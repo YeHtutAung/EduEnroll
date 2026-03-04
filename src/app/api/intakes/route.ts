@@ -5,7 +5,7 @@ import type { Intake, IntakeStatus } from "@/types/database";
 const VALID_STATUSES: IntakeStatus[] = ["draft", "open", "closed"];
 
 // Nihon Moment runs 4 intakes per year
-export const INTAKE_NAMES = ["January", "April", "July", "October"] as const;
+const INTAKE_NAMES = ["January", "April", "July", "October"] as const;
 
 type IntakeResult  = { data: Intake   | null; error: unknown };
 type IntakesResult = { data: Intake[] | null; error: unknown };

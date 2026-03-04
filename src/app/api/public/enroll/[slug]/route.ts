@@ -3,6 +3,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { formatMMK } from "@/lib/utils";
 import type { Intake, Class } from "@/types/database";
 
+// Always fetch live data — intake/class availability changes in real time
+export const dynamic = "force-dynamic";
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface PublicClassView {
