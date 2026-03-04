@@ -20,6 +20,25 @@ export type PaymentStatus = "pending" | "verified" | "rejected";
 
 export type MyanmarBank = "KBZ" | "AYA" | "CB" | "UAB" | "Yoma" | "Other";
 
+// ─── RPC return shapes ────────────────────────────────────────────────────────
+
+export type SubmitEnrollmentResult =
+  | {
+      success: true;
+      enrollment_ref: string;
+      enrollment_id: string;
+      class_level: JlptLevel;
+      fee_mmk: number;
+      tenant_id: string;
+      seat_remaining: number;
+    }
+  | {
+      success: false;
+      error: "CLASS_NOT_FOUND" | "CLASS_NOT_OPEN" | "CLASS_FULL" | "INTERNAL_ERROR";
+      class_status?: ClassStatus;
+      detail?: string;
+    };
+
 // ─── Default class fees (MMK) ─────────────────────────────────────────────────
 
 export const DEFAULT_CLASS_FEES: Record<JlptLevel, number> = {
@@ -163,6 +182,17 @@ export interface Database {
       seed_default_classes: {
         Args: { p_intake_id: string; p_tenant_id: string; p_seat_total?: number };
         Returns: void;
+      };
+      submit_enrollment: {
+        Args: {
+          p_class_id:         string;
+          p_student_name_en:  string;
+          p_phone:            string;
+          p_student_name_mm?: string | null;
+          p_nrc_number?:      string | null;
+          p_email?:           string | null;
+        };
+        Returns: SubmitEnrollmentResult;
       };
     };
     Enums: {
