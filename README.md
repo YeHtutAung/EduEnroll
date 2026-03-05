@@ -31,6 +31,7 @@ src/
 │   │   └── settings/             # Bank accounts CRUD + school profile
 │   ├── (public)/
 │   │   ├── layout.tsx            # Public layout — header, footer, no sidebar
+│   │   ├── status/               # Enrollment status checker (search by ref)
 │   │   └── enroll/
 │   │       ├── [slug]/           # Intake landing page — class cards, bilingual
 │   │       ├── form/             # Two-step enrollment form (personal info → review)
@@ -91,6 +92,7 @@ supabase/
 | `/enroll/[slug]` | Intake landing page — class cards grid (2-col desktop, 1-col mobile), level badges, Myanmar numeral fees, seats remaining, full-class overlay, loading skeleton, error state |
 | `/enroll/form` | Two-step bilingual enrollment form — Step 1: personal info (name EN/MM, NRC, phone, email), Step 2: review & confirm. Posts to `/api/public/enroll`, redirects to payment page on success |
 | `/enroll/payment/[ref]` | Payment instructions — enrollment ref with copy button, numbered bilingual steps, bank accounts with one-tap copy, payment proof upload with preview |
+| `/status` | Enrollment status checker — search by ref (auto-fills from `?ref=`), 4 bilingual result states: pending (gold), reviewing (blue), confirmed (green), rejected (red) |
 
 ## API Endpoints
 
