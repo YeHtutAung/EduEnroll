@@ -39,14 +39,18 @@ export async function middleware(request: NextRequest) {
   const requestHeaders = new Headers(request.headers);
   const { pathname } = request.nextUrl;
 
-  // ── Tenant detection (subdomain or ?tenant= fallback) ────────────────────
+  // ── Tenant detection (subdomain or localhost fallback) ───────────────────
   if (!shouldSkipTenant(pathname)) {
     const host = request.headers.get("host") ?? "";
+    const hostname = host.split(":")[0];
     let tenantSlug = extractSubdomain(host);
 
-    // Localhost fallback: use ?tenant= query param for development
-    if (!tenantSlug) {
-      tenantSlug = request.nextUrl.searchParams.get("tenant") ?? null;
+    // Localhost fallback chain: ?tenant= param → env var → null
+    if (!tenantSlug && (hostname === "localhost" || hostname === "127.0.0.1")) {
+      tenantSlug =
+        request.nextUrl.searchParams.get("tenant") ??
+        process.env.NEXT_PUBLIC_DEV_TENANT ??
+        null;
     }
 
     if (tenantSlug) {
