@@ -13,6 +13,8 @@ export async function GET(
   _request: NextRequest,
   { params }: { params: { id: string } },
 ) {
+  if (params.id === "new") return notFound("Intake");
+
   const auth = await requireAuth();
   if (auth instanceof NextResponse) return auth;
   const { supabase, tenantId } = auth;
@@ -38,6 +40,8 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: { id: string } },
 ) {
+  if (params.id === "new") return notFound("Intake");
+
   const auth = await requireAuth();
   if (auth instanceof NextResponse) return auth;
   const { supabase, tenantId } = auth;

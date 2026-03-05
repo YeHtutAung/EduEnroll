@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import StatusBadge from "@/components/ui/StatusBadge";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
 import { formatMMKSimple } from "@/lib/utils";
-import type { Class, ClassStatus, Intake, JlptLevel } from "@/types/database";
+import type { Class, ClassStatus, Intake, IntakeStatus, JlptLevel } from "@/types/database";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -293,6 +294,8 @@ export default function IntakeDetailPage({
 }: {
   params: { id: string };
 }) {
+  if (params.id === "new") redirect("/admin/intakes/new");
+
   const toast = useToast();
   const [intake, setIntake] = useState<Intake | null>(null);
   const [classes, setClasses] = useState<Class[]>([]);
@@ -302,6 +305,8 @@ export default function IntakeDetailPage({
   const [addingClasses, setAddingClasses] = useState(false);
   const [copied, setCopied] = useState(false);
   const [confirmAddAll, setConfirmAddAll] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -389,6 +394,39 @@ export default function IntakeDetailPage({
     }
   }
 
+  // ── Change Intake Status ────────────────────────────────────────────────────
+
+  async function handleStatusChange(newStatus: IntakeStatus) {
+    setUpdatingStatus(true);
+    setConfirmOpen(false);
+    try {
+      const res = await fetch(`/api/intakes/${params.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message ?? err.error ?? "Failed to update status.");
+      }
+      const updated = (await res.json()) as Intake;
+      setIntake(updated);
+      toast.success(`Status changed to "${newStatus}".`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update status.");
+    } finally {
+      setUpdatingStatus(false);
+    }
+  }
+
+  function requestStatusChange(newStatus: IntakeStatus) {
+    if (newStatus === "open") {
+      setConfirmOpen(true);
+    } else {
+      handleStatusChange(newStatus);
+    }
+  }
+
   // ── Error state ─────────────────────────────────────────────────────────────
   if (!loading && error) {
     return (
@@ -459,6 +497,22 @@ export default function IntakeDetailPage({
                 </h1>
                 <div className="flex items-center gap-2 mt-1">
                   <StatusBadge status={intake.status} />
+                  <select
+                    value={intake.status}
+                    onChange={(e) => requestStatusChange(e.target.value as IntakeStatus)}
+                    disabled={updatingStatus}
+                    className={`text-xs font-medium rounded-lg border px-2 py-1 bg-white focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent transition-colors disabled:opacity-50 ${
+                      intake.status === "open"
+                        ? "border-emerald-300 text-emerald-700"
+                        : intake.status === "closed"
+                          ? "border-red-300 text-red-600"
+                          : "border-gray-300 text-gray-600"
+                    }`}
+                  >
+                    <option value="draft">Draft</option>
+                    <option value="open">Open</option>
+                    <option value="closed">Closed</option>
+                  </select>
                   <span className="text-xs text-gray-400">·</span>
                   <span className="text-xs text-gray-500">{intake.year}</span>
                   <span className="text-xs text-gray-400">·</span>
@@ -688,10 +742,22 @@ export default function IntakeDetailPage({
         <ConfirmModal
           variant="success"
           title="Add All 5 Classes?"
-          message="This will create N5, N4, N3, N2, N1 classes with Nihon Moment default fees (300,000 – 500,000 MMK) and 30 seats each. Any levels that already exist will be skipped."
+          message="This will create N5, N4, N3, N2, N1 classes with default fees (300,000 – 500,000 MMK) and 30 seats each. Any levels that already exist will be skipped."
           confirmLabel="Add Classes"
           onConfirm={handleAddAllClasses}
           onCancel={() => setConfirmAddAll(false)}
+        />
+      )}
+
+      {/* Confirm opening intake */}
+      {confirmOpen && (
+        <ConfirmModal
+          variant="success"
+          title={`Open "${intake?.name}"?`}
+          message="This will make the enrollment portal live. Students can start enrolling immediately."
+          confirmLabel="Open Enrollment"
+          onConfirm={() => handleStatusChange("open")}
+          onCancel={() => setConfirmOpen(false)}
         />
       )}
     </div>

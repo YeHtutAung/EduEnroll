@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import StatusBadge from "@/components/ui/StatusBadge";
+import ConfirmModal from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
-import type { Intake } from "@/types/database";
+import type { Intake, IntakeStatus } from "@/types/database";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -145,11 +146,14 @@ function CreateIntakeModal({
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function IntakesPage() {
+  const toast = useToast();
   const [intakes, setIntakes] = useState<Intake[]>([]);
   const [classCounts, setClassCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState<{ intakeId: string; intakeName: string } | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -188,6 +192,36 @@ export default function IntakesPage() {
     setIntakes((prev) => [intake, ...prev]);
     setClassCounts((prev) => ({ ...prev, [intake.id]: 0 }));
     setShowCreate(false);
+  }
+
+  async function handleStatusChange(intakeId: string, newStatus: IntakeStatus) {
+    setUpdatingStatus(intakeId);
+    try {
+      const res = await fetch(`/api/intakes/${intakeId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message ?? err.error ?? "Failed to update status.");
+      }
+      const updated = (await res.json()) as Intake;
+      setIntakes((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+      toast.success(`Status changed to "${newStatus}".`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update status.");
+    } finally {
+      setUpdatingStatus(null);
+    }
+  }
+
+  function requestStatusChange(intakeId: string, intakeName: string, newStatus: IntakeStatus) {
+    if (newStatus === "open") {
+      setConfirmOpen({ intakeId, intakeName });
+    } else {
+      handleStatusChange(intakeId, newStatus);
+    }
   }
 
   // ── Error state ─────────────────────────────────────────────────────────────
@@ -310,25 +344,49 @@ export default function IntakesPage() {
                             </span>
                           </td>
                           <td className="px-5 py-4">
-                            <Link
-                              href={`/admin/intakes/${intake.id}`}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#1a3f8a] text-white text-xs font-medium rounded-lg hover:bg-blue-900 transition-colors"
-                            >
-                              Manage
-                              <svg
-                                className="w-3 h-3"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                strokeWidth={2.5}
-                                stroke="currentColor"
+                            <div className="flex items-center gap-2">
+                              <select
+                                value={intake.status}
+                                onChange={(e) =>
+                                  requestStatusChange(
+                                    intake.id,
+                                    intake.name,
+                                    e.target.value as IntakeStatus,
+                                  )
+                                }
+                                disabled={updatingStatus === intake.id}
+                                className={`text-xs font-medium rounded-lg border px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent transition-colors disabled:opacity-50 ${
+                                  intake.status === "open"
+                                    ? "border-emerald-300 text-emerald-700"
+                                    : intake.status === "closed"
+                                      ? "border-red-300 text-red-600"
+                                      : "border-gray-300 text-gray-600"
+                                }`}
                               >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"
-                                />
-                              </svg>
-                            </Link>
+                                <option value="draft">Draft</option>
+                                <option value="open">Open</option>
+                                <option value="closed">Closed</option>
+                              </select>
+                              <Link
+                                href={`/admin/intakes/${intake.id}`}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-[#1a3f8a] text-white text-xs font-medium rounded-lg hover:bg-blue-900 transition-colors"
+                              >
+                                Manage
+                                <svg
+                                  className="w-3 h-3"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  strokeWidth={2.5}
+                                  stroke="currentColor"
+                                >
+                                  <path
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                    d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3"
+                                  />
+                                </svg>
+                              </Link>
+                            </div>
                           </td>
                         </tr>
                       );
@@ -344,6 +402,21 @@ export default function IntakesPage() {
         <CreateIntakeModal
           onClose={() => setShowCreate(false)}
           onCreated={handleCreated}
+        />
+      )}
+
+      {/* Confirm opening intake */}
+      {confirmOpen && (
+        <ConfirmModal
+          variant="success"
+          title={`Open "${confirmOpen.intakeName}"?`}
+          message="This will make the enrollment portal live. Students can start enrolling immediately."
+          confirmLabel="Open Enrollment"
+          onConfirm={() => {
+            handleStatusChange(confirmOpen.intakeId, "open");
+            setConfirmOpen(null);
+          }}
+          onCancel={() => setConfirmOpen(null)}
         />
       )}
     </div>
