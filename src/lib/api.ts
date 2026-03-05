@@ -20,10 +20,11 @@ export async function requireAuth(): Promise<AuthContext | NextResponse> {
   const supabase = createClient();
 
   const {
-    data: { session },
-  } = await supabase.auth.getSession();
+    data: { user },
+    error: authError,
+  } = await supabase.auth.getUser();
 
-  if (!session) {
+  if (authError || !user) {
     return NextResponse.json(
       { error: "Unauthorized", message: "Valid session required." },
       { status: 401 },
@@ -33,7 +34,7 @@ export async function requireAuth(): Promise<AuthContext | NextResponse> {
   const { data: profile } = await supabase
     .from("users")
     .select("*")
-    .eq("id", session.user.id)
+    .eq("id", user.id)
     .single() as { data: User | null; error: unknown };
 
   if (!profile) {
