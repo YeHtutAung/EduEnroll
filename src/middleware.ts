@@ -24,8 +24,13 @@ function extractSubdomain(host: string): string | null {
     return parts[0];
   }
 
-  // Production/preview: "nihonmoment.edu-enroll-xi.vercel.app" (3+ parts)
-  // or custom domain: "nihonmoment.eduenroll.com" (3+ parts)
+  // Vercel domains: "nihonmoment.edu-enroll-xi.vercel.app" (4 parts)
+  // The bare "edu-enroll-xi.vercel.app" (3 parts) is NOT a subdomain.
+  if (parts.length >= 3 && parts[parts.length - 1] === "app" && parts[parts.length - 2] === "vercel") {
+    return parts.length >= 4 ? parts[0] : null;
+  }
+
+  // Custom domain: "nihonmoment.eduenroll.com" (3+ parts)
   if (parts.length >= 3) {
     return parts[0];
   }
