@@ -21,9 +21,19 @@ const jetBrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Nihon Moment — Japanese Language School",
+  title: "Nihon Moment — Enroll in Japanese Language Classes",
   description:
-    "Japanese Language School Enrollment System. Built in Myanmar, supports MMK currency and Myanmar + English bilingual interface.",
+    "Nihon Moment Japanese Language School — Enroll in JLPT N5–N1 classes. " +
+    "Bilingual Myanmar + English enrollment system. Pay in MMK.",
+  openGraph: {
+    title: "Nihon Moment — Enroll in Japanese Language Classes",
+    description:
+      "Join Nihon Moment Japanese Language School. JLPT N5–N1 classes, " +
+      "easy online enrollment, MMK payment. နီဟုန်မိုမန့် ဂျပန်ဘာသာ သင်တန်း",
+    siteName: "Nihon Moment",
+    locale: "my_MM",
+    type: "website",
+  },
 };
 
 export default function RootLayout({

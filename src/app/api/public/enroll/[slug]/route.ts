@@ -66,12 +66,11 @@ export async function GET(
   // exactly what fields are returned to the public.
   const supabase = createAdminClient();
 
-  // ── Find the matching intake ──────────────────────────────────
+  // ── Find the matching intake (any status) ────────────────────
   const { data: intakes, error: intakeError } = await supabase
     .from("intakes")
     .select("id, name, year, status")
     .eq("year", parsed.year)
-    .eq("status", "open")
     .ilike("name", `%${parsed.month}%`)
     .limit(1);
 
@@ -80,12 +79,27 @@ export async function GET(
   }
   if (!intakes || intakes.length === 0) {
     return NextResponse.json(
-      { error: "No open intake found for this slug." },
+      { error: "No intake found for this slug.", code: "NOT_FOUND" },
       { status: 404 },
     );
   }
 
   const intake = intakes[0] as Pick<Intake, "id" | "name" | "year" | "status">;
+
+  // If the intake is closed or in draft, return it with an appropriate code
+  // so the frontend can show a friendly message instead of a broken page.
+  if (intake.status === "closed") {
+    return NextResponse.json(
+      { error: "Enrollment for this intake is closed.", code: "INTAKE_CLOSED", intake },
+      { status: 410 },
+    );
+  }
+  if (intake.status === "draft") {
+    return NextResponse.json(
+      { error: "This intake is not yet open for enrollment.", code: "INTAKE_DRAFT", intake },
+      { status: 410 },
+    );
+  }
 
   // ── Fetch all visible classes (open + full) ──────────────────
   const { data: classes, error: classError } = await supabase

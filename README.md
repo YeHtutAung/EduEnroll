@@ -89,7 +89,7 @@ supabase/
 
 | Route | Description |
 |-------|-------------|
-| `/enroll/[slug]` | Intake landing page — class cards grid (2-col desktop, 1-col mobile), level badges, Myanmar numeral fees, seats remaining, full-class overlay, loading skeleton, error state |
+| `/enroll/[slug]` | Intake landing page — class cards grid, level badges, Myanmar numeral fees, seats remaining, full-class overlay. Edge cases: enrollment-closed page (locked icon), all-classes-full page (orange). Loading skeleton, error state |
 | `/enroll/form` | Two-step bilingual enrollment form — Step 1: personal info (name EN/MM, NRC, phone, email), Step 2: review & confirm. Posts to `/api/public/enroll`, redirects to payment page on success |
 | `/enroll/payment/[ref]` | Payment instructions — enrollment ref with copy button, numbered bilingual steps, bank accounts with one-tap copy, payment proof upload with preview |
 | `/status` | Enrollment status checker — search by ref (auto-fills from `?ref=`), 4 bilingual result states: pending (gold), reviewing (blue), confirmed (green), rejected (red) |
@@ -100,7 +100,7 @@ supabase/
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET`  | `/api/public/enroll/[slug]` | Open classes for an intake slug (e.g. `april-2026`) |
+| `GET`  | `/api/public/enroll/[slug]` | Classes for an intake slug (e.g. `april-2026`). Returns open+full classes, or 410 with code for closed/draft intakes |
 | `POST` | `/api/public/enroll` | Submit enrollment (atomic, seat-safe via `SELECT FOR UPDATE`) |
 | `POST` | `/api/public/payments/upload` | Upload payment proof (JPEG/PNG/WebP, max 5 MB) |
 | `GET`  | `/api/public/bank-accounts` | Active bank accounts (public, minimal fields) |
