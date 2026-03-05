@@ -30,7 +30,9 @@ src/
 │   │   ├── announcements/        # Announcement composer + history
 │   │   └── settings/             # Bank accounts CRUD + school profile
 │   ├── (public)/
-│   │   └── enroll/               # Public student enrollment flow
+│   │   ├── layout.tsx            # Public layout — header, footer, no sidebar
+│   │   └── enroll/
+│   │       └── [slug]/           # Intake landing page — class cards, bilingual
 │   ├── api/
 │   │   ├── intakes/              # GET/POST intakes, GET/POST classes
 │   │   ├── classes/[id]/         # PATCH class
@@ -79,6 +81,12 @@ supabase/
 | `/admin/payments` | Pending payment card grid, fullscreen review modal, approve/reject flows |
 | `/admin/announcements` | Composer (intake + class selector + message), sent history table |
 | `/admin/settings` | Bank accounts CRUD (toggle active/inactive, delete), school profile, change password |
+
+## Public Enrollment Pages
+
+| Route | Description |
+|-------|-------------|
+| `/enroll/[slug]` | Intake landing page — class cards grid (2-col desktop, 1-col mobile), level badges, Myanmar numeral fees, seats remaining, full-class overlay, loading skeleton, error state |
 
 ## API Endpoints
 

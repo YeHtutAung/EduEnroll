@@ -87,13 +87,12 @@ export async function GET(
 
   const intake = intakes[0] as Pick<Intake, "id" | "name" | "year" | "status">;
 
-  // ── Fetch open classes with seats remaining ───────────────────
+  // ── Fetch all visible classes (open + full) ──────────────────
   const { data: classes, error: classError } = await supabase
     .from("classes")
     .select("id, level, fee_mmk, seat_remaining, seat_total, enrollment_close_at, status")
     .eq("intake_id", intake.id)
-    .eq("status", "open")
-    .gt("seat_remaining", 0)
+    .in("status", ["open", "full"])
     .order("level");   // N1 … N5 alphabetically; re-sorted below
 
   if (classError) {
