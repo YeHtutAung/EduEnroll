@@ -11,6 +11,7 @@ interface SidebarProps {
   displayName: string;
   displayEmail: string;
   displayRole: UserRole;
+  schoolName: string;
 }
 
 interface NavLink {
@@ -67,7 +68,7 @@ const NAV_LINKS: NavLink[] = [
   },
 ];
 
-export default function Sidebar({ displayName, displayEmail, displayRole }: SidebarProps) {
+export default function Sidebar({ displayName, displayEmail, displayRole, schoolName }: SidebarProps) {
   const [open, setOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const pathname = usePathname();
@@ -95,6 +96,7 @@ export default function Sidebar({ displayName, displayEmail, displayRole }: Side
     (link) => !link.ownerOnly || isOwnerOrAbove,
   );
   const avatarLetter = displayName.charAt(0).toUpperCase();
+  const schoolLetter = schoolName.charAt(0).toUpperCase();
 
   return (
     <>
@@ -116,10 +118,10 @@ export default function Sidebar({ displayName, displayEmail, displayRole }: Side
           </svg>
         </button>
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-md bg-red-700 flex items-center justify-center shrink-0">
-            <span className="text-white font-bold text-sm select-none">日</span>
+          <div className="w-7 h-7 rounded-md bg-[#1a3f8a] flex items-center justify-center shrink-0">
+            <span className="text-white font-bold text-sm select-none">{schoolLetter}</span>
           </div>
-          <span className="text-sm font-bold">Nihon Moment</span>
+          <span className="text-sm font-bold truncate">{schoolName}</span>
         </div>
       </header>
 
@@ -142,15 +144,12 @@ export default function Sidebar({ displayName, displayEmail, displayRole }: Side
       >
         {/* School name */}
         <div className="flex items-center gap-3 px-5 py-5 border-b border-white/10">
-          <div className="w-9 h-9 rounded-lg bg-red-700 flex items-center justify-center shrink-0">
-            <span className="text-white font-bold text-base select-none">日</span>
+          <div className="w-9 h-9 rounded-lg bg-[#1a3f8a] flex items-center justify-center shrink-0">
+            <span className="text-white font-bold text-base select-none">{schoolLetter}</span>
           </div>
           <div className="min-w-0">
             <p className="text-sm font-bold text-white truncate leading-tight">
-              Nihon Moment
-            </p>
-            <p className="text-xs font-myanmar text-white/50 truncate leading-tight mt-0.5">
-              နီဟွန်းမိုးမန့်
+              {schoolName}
             </p>
           </div>
           {/* Close button — mobile only */}

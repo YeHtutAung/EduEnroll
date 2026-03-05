@@ -29,6 +29,17 @@ export default async function AdminLayout({
   const displayEmail = user.email ?? "";
   const displayRole = (profile?.role ?? "staff") as UserRole;
 
+  // Fetch tenant name for sidebar branding
+  let schoolName = "EduEnroll";
+  if (profile?.tenant_id) {
+    const { data: tenant } = (await supabase
+      .from("tenants")
+      .select("name")
+      .eq("id", profile.tenant_id)
+      .single()) as { data: { name: string } | null; error: unknown };
+    if (tenant?.name) schoolName = tenant.name;
+  }
+
   return (
     <RoleProvider role={displayRole}>
       <ToastProvider>
@@ -38,6 +49,7 @@ export default async function AdminLayout({
             displayName={displayName}
             displayEmail={displayEmail}
             displayRole={displayRole}
+            schoolName={schoolName}
           />
 
           {/* Main content — push down on mobile to clear the fixed top bar */}

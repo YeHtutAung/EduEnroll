@@ -281,8 +281,8 @@ export default function SettingsPage() {
   }
 
   // ── School profile ─────────────────────────────────────────────────────────
-  const [schoolName, setSchoolName] = useState("Nihon Moment");
-  const [schoolNameMm, setSchoolNameMm] = useState("နီဟွန်းမိုးမန့်");
+  const [schoolName, setSchoolName] = useState("");
+  const [schoolNameMm, setSchoolNameMm] = useState("");
   const [email, setEmail] = useState("");
   const [tenantId, setTenantId] = useState("");
   const [loadingProfile, setLoadingProfile] = useState(true);
