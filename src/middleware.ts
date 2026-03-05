@@ -4,7 +4,7 @@ import type { NextRequest } from "next/server";
 
 // ─── Routes that skip tenant detection ────────────────────────────────────────
 
-const SKIP_TENANT_PREFIXES = ["/register", "/api/saas/", "/superadmin"];
+const SKIP_TENANT_PREFIXES = ["/register", "/api/saas/", "/superadmin", "/onboarding"];
 
 function shouldSkipTenant(pathname: string): boolean {
   return SKIP_TENANT_PREFIXES.some((p) => pathname.startsWith(p));
@@ -96,6 +96,11 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(loginUrl);
   }
 
+  // Onboarding requires auth
+  if (!user && pathname.startsWith("/onboarding")) {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
   return response;
 }
 
@@ -103,6 +108,8 @@ export const config = {
   matcher: [
     "/login",
     "/admin/:path*",
+    "/superadmin/:path*",
+    "/onboarding",
     "/api/:path*",
     "/enroll/:path*",
     "/status",

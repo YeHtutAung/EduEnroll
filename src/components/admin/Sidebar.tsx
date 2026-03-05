@@ -41,6 +41,12 @@ const NAV_LINKS: NavLink[] = [
     emoji: "👥",
   },
   {
+    href: "/admin/analytics",
+    labelEn: "Analytics",
+    labelMm: "စာရင်းအင်း",
+    emoji: "📈",
+  },
+  {
     href: "/admin/payments",
     labelEn: "Payments",
     labelMm: "ငွေပေးချေမှု",
