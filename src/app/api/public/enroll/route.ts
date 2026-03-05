@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveTenantId } from "@/lib/api";
 import { formatMMK } from "@/lib/utils";
 import type { BankAccount, SubmitEnrollmentResult } from "@/types/database";
 
@@ -45,6 +46,9 @@ function isValidMyanmarPhone(phone: string): boolean {
 // }
 
 export async function POST(request: NextRequest) {
+  const tenantId = await resolveTenantId();
+  if (tenantId instanceof NextResponse) return tenantId;
+
   // ── Parse body ────────────────────────────────────────────────
   let body: unknown;
   try {

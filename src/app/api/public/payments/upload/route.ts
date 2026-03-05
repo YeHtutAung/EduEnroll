@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveTenantId } from "@/lib/api";
 import { formatMMK } from "@/lib/utils";
 import type { Enrollment, Class, Payment } from "@/types/database";
 
@@ -42,6 +43,9 @@ type PaymentResult    = { data: Payment             | null; error: unknown };
 //   7. Return payment id + confirmation
 
 export async function POST(request: NextRequest) {
+  const tenantId = await resolveTenantId();
+  if (tenantId instanceof NextResponse) return tenantId;
+
   // ── 1. Parse multipart form data ──────────────────────────────
   let formData: FormData;
   try {
@@ -99,6 +103,7 @@ export async function POST(request: NextRequest) {
     .from("enrollments")
     .select("*, classes(id, fee_mmk)")
     .eq("enrollment_ref", enrollmentRef.trim())
+    .eq("tenant_id", tenantId)
     .single() as EnrollmentResult;
 
   if (enrollmentError || !enrollment) {

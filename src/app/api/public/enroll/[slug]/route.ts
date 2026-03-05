@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveTenantId } from "@/lib/api";
 import { formatMMK } from "@/lib/utils";
 import type { Intake, Class } from "@/types/database";
 
@@ -44,16 +45,14 @@ function parseIntakeSlug(slug: string): { month: string; year: number } | null {
 
 // ─── GET /api/public/enroll/[slug] ───────────────────────────────────────────
 // Public — no authentication required.
-//
-// Returns the intake that matches the slug and all classes with
-// status='open' and at least one seat remaining.
-//
-// Slug format: "{month}-{year}"  e.g. "april-2026", "january-2026"
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: { slug: string } },
 ) {
+  const tenantId = await resolveTenantId();
+  if (tenantId instanceof NextResponse) return tenantId;
+
   const parsed = parseIntakeSlug(params.slug);
   if (!parsed) {
     return NextResponse.json(
@@ -62,14 +61,13 @@ export async function GET(
     );
   }
 
-  // Service-role client bypasses RLS — safe here because we control
-  // exactly what fields are returned to the public.
   const supabase = createAdminClient();
 
   // ── Find the matching intake (any status) ────────────────────
   const { data: intakes, error: intakeError } = await supabase
     .from("intakes")
     .select("id, name, year, status")
+    .eq("tenant_id", tenantId)
     .eq("year", parsed.year)
     .ilike("name", `%${parsed.month}%`)
     .limit(1);
@@ -86,8 +84,6 @@ export async function GET(
 
   const intake = intakes[0] as Pick<Intake, "id" | "name" | "year" | "status">;
 
-  // If the intake is closed or in draft, return it with an appropriate code
-  // so the frontend can show a friendly message instead of a broken page.
   if (intake.status === "closed") {
     return NextResponse.json(
       { error: "Enrollment for this intake is closed.", code: "INTAKE_CLOSED", intake },
@@ -106,8 +102,9 @@ export async function GET(
     .from("classes")
     .select("id, level, fee_mmk, seat_remaining, seat_total, enrollment_close_at, status")
     .eq("intake_id", intake.id)
+    .eq("tenant_id", tenantId)
     .in("status", ["open", "full"])
-    .order("level");   // N1 … N5 alphabetically; re-sorted below
+    .order("level");
 
   if (classError) {
     return NextResponse.json({ error: "Failed to fetch classes." }, { status: 500 });

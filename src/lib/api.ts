@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type { User } from "@/types/database";
 
 export interface AuthContext {
@@ -45,6 +47,39 @@ export async function requireAuth(): Promise<AuthContext | NextResponse> {
   }
 
   return { supabase, user: profile, tenantId: profile.tenant_id };
+}
+
+/**
+ * Resolves tenant_id from the x-tenant-slug header injected by middleware.
+ * For public API routes that don't require auth but need tenant scoping.
+ * Returns the tenant_id string, or a 400/404 NextResponse on failure.
+ */
+export async function resolveTenantId(): Promise<string | NextResponse> {
+  const headersList = headers();
+  const slug = headersList.get("x-tenant-slug");
+
+  if (!slug) {
+    return NextResponse.json(
+      { error: "Bad Request", message: "Tenant could not be determined." },
+      { status: 400 },
+    );
+  }
+
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("tenants")
+    .select("id")
+    .eq("subdomain", slug)
+    .maybeSingle() as { data: { id: string } | null; error: unknown };
+
+  if (error || !data) {
+    return NextResponse.json(
+      { error: "Not Found", message: "School not found." },
+      { status: 404 },
+    );
+  }
+
+  return data.id;
 }
 
 /** Convenience: 400 with a message */

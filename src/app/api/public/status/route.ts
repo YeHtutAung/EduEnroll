@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveTenantId } from "@/lib/api";
 import { formatMMK } from "@/lib/utils";
 import type { Enrollment, Class, Payment } from "@/types/database";
 import type { EnrollmentStatus, PaymentStatus } from "@/types/database";
@@ -76,6 +77,9 @@ type PaymentResult    = { data: Pick<Payment, "id" | "status" | "created_at"> | 
 // }
 
 export async function GET(request: NextRequest) {
+  const tenantId = await resolveTenantId();
+  if (tenantId instanceof NextResponse) return tenantId;
+
   const ref = request.nextUrl.searchParams.get("ref")?.trim();
 
   if (!ref) {
@@ -92,6 +96,7 @@ export async function GET(request: NextRequest) {
     .from("enrollments")
     .select("*, classes(id, level, fee_mmk)")
     .eq("enrollment_ref", ref)
+    .eq("tenant_id", tenantId)
     .single() as EnrollmentResult;
 
   if (enrollmentError || !enrollment) {

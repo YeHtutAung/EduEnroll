@@ -2,9 +2,61 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+// ─── Routes that skip tenant detection ────────────────────────────────────────
+
+const SKIP_TENANT_PREFIXES = ["/register", "/api/saas/", "/superadmin"];
+
+function shouldSkipTenant(pathname: string): boolean {
+  return SKIP_TENANT_PREFIXES.some((p) => pathname.startsWith(p));
+}
+
+// ─── Extract subdomain from hostname ──────────────────────────────────────────
+// e.g. "nihonmoment.edu-enroll-xi.vercel.app" → "nihonmoment"
+// e.g. "nihonmoment.localhost:3005" → "nihonmoment"
+
+function extractSubdomain(host: string): string | null {
+  // Remove port
+  const hostname = host.split(":")[0];
+  const parts = hostname.split(".");
+
+  // localhost with subdomain: "nihonmoment.localhost"
+  if (parts.length === 2 && parts[1] === "localhost") {
+    return parts[0];
+  }
+
+  // Production/preview: "nihonmoment.edu-enroll-xi.vercel.app" (3+ parts)
+  // or custom domain: "nihonmoment.eduenroll.com" (3+ parts)
+  if (parts.length >= 3) {
+    return parts[0];
+  }
+
+  return null;
+}
+
+// ─── Middleware ───────────────────────────────────────────────────────────────
+
 export async function middleware(request: NextRequest) {
+  const requestHeaders = new Headers(request.headers);
+  const { pathname } = request.nextUrl;
+
+  // ── Tenant detection (subdomain or ?tenant= fallback) ────────────────────
+  if (!shouldSkipTenant(pathname)) {
+    const host = request.headers.get("host") ?? "";
+    let tenantSlug = extractSubdomain(host);
+
+    // Localhost fallback: use ?tenant= query param for development
+    if (!tenantSlug) {
+      tenantSlug = request.nextUrl.searchParams.get("tenant") ?? null;
+    }
+
+    if (tenantSlug) {
+      requestHeaders.set("x-tenant-slug", tenantSlug);
+    }
+  }
+
+  // ── Supabase auth session refresh ────────────────────────────────────────
   let response = NextResponse.next({
-    request: { headers: request.headers },
+    request: { headers: requestHeaders },
   });
 
   const supabase = createServerClient(
@@ -19,7 +71,9 @@ export async function middleware(request: NextRequest) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value),
           );
-          response = NextResponse.next({ request });
+          response = NextResponse.next({
+            request: { headers: requestHeaders },
+          });
           cookiesToSet.forEach(({ name, value, options }) =>
             response.cookies.set(name, value, options),
           );
@@ -31,8 +85,6 @@ export async function middleware(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  const { pathname } = request.nextUrl;
 
   if (user && pathname === "/login") {
     return NextResponse.redirect(new URL("/admin/dashboard", request.url));
@@ -48,5 +100,11 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/login", "/admin/:path*"],
+  matcher: [
+    "/login",
+    "/admin/:path*",
+    "/api/:path*",
+    "/enroll/:path*",
+    "/status",
+  ],
 };

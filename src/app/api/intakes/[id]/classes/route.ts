@@ -20,13 +20,14 @@ export async function GET(
 ) {
   const auth = await requireAuth();
   if (auth instanceof NextResponse) return auth;
-  const { supabase } = auth;
+  const { supabase, tenantId } = auth;
 
-  // Confirm the intake exists (RLS scopes to the caller's tenant)
+  // Confirm the intake exists and belongs to the caller's tenant
   const { data: intake, error: intakeError } = await supabase
     .from("intakes")
     .select("id")
     .eq("id", params.id)
+    .eq("tenant_id", tenantId)
     .single() as IntakeResult;
 
   if (intakeError || !intake) return notFound("Intake");
@@ -34,7 +35,8 @@ export async function GET(
   const { data, error } = await supabase
     .from("classes")
     .select("*")
-    .eq("intake_id", params.id) as ClassesResult;
+    .eq("intake_id", params.id)
+    .eq("tenant_id", tenantId) as ClassesResult;
 
   if (error) {
     return NextResponse.json({ error: (error as { message: string }).message }, { status: 500 });
@@ -73,6 +75,7 @@ export async function POST(
     .from("intakes")
     .select("id, tenant_id")
     .eq("id", params.id)
+    .eq("tenant_id", tenantId)
     .single() as IntakeResult;
 
   if (intakeError || !intake) return notFound("Intake");

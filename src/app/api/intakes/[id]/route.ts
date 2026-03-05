@@ -15,12 +15,13 @@ export async function GET(
 ) {
   const auth = await requireAuth();
   if (auth instanceof NextResponse) return auth;
-  const { supabase } = auth;
+  const { supabase, tenantId } = auth;
 
   const { data, error } = await supabase
     .from("intakes")
     .select("*")
     .eq("id", params.id)
+    .eq("tenant_id", tenantId)
     .single() as IntakeResult;
 
   if (error || !data) return notFound("Intake");
@@ -39,7 +40,7 @@ export async function PATCH(
 ) {
   const auth = await requireAuth();
   if (auth instanceof NextResponse) return auth;
-  const { supabase } = auth;
+  const { supabase, tenantId } = auth;
 
   let body: unknown;
   try {
@@ -81,6 +82,7 @@ export async function PATCH(
     .from("intakes")
     .update(update as never)
     .eq("id", params.id)
+    .eq("tenant_id", tenantId)
     .select()
     .single() as IntakeResult;
 

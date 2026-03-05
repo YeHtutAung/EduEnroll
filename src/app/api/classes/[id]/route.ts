@@ -22,13 +22,14 @@ export async function PATCH(
 ) {
   const auth = await requireAuth();
   if (auth instanceof NextResponse) return auth;
-  const { supabase } = auth;
+  const { supabase, tenantId } = auth;
 
   // Fetch current class to base seat_remaining adjustments on
   const { data: existing, error: fetchError } = await supabase
     .from("classes")
     .select("*")
     .eq("id", params.id)
+    .eq("tenant_id", tenantId)
     .single() as ClassResult;
 
   if (fetchError || !existing) return notFound("Class");
@@ -100,6 +101,7 @@ export async function PATCH(
     .from("classes")
     .update(update as never)
     .eq("id", params.id)
+    .eq("tenant_id", tenantId)
     .select()
     .single() as ClassResult;
 
