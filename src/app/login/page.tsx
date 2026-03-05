@@ -24,5 +24,5 @@ export default async function LoginPage() {
     }
   }
 
-  return <LoginForm schoolName={schoolName} schoolNameMm={schoolNameMm} />;
+  return <LoginForm schoolName={schoolName} schoolNameMm={schoolNameMm} tenantSlug={slug} />;
 }

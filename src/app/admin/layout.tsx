@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import Sidebar from "@/components/admin/Sidebar";
 import { RoleProvider } from "@/components/admin/RoleContext";
 import { ToastProvider } from "@/components/ui/Toast";
@@ -25,13 +27,38 @@ export default async function AdminLayout({
     .eq("id", user.id)
     .single()) as { data: User | null; error: unknown };
 
-  const displayName = profile?.full_name ?? user.email ?? "Admin";
+  if (!profile) {
+    redirect("/login");
+  }
+
+  // ── Tenant membership guard ────────────────────────────────────────────────
+  // Ensure the logged-in user belongs to the tenant identified by the subdomain.
+  // Prevents cross-tenant admin access (e.g. Nihon Moment admin on IGM's portal).
+  const headersList = headers();
+  const tenantSlug = headersList.get("x-tenant-slug");
+
+  if (tenantSlug) {
+    const adminSupabase = createAdminClient();
+    const { data: tenant } = (await adminSupabase
+      .from("tenants")
+      .select("id")
+      .eq("subdomain", tenantSlug)
+      .maybeSingle()) as { data: { id: string } | null; error: unknown };
+
+    if (tenant && profile.tenant_id !== tenant.id) {
+      // User doesn't belong to this school — sign out and redirect
+      await supabase.auth.signOut();
+      redirect("/login");
+    }
+  }
+
+  const displayName = profile.full_name ?? user.email ?? "Admin";
   const displayEmail = user.email ?? "";
-  const displayRole = (profile?.role ?? "staff") as UserRole;
+  const displayRole = (profile.role ?? "staff") as UserRole;
 
   // Fetch tenant name for sidebar branding
   let schoolName = "EduEnroll";
-  if (profile?.tenant_id) {
+  if (profile.tenant_id) {
     const { data: tenant } = (await supabase
       .from("tenants")
       .select("name")

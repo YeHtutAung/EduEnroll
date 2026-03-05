@@ -9,6 +9,10 @@ const ERRORS: Record<string, { en: string; mm: string }> = {
     en: "Invalid email or password.",
     mm: "အီးမေးလ် သို့မဟုတ် စကားဝှက် မှားယွင်းနေသည်။",
   },
+  wrong_tenant: {
+    en: "Your account does not belong to this school.",
+    mm: "သင့်အကောင့်သည် ဤကျောင်းနှင့် သက်ဆိုင်မှုမရှိပါ။",
+  },
   default: {
     en: "Something went wrong. Please try again.",
     mm: "တစ်ခုခု မှားယွင်းသွားသည်။ နောက်မှ ထပ်ကြိုးစားပါ။",
@@ -18,9 +22,10 @@ const ERRORS: Record<string, { en: string; mm: string }> = {
 interface LoginFormProps {
   schoolName: string;
   schoolNameMm: string | null;
+  tenantSlug: string | null;
 }
 
-export default function LoginForm({ schoolName, schoolNameMm }: LoginFormProps) {
+export default function LoginForm({ schoolName, schoolNameMm, tenantSlug }: LoginFormProps) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -48,6 +53,22 @@ export default function LoginForm({ schoolName, schoolNameMm }: LoginFormProps) 
       setError(isInvalid ? ERRORS.invalid_credentials : ERRORS.default);
       setLoading(false);
       return;
+    }
+
+    // Verify the user belongs to this tenant before allowing access
+    if (tenantSlug) {
+      try {
+        const verifyRes = await fetch("/api/auth/verify-tenant");
+        if (verifyRes.status === 403) {
+          await supabase.auth.signOut();
+          setError(ERRORS.wrong_tenant);
+          setLoading(false);
+          return;
+        }
+      } catch {
+        // If verification fails for network reasons, allow through —
+        // the admin layout will catch tenant mismatches as a safety net.
+      }
     }
 
     router.push("/admin/dashboard");
