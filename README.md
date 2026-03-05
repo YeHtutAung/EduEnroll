@@ -32,7 +32,8 @@ src/
 │   ├── (public)/
 │   │   ├── layout.tsx            # Public layout — header, footer, no sidebar
 │   │   └── enroll/
-│   │       └── [slug]/           # Intake landing page — class cards, bilingual
+│   │       ├── [slug]/           # Intake landing page — class cards, bilingual
+│   │       └── form/             # Two-step enrollment form (personal info → review)
 │   ├── api/
 │   │   ├── intakes/              # GET/POST intakes, GET/POST classes
 │   │   ├── classes/[id]/         # PATCH class
@@ -87,6 +88,7 @@ supabase/
 | Route | Description |
 |-------|-------------|
 | `/enroll/[slug]` | Intake landing page — class cards grid (2-col desktop, 1-col mobile), level badges, Myanmar numeral fees, seats remaining, full-class overlay, loading skeleton, error state |
+| `/enroll/form` | Two-step bilingual enrollment form — Step 1: personal info (name EN/MM, NRC, phone, email), Step 2: review & confirm. Posts to `/api/public/enroll`, redirects to payment page on success |
 
 ## API Endpoints
 

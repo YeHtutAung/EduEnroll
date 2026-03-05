@@ -249,7 +249,7 @@ export default function IntakeLandingPage() {
   }, [params.slug]);
 
   function handleSelectClass(classId: string) {
-    router.push(`/enroll/${params.slug}/form?class_id=${classId}`);
+    router.push(`/enroll/form?class_id=${classId}&slug=${params.slug}`);
   }
 
   if (loading) return <LoadingSkeleton />;
