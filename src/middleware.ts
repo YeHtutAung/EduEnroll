@@ -40,15 +40,18 @@ export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // ── Tenant detection (subdomain or localhost fallback) ───────────────────
+  let tenantSlug: string | null = null;
+
   if (!shouldSkipTenant(pathname)) {
     const host = request.headers.get("host") ?? "";
     const hostname = host.split(":")[0];
-    let tenantSlug = extractSubdomain(host);
+    tenantSlug = extractSubdomain(host);
 
-    // Localhost fallback chain: ?tenant= param → env var → null
+    // Localhost fallback chain: ?tenant= param → cookie → env var → null
     if (!tenantSlug && (hostname === "localhost" || hostname === "127.0.0.1")) {
       tenantSlug =
         request.nextUrl.searchParams.get("tenant") ??
+        request.cookies.get("x-tenant-slug")?.value ??
         process.env.NEXT_PUBLIC_DEV_TENANT ??
         null;
     }
@@ -103,6 +106,18 @@ export async function middleware(request: NextRequest) {
   // Onboarding requires auth
   if (!user && pathname.startsWith("/onboarding")) {
     return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  // Set tenant cookie on localhost so client-side fetches carry the tenant slug.
+  // Only set when ?tenant= param was used (explicit override) to avoid stale cookies.
+  const tenantParam = request.nextUrl.searchParams.get("tenant");
+  if (tenantParam && tenantSlug) {
+    response.cookies.set("x-tenant-slug", tenantSlug, {
+      path: "/",
+      httpOnly: false,
+      sameSite: "lax",
+      maxAge: 60 * 60 * 24, // 24 hours
+    });
   }
 
   return response;
