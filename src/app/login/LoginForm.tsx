@@ -87,13 +87,11 @@ export default function LoginForm({ schoolName, schoolNameMm, tenantSlug }: Logi
 
     // Superadmin goes to /superadmin, regular users to /admin/dashboard
     if (isSuperadmin) {
-      // Set cookie so middleware knows to redirect to /superadmin
       document.cookie = "x-user-role=superadmin; path=/; max-age=86400; samesite=lax";
-      router.push("/superadmin");
-    } else {
-      document.cookie = "x-user-role=; path=/; max-age=0";
-      router.push("/admin/dashboard");
+      window.location.href = "/superadmin";
+      return;
     }
+    router.push("/admin/dashboard");
     router.refresh();
   }
 
