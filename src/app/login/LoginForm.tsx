@@ -61,11 +61,11 @@ export default function LoginForm({ schoolName, schoolNameMm, tenantSlug }: Logi
     } = await supabase.auth.getUser();
     let isSuperadmin = false;
     if (authUser) {
-      const { data: profile } = await supabase
+      const { data: profile } = (await supabase
         .from("users")
         .select("role")
         .eq("id", authUser.id)
-        .single();
+        .single()) as { data: { role: string } | null; error: unknown };
       if (profile?.role === "superadmin") isSuperadmin = true;
     }
 
