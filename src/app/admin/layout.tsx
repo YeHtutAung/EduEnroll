@@ -31,13 +31,18 @@ export default async function AdminLayout({
     redirect("/login");
   }
 
+  // Superadmins should use /superadmin, not /admin
+  if (profile.role === "superadmin") {
+    redirect("/superadmin");
+  }
+
   // ── Tenant membership guard ────────────────────────────────────────────────
   // Ensure the logged-in user belongs to the tenant identified by the subdomain.
   // Prevents cross-tenant admin access (e.g. Nihon Moment admin on IGM's portal).
   const headersList = headers();
   const tenantSlug = headersList.get("x-tenant-slug");
 
-  if (tenantSlug && profile.role !== "superadmin") {
+  if (tenantSlug) {
     const adminSupabase = createAdminClient();
     const { data: tenant } = (await adminSupabase
       .from("tenants")
