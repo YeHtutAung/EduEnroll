@@ -49,11 +49,11 @@ export async function middleware(request: NextRequest) {
 
   if (!shouldSkipTenant(pathname)) {
     const host = request.headers.get("host") ?? "";
-    const hostname = host.split(":")[0];
     tenantSlug = extractSubdomain(host);
 
-    // Localhost fallback chain: ?tenant= param → cookie → env var → null
-    if (!tenantSlug && (hostname === "localhost" || hostname === "127.0.0.1")) {
+    // Fallback chain when no subdomain detected: ?tenant= param → cookie → env var → null
+    // Works on localhost AND bare prod domains (e.g. edu-enroll-xi.vercel.app)
+    if (!tenantSlug) {
       tenantSlug =
         request.nextUrl.searchParams.get("tenant") ??
         request.cookies.get("x-tenant-slug")?.value ??
@@ -118,7 +118,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  // Set tenant cookie on localhost so client-side fetches carry the tenant slug.
+  // Set tenant cookie so client-side fetches carry the tenant slug.
   // Only set when ?tenant= param was used (explicit override) to avoid stale cookies.
   const tenantParam = request.nextUrl.searchParams.get("tenant");
   if (tenantParam && tenantSlug) {
