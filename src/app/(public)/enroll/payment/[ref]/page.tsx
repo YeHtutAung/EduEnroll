@@ -165,7 +165,8 @@ function UploadSection({
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [uploadError, setUploadError] = useState<{ en: string; mm: string } | null>(null);
   const [uploadDone, setUploadDone] = useState(false);
   const [preview, setPreview] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -175,24 +176,33 @@ function UploadSection({
     if (!file) return;
     setUploadError(null);
 
-    // Validate type + size
-    const allowed = ["image/jpeg", "image/png", "image/webp"];
-    if (!allowed.includes(file.type)) {
-      setUploadError("Only JPEG, PNG, or WebP images are allowed.");
+    // Validate file is an image
+    if (!file.type.startsWith("image/")) {
+      setUploadError({
+        en: "Please select an image file.",
+        mm: "ဓာတ်ပုံဖိုင် ရွေးချယ်ပါ။",
+      });
       return;
     }
+    // Validate size
     if (file.size > 5 * 1024 * 1024) {
-      setUploadError("File must be under 5 MB.");
+      setUploadError({
+        en: "File too large. Please use a smaller image (max 5 MB).",
+        mm: "ဖိုင်အရွယ်အစား ကြီးလွန်းသည်။ ပိုသေးသော ဓာတ်ပုံ သုံးပါ (အများဆုံး ၅ MB)။",
+      });
       return;
     }
 
     setSelectedFile(file);
+    // Revoke previous preview URL to avoid memory leaks
+    if (preview) URL.revokeObjectURL(preview);
     setPreview(URL.createObjectURL(file));
   }
 
   async function handleUpload() {
     if (!selectedFile) return;
     setUploading(true);
+    setUploadProgress(0);
     setUploadError(null);
 
     try {
@@ -200,115 +210,205 @@ function UploadSection({
       formData.append("enrollment_ref", enrollmentRef);
       formData.append("proof_image", selectedFile);
 
-      const res = await fetch("/api/public/payments/upload", {
-        method: "POST",
-        body: formData,
-      });
+      // Use XMLHttpRequest for upload progress tracking
+      const result = await new Promise<{ ok: boolean; body: Record<string, string> }>(
+        (resolve, reject) => {
+          const xhr = new XMLHttpRequest();
 
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setUploadError(body.message || "Upload failed. Please try again.");
+          xhr.upload.addEventListener("progress", (e) => {
+            if (e.lengthComputable) {
+              const pct = Math.round((e.loaded / e.total) * 100);
+              setUploadProgress(pct);
+            }
+          });
+
+          xhr.addEventListener("load", () => {
+            let body = {};
+            try { body = JSON.parse(xhr.responseText); } catch { /* empty */ }
+            resolve({ ok: xhr.status >= 200 && xhr.status < 300, body: body as Record<string, string> });
+          });
+
+          xhr.addEventListener("error", () => reject(new Error("network")));
+          xhr.addEventListener("abort", () => reject(new Error("aborted")));
+
+          xhr.open("POST", "/api/public/payments/upload");
+          xhr.send(formData);
+        },
+      );
+
+      if (!result.ok) {
+        setUploadError({
+          en: result.body.message || "Upload failed. Please try again.",
+          mm: result.body.message_mm || "တင်သွင်းမှု မအောင်မြင်ပါ။ ထပ်မံကြိုးစားပါ။",
+        });
         return;
       }
 
+      setUploadProgress(100);
       setUploadDone(true);
       onUploadSuccess();
     } catch {
-      setUploadError("Network error. Please check your connection.");
+      setUploadError({
+        en: "Network error. Please check your connection and try again.",
+        mm: "ကွန်ရက်ချိတ်ဆက်မှု မအောင်မြင်ပါ။ ထပ်မံကြိုးစားပါ။",
+      });
     } finally {
       setUploading(false);
     }
   }
 
+  function handleRetry() {
+    setUploadError(null);
+    setUploadProgress(0);
+  }
+
+  // ── Success screen ──────────────────────────────────────────
   if (uploadDone) {
     return (
-      <div className="rounded-xl border border-green-200 bg-green-50 p-6 text-center">
-        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-green-100">
-          <svg className="h-6 w-6 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <div className="rounded-xl border border-green-200 bg-green-50 p-8 text-center">
+        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
+          <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
           </svg>
         </div>
-        <p className="font-semibold text-green-800">Payment Proof Uploaded!</p>
-        <p className="font-myanmar mt-1 text-sm text-green-700">
-          ငွေပေးချေမှု အထောက်အထား တင်သွင်းပြီးပါပြီ
+        <h3 className="text-xl font-bold text-green-800">Payment submitted for review!</h3>
+        <p className="font-myanmar mt-1 text-green-700">
+          စစ်ဆေးရန် တင်ပြပြီးပါပြီ
         </p>
-        <p className="mt-3 text-sm text-gray-600">
+
+        <div className="mt-5 rounded-lg bg-white/70 px-4 py-3">
+          <p className="text-xs text-gray-500">Enrollment Reference</p>
+          <p className="font-mono text-lg font-bold text-[#1a6b3c]">{enrollmentRef}</p>
+        </div>
+
+        <p className="mt-5 text-sm text-gray-600">
           We will review your payment and confirm your enrollment shortly.
         </p>
         <p className="font-myanmar mt-1 text-sm text-gray-500">
           သင့်ငွေပေးချေမှုကို စစ်ဆေးပြီး စာရင်းသွင်းမှုကို မကြာမီ အတည်ပြုပေးပါမည်။
         </p>
+
+        <a
+          href={`/status?ref=${encodeURIComponent(enrollmentRef)}`}
+          className="mt-6 inline-flex items-center gap-2 rounded-lg bg-[#1a6b3c] px-6 py-3 text-sm font-semibold text-white hover:bg-[#155d33] transition-colors"
+        >
+          Check Status / <span className="font-myanmar">အခြေအနေ စစ်ဆေးမည်</span>
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+          </svg>
+        </a>
       </div>
     );
   }
 
+  // ── Upload form ─────────────────────────────────────────────
   return (
     <div id="upload-section">
-      <h3 className="mb-4 text-lg font-semibold text-gray-900">
-        Upload Payment Screenshot / <span className="font-myanmar">ငွေလွှဲပြေစာ ဓာတ်ပုံ တင်သွင်းပါ</span>
+      <h3 className="mb-2 text-lg font-semibold text-gray-900">
+        Upload Transfer Screenshot
       </h3>
+      <p className="font-myanmar mb-5 text-sm text-gray-500">
+        ငွေလွှဲပြေစာ တင်သွင်းပါ
+      </p>
 
       {/* File picker area */}
       <div
         onClick={() => fileInputRef.current?.click()}
         className={`cursor-pointer rounded-xl border-2 border-dashed p-8 text-center transition-colors ${
-          preview ? "border-[#1a6b3c] bg-green-50/50" : "border-gray-300 hover:border-gray-400"
+          preview ? "border-[#1a6b3c] bg-green-50/50" : "border-gray-300 hover:border-gray-400 hover:bg-gray-50"
         }`}
       >
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/jpeg,image/png,image/webp"
+          accept="image/*"
           onChange={handleFileSelect}
           className="hidden"
         />
         {preview ? (
           <div>
-            <img src={preview} alt="Preview" className="mx-auto mb-3 max-h-48 rounded-lg" />
-            <p className="text-sm text-gray-500">Click to change image</p>
+            <img src={preview} alt="Preview" className="mx-auto mb-3 max-h-56 rounded-lg shadow-sm" />
+            <p className="text-sm text-gray-500">Tap to change image</p>
+            <p className="font-myanmar text-xs text-gray-400">ဓာတ်ပုံ ပြောင်းရန် နှိပ်ပါ</p>
           </div>
         ) : (
           <div>
-            <svg className="mx-auto mb-3 h-10 w-10 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            {/* Camera icon */}
+            <svg className="mx-auto mb-4 h-14 w-14 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.2}
+                d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.2}
+                d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
-            <p className="text-sm font-medium text-gray-600">
+            <p className="text-base font-medium text-gray-600">
               Tap to select screenshot
             </p>
             <p className="font-myanmar mt-1 text-sm text-gray-400">
               ဓာတ်ပုံ ရွေးချယ်ရန် နှိပ်ပါ
             </p>
-            <p className="mt-2 text-xs text-gray-400">JPEG, PNG, or WebP (max 5 MB)</p>
+            <p className="mt-3 text-xs text-gray-400">
+              Supports all image formats (max 5 MB)
+            </p>
           </div>
         )}
       </div>
 
+      {/* Error message */}
       {uploadError && (
-        <p className="mt-3 text-sm text-red-600">{uploadError}</p>
+        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3">
+          <p className="text-sm font-medium text-red-700">{uploadError.en}</p>
+          <p className="font-myanmar mt-0.5 text-sm text-red-600">{uploadError.mm}</p>
+          {uploading === false && (
+            <button
+              onClick={handleRetry}
+              className="mt-2 text-sm font-semibold text-red-700 underline hover:text-red-800"
+            >
+              Try again / <span className="font-myanmar">ထပ်မံကြိုးစားပါ</span>
+            </button>
+          )}
+        </div>
       )}
 
-      {selectedFile && (
-        <button
-          onClick={handleUpload}
-          disabled={uploading}
-          className="mt-4 w-full rounded-lg bg-[#1a6b3c] py-3 text-sm font-semibold text-white hover:bg-[#155d33] transition-colors disabled:opacity-50"
-        >
-          {uploading ? (
-            <span className="inline-flex items-center justify-center gap-2">
-              <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              Uploading...
-            </span>
-          ) : (
-            <>
-              Upload Screenshot / <span className="font-myanmar">ဓာတ်ပုံ တင်သွင်းမည်</span>
-            </>
-          )}
-        </button>
+      {/* Progress bar */}
+      {uploading && (
+        <div className="mt-4">
+          <div className="mb-1.5 flex items-center justify-between text-xs text-gray-500">
+            <span>Uploading...</span>
+            <span>{uploadProgress}%</span>
+          </div>
+          <div className="h-2.5 overflow-hidden rounded-full bg-gray-200">
+            <div
+              className="h-full rounded-full bg-[#1a6b3c] transition-all duration-300"
+              style={{ width: `${uploadProgress}%` }}
+            />
+          </div>
+        </div>
       )}
+
+      {/* Submit button */}
+      <button
+        onClick={handleUpload}
+        disabled={!selectedFile || uploading}
+        className={`mt-5 w-full rounded-lg py-3.5 text-sm font-semibold transition-colors ${
+          selectedFile && !uploading
+            ? "bg-[#1a6b3c] text-white hover:bg-[#155d33]"
+            : "cursor-not-allowed bg-gray-200 text-gray-400"
+        }`}
+      >
+        {uploading ? (
+          <span className="inline-flex items-center justify-center gap-2">
+            <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            Uploading...
+          </span>
+        ) : (
+          <>
+            Submit Payment Proof / <span className="font-myanmar">တင်သွင်းမည်</span>
+          </>
+        )}
+      </button>
     </div>
   );
 }
