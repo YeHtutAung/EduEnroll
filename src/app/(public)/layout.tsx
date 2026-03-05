@@ -10,7 +10,7 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
         <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-4 sm:px-6">
           <Link href="/" className="flex flex-col">
             <span className="text-xl font-bold text-[#1a6b3c]">Nihon Moment</span>
-            <span className="font-myanmar text-sm text-[#1a6b3c]">နီဟုန်မိုမန့်</span>
+            <span className="font-myanmar text-sm text-[#1a6b3c]">နီဟွန်းမိုးမန့်</span>
           </Link>
           <p className="hidden text-right text-xs text-gray-500 sm:block">
             Japanese Language School
@@ -30,7 +30,7 @@ export default function PublicLayout({ children }: { children: React.ReactNode }
         <div className="mx-auto max-w-4xl px-4 py-6 text-center text-sm text-gray-500 sm:px-6">
           <p className="font-semibold text-gray-700">
             Nihon Moment{" "}
-            <span className="font-myanmar">နီဟုန်မိုမန့်</span>
+            <span className="font-myanmar">နီဟွန်းမိုးမန့်</span>
           </p>
           <p className="mt-1">Powered by EduEnroll</p>
         </div>

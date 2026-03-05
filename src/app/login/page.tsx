@@ -59,7 +59,7 @@ export default function LoginPage() {
             Nihon Moment
           </h1>
           <p className="text-lg font-medium text-slate-600 mt-0.5 font-myanmar">
-            နီဟုန်မိုမန့်
+            နီဟွန်းမိုးမန့်
           </p>
           <p className="text-sm text-slate-500 mt-1">
             Japanese Language School&nbsp;

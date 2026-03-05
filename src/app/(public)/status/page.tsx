@@ -158,7 +158,7 @@ function RejectedCard({ data }: { data: StatusResponse }) {
           အမှားဖြစ်နေသည်ဟု ယူဆပါက ကျောင်းသို့ ဆက်သွယ်ပါ -
         </p>
         <p className="mt-2 text-sm font-semibold text-red-900">
-          Nihon Moment / <span className="font-myanmar">နီဟုန်မိုမန့်</span>
+          Nihon Moment / <span className="font-myanmar">နီဟွန်းမိုးမန့်</span>
         </p>
       </div>
     </div>

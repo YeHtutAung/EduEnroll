@@ -29,7 +29,7 @@ export const metadata: Metadata = {
     title: "Nihon Moment — Enroll in Japanese Language Classes",
     description:
       "Join Nihon Moment Japanese Language School. JLPT N5–N1 classes, " +
-      "easy online enrollment, MMK payment. နီဟုန်မိုမန့် ဂျပန်ဘာသာ သင်တန်း",
+      "easy online enrollment, MMK payment. နီဟွန်းမိုးမန့် ဂျပန်ဘာသာ သင်တန်း",
     siteName: "Nihon Moment",
     locale: "my_MM",
     type: "website",

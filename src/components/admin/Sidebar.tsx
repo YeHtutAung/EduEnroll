@@ -129,7 +129,7 @@ export default function Sidebar({ displayName, displayEmail, displayRole }: Side
               Nihon Moment
             </p>
             <p className="text-xs font-myanmar text-white/50 truncate leading-tight mt-0.5">
-              နီဟုန်မိုမန့်
+              နီဟွန်းမိုးမန့်
             </p>
           </div>
           {/* Close button — mobile only */}

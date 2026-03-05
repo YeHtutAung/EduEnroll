@@ -125,7 +125,7 @@ export function formatMyanmarPhone(phone: string): string {
 
 export const NIHON_MOMENT_CONFIG = {
   schoolName:   "Nihon Moment",
-  schoolNameMM: "နီဟုန်မိုမန့်",
+  schoolNameMM: "နီဟွန်းမိုးမန့်",
   currency:     "MMK",
   defaultFees:  {
     N5: 300_000,
