@@ -27,14 +27,7 @@ interface BankAccountInfo {
 
 // ─── Myanmar numerals ────────────────────────────────────────────────────────
 
-const MM_DIGITS: Record<string, string> = {
-  "0": "၀", "1": "၁", "2": "၂", "3": "၃", "4": "၄",
-  "5": "၅", "6": "၆", "7": "၇", "8": "၈", "9": "၉",
-};
-
-function toMM(str: string): string {
-  return str.replace(/[0-9]/g, (d) => MM_DIGITS[d]);
-}
+// Myanmar numerals not needed on this page — fees come pre-formatted from API
 
 // ─── Bank badge colors ───────────────────────────────────────────────────────
 
@@ -327,7 +320,8 @@ function UploadSection({
         />
         {preview ? (
           <div>
-            <img src={preview} alt="Preview" className="mx-auto mb-3 max-h-56 rounded-lg shadow-sm" />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={preview} alt="Payment screenshot preview" className="mx-auto mb-3 max-h-56 rounded-lg shadow-sm" />
             <p className="text-sm text-gray-500">Tap to change image</p>
             <p className="font-myanmar text-xs text-gray-400">ဓာတ်ပုံ ပြောင်းရန် နှိပ်ပါ</p>
           </div>
@@ -464,7 +458,6 @@ export default function PaymentInstructionsPage() {
   if (error || !enrollment) return <ErrorPage message={error || "Unknown error"} />;
 
   const feeFormatted = enrollment.fee_formatted ?? formatMMK(enrollment.fee_mmk ?? 0);
-  const feeMMK = enrollment.fee_mmk ?? 0;
   const feeMyanmarOnly = feeFormatted.replace(" MMK", "");
   const showUpload = enrollment.status === "pending_payment";
 

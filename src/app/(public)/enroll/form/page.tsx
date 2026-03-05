@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { formatMMK } from "@/lib/utils";
 import type { JlptLevel, ClassStatus } from "@/types/database";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -170,7 +169,15 @@ function ErrorPage({ message, onBack }: { message: string; onBack?: () => void }
 
 // ─── Main page ───────────────────────────────────────────────────────────────
 
-export default function EnrollmentFormPage() {
+export default function EnrollmentFormPageWrapper() {
+  return (
+    <Suspense fallback={<LoadingSkeleton />}>
+      <EnrollmentFormPage />
+    </Suspense>
+  );
+}
+
+function EnrollmentFormPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const classId = searchParams.get("class_id");
