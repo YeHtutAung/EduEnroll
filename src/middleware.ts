@@ -94,13 +94,9 @@ export async function middleware(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   if (user && pathname === "/login") {
-    // Check if user is superadmin — redirect to /superadmin instead of /admin
-    const { data: profile } = await supabase
-      .from("users")
-      .select("role")
-      .eq("id", user.id)
-      .single();
-    if (profile?.role === "superadmin") {
+    // Check x-user-role cookie (set by LoginForm after auth) for superadmin redirect
+    const userRole = request.cookies.get("x-user-role")?.value;
+    if (userRole === "superadmin") {
       return NextResponse.redirect(new URL("/superadmin", request.url));
     }
     return NextResponse.redirect(new URL("/admin/dashboard", request.url));
