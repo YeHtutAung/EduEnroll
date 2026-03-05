@@ -37,7 +37,7 @@ export default async function AdminLayout({
   const headersList = headers();
   const tenantSlug = headersList.get("x-tenant-slug");
 
-  if (tenantSlug) {
+  if (tenantSlug && profile.role !== "superadmin") {
     const adminSupabase = createAdminClient();
     const { data: tenant } = (await adminSupabase
       .from("tenants")

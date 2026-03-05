@@ -55,8 +55,22 @@ export default function LoginForm({ schoolName, schoolNameMm, tenantSlug }: Logi
       return;
     }
 
+    // Check if the user is a superadmin — they bypass tenant verification
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser();
+    let isSuperadmin = false;
+    if (authUser) {
+      const { data: profile } = await supabase
+        .from("users")
+        .select("role")
+        .eq("id", authUser.id)
+        .single();
+      if (profile?.role === "superadmin") isSuperadmin = true;
+    }
+
     // Verify the user belongs to this tenant before allowing access
-    if (tenantSlug) {
+    if (tenantSlug && !isSuperadmin) {
       try {
         const verifyRes = await fetch("/api/auth/verify-tenant");
         if (verifyRes.status === 403) {
@@ -71,7 +85,12 @@ export default function LoginForm({ schoolName, schoolNameMm, tenantSlug }: Logi
       }
     }
 
-    router.push("/admin/dashboard");
+    // Superadmin goes to /superadmin, regular users to /admin/dashboard
+    if (isSuperadmin) {
+      router.push("/superadmin");
+    } else {
+      router.push("/admin/dashboard");
+    }
     router.refresh();
   }
 

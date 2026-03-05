@@ -127,6 +127,7 @@ export const config = {
   matcher: [
     "/login",
     "/admin/:path*",
+    "/superadmin",
     "/superadmin/:path*",
     "/onboarding",
     "/api/:path*",

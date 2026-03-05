@@ -23,7 +23,9 @@ export default async function SuperadminLayout({
     .single()) as { data: User | null; error: unknown };
 
   if (!profile || profile.role !== "superadmin") {
-    redirect("/admin/dashboard");
+    // Sign out non-superadmin users so they can re-login with the right account
+    await supabase.auth.signOut();
+    redirect("/login");
   }
 
   return (
