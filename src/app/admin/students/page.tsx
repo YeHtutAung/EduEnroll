@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import StatusBadge from "@/components/ui/StatusBadge";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import { useToast } from "@/components/ui/Toast";
+import { useRole } from "@/components/admin/RoleContext";
 import { formatMMKSimple } from "@/lib/utils";
 import type { EnrollmentStatus, Intake, JlptLevel, PaymentStatus } from "@/types/database";
 
@@ -403,6 +404,8 @@ function DetailRow({
 
 export default function StudentsPage() {
   const toast = useToast();
+  const role = useRole();
+  const isOwnerOrAbove = role === "owner" || role === "superadmin";
 
   // Filters
   const [filters, setFilters] = useState<Filters>({
@@ -562,28 +565,30 @@ export default function StudentsPage() {
           <h1 className="text-2xl font-bold text-gray-900 leading-tight">Students</h1>
           <p className="text-sm font-myanmar text-gray-400 mt-0.5">ကျောင်းသားများ</p>
         </div>
-        <button
-          onClick={handleExport}
-          disabled={exporting || loading}
-          className="flex items-center gap-2 px-4 py-2.5 bg-[#1a6b3c] text-white text-sm font-medium rounded-xl hover:bg-green-800 disabled:opacity-50 transition-colors shadow-sm shrink-0"
-        >
-          {exporting ? (
-            <>
-              <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              Exporting…
-            </>
-          ) : (
-            <>
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
-              </svg>
-              Export Excel
-            </>
-          )}
-        </button>
+        {isOwnerOrAbove && (
+          <button
+            onClick={handleExport}
+            disabled={exporting || loading}
+            className="flex items-center gap-2 px-4 py-2.5 bg-[#1a6b3c] text-white text-sm font-medium rounded-xl hover:bg-green-800 disabled:opacity-50 transition-colors shadow-sm shrink-0"
+          >
+            {exporting ? (
+              <>
+                <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+                Exporting…
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                </svg>
+                Export Excel
+              </>
+            )}
+          </button>
+        )}
       </div>
 
       {/* ── Filter bar ──────────────────────────────────────────────── */}

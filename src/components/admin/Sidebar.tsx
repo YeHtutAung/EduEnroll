@@ -5,13 +5,23 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import LogoutButton from "@/components/admin/LogoutButton";
 
+import type { UserRole } from "@/types/database";
+
 interface SidebarProps {
   displayName: string;
   displayEmail: string;
-  displayRole: string;
+  displayRole: UserRole;
 }
 
-const NAV_LINKS = [
+interface NavLink {
+  href: string;
+  labelEn: string;
+  labelMm: string;
+  emoji: string;
+  ownerOnly?: boolean;
+}
+
+const NAV_LINKS: NavLink[] = [
   {
     href: "/admin/dashboard",
     labelEn: "Dashboard",
@@ -47,6 +57,7 @@ const NAV_LINKS = [
     labelEn: "Settings",
     labelMm: "ဆက်တင်",
     emoji: "⚙️",
+    ownerOnly: true,
   },
 ];
 
@@ -73,6 +84,10 @@ export default function Sidebar({ displayName, displayEmail, displayRole }: Side
     setOpen(false);
   }
 
+  const isOwnerOrAbove = displayRole === "owner" || displayRole === "superadmin";
+  const visibleLinks = NAV_LINKS.filter(
+    (link) => !link.ownerOnly || isOwnerOrAbove,
+  );
   const avatarLetter = displayName.charAt(0).toUpperCase();
 
   return (
@@ -146,7 +161,7 @@ export default function Sidebar({ displayName, displayEmail, displayRole }: Side
 
         {/* Navigation */}
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-0.5">
-          {NAV_LINKS.map((link) => {
+          {visibleLinks.map((link) => {
             const active = isActive(link.href);
             return (
               <Link

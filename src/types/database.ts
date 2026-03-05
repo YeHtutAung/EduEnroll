@@ -2,7 +2,7 @@
 
 export type PlanType = "starter" | "pro";
 
-export type UserRole = "owner" | "admin" | "student";
+export type UserRole = "superadmin" | "owner" | "staff";
 
 export type IntakeStatus = "draft" | "open" | "closed";
 
@@ -132,6 +132,17 @@ export interface BankAccount {
   created_at: string;
 }
 
+export interface StaffInvite {
+  id: string;
+  tenant_id: string;
+  email: string;
+  token: string;
+  invited_by: string | null;
+  accepted_at: string | null;
+  expires_at: string;
+  created_at: string;
+}
+
 // ─── Supabase Database shape ──────────────────────────────────────────────────
 
 export interface Database {
@@ -171,6 +182,11 @@ export interface Database {
         Row: BankAccount;
         Insert: Omit<BankAccount, "id" | "created_at">;
         Update: Partial<Omit<BankAccount, "id" | "created_at">>;
+      };
+      staff_invites: {
+        Row: StaffInvite;
+        Insert: Omit<StaffInvite, "id" | "token" | "accepted_at" | "expires_at" | "created_at">;
+        Update: Partial<Omit<StaffInvite, "id" | "token" | "created_at">>;
       };
     };
     Views: Record<string, never>;

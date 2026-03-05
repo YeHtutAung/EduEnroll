@@ -24,6 +24,19 @@ SaaS platform supporting MMK currency, bilingual Myanmar + English interface, an
 - **Public routes**: `resolveTenantId()` resolves tenant from middleware header
 - **Skip routes**: `/register`, `/api/saas/*`, `/superadmin` bypass tenant detection
 
+## Staff Roles
+
+| Role | Permissions |
+|------|-------------|
+| `superadmin` | Full access across all tenants |
+| `owner` | Full access within their tenant — manage staff, bank accounts, school profile, export data |
+| `staff` | View dashboard, intakes, students, payments, announcements. Cannot access Settings, Export, or bank account management |
+
+Role enforcement:
+- **Server-side**: `requireOwner()` in API routes returns 403 for staff
+- **Client-side**: Sidebar hides Settings for staff, Export button hidden on students page
+- **Database**: RLS policies restrict staff from modifying bank_accounts, tenants, and other users
+
 ## Project Structure
 
 ```
@@ -40,6 +53,7 @@ src/
 │   │   ├── payments/               # Payment verification queue
 │   │   ├── announcements/          # Announcement composer + history
 │   │   └── settings/               # Bank accounts CRUD + school profile
+│   │       └── staff/              # Staff management page (owner-only)
 │   ├── (public)/
 │   │   ├── layout.tsx              # Public layout — header, footer, no sidebar
 │   │   ├── status/                 # Enrollment status checker (search by ref)
@@ -60,7 +74,9 @@ src/
 │   │   │   ├── payments/[id]/verify/ # PATCH approve/reject
 │   │   │   ├── bank-accounts/      # GET/POST bank accounts
 │   │   │   ├── bank-accounts/[id]/ # PATCH/DELETE bank account
-│   │   │   └── announcements/      # GET/POST announcements
+│   │   │   ├── announcements/      # GET/POST announcements
+│   │   │   └── staff/              # GET list / POST invite staff (owner-only)
+│   │   │       └── accept/         # GET accept invite token
 │   │   └── public/
 │   │       ├── enroll/             # POST enrollment submission
 │   │       ├── enroll/[slug]/      # GET intake + classes for public landing
@@ -107,6 +123,7 @@ supabase/
 | `/admin/payments` | Pending payment card grid, fullscreen review modal, approve/reject flows |
 | `/admin/announcements` | Composer (intake + class selector + message), sent history table |
 | `/admin/settings` | Bank accounts CRUD (toggle active/inactive, delete), school profile, change password |
+| `/admin/settings/staff` | Staff management — list members, invite via email, role badges (owner-only) |
 
 ## Public Enrollment Pages
 
@@ -151,6 +168,9 @@ supabase/
 | `DELETE`| `/api/admin/bank-accounts/[id]` | Delete bank account |
 | `GET`  | `/api/admin/announcements` | List announcements (newest first) |
 | `POST` | `/api/admin/announcements` | Save announcement to history |
+| `GET`  | `/api/admin/staff` | List staff members (owner-only) |
+| `POST` | `/api/admin/staff` | Create staff invite (owner-only) |
+| `GET`  | `/api/admin/staff/accept?token=xxx` | Accept invite, create staff account |
 | `GET`  | `/api/intakes` | List intakes |
 | `POST` | `/api/intakes` | Create intake |
 | `GET`  | `/api/intakes/[id]/classes` | List classes for an intake |
@@ -159,7 +179,7 @@ supabase/
 
 ## Database Schema
 
-8 tables with full Row Level Security (multi-tenant, scoped by `tenant_id`):
+9 tables with full Row Level Security (multi-tenant, scoped by `tenant_id`):
 
 | Table | Description |
 |-------|-------------|
@@ -171,6 +191,7 @@ supabase/
 | `payments` | Payment proof submissions with verification status |
 | `bank_accounts` | School bank accounts shown to students |
 | `announcements` | Admin-composed announcements (dispatch wired in Sprint 4) |
+| `staff_invites` | Invite tokens for staff onboarding (7-day expiry) |
 
 Key patterns:
 - `submit_enrollment()` — PostgreSQL RPC with `SELECT FOR UPDATE` to prevent overselling
