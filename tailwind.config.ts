@@ -11,6 +11,7 @@ const config: Config = {
       fontFamily: {
         sans: ["var(--font-noto-sans)", "var(--font-noto-sans-myanmar)", "sans-serif"],
         myanmar: ["var(--font-noto-sans-myanmar)", "sans-serif"],
+        mono: ["var(--font-jetbrains-mono)", "monospace"],
       },
       colors: {
         background: "var(--background)",

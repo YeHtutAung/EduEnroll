@@ -33,7 +33,8 @@ src/
 │   │   ├── layout.tsx            # Public layout — header, footer, no sidebar
 │   │   └── enroll/
 │   │       ├── [slug]/           # Intake landing page — class cards, bilingual
-│   │       └── form/             # Two-step enrollment form (personal info → review)
+│   │       ├── form/             # Two-step enrollment form (personal info → review)
+│   │       └── payment/[ref]/   # Payment instructions + proof upload
 │   ├── api/
 │   │   ├── intakes/              # GET/POST intakes, GET/POST classes
 │   │   ├── classes/[id]/         # PATCH class
@@ -89,6 +90,7 @@ supabase/
 |-------|-------------|
 | `/enroll/[slug]` | Intake landing page — class cards grid (2-col desktop, 1-col mobile), level badges, Myanmar numeral fees, seats remaining, full-class overlay, loading skeleton, error state |
 | `/enroll/form` | Two-step bilingual enrollment form — Step 1: personal info (name EN/MM, NRC, phone, email), Step 2: review & confirm. Posts to `/api/public/enroll`, redirects to payment page on success |
+| `/enroll/payment/[ref]` | Payment instructions — enrollment ref with copy button, numbered bilingual steps, bank accounts with one-tap copy, payment proof upload with preview |
 
 ## API Endpoints
 
@@ -99,6 +101,7 @@ supabase/
 | `GET`  | `/api/public/enroll/[slug]` | Open classes for an intake slug (e.g. `april-2026`) |
 | `POST` | `/api/public/enroll` | Submit enrollment (atomic, seat-safe via `SELECT FOR UPDATE`) |
 | `POST` | `/api/public/payments/upload` | Upload payment proof (JPEG/PNG/WebP, max 5 MB) |
+| `GET`  | `/api/public/bank-accounts` | Active bank accounts (public, minimal fields) |
 | `GET`  | `/api/public/status?ref=NM-YYYY-NNNNN` | Check enrollment + payment status |
 
 ### Admin (requires Supabase session)
