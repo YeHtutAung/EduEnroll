@@ -7,11 +7,6 @@ import ConfirmModal from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
 import type { Intake, IntakeStatus } from "@/types/database";
 
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const INTAKE_MONTHS = ["January", "April", "July", "October"] as const;
-type IntakeMonth = (typeof INTAKE_MONTHS)[number];
-
 // ── Skeleton ──────────────────────────────────────────────────────────────────
 
 function Pulse({ className }: { className: string }) {
@@ -30,119 +25,6 @@ function RowSkeleton() {
   );
 }
 
-// ── Create Intake Modal ───────────────────────────────────────────────────────
-
-function CreateIntakeModal({
-  onClose,
-  onCreated,
-}: {
-  onClose: () => void;
-  onCreated: (intake: Intake) => void;
-}) {
-  const toast = useToast();
-  const [month, setMonth] = useState<IntakeMonth>("April");
-  const [year, setYear] = useState(new Date().getFullYear());
-  const [saving, setSaving] = useState(false);
-
-  const intakeName = `${month} ${year} Intake`;
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      const res = await fetch("/api/intakes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: intakeName, year }),
-      });
-      if (!res.ok) {
-        const err = await res.json();
-        throw new Error(err.message ?? err.error ?? "Failed to create intake.");
-      }
-      const intake = (await res.json()) as Intake;
-      toast.success(`"${intake.name}" created.`);
-      onCreated(intake);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to create intake.");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-      <div className="relative w-full max-w-md bg-white rounded-2xl shadow-xl p-6">
-        <h2 className="text-lg font-bold text-gray-900 mb-0.5">Create New Intake</h2>
-        <p className="text-sm text-gray-400 font-myanmar mb-6">သင်တန်းအသစ်ဖွင့်မည်</p>
-
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              Month
-            </label>
-            <select
-              value={month}
-              onChange={(e) => setMonth(e.target.value as IntakeMonth)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent bg-white"
-            >
-              {INTAKE_MONTHS.map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              Year
-            </label>
-            <input
-              type="number"
-              value={year}
-              onChange={(e) => setYear(Number(e.target.value))}
-              min={2020}
-              max={2100}
-              required
-              className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
-            />
-          </div>
-
-          {/* Preview */}
-          <div className="flex items-center gap-2 rounded-xl bg-[#f0f4ff] px-4 py-3 text-sm">
-            <svg className="w-4 h-4 text-[#1a3f8a] shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
-            </svg>
-            <span className="text-gray-600">
-              Intake name: <span className="font-semibold text-[#1a3f8a]">{intakeName}</span>
-            </span>
-          </div>
-
-          <div className="flex gap-3 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl text-sm text-gray-700 hover:bg-gray-50 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={saving}
-              className="flex-1 px-4 py-2.5 bg-[#1a3f8a] text-white rounded-xl text-sm font-medium hover:bg-blue-900 disabled:opacity-50 transition-colors"
-            >
-              {saving ? "Creating…" : "Create Intake"}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function IntakesPage() {
@@ -151,7 +33,6 @@ export default function IntakesPage() {
   const [classCounts, setClassCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState<{ intakeId: string; intakeName: string } | null>(null);
 
@@ -187,12 +68,6 @@ export default function IntakesPage() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
-
-  function handleCreated(intake: Intake) {
-    setIntakes((prev) => [intake, ...prev]);
-    setClassCounts((prev) => ({ ...prev, [intake.id]: 0 }));
-    setShowCreate(false);
-  }
 
   async function handleStatusChange(intakeId: string, newStatus: IntakeStatus) {
     setUpdatingStatus(intakeId);
@@ -253,8 +128,8 @@ export default function IntakesPage() {
             သင်တန်းနှင့် အတန်းများ
           </p>
         </div>
-        <button
-          onClick={() => setShowCreate(true)}
+        <Link
+          href="/admin/intakes/new"
           className="flex items-center gap-2 px-4 py-2.5 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 transition-colors shadow-sm shrink-0"
         >
           <svg
@@ -267,7 +142,7 @@ export default function IntakesPage() {
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
           </svg>
           Create New Intake
-        </button>
+        </Link>
       </div>
 
       {/* Table card */}
@@ -281,12 +156,12 @@ export default function IntakesPage() {
             <p className="text-sm text-gray-400 max-w-xs">
               Create your first intake to start managing classes and enrollments.
             </p>
-            <button
-              onClick={() => setShowCreate(true)}
+            <Link
+              href="/admin/intakes/new"
               className="mt-2 px-5 py-2 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 transition-colors"
             >
               Create First Intake
-            </button>
+            </Link>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -396,14 +271,6 @@ export default function IntakesPage() {
           </div>
         )}
       </div>
-
-      {/* Create modal */}
-      {showCreate && (
-        <CreateIntakeModal
-          onClose={() => setShowCreate(false)}
-          onCreated={handleCreated}
-        />
-      )}
 
       {/* Confirm opening intake */}
       {confirmOpen && (
