@@ -59,11 +59,6 @@ export interface Tenant {
   currency: string;             // default 'MMK'
   language: string;             // default 'my+en'
   plan: PlanType;
-  messenger_enabled: boolean;
-  messenger_page_id: string | null;
-  messenger_page_token: string | null;
-  messenger_verify_token: string | null;
-  messenger_greeting: string | null;
   created_at: string;
 }
 
