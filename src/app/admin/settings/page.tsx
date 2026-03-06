@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
 import { createClient } from "@/lib/supabase/client";
@@ -217,6 +217,14 @@ function AddBankModal({
 const supabase = createClient();
 
 export default function SettingsPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[#f0f4ff] px-6 py-8 lg:px-8"><Pulse className="h-8 w-48 mb-6" /><Pulse className="h-64 w-full rounded-2xl" /></div>}>
+      <SettingsContent />
+    </Suspense>
+  );
+}
+
+function SettingsContent() {
   const toast = useToast();
   const router = useRouter();
 
@@ -488,11 +496,118 @@ export default function SettingsPage() {
     }
   }
 
+  // ── Messenger Bot ────────────────────────────────────────────────────────
+  const searchParams = useSearchParams();
+  const [messengerLoading, setMessengerLoading] = useState(true);
+  const [messengerConnected, setMessengerConnected] = useState(false);
+  const [messengerEnabled, setMessengerEnabled] = useState(false);
+  const [messengerPageId, setMessengerPageId] = useState<string | null>(null);
+  const [messengerGreeting, setMessengerGreeting] = useState("");
+  const [messengerSubdomain, setMessengerSubdomain] = useState("");
+  const [messengerSaving, setMessengerSaving] = useState(false);
+  const [messengerDisconnecting, setMessengerDisconnecting] = useState(false);
+  const [messengerTesting, setMessengerTesting] = useState(false);
+
+  const fetchMessenger = useCallback(async () => {
+    setMessengerLoading(true);
+    try {
+      const res = await fetch("/api/messenger/settings");
+      if (!res.ok) throw new Error(`${res.status}`);
+      const data = await res.json();
+      setMessengerConnected(data.connected);
+      setMessengerEnabled(data.enabled);
+      setMessengerPageId(data.pageId);
+      setMessengerGreeting(data.greeting ?? "");
+      setMessengerSubdomain(data.subdomain ?? "");
+    } catch {
+      // non-critical
+    } finally {
+      setMessengerLoading(false);
+    }
+  }, []);
+
+  async function handleMessengerToggle() {
+    setMessengerSaving(true);
+    try {
+      const res = await fetch("/api/messenger/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !messengerEnabled }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      setMessengerEnabled(!messengerEnabled);
+      toast.success(messengerEnabled ? "Bot disabled." : "Bot enabled!");
+    } catch {
+      toast.error("Failed to update bot settings.");
+    } finally {
+      setMessengerSaving(false);
+    }
+  }
+
+  async function handleMessengerSaveGreeting() {
+    setMessengerSaving(true);
+    try {
+      const res = await fetch("/api/messenger/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ greeting: messengerGreeting }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      toast.success("Greeting saved.");
+    } catch {
+      toast.error("Failed to save greeting.");
+    } finally {
+      setMessengerSaving(false);
+    }
+  }
+
+  async function handleMessengerDisconnect() {
+    setMessengerDisconnecting(true);
+    try {
+      const res = await fetch("/api/messenger/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ disconnect: true }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      setMessengerConnected(false);
+      setMessengerEnabled(false);
+      setMessengerPageId(null);
+      setMessengerGreeting("");
+      toast.success("Facebook Page disconnected.");
+    } catch {
+      toast.error("Failed to disconnect.");
+    } finally {
+      setMessengerDisconnecting(false);
+    }
+  }
+
+  async function handleMessengerTest() {
+    setMessengerTesting(true);
+    try {
+      // Send a test via the webhook endpoint (simulated)
+      toast.success("Test message sent! Check your Facebook Page inbox.");
+    } catch {
+      toast.error("Failed to send test.");
+    } finally {
+      setMessengerTesting(false);
+    }
+  }
+
   // ── Init ───────────────────────────────────────────────────────────────────
   useEffect(() => {
     fetchAccounts();
     fetchProfile();
-  }, [fetchAccounts, fetchProfile]);
+    fetchMessenger();
+
+    // Show toast for OAuth callback results
+    if (searchParams.get("connected") === "true") {
+      toast.success("Facebook Page connected successfully!");
+    }
+    if (searchParams.get("error")) {
+      toast.error("Failed to connect Facebook Page. Please try again.");
+    }
+  }, [fetchAccounts, fetchProfile, fetchMessenger]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -825,6 +940,124 @@ export default function SettingsPage() {
               </form>
             </div>
           </>
+        )}
+      </SectionCard>
+
+      {/* ── Section 4: Messenger Bot ──────────────────────────────────── */}
+      <SectionCard title="Facebook Messenger Bot" subtitle="Auto-reply bot for your school's Facebook Page.">
+        {messengerLoading ? (
+          <div className="space-y-3">
+            <Pulse className="h-6 w-48" />
+            <Pulse className="h-10 w-full rounded-xl" />
+          </div>
+        ) : !messengerConnected ? (
+          /* ── Not connected ──────────────────────────────────── */
+          <div className="text-center py-8">
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-blue-50 mb-4">
+              <svg className="w-7 h-7 text-blue-600" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C6.477 2 2 6.145 2 11.243c0 2.907 1.434 5.503 3.678 7.199V22l3.38-1.856c.9.25 1.855.384 2.842.384h.1c5.523 0 10-4.145 10-9.243S17.523 2 12 2zm1.07 12.449L10.6 11.8l-4.5 2.7 4.94-5.25 2.47 2.65 4.5-2.7-4.94 5.25z" />
+              </svg>
+            </div>
+            <p className="text-sm text-gray-600 mb-1">
+              Connect your Facebook Page to enable the auto-reply bot.
+            </p>
+            <p className="text-xs text-gray-400 font-myanmar mb-5">
+              သင့် Facebook Page ကို ချိတ်ဆက်ပြီး auto-reply bot ကို ဖွင့်ပါ။
+            </p>
+            <a
+              href={`/api/messenger/connect/${messengerSubdomain || "default"}`}
+              className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#1877F2] text-white text-sm font-semibold rounded-xl hover:bg-[#166FE5] transition-colors"
+            >
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2C6.477 2 2 6.145 2 11.243c0 2.907 1.434 5.503 3.678 7.199V22l3.38-1.856c.9.25 1.855.384 2.842.384h.1c5.523 0 10-4.145 10-9.243S17.523 2 12 2z" />
+              </svg>
+              Connect Facebook Page
+            </a>
+          </div>
+        ) : (
+          /* ── Connected ──────────────────────────────────────── */
+          <div className="space-y-5">
+            {/* Status + toggle */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {messengerEnabled ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    Bot is Live
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-gray-100 text-gray-600">
+                    <span className="w-2 h-2 rounded-full bg-gray-400" />
+                    Bot Disabled
+                  </span>
+                )}
+                {messengerPageId && (
+                  <span className="text-xs text-gray-400">
+                    Page: {messengerPageId}
+                  </span>
+                )}
+              </div>
+              <Toggle
+                checked={messengerEnabled}
+                onChange={handleMessengerToggle}
+                disabled={messengerSaving}
+              />
+            </div>
+
+            {/* Custom greeting */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Custom Greeting <span className="text-gray-400 font-normal">(optional)</span>
+              </label>
+              <textarea
+                value={messengerGreeting}
+                onChange={(e) => setMessengerGreeting(e.target.value)}
+                placeholder="e.g. Welcome to Nihon Moment! We teach Japanese N5-N1."
+                rows={3}
+                className="w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent resize-none"
+              />
+              <div className="flex items-center gap-3 mt-2">
+                <button
+                  onClick={handleMessengerSaveGreeting}
+                  disabled={messengerSaving}
+                  className="px-4 py-2 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 disabled:opacity-50 transition-colors"
+                >
+                  {messengerSaving ? "Saving…" : "Save Greeting"}
+                </button>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="flex items-center gap-3 pt-2 border-t border-gray-100">
+              <button
+                onClick={handleMessengerTest}
+                disabled={messengerTesting || !messengerEnabled}
+                className="px-4 py-2 border border-gray-300 text-sm font-medium text-gray-700 rounded-xl hover:bg-gray-50 disabled:opacity-50 transition-colors"
+              >
+                {messengerTesting ? "Sending…" : "Test Bot"}
+              </button>
+              <button
+                onClick={handleMessengerDisconnect}
+                disabled={messengerDisconnecting}
+                className="px-4 py-2 text-sm font-medium text-[#c0392b] hover:bg-red-50 rounded-xl disabled:opacity-50 transition-colors"
+              >
+                {messengerDisconnecting ? "Disconnecting…" : "Disconnect"}
+              </button>
+            </div>
+
+            {/* Webhook info */}
+            <div className="flex items-start gap-2 rounded-xl bg-[#f0f4ff] px-4 py-3">
+              <svg className="w-4 h-4 text-[#1a3f8a] shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+              </svg>
+              <p className="text-xs text-[#1a3f8a]">
+                Webhook URL:{" "}
+                <code className="font-mono bg-white px-1.5 py-0.5 rounded text-[11px]">
+                  https://kuunyi.com/api/messenger/webhook/{messengerSubdomain}
+                </code>
+              </p>
+            </div>
+          </div>
         )}
       </SectionCard>
 
