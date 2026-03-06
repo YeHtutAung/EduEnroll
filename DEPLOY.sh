@@ -7,8 +7,9 @@
 # This script:
 #   1. Asks 3 confirmation questions
 #   2. Merges staging → main
-#   3. Pushes to origin (triggers Vercel production deploy)
-#   4. Returns to dev branch
+#   3. Pushes to origin
+#   4. Runs `vercel --prod` to deploy to production
+#   5. Returns to dev branch
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -48,18 +49,9 @@ if [ "$confirm1" = "y" ] && [ "$confirm2" = "y" ] && [ "$confirm3" = "y" ]; then
   git push origin main
 
   echo ""
-  echo "Waiting for Vercel to build..."
-  sleep 30
-
-  echo "Promoting to production via Vercel CLI..."
-  DEPLOY_URL=$(vercel ls edu-enroll --scope yehtutaungs-projects 2>/dev/null | grep main | head -1 | awk '{print $1}')
-  if [ -n "$DEPLOY_URL" ]; then
-    vercel promote "$DEPLOY_URL" --scope yehtutaungs-projects
-    echo "Production deploy complete."
-  else
-    echo "WARNING: Could not find main branch deployment. Check Vercel dashboard manually."
-    echo "Monitor: https://vercel.com"
-  fi
+  echo "Deploying to production via Vercel CLI..."
+  vercel --prod --yes
+  echo "Production deploy complete."
 
   echo ""
 
