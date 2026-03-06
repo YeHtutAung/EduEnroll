@@ -24,9 +24,10 @@ interface LoginFormProps {
   schoolNameMm: string | null;
   tenantSlug: string | null;
   isSuperadminOnly?: boolean;
+  logoUrl?: string | null;
 }
 
-export default function LoginForm({ schoolName, schoolNameMm, tenantSlug, isSuperadminOnly }: LoginFormProps) {
+export default function LoginForm({ schoolName, schoolNameMm, tenantSlug, isSuperadminOnly, logoUrl }: LoginFormProps) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -113,11 +114,16 @@ export default function LoginForm({ schoolName, schoolNameMm, tenantSlug, isSupe
 
         {/* School identity */}
         <div className="mb-8 text-center">
-          <div className={`inline-flex items-center justify-center w-14 h-14 rounded-full mb-4 ${isGeneric ? "bg-[#6d28d9]" : "bg-red-700"}`}>
-            <span className="text-white text-2xl font-bold select-none">
-              {isGeneric ? "E" : avatarLetter}
-            </span>
-          </div>
+          {logoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={logoUrl} alt={schoolName} className="w-20 h-20 rounded-full object-contain mx-auto mb-4" />
+          ) : (
+            <div className={`inline-flex items-center justify-center w-14 h-14 rounded-full mb-4 ${isGeneric ? "bg-[#6d28d9]" : "bg-red-700"}`}>
+              <span className="text-white text-2xl font-bold select-none">
+                {isGeneric ? "E" : avatarLetter}
+              </span>
+            </div>
+          )}
           <h1 className="text-2xl font-bold text-slate-900 leading-tight">
             {schoolName}
           </h1>

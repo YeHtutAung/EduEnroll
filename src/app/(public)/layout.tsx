@@ -10,17 +10,21 @@ export default async function PublicLayout({ children }: { children: React.React
 
   let schoolName = "EduEnroll";
   const schoolNameMm: string | null = null;
+  let logoUrl: string | null = null;
 
   if (slug) {
     const supabase = createAdminClient();
     const { data: tenant } = (await supabase
       .from("tenants")
-      .select("name")
+      .select("name, logo_url")
       .eq("subdomain", slug)
-      .maybeSingle()) as { data: { name: string } | null; error: unknown };
+      .maybeSingle()) as { data: { name: string; logo_url: string | null } | null; error: unknown };
 
     if (tenant?.name) {
       schoolName = tenant.name;
+    }
+    if (tenant?.logo_url) {
+      logoUrl = tenant.logo_url;
     }
   }
 
@@ -29,11 +33,17 @@ export default async function PublicLayout({ children }: { children: React.React
       {/* ─── Header ──────────────────────────────────────────────── */}
       <header className="border-b border-gray-200 bg-white">
         <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-4 sm:px-6">
-          <Link href="/" className="flex flex-col">
-            <span className="text-xl font-bold text-[#1a6b3c]">{schoolName}</span>
-            {schoolNameMm && (
-              <span className="font-myanmar text-sm text-[#1a6b3c]">{schoolNameMm}</span>
+          <Link href="/" className="flex items-center gap-3">
+            {logoUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={logoUrl} alt="" className="w-10 h-10 rounded-lg object-contain shrink-0" />
             )}
+            <span className="flex flex-col">
+              <span className="text-xl font-bold text-[#1a6b3c]">{schoolName}</span>
+              {schoolNameMm && (
+                <span className="font-myanmar text-sm text-[#1a6b3c]">{schoolNameMm}</span>
+              )}
+            </span>
           </Link>
           <p className="hidden text-right text-xs text-gray-500 sm:block">
             Japanese Language School

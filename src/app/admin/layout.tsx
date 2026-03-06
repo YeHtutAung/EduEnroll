@@ -64,15 +64,17 @@ export default async function AdminLayout({
   const displayEmail = user.email ?? "";
   const displayRole = (profile.role ?? "staff") as UserRole;
 
-  // Fetch tenant name for sidebar branding
+  // Fetch tenant name + logo for sidebar branding
   let schoolName = "EduEnroll";
+  let schoolLogoUrl: string | null = null;
   if (profile.tenant_id) {
     const { data: tenant } = (await supabase
       .from("tenants")
-      .select("name")
+      .select("name, logo_url")
       .eq("id", profile.tenant_id)
-      .single()) as { data: { name: string } | null; error: unknown };
+      .single()) as { data: { name: string; logo_url: string | null } | null; error: unknown };
     if (tenant?.name) schoolName = tenant.name;
+    if (tenant?.logo_url) schoolLogoUrl = tenant.logo_url;
   }
 
   return (
@@ -85,6 +87,7 @@ export default async function AdminLayout({
             displayEmail={displayEmail}
             displayRole={displayRole}
             schoolName={schoolName}
+            schoolLogoUrl={schoolLogoUrl}
           />
 
           {/* Main content — push down on mobile to clear the fixed top bar */}
