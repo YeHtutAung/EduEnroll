@@ -41,6 +41,9 @@ cp .env.local.example .env.local
 | `NEXT_PUBLIC_SUPABASE_URL` | Yes | Supabase project URL (e.g. `https://xxx.supabase.co`) |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Yes | Supabase anonymous/public key |
 | `SUPABASE_SERVICE_ROLE_KEY` | Yes | Supabase service role key (server-side only, bypasses RLS) |
+| `MESSENGER_APP_ID` | No | Meta Developer App ID (for Messenger Bot) |
+| `MESSENGER_APP_SECRET` | No | Meta Developer App Secret |
+| `MESSENGER_ENCRYPTION_KEY` | No | 64-char hex for AES-256-GCM page token encryption |
 
 ## Local Development Setup
 
@@ -182,7 +185,13 @@ src/
 │   │   ├── server.ts               # Server client (cookies)
 │   │   └── admin.ts                # Service-role client (bypasses RLS)
 │   ├── api.ts                      # requireAuth(), requireOwner(), resolveTenantId()
-│   └── utils.ts                    # formatMMK, formatMyanmarPhone, etc.
+│   ├── tenant.ts                   # extractSubdomainFromHost() helper
+│   ├── utils.ts                    # formatMMK, formatMyanmarPhone, etc.
+│   └── messenger/
+│       ├── send.ts                 # Meta Graph API send helpers
+│       ├── processor.ts            # Message routing + keyword matching
+│       ├── responses.ts            # 6 bot response handlers
+│       └── crypto.ts               # AES-256-GCM encrypt/decrypt for page tokens
 └── types/
     └── database.ts                 # TypeScript types for all tables + enums
 supabase/
@@ -221,7 +230,7 @@ supabase/
 | `/admin/analytics` | Enrollment trend, class distribution, seat fill, date range filter |
 | `/admin/payments` | Pending payment card grid, review modal, approve/reject |
 | `/admin/announcements` | Composer (intake + class selector + message), sent history |
-| `/admin/settings` | Bank accounts CRUD, school profile, change password |
+| `/admin/settings` | Bank accounts CRUD, school profile, Messenger Bot, change password |
 | `/admin/settings/staff` | Staff management — list, invite via email (owner-only) |
 | `/admin/settings/billing` | Free Beta placeholder |
 
@@ -261,6 +270,17 @@ supabase/
 | `GET`  | `/api/public/bank-accounts` | Active bank accounts |
 | `GET`  | `/api/public/status?ref=NM-YYYY-NNNNN` | Check enrollment + payment status |
 
+### Messenger Bot (per-tenant webhook)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET`  | `/api/messenger/webhook/[slug]` | Meta webhook verification (hub.challenge) |
+| `POST` | `/api/messenger/webhook/[slug]` | Receive and process incoming messages |
+| `GET`  | `/api/messenger/connect/[slug]` | Redirect to Meta OAuth for page connection |
+| `GET`  | `/api/messenger/callback` | OAuth callback — exchange code, save encrypted token |
+| `GET`  | `/api/messenger/settings` | Read messenger config (auth required) |
+| `PATCH`| `/api/messenger/settings` | Update messenger config (auth required) |
+
 ### Admin (requires Supabase session)
 
 | Method | Path | Description |
@@ -292,7 +312,7 @@ supabase/
 
 | Table | Description |
 |-------|-------------|
-| `tenants` | School organisations (name, subdomain, plan) |
+| `tenants` | School organisations (name, subdomain, plan, messenger config) |
 | `users` | Admin staff (superadmin / owner / staff roles) |
 | `intakes` | Enrollment cohorts (e.g. April 2026 Intake) |
 | `classes` | JLPT levels N5–N1 per intake, with seat tracking |
@@ -337,6 +357,61 @@ export SUPABASE_URL=https://xxx.supabase.co
 export SUPABASE_SERVICE_ROLE_KEY=xxx
 bash security-audit.sh
 ```
+
+## Facebook Messenger Bot Setup
+
+Each tenant can connect their Facebook Page to enable an auto-reply bot for student inquiries.
+
+### Prerequisites
+
+1. Create a **Meta Developer App** at [developers.facebook.com](https://developers.facebook.com)
+2. Add the **Messenger** product to your app
+3. Configure the app's **Valid OAuth Redirect URIs** to include: `https://kuunyi.com/api/messenger/callback`
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `MESSENGER_APP_ID` | Meta App ID from the Developer Console |
+| `MESSENGER_APP_SECRET` | Meta App Secret |
+| `MESSENGER_ENCRYPTION_KEY` | 64-char hex string for AES-256-GCM encryption of page tokens |
+
+Generate the encryption key:
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+### How It Works
+
+1. School admin goes to **Settings → Facebook Messenger Bot** and clicks "Connect Facebook Page"
+2. OAuth flow redirects to Meta, admin grants `pages_messaging` + `pages_read_engagement` + `pages_show_list` permissions
+3. Callback route exchanges code for a long-lived page access token, encrypts it with AES-256-GCM, and saves to the `tenants` table
+4. Webhook subscription is registered for the page
+5. Admin can enable/disable the bot, set a custom greeting, or disconnect
+
+### Bot Quick Replies
+
+| Button | Payload | Response |
+|--------|---------|----------|
+| Open Intakes | `OPEN_INTAKES` | Lists open intakes with class levels and availability |
+| Fees | `FEES` | Shows course fees per JLPT level in Myanmar numerals |
+| How to Enroll | `HOW_TO_ENROLL` | Sends tenant-specific enrollment URL |
+| Schedule | `SCHEDULE` | Shows enrollment open/close dates (EN + Myanmar) |
+| Payment | `PAYMENT` | Lists active bank accounts + payment proof upload link |
+| Check Status | `CHECK_STATUS` | Prompts for ref number, returns enrollment + payment status |
+
+The bot also supports **keyword matching** for free-text messages (e.g. "fee", "enroll", "ငွေ") and **reference number detection** (e.g. `NM-2026-00042`).
+
+### Webhook URL
+
+Each tenant's webhook URL follows the pattern:
+
+```
+https://kuunyi.com/api/messenger/webhook/{tenant-subdomain}
+```
+
+Configure this in the Meta Developer Console under **Webhooks → Callback URL**, with the tenant's `messenger_verify_token` as the verify token.
 
 ## Scripts
 
