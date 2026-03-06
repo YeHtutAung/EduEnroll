@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
 import { createClient } from "@/lib/supabase/client";
@@ -217,6 +218,7 @@ const supabase = createClient();
 
 export default function SettingsPage() {
   const toast = useToast();
+  const router = useRouter();
 
   // ── Bank accounts ──────────────────────────────────────────────────────────
   const [accounts, setAccounts] = useState<BankAccount[]>([]);
@@ -280,6 +282,86 @@ export default function SettingsPage() {
     }
   }
 
+  // ── School logo ────────────────────────────────────────────────────────────
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [removingLogo, setRemovingLogo] = useState(false);
+
+  async function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file || !tenantId) return;
+
+    if (!["image/jpeg", "image/png", "image/svg+xml"].includes(file.type)) {
+      toast.error("Only JPG, PNG, or SVG files are allowed.");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error("File size must be under 2MB.");
+      return;
+    }
+
+    setUploadingLogo(true);
+    try {
+      const ext = file.name.split(".").pop() ?? "png";
+      const path = `${tenantId}/logo.${ext}`;
+
+      const { error: uploadErr } = await supabase.storage
+        .from("school-logos")
+        .upload(path, file, { upsert: true });
+      if (uploadErr) throw new Error(uploadErr.message);
+
+      const { data: urlData } = supabase.storage
+        .from("school-logos")
+        .getPublicUrl(path);
+      const publicUrl = urlData.publicUrl + "?t=" + Date.now();
+
+      const { error: updateErr } = await supabase
+        .from("tenants")
+        .update({ logo_url: publicUrl } as never)
+        .eq("id", tenantId);
+      if (updateErr) throw new Error((updateErr as Error).message);
+
+      setLogoUrl(publicUrl);
+      toast.success("Logo uploaded successfully.");
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to upload logo.");
+    } finally {
+      setUploadingLogo(false);
+      e.target.value = "";
+    }
+  }
+
+  async function handleRemoveLogo() {
+    if (!tenantId) return;
+    setRemovingLogo(true);
+    try {
+      // List and remove all files in tenant's logo folder
+      const { data: files } = await supabase.storage
+        .from("school-logos")
+        .list(tenantId);
+      if (files && files.length > 0) {
+        await supabase.storage
+          .from("school-logos")
+          .remove(files.map((f) => `${tenantId}/${f.name}`));
+      }
+
+      const { error: updateErr } = await supabase
+        .from("tenants")
+        .update({ logo_url: null } as never)
+        .eq("id", tenantId);
+      if (updateErr) throw new Error((updateErr as Error).message);
+
+      setLogoUrl(null);
+      toast.success("Logo removed.");
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to remove logo.");
+    } finally {
+      setRemovingLogo(false);
+    }
+  }
+
   // ── School profile ─────────────────────────────────────────────────────────
   const [schoolName, setSchoolName] = useState("");
   const [schoolNameMm, setSchoolNameMm] = useState("");
@@ -306,13 +388,14 @@ export default function SettingsPage() {
       if (!profile) return;
       setTenantId(profile.tenant_id);
 
-      // Fetch tenant name
+      // Fetch tenant name + logo
       const { data: tenant } = await supabase
         .from("tenants")
-        .select("name")
+        .select("name, logo_url")
         .eq("id", profile.tenant_id)
-        .single() as { data: { name: string } | null; error: unknown };
+        .single() as { data: { name: string; logo_url: string | null } | null; error: unknown };
       if (tenant?.name) setSchoolName(tenant.name);
+      if (tenant?.logo_url) setLogoUrl(tenant.logo_url);
     } catch {
       // non-critical; keep defaults
     } finally {
@@ -332,6 +415,7 @@ export default function SettingsPage() {
         .eq("id", tenantId);
       if (error) throw new Error((error as Error).message);
       toast.success("School profile saved.");
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save profile.");
     } finally {
@@ -522,7 +606,48 @@ export default function SettingsPage() {
         </div>
       </SectionCard>
 
-      {/* ── Section 2: School Profile ────────────────────────────────── */}
+      {/* ── Section 2: School Logo ──────────────────────────────────── */}
+      <SectionCard title="School Logo" subtitle="Displayed on login page, enrollment page, and sidebar.">
+        <div className="flex items-center gap-6">
+          {/* Preview */}
+          <div className="w-20 h-20 rounded-xl border-2 border-dashed border-gray-200 flex items-center justify-center bg-gray-50 shrink-0 overflow-hidden">
+            {logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={logoUrl} alt="School logo" className="w-full h-full object-contain" />
+            ) : (
+              <span className="text-2xl font-bold text-gray-300">
+                {schoolName ? schoolName.charAt(0).toUpperCase() : "?"}
+              </span>
+            )}
+          </div>
+
+          {/* Actions */}
+          <div className="space-y-2">
+            <label className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 transition-colors cursor-pointer disabled:opacity-50">
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/svg+xml"
+                onChange={handleLogoUpload}
+                disabled={uploadingLogo || !tenantId}
+                className="sr-only"
+              />
+              {uploadingLogo ? "Uploading…" : "Upload Logo"}
+            </label>
+            {logoUrl && (
+              <button
+                onClick={handleRemoveLogo}
+                disabled={removingLogo}
+                className="block text-xs text-[#c0392b] hover:underline disabled:opacity-50"
+              >
+                {removingLogo ? "Removing…" : "Remove Logo"}
+              </button>
+            )}
+            <p className="text-xs text-gray-400">JPG, PNG, or SVG. Max 2MB.</p>
+          </div>
+        </div>
+      </SectionCard>
+
+      {/* ── Section 3: School Profile ────────────────────────────────── */}
       <SectionCard title="School Profile" subtitle="Update your school name displayed to students.">
 
         {loadingProfile ? (

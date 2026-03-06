@@ -15,17 +15,21 @@ export default async function LoginPage() {
 
   let schoolName = "EduEnroll Admin";
   const schoolNameMm: string | null = null;
+  let logoUrl: string | null = null;
 
   const supabase = createAdminClient();
   const { data: tenant } = (await supabase
     .from("tenants")
-    .select("name")
+    .select("name, logo_url")
     .eq("subdomain", slug)
-    .maybeSingle()) as { data: { name: string } | null; error: unknown };
+    .maybeSingle()) as { data: { name: string; logo_url: string | null } | null; error: unknown };
 
   if (tenant?.name) {
     schoolName = tenant.name;
   }
+  if (tenant?.logo_url) {
+    logoUrl = tenant.logo_url;
+  }
 
-  return <LoginForm schoolName={schoolName} schoolNameMm={schoolNameMm} tenantSlug={slug} />;
+  return <LoginForm schoolName={schoolName} schoolNameMm={schoolNameMm} tenantSlug={slug} logoUrl={logoUrl} />;
 }

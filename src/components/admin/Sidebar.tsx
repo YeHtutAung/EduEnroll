@@ -12,6 +12,7 @@ interface SidebarProps {
   displayEmail: string;
   displayRole: UserRole;
   schoolName: string;
+  schoolLogoUrl?: string | null;
 }
 
 interface NavLink {
@@ -68,7 +69,7 @@ const NAV_LINKS: NavLink[] = [
   },
 ];
 
-export default function Sidebar({ displayName, displayEmail, displayRole, schoolName }: SidebarProps) {
+export default function Sidebar({ displayName, displayEmail, displayRole, schoolName, schoolLogoUrl }: SidebarProps) {
   const [open, setOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const pathname = usePathname();
@@ -118,9 +119,14 @@ export default function Sidebar({ displayName, displayEmail, displayRole, school
           </svg>
         </button>
         <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-md bg-[#1a3f8a] flex items-center justify-center shrink-0">
-            <span className="text-white font-bold text-sm select-none">{schoolLetter}</span>
-          </div>
+          {schoolLogoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={schoolLogoUrl} alt="" className="w-7 h-7 rounded-md object-contain shrink-0" />
+          ) : (
+            <div className="w-7 h-7 rounded-md bg-[#1a3f8a] flex items-center justify-center shrink-0">
+              <span className="text-white font-bold text-sm select-none">{schoolLetter}</span>
+            </div>
+          )}
           <span className="text-sm font-bold truncate">{schoolName}</span>
         </div>
       </header>
@@ -144,9 +150,14 @@ export default function Sidebar({ displayName, displayEmail, displayRole, school
       >
         {/* School name */}
         <div className="flex items-center gap-3 px-5 py-5 border-b border-white/10">
-          <div className="w-9 h-9 rounded-lg bg-[#1a3f8a] flex items-center justify-center shrink-0">
-            <span className="text-white font-bold text-base select-none">{schoolLetter}</span>
-          </div>
+          {schoolLogoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={schoolLogoUrl} alt="" className="w-9 h-9 rounded-lg object-contain shrink-0" />
+          ) : (
+            <div className="w-9 h-9 rounded-lg bg-[#1a3f8a] flex items-center justify-center shrink-0">
+              <span className="text-white font-bold text-base select-none">{schoolLetter}</span>
+            </div>
+          )}
           <div className="min-w-0">
             <p className="text-sm font-bold text-white truncate leading-tight">
               {schoolName}
