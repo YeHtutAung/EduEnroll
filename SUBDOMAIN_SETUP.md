@@ -1,8 +1,8 @@
-# Subdomain Routing — EduEnroll
+# Subdomain Routing — KuuNyi
 
 ## How It Works
 
-EduEnroll uses **wildcard subdomain routing** so each registered school gets its own URL:
+KuuNyi uses **wildcard subdomain routing** so each registered school gets its own URL:
 
 ```
 nihon-moment.kuunyi.com

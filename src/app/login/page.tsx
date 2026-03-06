@@ -10,10 +10,10 @@ export default async function LoginPage() {
 
   // No tenant context (root domain) — superadmin-only login
   if (!slug) {
-    return <LoginForm schoolName="EduEnroll Admin" schoolNameMm={null} tenantSlug={null} isSuperadminOnly />;
+    return <LoginForm schoolName="KuuNyi Admin" schoolNameMm={null} tenantSlug={null} isSuperadminOnly />;
   }
 
-  let schoolName = "EduEnroll Admin";
+  let schoolName = "KuuNyi Admin";
   const schoolNameMm: string | null = null;
   let logoUrl: string | null = null;
 

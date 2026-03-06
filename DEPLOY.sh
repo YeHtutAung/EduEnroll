@@ -1,5 +1,5 @@
 #!/bin/bash
-# ─── EduEnroll Production Deploy Script ──────────────────────────────────────
+# ─── KuuNyi Production Deploy Script ──────────────────────────────────────
 #
 # Promotes staging to production after verifying the pre-deploy checklist.
 # Usage: bash DEPLOY.sh
@@ -16,7 +16,7 @@ set -euo pipefail
 
 echo ""
 echo "═══════════════════════════════════════════════════════════"
-echo "  EduEnroll — Production Deploy"
+echo "  KuuNyi — Production Deploy"
 echo "═══════════════════════════════════════════════════════════"
 echo ""
 

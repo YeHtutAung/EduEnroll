@@ -244,9 +244,9 @@ export default function OnboardingPage() {
         {/* Logo */}
         <div className="text-center mb-6">
           <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-[#6d28d9] mb-3">
-            <span className="text-white text-xl font-bold">E</span>
+            <span className="text-white text-xl font-bold">K</span>
           </div>
-          <p className="text-sm text-gray-400">Welcome to EduEnroll</p>
+          <p className="text-sm text-gray-400">Welcome to KuuNyi</p>
         </div>
 
         {/* Card */}

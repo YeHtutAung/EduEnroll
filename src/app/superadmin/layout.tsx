@@ -39,7 +39,7 @@ export default async function SuperadminLayout({
               <span className="text-white font-bold text-sm">SA</span>
             </div>
             <div>
-              <h1 className="text-base font-bold">EduEnroll Super Admin</h1>
+              <h1 className="text-base font-bold">KuuNyi Super Admin</h1>
               <p className="text-xs text-white/60">Platform Management</p>
             </div>
           </div>

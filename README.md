@@ -1,4 +1,4 @@
-# EduEnroll
+# KuuNyi
 
 **Multi-tenant enrollment management platform for Myanmar language schools.**
 
@@ -6,7 +6,7 @@ SaaS platform supporting MMK currency, bilingual Myanmar + English interface, su
 
 ## Platform Overview
 
-EduEnroll enables Japanese language schools in Myanmar to manage student enrollments online. Each school gets a dedicated subdomain (e.g. `nihon-moment.kuunyi.com`) with:
+KuuNyi enables Japanese language schools in Myanmar to manage student enrollments online. Each school gets a dedicated subdomain (e.g. `nihon-moment.kuunyi.com`) with:
 
 - **Public enrollment portal** — students browse intakes, select JLPT classes (N5–N1), submit enrollment forms, and upload payment proof
 - **Admin dashboard** — school staff manage intakes, verify payments, track students, view analytics, and configure bank accounts
@@ -56,7 +56,7 @@ cp .env.local.example .env.local
 
 ```bash
 git clone <repo-url>
-cd EduEnroll
+cd KuuNyi
 npm install
 ```
 

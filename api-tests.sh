@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════
-# Nihon Moment EduEnroll — Sprint 2 API Test Suite
+# Nihon Moment KuuNyi — Sprint 2 API Test Suite
 # ═══════════════════════════════════════════════════════════════
 #
 # Tests every endpoint built in Sprint 2.
@@ -677,7 +677,7 @@ test_auth_guards() {
 main() {
   echo -e "${BOLD}"
   echo "╔══════════════════════════════════════════════════════╗"
-  echo "║   Nihon Moment EduEnroll — Sprint 2 API Test Suite  ║"
+  echo "║   Nihon Moment KuuNyi — Sprint 2 API Test Suite  ║"
   echo "╚══════════════════════════════════════════════════════╝"
   echo -e "${RESET}"
   echo "  Base URL : ${BASE_URL}"

@@ -65,7 +65,7 @@ export default async function AdminLayout({
   const displayRole = (profile.role ?? "staff") as UserRole;
 
   // Fetch tenant name + logo for sidebar branding
-  let schoolName = "EduEnroll";
+  let schoolName = "KuuNyi";
   let schoolLogoUrl: string | null = null;
   if (profile.tenant_id) {
     const { data: tenant } = (await supabase

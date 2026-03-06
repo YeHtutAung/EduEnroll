@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# ─── EduEnroll Security Audit — Tenant Isolation Test ────────────────────────
+# ─── KuuNyi Security Audit — Tenant Isolation Test ────────────────────────
 #
 # Registers two test tenants (school-a, school-b), creates test data in
 # school-a, then attempts to access school-a's data using school-b's auth
@@ -31,7 +31,7 @@ fail() { echo "  ✗ FAIL — $1 (got: $2)"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 
 echo ""
 echo "═══════════════════════════════════════════════════════════"
-echo "  EduEnroll Security Audit — Tenant Isolation"
+echo "  KuuNyi Security Audit — Tenant Isolation"
 echo "═══════════════════════════════════════════════════════════"
 echo ""
 

@@ -1,4 +1,4 @@
-# EduEnroll Branch Strategy
+# KuuNyi Branch Strategy
 
 ## Branches
 
