@@ -1,30 +1,10 @@
 import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { extractSubdomainFromHost } from "@/lib/tenant";
 import LoginForm from "./LoginForm";
 
 // Tenant slug comes from middleware at request time — never cache this page
 export const dynamic = "force-dynamic";
-
-// ─── Extract subdomain from host header (fallback for middleware) ────────────
-
-function extractSubdomainFromHost(host: string): string | null {
-  const hostname = host.split(":")[0];
-  const parts = hostname.split(".");
-
-  // "nihon-moment.localhost" → "nihon-moment"
-  if (parts.length === 2 && parts[1] === "localhost") return parts[0];
-
-  // "nihon-moment.kuunyi.com" → "nihon-moment"
-  if (hostname.endsWith(".kuunyi.com")) {
-    const sub = parts.slice(0, parts.length - 2).join(".");
-    return sub && sub !== "www" ? sub : null;
-  }
-
-  // "nihon-moment.edu-enroll-xi.vercel.app" → "nihon-moment"
-  if (hostname.endsWith(".vercel.app")) return parts.length >= 4 ? parts[0] : null;
-
-  return parts.length >= 3 ? parts[0] : null;
-}
 
 // ─── Server component: resolve tenant name from subdomain ───────────────────
 

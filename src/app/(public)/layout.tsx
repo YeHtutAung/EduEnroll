@@ -1,12 +1,15 @@
 import { headers } from "next/headers";
 import Link from "next/link";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { extractSubdomainFromHost } from "@/lib/tenant";
 
 // ─── Server component: resolve tenant name for public pages ─────────────────
 
 export default async function PublicLayout({ children }: { children: React.ReactNode }) {
   const headersList = headers();
-  const slug = headersList.get("x-tenant-slug");
+  const slug =
+    headersList.get("x-tenant-slug") ||
+    extractSubdomainFromHost(headersList.get("host") ?? "");
 
   let schoolName = "KuuNyi";
   const schoolNameMm: string | null = null;

@@ -6,6 +6,7 @@ import Sidebar from "@/components/admin/Sidebar";
 import { RoleProvider } from "@/components/admin/RoleContext";
 import { ToastProvider } from "@/components/ui/Toast";
 import type { User, UserRole } from "@/types/database";
+import { extractSubdomainFromHost } from "@/lib/tenant";
 
 export default async function AdminLayout({
   children,
@@ -40,7 +41,9 @@ export default async function AdminLayout({
   // Ensure the logged-in user belongs to the tenant identified by the subdomain.
   // Prevents cross-tenant admin access (e.g. Nihon Moment admin on IGM's portal).
   const headersList = headers();
-  const tenantSlug = headersList.get("x-tenant-slug");
+  const tenantSlug =
+    headersList.get("x-tenant-slug") ||
+    extractSubdomainFromHost(headersList.get("host") ?? "");
 
   // No tenant context (root domain like www.kuunyi.com) — admin is not accessible
   if (!tenantSlug) {
