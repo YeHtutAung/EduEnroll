@@ -42,19 +42,22 @@ export default async function AdminLayout({
   const headersList = headers();
   const tenantSlug = headersList.get("x-tenant-slug");
 
-  if (tenantSlug) {
-    const adminSupabase = createAdminClient();
-    const { data: tenant } = (await adminSupabase
-      .from("tenants")
-      .select("id")
-      .eq("subdomain", tenantSlug)
-      .maybeSingle()) as { data: { id: string } | null; error: unknown };
+  // No tenant context (root domain like www.kuunyi.com) — admin is not accessible
+  if (!tenantSlug) {
+    redirect("/register");
+  }
 
-    if (tenant && profile.tenant_id !== tenant.id) {
-      // User doesn't belong to this school — sign out and redirect
-      await supabase.auth.signOut();
-      redirect("/login");
-    }
+  const adminSupabase = createAdminClient();
+  const { data: tenant } = (await adminSupabase
+    .from("tenants")
+    .select("id")
+    .eq("subdomain", tenantSlug)
+    .maybeSingle()) as { data: { id: string } | null; error: unknown };
+
+  if (tenant && profile.tenant_id !== tenant.id) {
+    // User doesn't belong to this school — sign out and redirect
+    await supabase.auth.signOut();
+    redirect("/login");
   }
 
   const displayName = profile.full_name ?? user.email ?? "Admin";

@@ -54,14 +54,19 @@ export async function middleware(request: NextRequest) {
 
   // ── Tenant detection (subdomain or localhost fallback) ───────────────────
   let tenantSlug: string | null = null;
+  const host = request.headers.get("host") ?? "";
+  const hostname = host.split(":")[0];
+  const isRootDomain =
+    hostname === "kuunyi.com" ||
+    hostname === "www.kuunyi.com" ||
+    hostname === "edu-enroll-xi.vercel.app";
 
   if (!shouldSkipTenant(pathname)) {
-    const host = request.headers.get("host") ?? "";
     tenantSlug = extractSubdomain(host);
 
-    // Fallback chain when no subdomain detected: ?tenant= param → cookie → env var → null
-    // Works on localhost AND bare prod domains (e.g. kuunyi.com, edu-enroll-xi.vercel.app)
-    if (!tenantSlug) {
+    // Fallback chain for localhost only — ?tenant= param → cookie → env var
+    // Do NOT apply fallback on production root domains (www.kuunyi.com, edu-enroll-xi.vercel.app)
+    if (!tenantSlug && !isRootDomain) {
       tenantSlug =
         request.nextUrl.searchParams.get("tenant") ??
         request.cookies.get("x-tenant-slug")?.value ??
@@ -71,6 +76,11 @@ export async function middleware(request: NextRequest) {
 
     if (tenantSlug) {
       requestHeaders.set("x-tenant-slug", tenantSlug);
+    }
+
+    // Block /admin on root domain — no tenant context means no school dashboard
+    if (!tenantSlug && isRootDomain && pathname.startsWith("/admin")) {
+      return NextResponse.redirect(new URL("/register", request.url));
     }
   }
 
