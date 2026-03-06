@@ -7,7 +7,7 @@ import StatusBadge from "@/components/ui/StatusBadge";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
 import { formatMMKSimple } from "@/lib/utils";
-import type { Class, ClassStatus, Intake, IntakeStatus, JlptLevel } from "@/types/database";
+import type { Class, ClassMode, ClassStatus, Intake, IntakeStatus, JlptLevel } from "@/types/database";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -91,6 +91,7 @@ interface EditForm {
   enrollment_open_at: string;
   enrollment_close_at: string;
   status: ClassStatus;
+  mode: ClassMode;
 }
 
 function classToForm(cls: Class): EditForm {
@@ -100,6 +101,7 @@ function classToForm(cls: Class): EditForm {
     enrollment_open_at: toDatetimeLocal(cls.enrollment_open_at),
     enrollment_close_at: toDatetimeLocal(cls.enrollment_close_at),
     status: cls.status,
+    mode: cls.mode ?? "offline",
   };
 }
 
@@ -136,6 +138,7 @@ function EditClassModal({
           fee_mmk: fee,
           seat_total: seats,
           status: form.status,
+          mode: form.mode,
           // Always include both date keys so the server can clear them
           enrollment_open_at: fromDatetimeLocal(form.enrollment_open_at),
           enrollment_close_at: fromDatetimeLocal(form.enrollment_close_at),
@@ -262,6 +265,35 @@ function EditClassModal({
               <option value="full">Full — no seats remaining</option>
               <option value="closed">Closed — enrollment ended</option>
             </select>
+          </div>
+
+          {/* Mode toggle */}
+          <div>
+            <label className={labelClass}>Class Mode</label>
+            <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => set("mode", "offline")}
+                className={`px-4 py-2 text-sm font-medium transition-colors ${
+                  form.mode === "offline"
+                    ? "bg-[#6d28d9] text-white"
+                    : "bg-white text-gray-600 hover:bg-gray-50"
+                }`}
+              >
+                🏫 Offline
+              </button>
+              <button
+                type="button"
+                onClick={() => set("mode", "online")}
+                className={`px-4 py-2 text-sm font-medium transition-colors ${
+                  form.mode === "online"
+                    ? "bg-[#6d28d9] text-white"
+                    : "bg-white text-gray-600 hover:bg-gray-50"
+                }`}
+              >
+                💻 Online
+              </button>
+            </div>
           </div>
 
           {/* Actions */}
@@ -613,6 +645,7 @@ export default function IntakeDetailPage({
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100 text-left">
                 <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Level</th>
+                <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Mode</th>
                 <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Fee</th>
                 <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Seats</th>
                 <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Enrollment Window</th>
@@ -640,7 +673,7 @@ export default function IntakeDetailPage({
                               {level}
                             </span>
                           </td>
-                          <td colSpan={5} className="px-5 py-4 text-xs text-gray-400 italic">
+                          <td colSpan={6} className="px-5 py-4 text-xs text-gray-400 italic">
                             Not created yet
                             {!allClassesExist && (
                               <span className="ml-2 text-[#1a3f8a] not-italic">
@@ -667,6 +700,17 @@ export default function IntakeDetailPage({
                             style={{ backgroundColor: LEVEL_COLORS[level] }}
                           >
                             {level}
+                          </span>
+                        </td>
+
+                        {/* Mode */}
+                        <td className="px-5 py-4">
+                          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                            (cls.mode ?? "offline") === "online"
+                              ? "bg-blue-50 text-blue-700"
+                              : "bg-emerald-50 text-emerald-700"
+                          }`}>
+                            {(cls.mode ?? "offline") === "online" ? "💻 Online" : "🏫 Offline"}
                           </span>
                         </td>
 
