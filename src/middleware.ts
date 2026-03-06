@@ -4,7 +4,7 @@ import type { NextRequest } from "next/server";
 
 // ─── Routes that skip tenant detection ────────────────────────────────────────
 
-const SKIP_TENANT_PREFIXES = ["/register", "/api/saas/", "/superadmin", "/onboarding"];
+const SKIP_TENANT_PREFIXES = ["/register", "/api/saas/", "/api/messenger/", "/superadmin", "/onboarding"];
 
 function shouldSkipTenant(pathname: string): boolean {
   return SKIP_TENANT_PREFIXES.some((p) => pathname.startsWith(p));
