@@ -5,17 +5,17 @@
 EduEnroll uses **wildcard subdomain routing** so each registered school gets its own URL:
 
 ```
-nihonmoment.edu-enroll-xi.vercel.app
-sakura-academy.edu-enroll-xi.vercel.app
+nihon-moment.kuunyi.com
+sakura-academy.kuunyi.com
 ```
 
 ### Request Flow
 
 ```
-Browser → nihonmoment.edu-enroll-xi.vercel.app/enroll/april-2026
-       → Vercel routes *.edu-enroll-xi.vercel.app to the Next.js app
-       → Middleware extracts "nihonmoment" from hostname
-       → Sets x-tenant-slug: nihonmoment header
+Browser → nihon-moment.kuunyi.com/enroll/april-2026
+       → Vercel routes *.kuunyi.com to the Next.js app
+       → Middleware extracts "nihon-moment" from hostname
+       → Sets x-tenant-slug: nihon-moment header
        → API routes call resolveTenantId() → looks up tenant_id from tenants table
        → All queries scoped to that tenant_id via .eq("tenant_id", tenantId)
 ```
@@ -24,8 +24,9 @@ Browser → nihonmoment.edu-enroll-xi.vercel.app/enroll/april-2026
 
 ```
 1. Extract subdomain from hostname
-   - "nihonmoment.edu-enroll-xi.vercel.app" → parts[0] = "nihonmoment"
-   - "nihonmoment.localhost:3005" → parts[0] = "nihonmoment"
+   - "nihon-moment.kuunyi.com" → slug = "nihon-moment"
+   - "nihon-moment.edu-enroll-xi.vercel.app" → slug = "nihon-moment" (fallback)
+   - "nihon-moment.localhost:3005" → slug = "nihon-moment"
 
 2. Fallback for plain localhost
    - No subdomain detected → check ?tenant= query param
@@ -46,25 +47,27 @@ Browser → nihonmoment.edu-enroll-xi.vercel.app/enroll/april-2026
 Go to **Project Settings → Domains** and add:
 
 ```
+*.kuunyi.com
+kuunyi.com
+www.kuunyi.com
+```
+
+Fallback Vercel subdomain (still works):
+
+```
 *.edu-enroll-xi.vercel.app
-```
-
-Or for a custom domain:
-
-```
-*.eduenroll.com
-eduenroll.com
 ```
 
 Vercel automatically routes all subdomains to your single Next.js deployment. No additional configuration needed — the middleware handles tenant detection.
 
 ### 2. DNS for Custom Domain
 
-If using a custom domain like `eduenroll.com`:
+For `kuunyi.com`:
 
 | Type  | Name | Value                          |
 |-------|------|--------------------------------|
 | A     | @    | 76.76.21.21                    |
+| CNAME | www  | cname.vercel-dns.com           |
 | CNAME | *    | cname.vercel-dns.com           |
 
 The wildcard CNAME (`*`) ensures any subdomain routes to Vercel.
@@ -77,14 +80,16 @@ Set these in **Project Settings → Environment Variables**:
 NEXT_PUBLIC_SUPABASE_URL=https://xxx.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
 SUPABASE_SERVICE_ROLE_KEY=eyJ...
+NEXT_PUBLIC_APP_DOMAIN=kuunyi.com
+FROM_EMAIL=noreply@kuunyi.com
 ```
 
 ## How New Schools Get Their Subdomain
 
-1. School registers at `/register` with a chosen subdomain (e.g. `nihonmoment`)
+1. School registers at `/register` with a chosen subdomain (e.g. `nihon-moment`)
 2. `POST /api/saas/register` validates the slug and checks uniqueness
-3. Creates row in `tenants` table with `subdomain = 'nihonmoment'`
-4. Immediately accessible at `nihonmoment.edu-enroll-xi.vercel.app`
+3. Creates row in `tenants` table with `subdomain = 'nihon-moment'`
+4. Immediately accessible at `nihon-moment.kuunyi.com`
 5. No DNS changes or Vercel config updates needed — wildcard handles it
 
 ## Local Development
@@ -92,18 +97,18 @@ SUPABASE_SERVICE_ROLE_KEY=eyJ...
 Since `localhost` doesn't support real subdomains easily, use the query param fallback:
 
 ```
-http://localhost:3005/enroll/april-2026?tenant=nihonmoment
-http://localhost:3005/admin/dashboard?tenant=nihonmoment
+http://localhost:3005/enroll/april-2026?tenant=nihon-moment
+http://localhost:3005/admin/dashboard?tenant=nihon-moment
 ```
 
 Or use subdomain-style localhost (requires `/etc/hosts` entry):
 
 ```
 # Add to /etc/hosts (or C:\Windows\System32\drivers\etc\hosts)
-127.0.0.1 nihonmoment.localhost
+127.0.0.1 nihon-moment.localhost
 
 # Then access:
-http://nihonmoment.localhost:3005/enroll/april-2026
+http://nihon-moment.localhost:3005/enroll/april-2026
 ```
 
 ## Security

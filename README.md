@@ -6,7 +6,7 @@ SaaS platform supporting MMK currency, bilingual Myanmar + English interface, su
 
 ## Platform Overview
 
-EduEnroll enables Japanese language schools in Myanmar to manage student enrollments online. Each school gets a dedicated subdomain (e.g. `nihonmoment.eduenroll.com`) with:
+EduEnroll enables Japanese language schools in Myanmar to manage student enrollments online. Each school gets a dedicated subdomain (e.g. `nihon-moment.kuunyi.com`) with:
 
 - **Public enrollment portal** — students browse intakes, select JLPT classes (N5–N1), submit enrollment forms, and upload payment proof
 - **Admin dashboard** — school staff manage intakes, verify payments, track students, view analytics, and configure bank accounts
@@ -86,14 +86,14 @@ Open [http://localhost:3005](http://localhost:3005).
 5. For multi-tenant dev testing, use `?tenant=` query param:
 
 ```
-http://localhost:3005/enroll/april-2026?tenant=nihonmoment
-http://localhost:3005/admin/dashboard?tenant=nihonmoment
+http://localhost:3005/enroll/april-2026?tenant=nihon-moment
+http://localhost:3005/admin/dashboard?tenant=nihon-moment
 ```
 
 ## Multi-Tenancy Architecture
 
-- **Subdomain routing**: Middleware extracts tenant slug from hostname (e.g. `nihonmoment.eduenroll.com` → slug `nihonmoment`)
-- **Localhost fallback**: Use `?tenant=nihonmoment` query param for local development
+- **Subdomain routing**: Middleware extracts tenant slug from hostname (e.g. `nihon-moment.kuunyi.com` → slug `nihon-moment`)
+- **Localhost fallback**: Use `?tenant=nihon-moment` query param for local development
 - **Tenant resolution**: Middleware sets `x-tenant-slug` header → `resolveTenantId()` looks up `tenant_id` from tenants table
 - **Admin routes**: `requireAuth()` resolves tenant from user profile (via Supabase session)
 - **Public routes**: `resolveTenantId()` resolves tenant from middleware header
@@ -315,7 +315,7 @@ Key patterns:
 
 1. Push to GitHub and import the repo in Vercel
 2. Set environment variables in Vercel dashboard (see [Environment Variables](#environment-variables))
-3. Add wildcard domain: `*.eduenroll.com` (or `*.edu-enroll-xi.vercel.app`)
+3. Add wildcard domain: `*.kuunyi.com` (or `*.edu-enroll-xi.vercel.app` as fallback)
 4. Deploy — Vercel auto-detects Next.js and builds
 
 See [SUBDOMAIN_SETUP.md](SUBDOMAIN_SETUP.md) for detailed wildcard subdomain configuration.
