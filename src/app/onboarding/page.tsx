@@ -218,7 +218,7 @@ export default function OnboardingPage() {
 
   // ── Enrollment link ───────────────────────────────────────────────────────
   const enrollLink = createdIntakeSlug
-    ? `${subdomain}.eduenroll.com/enroll/${createdIntakeSlug}`
+    ? `${subdomain}.kuunyi.com/enroll/${createdIntakeSlug}`
     : null;
   const [copied, setCopied] = useState(false);
 

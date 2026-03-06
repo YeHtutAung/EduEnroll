@@ -11,8 +11,9 @@ function shouldSkipTenant(pathname: string): boolean {
 }
 
 // ─── Extract subdomain from hostname ──────────────────────────────────────────
-// e.g. "nihonmoment.edu-enroll-xi.vercel.app" → "nihonmoment"
-// e.g. "nihonmoment.localhost:3005" → "nihonmoment"
+// e.g. "nihonmoment.kuunyi.com"                → "nihonmoment"
+// e.g. "nihonmoment.edu-enroll-xi.vercel.app"  → "nihonmoment" (fallback)
+// e.g. "nihonmoment.localhost:3005"             → "nihonmoment"
 
 function extractSubdomain(host: string): string | null {
   // Remove port
@@ -24,13 +25,20 @@ function extractSubdomain(host: string): string | null {
     return parts[0];
   }
 
+  // Production domain: "nihonmoment.kuunyi.com" (3 parts)
+  // Bare "kuunyi.com" (2 parts) or "www.kuunyi.com" → no subdomain
+  if (hostname.endsWith(".kuunyi.com")) {
+    const sub = parts.slice(0, parts.length - 2).join(".");
+    return sub && sub !== "www" ? sub : null;
+  }
+
   // Vercel domains: "nihonmoment.edu-enroll-xi.vercel.app" (4 parts)
   // The bare "edu-enroll-xi.vercel.app" (3 parts) is NOT a subdomain.
-  if (parts.length >= 3 && parts[parts.length - 1] === "app" && parts[parts.length - 2] === "vercel") {
+  if (hostname.endsWith(".vercel.app")) {
     return parts.length >= 4 ? parts[0] : null;
   }
 
-  // Custom domain: "nihonmoment.eduenroll.com" (3+ parts)
+  // Other custom domains: "nihonmoment.example.com" (3+ parts)
   if (parts.length >= 3) {
     return parts[0];
   }
@@ -52,7 +60,7 @@ export async function middleware(request: NextRequest) {
     tenantSlug = extractSubdomain(host);
 
     // Fallback chain when no subdomain detected: ?tenant= param → cookie → env var → null
-    // Works on localhost AND bare prod domains (e.g. edu-enroll-xi.vercel.app)
+    // Works on localhost AND bare prod domains (e.g. kuunyi.com, edu-enroll-xi.vercel.app)
     if (!tenantSlug) {
       tenantSlug =
         request.nextUrl.searchParams.get("tenant") ??
