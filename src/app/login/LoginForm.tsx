@@ -120,7 +120,7 @@ export default function LoginForm({ schoolName, schoolNameMm, tenantSlug, isSupe
           ) : (
             <div className={`inline-flex items-center justify-center w-14 h-14 rounded-full mb-4 ${isGeneric ? "bg-[#6d28d9]" : "bg-red-700"}`}>
               <span className="text-white text-2xl font-bold select-none">
-                {isGeneric ? "E" : avatarLetter}
+                {isGeneric ? "K" : avatarLetter}
               </span>
             </div>
           )}
