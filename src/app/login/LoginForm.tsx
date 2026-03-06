@@ -23,9 +23,10 @@ interface LoginFormProps {
   schoolName: string;
   schoolNameMm: string | null;
   tenantSlug: string | null;
+  isSuperadminOnly?: boolean;
 }
 
-export default function LoginForm({ schoolName, schoolNameMm, tenantSlug }: LoginFormProps) {
+export default function LoginForm({ schoolName, schoolNameMm, tenantSlug, isSuperadminOnly }: LoginFormProps) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -67,6 +68,17 @@ export default function LoginForm({ schoolName, schoolNameMm, tenantSlug }: Logi
         .eq("id", authUser.id)
         .single()) as { data: { role: string } | null; error: unknown };
       if (profile?.role === "superadmin") isSuperadmin = true;
+    }
+
+    // On root domain, only superadmins may log in
+    if (isSuperadminOnly && !isSuperadmin) {
+      await supabase.auth.signOut();
+      setError({
+        en: "School admin? Please log in at your school's domain (e.g. your-school.kuunyi.com/login).",
+        mm: "ကျောင်းအက်မင်ဖြစ်ပါက သင့်ကျောင်း၏ domain မှ ဝင်ရောက်ပါ။",
+      });
+      setLoading(false);
+      return;
     }
 
     // Verify the user belongs to this tenant before allowing access

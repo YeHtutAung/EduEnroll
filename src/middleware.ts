@@ -79,6 +79,7 @@ export async function middleware(request: NextRequest) {
     }
 
     // Block /admin on root domain — no tenant context means no school dashboard
+    // Note: /login is allowed on root domain for superadmin access
     if (!tenantSlug && isRootDomain && pathname.startsWith("/admin")) {
       return NextResponse.redirect(new URL("/register", request.url));
     }

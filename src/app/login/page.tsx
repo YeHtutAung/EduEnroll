@@ -8,20 +8,23 @@ export default async function LoginPage() {
   const headersList = headers();
   const slug = headersList.get("x-tenant-slug");
 
+  // No tenant context (root domain) — superadmin-only login
+  if (!slug) {
+    return <LoginForm schoolName="EduEnroll Admin" schoolNameMm={null} tenantSlug={null} isSuperadminOnly />;
+  }
+
   let schoolName = "EduEnroll Admin";
   const schoolNameMm: string | null = null;
 
-  if (slug) {
-    const supabase = createAdminClient();
-    const { data: tenant } = (await supabase
-      .from("tenants")
-      .select("name")
-      .eq("subdomain", slug)
-      .maybeSingle()) as { data: { name: string } | null; error: unknown };
+  const supabase = createAdminClient();
+  const { data: tenant } = (await supabase
+    .from("tenants")
+    .select("name")
+    .eq("subdomain", slug)
+    .maybeSingle()) as { data: { name: string } | null; error: unknown };
 
-    if (tenant?.name) {
-      schoolName = tenant.name;
-    }
+  if (tenant?.name) {
+    schoolName = tenant.name;
   }
 
   return <LoginForm schoolName={schoolName} schoolNameMm={schoolNameMm} tenantSlug={slug} />;
