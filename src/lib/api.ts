@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { extractSubdomainFromHost } from "@/lib/tenant";
 import type { User } from "@/types/database";
 
 export interface AuthContext {
@@ -56,7 +57,9 @@ export async function requireAuth(): Promise<AuthContext | NextResponse> {
  */
 export async function resolveTenantId(): Promise<string | NextResponse> {
   const headersList = headers();
-  const slug = headersList.get("x-tenant-slug");
+  const slug =
+    headersList.get("x-tenant-slug") ||
+    extractSubdomainFromHost(headersList.get("host") ?? "");
 
   if (!slug) {
     return NextResponse.json(
