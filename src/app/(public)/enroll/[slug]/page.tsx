@@ -35,6 +35,7 @@ interface ApiError {
   error: string;
   code?: string;
   intake?: PublicIntake;
+  opens_at?: string | null;
 }
 
 // ─── Myanmar translations for intake names ───────────────────────────────────
@@ -237,7 +238,67 @@ function ClassCard({ cls, onSelect }: { cls: PublicClass; onSelect: (id: string)
   );
 }
 
-// ─── Enrollment closed page ──────────────────────────────────────────────────
+// ─── Coming Soon page (draft intake) ────────────────────────────────────────
+
+function ComingSoonPage({ intake, opensAt }: { intake?: PublicIntake; opensAt?: string | null }) {
+  const intakeNameMM = intake ? getIntakeNameMM(intake.name, intake.year) : null;
+
+  const opensFormatted = opensAt
+    ? new Date(opensAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
+    : null;
+
+  return (
+    <div className="flex flex-col items-center py-16 text-center">
+      <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-purple-50">
+        <span className="text-3xl">🕐</span>
+      </div>
+
+      {intake && (
+        <p className="mb-2 text-base font-semibold text-gray-700">
+          {intake.name} ({intake.year})
+        </p>
+      )}
+
+      <h1 className="text-2xl font-bold text-gray-900">Coming Soon</h1>
+      <p className="font-myanmar mt-1 text-lg text-gray-600">
+        မကြာမီ ဖွင့်လှစ်မည်
+      </p>
+      {intakeNameMM && (
+        <p className="font-myanmar mt-1 text-sm text-gray-400">{intakeNameMM}</p>
+      )}
+
+      {opensFormatted && (
+        <div className="mt-6 inline-flex items-center gap-2 rounded-full bg-purple-50 px-4 py-2 text-sm font-medium text-purple-700">
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+          </svg>
+          Opens {opensFormatted}
+        </div>
+      )}
+
+      <div className="mt-8 max-w-sm rounded-xl border border-purple-200 bg-purple-50 p-5">
+        <p className="text-sm text-gray-600">
+          Enrollment for this intake has not opened yet. Please check back soon!
+        </p>
+        <p className="font-myanmar mt-2 text-sm text-gray-500">
+          ဤသင်တန်းအတွက် စာရင်းသွင်းချိန် မဖွင့်လှစ်ရသေးပါ။ နောက်မှ ပြန်လည်စစ်ဆေးပါ။
+        </p>
+      </div>
+
+      <a
+        href="/enroll"
+        className="mt-6 inline-flex items-center gap-2 text-sm font-medium text-[#1a3f8a] hover:underline"
+      >
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+        </svg>
+        Check Other Intakes
+      </a>
+    </div>
+  );
+}
+
+// ─── Enrollment closed page ─────────────────────────────────────────────────
 
 function EnrollmentClosedPage({ intake }: { intake?: PublicIntake }) {
   const intakeNameMM = intake ? getIntakeNameMM(intake.name, intake.year) : null;
@@ -245,14 +306,13 @@ function EnrollmentClosedPage({ intake }: { intake?: PublicIntake }) {
   return (
     <div className="flex flex-col items-center py-16 text-center">
       <div className="mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100">
-        <svg className="h-8 w-8 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-            d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-        </svg>
+        <span className="text-3xl">🔒</span>
       </div>
 
       {intake && (
-        <p className="mb-2 text-sm text-gray-500">{intake.name}</p>
+        <p className="mb-2 text-base font-semibold text-gray-700">
+          {intake.name} ({intake.year})
+        </p>
       )}
 
       <h1 className="text-2xl font-bold text-gray-900">Enrollment Closed</h1>
@@ -271,6 +331,16 @@ function EnrollmentClosedPage({ intake }: { intake?: PublicIntake }) {
           ဤသင်တန်းအတွက် စာရင်းသွင်းချိန် ပိတ်သိမ်းပြီးဖြစ်သည်။ နောက်သင်တန်းအတွက် ပြန်လည်စစ်ဆေးပါ။
         </p>
       </div>
+
+      <a
+        href="/enroll"
+        className="mt-6 inline-flex items-center gap-2 text-sm font-medium text-[#1a3f8a] hover:underline"
+      >
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+        </svg>
+        Check Other Intakes
+      </a>
     </div>
   );
 }
@@ -347,7 +417,10 @@ export default function IntakeLandingPage() {
 
   // ── Handle error states ───────────────────────────────────────
   if (errorInfo) {
-    if (errorInfo.code === "INTAKE_CLOSED" || errorInfo.code === "INTAKE_DRAFT") {
+    if (errorInfo.code === "INTAKE_DRAFT") {
+      return <ComingSoonPage intake={errorInfo.intake} opensAt={errorInfo.opens_at} />;
+    }
+    if (errorInfo.code === "INTAKE_CLOSED") {
       return <EnrollmentClosedPage intake={errorInfo.intake} />;
     }
     return <ErrorPage message={errorInfo.error || "Unknown error"} />;

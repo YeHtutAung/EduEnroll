@@ -426,6 +426,18 @@ export default function IntakeDetailPage({
     }
   }
 
+  async function handleCopyClassLink(level: JlptLevel) {
+    if (!intake) return;
+    const slug = intakeToSlug(intake);
+    const url = `${window.location.origin}/enroll/${slug}?level=${level}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      toast.success(`${level} enrollment link copied!`);
+    } catch {
+      toast.error("Failed to copy. Try manually: " + url);
+    }
+  }
+
   // ── Change Intake Status ────────────────────────────────────────────────────
 
   async function handleStatusChange(newStatus: IntakeStatus) {
@@ -747,17 +759,29 @@ export default function IntakeDetailPage({
                           <StatusBadge status={cls.status} />
                         </td>
 
-                        {/* Edit */}
+                        {/* Actions */}
                         <td className="px-5 py-4">
-                          <button
-                            onClick={() => setEditingClass(cls)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-600 text-xs font-medium rounded-lg hover:border-[#1a3f8a] hover:text-[#1a3f8a] transition-colors"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-                            </svg>
-                            Edit
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() => setEditingClass(cls)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-600 text-xs font-medium rounded-lg hover:border-[#1a3f8a] hover:text-[#1a3f8a] transition-colors"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                              </svg>
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => handleCopyClassLink(cls.level)}
+                              title={`Copy ${cls.level} enrollment link`}
+                              className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-600 text-xs font-medium rounded-lg hover:border-[#0891b2] hover:text-[#0891b2] transition-colors"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+                              </svg>
+                              Link
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     );

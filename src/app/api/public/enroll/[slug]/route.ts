@@ -92,8 +92,20 @@ export async function GET(
     );
   }
   if (intake.status === "draft") {
+    // Fetch earliest enrollment_open_at from classes to show "Opens on" date
+    const { data: draftClasses } = await supabase
+      .from("classes")
+      .select("enrollment_open_at")
+      .eq("intake_id", intake.id)
+      .eq("tenant_id", tenantId)
+      .not("enrollment_open_at", "is", null)
+      .order("enrollment_open_at", { ascending: true })
+      .limit(1) as { data: { enrollment_open_at: string }[] | null; error: unknown };
+
+    const opensAt = draftClasses?.[0]?.enrollment_open_at ?? null;
+
     return NextResponse.json(
-      { error: "This intake is not yet open for enrollment.", code: "INTAKE_DRAFT", intake },
+      { error: "This intake is not yet open for enrollment.", code: "INTAKE_DRAFT", intake, opens_at: opensAt },
       { status: 410 },
     );
   }
