@@ -2,15 +2,15 @@ import Link from "next/link";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "EduEnroll — Enrollment Management for Myanmar Language Schools",
+  title: "KuuNyi — Enrollment Management for Myanmar Language Schools",
   description:
     "Online enrollment, payment verification, and student records for Myanmar language schools. " +
     "သင်တန်းကျောင်းများအတွက် စာရင်းသွင်းစနစ်",
   openGraph: {
-    title: "EduEnroll — Enrollment Management for Myanmar Language Schools",
+    title: "KuuNyi — Enrollment Management for Myanmar Language Schools",
     description:
       "Online enrollment, payment verification, and student records for Myanmar language schools.",
-    siteName: "EduEnroll",
+    siteName: "KuuNyi",
     locale: "my_MM",
     type: "website",
   },
@@ -64,9 +64,9 @@ export default function LandingPage() {
         <div className="max-w-5xl mx-auto flex items-center justify-between px-4 sm:px-6 h-14">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-[#6d28d9] flex items-center justify-center shrink-0">
-              <span className="text-white font-bold text-sm select-none">E</span>
+              <span className="text-white font-bold text-sm select-none">K</span>
             </div>
-            <span className="text-base font-bold text-slate-900">EduEnroll</span>
+            <span className="text-base font-bold text-slate-900">KuuNyi</span>
           </div>
           <div className="flex items-center gap-3">
             <Link
@@ -93,7 +93,7 @@ export default function LandingPage() {
         </div>
 
         <h1 className="text-3xl sm:text-5xl font-bold text-slate-900 leading-tight max-w-3xl mx-auto">
-          <span className="text-[#6d28d9]">EduEnroll</span>
+          <span className="text-[#6d28d9]">KuuNyi</span>
           <span className="block font-myanmar text-2xl sm:text-3xl text-slate-700 mt-3 leading-snug">
             သင်တန်းကျောင်းများအတွက် စာရင်းသွင်းစနစ်
           </span>
@@ -180,12 +180,12 @@ export default function LandingPage() {
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 rounded bg-[#6d28d9] flex items-center justify-center">
-              <span className="text-white font-bold text-xs select-none">E</span>
+              <span className="text-white font-bold text-xs select-none">K</span>
             </div>
-            <span className="text-sm font-semibold text-slate-700">EduEnroll</span>
+            <span className="text-sm font-semibold text-slate-700">KuuNyi</span>
           </div>
           <p className="text-xs text-slate-400">
-            &copy; {new Date().getFullYear()} EduEnroll — Myanmar
+            &copy; {new Date().getFullYear()} KuuNyi — Myanmar
           </p>
         </div>
       </footer>

@@ -21,16 +21,16 @@ const jetBrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Nihon Moment — Enroll in Japanese Language Classes",
+  title: "KuuNyi — School Enrollment Platform",
   description:
-    "Nihon Moment Japanese Language School — Enroll in JLPT N5–N1 classes. " +
+    "KuuNyi enrollment management for Myanmar language schools. " +
     "Bilingual Myanmar + English enrollment system. Pay in MMK.",
   openGraph: {
-    title: "Nihon Moment — Enroll in Japanese Language Classes",
+    title: "KuuNyi — School Enrollment Platform",
     description:
-      "Join Nihon Moment Japanese Language School. JLPT N5–N1 classes, " +
-      "easy online enrollment, MMK payment. နီဟွန်းမိုးမန့် ဂျပန်ဘာသာ သင်တန်း",
-    siteName: "Nihon Moment",
+      "KuuNyi enrollment management for Myanmar language schools. " +
+      "Easy online enrollment, MMK payment. သင်တန်းကျောင်းများအတွက် စာရင်းသွင်းစနစ်",
+    siteName: "KuuNyi",
     locale: "my_MM",
     type: "website",
   },

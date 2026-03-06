@@ -1,4 +1,4 @@
-# Database Migrations — EduEnroll
+# Database Migrations — KuuNyi
 
 Supabase project: `nhxmumcvgnxlczjsgctz`
 Migrations live in: `supabase/migrations/`

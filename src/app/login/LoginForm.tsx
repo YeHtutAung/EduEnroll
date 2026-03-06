@@ -34,7 +34,7 @@ export default function LoginForm({ schoolName, schoolNameMm, tenantSlug, isSupe
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<{ en: string; mm: string } | null>(null);
 
-  const isGeneric = schoolName === "EduEnroll Admin";
+  const isGeneric = schoolName === "KuuNyi Admin";
   const avatarLetter = schoolName.charAt(0).toUpperCase();
 
   async function handleSubmit(e: React.FormEvent) {

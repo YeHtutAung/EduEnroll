@@ -152,9 +152,9 @@ export default function RegisterPage() {
         <div className="max-w-5xl mx-auto flex items-center justify-between px-4 sm:px-6 h-14">
           <Link href="/" className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg bg-[#6d28d9] flex items-center justify-center shrink-0">
-              <span className="text-white font-bold text-sm select-none">E</span>
+              <span className="text-white font-bold text-sm select-none">K</span>
             </div>
-            <span className="text-base font-bold text-slate-900">EduEnroll</span>
+            <span className="text-base font-bold text-slate-900">KuuNyi</span>
           </Link>
           <Link
             href="/login"
@@ -334,7 +334,7 @@ export default function RegisterPage() {
         </div>
 
         <p className="mt-6 text-center text-xs text-slate-400">
-          EduEnroll &copy; {new Date().getFullYear()} — Myanmar
+          KuuNyi &copy; {new Date().getFullYear()} — Myanmar
         </p>
       </main>
     </div>

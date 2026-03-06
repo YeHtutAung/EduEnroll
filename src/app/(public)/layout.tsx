@@ -8,7 +8,7 @@ export default async function PublicLayout({ children }: { children: React.React
   const headersList = headers();
   const slug = headersList.get("x-tenant-slug");
 
-  let schoolName = "EduEnroll";
+  let schoolName = "KuuNyi";
   const schoolNameMm: string | null = null;
   let logoUrl: string | null = null;
 
@@ -70,7 +70,7 @@ export default async function PublicLayout({ children }: { children: React.React
               rel="noopener noreferrer"
               className="underline hover:text-gray-700"
             >
-              EduEnroll
+              KuuNyi
             </a>
           </p>
         </div>
