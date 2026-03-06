@@ -149,9 +149,14 @@ export default function SchoolDetailPage() {
               <h1 className="text-xl font-bold text-gray-900">{tenant.name}</h1>
               {statusBadge}
             </div>
-            <p className="text-sm text-[#4c1d95] font-mono">
-              {tenant.subdomain}.eduenroll.com
-            </p>
+            <a
+              href={`https://${tenant.subdomain}.kuunyi.com`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-[#4c1d95] font-mono hover:underline"
+            >
+              {tenant.subdomain}.kuunyi.com
+            </a>
             <p className="text-xs text-gray-400 mt-1">
               Created {new Date(tenant.created_at).toLocaleDateString("en-GB", {
                 day: "numeric",

@@ -226,7 +226,7 @@ export default function RegisterPage() {
                   placeholder="your-school"
                 />
                 <span className="inline-flex items-center px-3 rounded-r-lg border border-l-0 border-slate-300 bg-slate-50 text-sm text-slate-500">
-                  .eduenroll.com
+                  .kuunyi.com
                 </span>
               </div>
               <div className="mt-1.5 min-h-[1.25rem]">

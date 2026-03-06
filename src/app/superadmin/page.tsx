@@ -137,9 +137,14 @@ export default function SuperadminPage() {
                       <p className="font-medium text-gray-900">{school.name}</p>
                     </td>
                     <td className="px-6 py-4">
-                      <span className="text-[#4c1d95] font-mono text-xs">
-                        {school.subdomain}.eduenroll.com
-                      </span>
+                      <a
+                        href={`https://${school.subdomain}.kuunyi.com`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[#4c1d95] font-mono text-xs hover:underline"
+                      >
+                        {school.subdomain}.kuunyi.com
+                      </a>
                     </td>
                     <td className="px-6 py-4 text-gray-600">
                       {school.owner_email ?? "—"}

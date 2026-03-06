@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import SuperadminLogoutButton from "@/components/admin/SuperadminLogoutButton";
 import type { User } from "@/types/database";
 
 export default async function SuperadminLayout({
@@ -42,7 +43,10 @@ export default async function SuperadminLayout({
               <p className="text-xs text-white/60">Platform Management</p>
             </div>
           </div>
-          <p className="text-sm text-white/70">{user.email}</p>
+          <div className="flex items-center gap-3">
+            <p className="text-sm text-white/70">{user.email}</p>
+            <SuperadminLogoutButton />
+          </div>
         </div>
       </header>
       {children}
