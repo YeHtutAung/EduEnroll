@@ -2,6 +2,9 @@ import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import LoginForm from "./LoginForm";
 
+// Tenant slug comes from middleware at request time — never cache this page
+export const dynamic = "force-dynamic";
+
 // ─── Server component: resolve tenant name from subdomain ───────────────────
 
 export default async function LoginPage() {
