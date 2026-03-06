@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { processMessage } from "@/lib/messenger/processor";
+import { decryptToken } from "@/lib/messenger/crypto";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -80,6 +81,15 @@ export async function POST(
     return NextResponse.json({ status: "ignored" }, { status: 200 });
   }
 
+  // Decrypt the stored page token
+  let pageToken: string;
+  try {
+    pageToken = decryptToken(tenant.messenger_page_token);
+  } catch {
+    console.error(`[messenger] Failed to decrypt page token for ${params.slug}`);
+    return NextResponse.json({ status: "ok" }, { status: 200 });
+  }
+
   let body: { entry?: WebhookEntry[] };
   try {
     body = await request.json();
@@ -101,7 +111,7 @@ export async function POST(
           tenant.id,
           event.sender.id,
           event.message,
-          tenant.messenger_page_token,
+          pageToken,
         ).catch((err) => {
           console.error(`[messenger] Error processing message for ${params.slug}:`, err);
         }),
