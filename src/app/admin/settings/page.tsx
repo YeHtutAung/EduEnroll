@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
 import { createClient } from "@/lib/supabase/client";
@@ -217,6 +218,7 @@ const supabase = createClient();
 
 export default function SettingsPage() {
   const toast = useToast();
+  const router = useRouter();
 
   // ── Bank accounts ──────────────────────────────────────────────────────────
   const [accounts, setAccounts] = useState<BankAccount[]>([]);
@@ -321,6 +323,7 @@ export default function SettingsPage() {
 
       setLogoUrl(publicUrl);
       toast.success("Logo uploaded successfully.");
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to upload logo.");
     } finally {
@@ -351,6 +354,7 @@ export default function SettingsPage() {
 
       setLogoUrl(null);
       toast.success("Logo removed.");
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to remove logo.");
     } finally {
@@ -411,6 +415,7 @@ export default function SettingsPage() {
         .eq("id", tenantId);
       if (error) throw new Error((error as Error).message);
       toast.success("School profile saved.");
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save profile.");
     } finally {
