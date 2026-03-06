@@ -62,11 +62,27 @@ export async function POST(request: NextRequest) {
     return badRequest(`status must be one of: ${VALID_STATUSES.join(", ")}.`);
   }
 
+  // Check for duplicate intake (same name + year for this tenant)
+  const { data: existing } = await supabase
+    .from("intakes")
+    .select("id")
+    .eq("tenant_id", tenantId)
+    .eq("name", (name as string).trim())
+    .eq("year", year as number)
+    .maybeSingle() as { data: { id: string } | null; error: unknown };
+
+  if (existing) {
+    return NextResponse.json(
+      { error: "An intake with this name and year already exists." },
+      { status: 400 },
+    );
+  }
+
   const { data, error } = await supabase
     .from("intakes")
     .insert({
       tenant_id: tenantId,
-      name: name.trim(),
+      name: (name as string).trim(),
       year: year as number,
       status: status as IntakeStatus,
     } as never)
