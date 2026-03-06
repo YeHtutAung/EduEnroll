@@ -44,6 +44,7 @@ cp .env.local.example .env.local
 | `MESSENGER_APP_ID` | No | Meta Developer App ID (for Messenger Bot) |
 | `MESSENGER_APP_SECRET` | No | Meta Developer App Secret |
 | `MESSENGER_ENCRYPTION_KEY` | No | 64-char hex for AES-256-GCM page token encryption |
+| `MESSENGER_VERIFY_TOKEN` | No | Verify token for central webhook (e.g. `kuunyi-webhook-2026`) |
 
 ## Local Development Setup
 
@@ -270,12 +271,14 @@ supabase/
 | `GET`  | `/api/public/bank-accounts` | Active bank accounts |
 | `GET`  | `/api/public/status?ref=NM-YYYY-NNNNN` | Check enrollment + payment status |
 
-### Messenger Bot (per-tenant webhook)
+### Messenger Bot
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET`  | `/api/messenger/webhook/[slug]` | Meta webhook verification (hub.challenge) |
-| `POST` | `/api/messenger/webhook/[slug]` | Receive and process incoming messages |
+| `GET`  | `/api/messenger/webhook` | Central webhook verification (hub.challenge) |
+| `POST` | `/api/messenger/webhook` | Receive messages, route by page_id to tenant |
+| `GET`  | `/api/messenger/webhook/[slug]` | Per-school webhook verification (legacy fallback) |
+| `POST` | `/api/messenger/webhook/[slug]` | Per-school message handler (legacy fallback) |
 | `GET`  | `/api/messenger/connect/[slug]` | Redirect to Meta OAuth for page connection |
 | `GET`  | `/api/messenger/callback` | OAuth callback — exchange code, save encrypted token |
 | `GET`  | `/api/messenger/settings` | Read messenger config (auth required) |
@@ -405,13 +408,13 @@ The bot also supports **keyword matching** for free-text messages (e.g. "fee", "
 
 ### Webhook URL
 
-Each tenant's webhook URL follows the pattern:
+One central webhook handles all schools:
 
 ```
-https://kuunyi.com/api/messenger/webhook/{tenant-subdomain}
+https://kuunyi.com/api/messenger/webhook
 ```
 
-Configure this in the Meta Developer Console under **Webhooks → Callback URL**, with the tenant's `messenger_verify_token` as the verify token.
+Configure this in the Meta Developer Console under **Webhooks → Callback URL**, with `MESSENGER_VERIFY_TOKEN` as the verify token. Messages are routed to the correct school by matching `entry[].id` (page ID) against `tenants.messenger_page_id`.
 
 ## Scripts
 

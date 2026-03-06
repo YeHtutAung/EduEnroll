@@ -1053,7 +1053,7 @@ function SettingsContent() {
               <p className="text-xs text-[#1a3f8a]">
                 Webhook URL:{" "}
                 <code className="font-mono bg-white px-1.5 py-0.5 rounded text-[11px]">
-                  https://kuunyi.com/api/messenger/webhook/{messengerSubdomain}
+                  https://kuunyi.com/api/messenger/webhook
                 </code>
               </p>
             </div>
