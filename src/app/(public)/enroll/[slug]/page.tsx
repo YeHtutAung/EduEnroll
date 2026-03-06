@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { formatMMK } from "@/lib/utils";
 import type { JlptLevel, ClassStatus } from "@/types/database";
 
@@ -383,8 +383,18 @@ function AllClassesFullPage({ intake }: { intake: PublicIntake }) {
 // ─── Main page ───────────────────────────────────────────────────────────────
 
 export default function IntakeLandingPage() {
+  return (
+    <Suspense fallback={<LoadingSkeleton />}>
+      <IntakeLandingContent />
+    </Suspense>
+  );
+}
+
+function IntakeLandingContent() {
   const params = useParams<{ slug: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const levelFilter = searchParams.get("level") as JlptLevel | null;
   const [data, setData] = useState<ApiResponse | null>(null);
   const [errorInfo, setErrorInfo] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState(true);
@@ -428,11 +438,14 @@ export default function IntakeLandingPage() {
 
   if (!data) return <ErrorPage message="Unknown error" />;
 
-  const { intake, classes } = data;
+  const { intake, classes: allClasses } = data;
+  const classes = levelFilter
+    ? allClasses.filter((c) => c.level === levelFilter)
+    : allClasses;
   const intakeNameMM = getIntakeNameMM(intake.name, intake.year);
 
   // ── All classes full ──────────────────────────────────────────
-  const allFull = classes.length > 0 && classes.every((c) => c.seat_remaining === 0 || c.status === "full");
+  const allFull = allClasses.length > 0 && allClasses.every((c) => c.seat_remaining === 0 || c.status === "full");
   if (allFull) {
     return <AllClassesFullPage intake={intake} />;
   }
