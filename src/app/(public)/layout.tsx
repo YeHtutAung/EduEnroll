@@ -52,7 +52,17 @@ export default async function PublicLayout({ children }: { children: React.React
       <footer className="border-t border-gray-200 bg-gray-50">
         <div className="mx-auto max-w-4xl px-4 py-6 text-center text-sm text-gray-500 sm:px-6">
           <p className="font-semibold text-gray-700">{schoolName}</p>
-          <p className="mt-1">Powered by EduEnroll</p>
+          <p className="mt-1">
+            Powered by{" "}
+            <a
+              href="https://www.kuunyi.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline hover:text-gray-700"
+            >
+              EduEnroll
+            </a>
+          </p>
         </div>
       </footer>
     </div>
