@@ -48,8 +48,19 @@ if [ "$confirm1" = "y" ] && [ "$confirm2" = "y" ] && [ "$confirm3" = "y" ]; then
   git push origin main
 
   echo ""
-  echo "Production deploy triggered."
-  echo "Monitor: https://vercel.com"
+  echo "Waiting for Vercel to build..."
+  sleep 30
+
+  echo "Promoting to production via Vercel CLI..."
+  DEPLOY_URL=$(vercel ls edu-enroll --scope yehtutaungs-projects 2>/dev/null | grep main | head -1 | awk '{print $1}')
+  if [ -n "$DEPLOY_URL" ]; then
+    vercel promote "$DEPLOY_URL" --scope yehtutaungs-projects
+    echo "Production deploy complete."
+  else
+    echo "WARNING: Could not find main branch deployment. Check Vercel dashboard manually."
+    echo "Monitor: https://vercel.com"
+  fi
+
   echo ""
 
   git checkout dev
