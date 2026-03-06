@@ -81,6 +81,8 @@ export interface Intake {
   created_at: string;
 }
 
+export type ClassMode = "online" | "offline";
+
 export interface Class {
   id: string;
   intake_id: string;
@@ -92,6 +94,7 @@ export interface Class {
   enrollment_open_at: string | null;
   enrollment_close_at: string | null;
   status: ClassStatus;
+  mode: ClassMode;
   created_at: string;
 }
 

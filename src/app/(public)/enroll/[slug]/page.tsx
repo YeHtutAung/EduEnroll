@@ -16,6 +16,7 @@ interface PublicClass {
   seat_total: number;
   enrollment_close_at: string | null;
   status: ClassStatus;
+  mode?: "online" | "offline";
 }
 
 interface PublicIntake {
@@ -194,6 +195,17 @@ function ClassCard({ cls, onSelect }: { cls: PublicClass; onSelect: (id: string)
             {cls.level}
           </span>
           <SeatsBadge remaining={cls.seat_remaining} />
+        </div>
+
+        {/* Mode badge */}
+        <div className="mb-3">
+          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+            (cls.mode ?? "offline") === "online"
+              ? "bg-blue-50 text-blue-700"
+              : "bg-emerald-50 text-emerald-700"
+          }`}>
+            {(cls.mode ?? "offline") === "online" ? "💻 Online Class" : "🏫 Offline Class"}
+          </span>
         </div>
 
         {/* Fee */}

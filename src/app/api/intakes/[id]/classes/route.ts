@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, badRequest, notFound } from "@/lib/api";
 import { DEFAULT_CLASS_FEES } from "@/types/database";
-import type { Class, Intake, JlptLevel, ClassStatus } from "@/types/database";
+import type { Class, ClassMode, Intake, JlptLevel, ClassStatus } from "@/types/database";
 
 const JLPT_LEVELS: JlptLevel[] = ["N5", "N4", "N3", "N2", "N1"];
 const VALID_CLASS_STATUSES: ClassStatus[] = ["draft", "open", "full", "closed"];
+const VALID_CLASS_MODES: ClassMode[] = ["online", "offline"];
 const DEFAULT_SEAT_TOTAL = 30;
 
 type IntakeResult  = { data: Intake   | null; error: unknown };
@@ -94,6 +95,7 @@ export async function POST(
     enrollment_open_at,
     enrollment_close_at,
     status = "draft",
+    mode = "offline",
   } = body as Record<string, unknown>;
 
   // Validate level
@@ -120,6 +122,9 @@ export async function POST(
   if (!VALID_CLASS_STATUSES.includes(status as ClassStatus)) {
     return badRequest(`status must be one of: ${VALID_CLASS_STATUSES.join(", ")}.`);
   }
+  if (!VALID_CLASS_MODES.includes(mode as ClassMode)) {
+    return badRequest(`mode must be one of: ${VALID_CLASS_MODES.join(", ")}.`);
+  }
 
   const { data, error } = await supabase
     .from("classes")
@@ -133,6 +138,7 @@ export async function POST(
       enrollment_open_at: (enrollment_open_at as string | null) ?? null,
       enrollment_close_at: (enrollment_close_at as string | null) ?? null,
       status: status as ClassStatus,
+      mode: mode as ClassMode,
     } as never)
     .select()
     .single() as ClassResult;

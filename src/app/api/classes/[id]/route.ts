@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, badRequest, notFound } from "@/lib/api";
-import type { Class, ClassStatus } from "@/types/database";
+import type { Class, ClassMode, ClassStatus } from "@/types/database";
 
 const VALID_CLASS_STATUSES: ClassStatus[] = ["draft", "open", "full", "closed"];
+const VALID_CLASS_MODES: ClassMode[] = ["online", "offline"];
 
 type ClassResult = { data: Class | null; error: unknown };
 
@@ -47,6 +48,7 @@ export async function PATCH(
     enrollment_open_at,
     enrollment_close_at,
     status,
+    mode,
   } = body as Record<string, unknown>;
 
   const update: Partial<Omit<Class, "id" | "created_at">> = {};
@@ -91,6 +93,14 @@ export async function PATCH(
       return badRequest(`status must be one of: ${VALID_CLASS_STATUSES.join(", ")}.`);
     }
     update.status = status as ClassStatus;
+  }
+
+  // mode
+  if (mode !== undefined) {
+    if (!VALID_CLASS_MODES.includes(mode as ClassMode)) {
+      return badRequest(`mode must be one of: ${VALID_CLASS_MODES.join(", ")}.`);
+    }
+    update.mode = mode as ClassMode;
   }
 
   if (Object.keys(update).length === 0) {
