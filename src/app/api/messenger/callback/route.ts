@@ -15,14 +15,23 @@ export async function GET(request: NextRequest) {
 
   // User denied permissions or error occurred
   if (error || !code || !state) {
+    console.error("[messenger] OAuth error or missing params:", { error, hasCode: !!code, state });
     const redirectUrl = new URL(`https://${state ?? "www"}.kuunyi.com/admin/settings`);
     redirectUrl.searchParams.set("tab", "messenger");
     redirectUrl.searchParams.set("error", error ?? "missing_code");
-    return NextResponse.redirect(redirectUrl.toString());
+    return new NextResponse(null, { status: 302, headers: { Location: redirectUrl.toString() } });
   }
 
-  const appId = process.env.MESSENGER_APP_ID!;
-  const appSecret = process.env.MESSENGER_APP_SECRET!;
+  const appId = process.env.MESSENGER_APP_ID;
+  const appSecret = process.env.MESSENGER_APP_SECRET;
+
+  if (!appId || !appSecret) {
+    console.error("[messenger] Missing env vars:", { hasAppId: !!appId, hasAppSecret: !!appSecret });
+    const errorUrl = new URL(`https://${state}.kuunyi.com/admin/settings`);
+    errorUrl.searchParams.set("tab", "messenger");
+    errorUrl.searchParams.set("error", "server_config");
+    return new NextResponse(null, { status: 302, headers: { Location: errorUrl.toString() } });
+  }
   const redirectUri = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://kuunyi.com"}/api/messenger/callback`;
 
   try {
@@ -97,12 +106,13 @@ export async function GET(request: NextRequest) {
     const successUrl = new URL(`https://${state}.kuunyi.com/admin/settings`);
     successUrl.searchParams.set("tab", "messenger");
     successUrl.searchParams.set("connected", "true");
-    return NextResponse.redirect(successUrl.toString());
+    console.log(`[messenger] Successfully connected page ${pageId} for ${state}`);
+    return new NextResponse(null, { status: 302, headers: { Location: successUrl.toString() } });
   } catch (err) {
     console.error("[messenger] OAuth callback error:", err);
     const errorUrl = new URL(`https://${state}.kuunyi.com/admin/settings`);
     errorUrl.searchParams.set("tab", "messenger");
     errorUrl.searchParams.set("error", "connection_failed");
-    return NextResponse.redirect(errorUrl.toString());
+    return new NextResponse(null, { status: 302, headers: { Location: errorUrl.toString() } });
   }
 }
