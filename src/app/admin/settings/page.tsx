@@ -363,6 +363,7 @@ export default function SettingsPage() {
   }
 
   // ── School profile ─────────────────────────────────────────────────────────
+  const [displayName, setDisplayName] = useState("");
   const [schoolName, setSchoolName] = useState("");
   const [schoolNameMm, setSchoolNameMm] = useState("");
   const [email, setEmail] = useState("");
@@ -379,14 +380,15 @@ export default function SettingsPage() {
       if (!user) return;
       setEmail(user.email ?? "");
 
-      // Fetch admin profile → tenant_id
+      // Fetch admin profile → tenant_id + full_name
       const { data: profile } = await supabase
         .from("users")
-        .select("tenant_id")
+        .select("tenant_id, full_name")
         .eq("id", user.id)
-        .single() as { data: { tenant_id: string } | null; error: unknown };
+        .single() as { data: { tenant_id: string; full_name: string | null } | null; error: unknown };
       if (!profile) return;
       setTenantId(profile.tenant_id);
+      if (profile.full_name) setDisplayName(profile.full_name);
 
       // Fetch tenant name + logo
       const { data: tenant } = await supabase
@@ -414,7 +416,18 @@ export default function SettingsPage() {
         .update({ name: schoolName.trim() } as never)
         .eq("id", tenantId);
       if (error) throw new Error((error as Error).message);
-      toast.success("School profile saved.");
+
+      // Update user display name
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { error: nameErr } = await supabase
+          .from("users")
+          .update({ full_name: displayName.trim() } as never)
+          .eq("id", user.id);
+        if (nameErr) throw new Error((nameErr as Error).message);
+      }
+
+      toast.success("Profile saved.");
       router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save profile.");
@@ -663,6 +676,23 @@ export default function SettingsPage() {
           <>
             {/* Profile form */}
             <form onSubmit={handleSaveProfile} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Your Display Name
+                </label>
+                <input
+                  type="text"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  required
+                  placeholder="e.g. John Doe"
+                  className={`${inputClass} max-w-sm`}
+                />
+                <p className="mt-1 text-xs text-gray-400">
+                  Shown in the sidebar and used as your admin name.
+                </p>
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">
