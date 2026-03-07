@@ -24,8 +24,29 @@ interface NavLink {
   ownerOnly?: boolean;
 }
 
+// ─── Myanmar translations per org type ─────────────────────────────────────
+
+const INTAKE_MM: Record<string, string> = {
+  language_school: "သင်တန်းများ",
+  event:           "ပွဲများနှင့် လက်မှတ်အမျိုးအစားများ",
+  fitness:         "အသုတ်များနှင့် အတန်းအမျိုးအစားများ",
+  beauty_wellness: "သင်တန်းများနှင့် အချိန်အမျိုးအစားများ",
+  training_center: "အသုတ်များနှင့် သင်ခန်းစာအမျိုးအစားများ",
+};
+
+const STUDENT_MM: Record<string, string> = {
+  language_school: "ကျောင်းသားများ",
+  event:           "တက်ရောက်သူများ",
+  fitness:         "အဖွဲ့ဝင်များ",
+  beauty_wellness: "ဖောက်သည်များ",
+  training_center: "သင်တန်းသားများ",
+};
+
 export default function Sidebar({ displayName, displayEmail, displayRole, schoolName, schoolLogoUrl }: SidebarProps) {
   const tl = useTenantLabels();
+
+  const intakeMm = INTAKE_MM[tl.orgType] ?? INTAKE_MM.language_school;
+  const studentMm = STUDENT_MM[tl.orgType] ?? STUDENT_MM.language_school;
 
   const NAV_LINKS: NavLink[] = [
     {
@@ -37,13 +58,13 @@ export default function Sidebar({ displayName, displayEmail, displayRole, school
     {
       href: "/admin/intakes",
       labelEn: `${tl.intake}s & ${tl.class}es`,
-      labelMm: "သင်တန်းများ",
+      labelMm: intakeMm,
       emoji: "🏫",
     },
     {
       href: "/admin/students",
       labelEn: `${tl.student}s`,
-      labelMm: "ကျောင်းသားများ",
+      labelMm: studentMm,
       emoji: "👥",
     },
     {
