@@ -412,7 +412,8 @@ export default function FormBuilderPage() {
     } finally {
       setLoading(false);
     }
-  }, [intakeId, toast]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [intakeId]);
 
   useEffect(() => {
     fetchFields();
