@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ui/Toast";
+import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
 import type { Intake } from "@/types/database";
 
 const ALL_MONTHS = [
@@ -17,12 +18,13 @@ const MAX_YEAR = 2030;
 export default function NewIntakePage() {
   const router = useRouter();
   const toast = useToast();
+  const labels = useTenantLabels();
   const [month, setMonth] = useState<string>("");
   const [year, setYear] = useState(new Date().getFullYear());
   const [nameOverride, setNameOverride] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const autoName = month ? `${month} ${year} Intake` : "";
+  const autoName = month ? `${month} ${year} ${labels.intake}` : "";
   const intakeName = nameOverride || autoName;
 
   // When month/year changes, clear manual override so auto-name takes effect
@@ -74,10 +76,10 @@ export default function NewIntakePage() {
         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
         </svg>
-        Back to Intakes
+        Back to {labels.intake}s
       </button>
 
-      <h1 className="text-2xl font-bold text-gray-900 mb-0.5">Create New Intake</h1>
+      <h1 className="text-2xl font-bold text-gray-900 mb-0.5">Create New {labels.intake}</h1>
       <p className="text-sm text-gray-400 font-myanmar mb-8">သင်တန်းအသစ်ဖွင့်မည်</p>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
@@ -152,7 +154,7 @@ export default function NewIntakePage() {
           {/* Intake name (auto-generated, editable) */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              Intake Name
+              {labels.intake} Name
             </label>
             <input
               type="text"
@@ -209,7 +211,7 @@ export default function NewIntakePage() {
               disabled={saving || !month}
               className="flex-1 px-4 py-2.5 bg-[#1a3f8a] text-white rounded-xl text-sm font-medium hover:bg-blue-900 disabled:opacity-50 transition-colors"
             >
-              {saving ? "Creating…" : "Create Intake"}
+              {saving ? "Creating…" : `Create ${labels.intake}`}
             </button>
           </div>
         </form>

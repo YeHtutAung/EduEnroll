@@ -59,6 +59,12 @@ export interface Tenant {
   currency: string;             // default 'MMK'
   language: string;             // default 'my+en'
   plan: PlanType;
+  org_type: string;             // default 'language_school'
+  label_intake: string;         // default 'Intake'
+  label_class: string;          // default 'Class Type'
+  label_student: string;        // default 'Student'
+  label_seat: string;           // default 'Seat'
+  label_fee: string;            // default 'Fee'
   messenger_enabled: boolean;
   messenger_page_id: string | null;
   messenger_page_token: string | null;
@@ -92,7 +98,7 @@ export interface Class {
   id: string;
   intake_id: string;
   tenant_id: string;
-  level: JlptLevel;
+  level: string;
   fee_mmk: number;
   seat_total: number;
   seat_remaining: number;
@@ -100,6 +106,10 @@ export interface Class {
   enrollment_close_at: string | null;
   status: ClassStatus;
   mode: ClassMode;
+  event_date: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  venue: string | null;
   created_at: string;
 }
 

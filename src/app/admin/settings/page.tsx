@@ -379,6 +379,17 @@ function SettingsContent() {
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
 
+  // ── Organization type + labels ────────────────────────────────────────────
+  const [orgType, setOrgType] = useState("language_school");
+  const [orgLabels, setOrgLabels] = useState({
+    intake: "Intake",
+    class: "Class Type",
+    student: "Student",
+    seat: "Seat",
+    fee: "Fee",
+  });
+  const [savingOrg, setSavingOrg] = useState(false);
+
   const fetchProfile = useCallback(async () => {
     setLoadingProfile(true);
     try {
@@ -398,14 +409,36 @@ function SettingsContent() {
       setTenantId(profile.tenant_id);
       if (profile.full_name) setDisplayName(profile.full_name);
 
-      // Fetch tenant name + logo
+      // Fetch tenant name + logo + org labels
       const { data: tenant } = await supabase
         .from("tenants")
-        .select("name, logo_url")
+        .select("name, logo_url, org_type, label_intake, label_class, label_student, label_seat, label_fee")
         .eq("id", profile.tenant_id)
-        .single() as { data: { name: string; logo_url: string | null } | null; error: unknown };
+        .single() as {
+        data: {
+          name: string;
+          logo_url: string | null;
+          org_type: string;
+          label_intake: string;
+          label_class: string;
+          label_student: string;
+          label_seat: string;
+          label_fee: string;
+        } | null;
+        error: unknown;
+      };
       if (tenant?.name) setSchoolName(tenant.name);
       if (tenant?.logo_url) setLogoUrl(tenant.logo_url);
+      if (tenant) {
+        setOrgType(tenant.org_type ?? "language_school");
+        setOrgLabels({
+          intake: tenant.label_intake ?? "Intake",
+          class: tenant.label_class ?? "Class Type",
+          student: tenant.label_student ?? "Student",
+          seat: tenant.label_seat ?? "Seat",
+          fee: tenant.label_fee ?? "Fee",
+        });
+      }
     } catch {
       // non-critical; keep defaults
     } finally {
@@ -493,6 +526,54 @@ function SettingsContent() {
       setPwError(err instanceof Error ? err.message : "Failed to update password.");
     } finally {
       setChangingPw(false);
+    }
+  }
+
+  // ── Org type presets ───────────────────────────────────────────────────────
+  const ORG_PRESETS: Record<string, { label: string; intake: string; class: string; student: string; seat: string; fee: string }> = {
+    language_school: { label: "Language School",   intake: "Intake",   class: "Class Type", student: "Student", seat: "Seat", fee: "Fee" },
+    training_center: { label: "Training Center",   intake: "Batch",    class: "Course",     student: "Trainee", seat: "Slot", fee: "Tuition" },
+    university:      { label: "University",         intake: "Semester", class: "Program",    student: "Student", seat: "Seat", fee: "Tuition" },
+    tutoring:        { label: "Tutoring",           intake: "Session",  class: "Subject",    student: "Student", seat: "Spot", fee: "Rate" },
+    custom:          { label: "Custom",             intake: "Intake",   class: "Class Type", student: "Student", seat: "Seat", fee: "Fee" },
+  };
+
+  function handleOrgTypeChange(value: string) {
+    setOrgType(value);
+    if (value !== "custom") {
+      const preset = ORG_PRESETS[value];
+      setOrgLabels({
+        intake: preset.intake,
+        class: preset.class,
+        student: preset.student,
+        seat: preset.seat,
+        fee: preset.fee,
+      });
+    }
+  }
+
+  async function handleSaveOrg(e: React.FormEvent) {
+    e.preventDefault();
+    if (!tenantId) return;
+    setSavingOrg(true);
+    try {
+      const { error } = await supabase
+        .from("tenants")
+        .update({
+          org_type: orgType,
+          label_intake: orgLabels.intake.trim() || "Intake",
+          label_class: orgLabels.class.trim() || "Class Type",
+          label_student: orgLabels.student.trim() || "Student",
+          label_seat: orgLabels.seat.trim() || "Seat",
+          label_fee: orgLabels.fee.trim() || "Fee",
+        } as never)
+        .eq("id", tenantId);
+      if (error) throw new Error((error as Error).message);
+      toast.success("Organization settings saved.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save organization settings.");
+    } finally {
+      setSavingOrg(false);
     }
   }
 
@@ -775,7 +856,76 @@ function SettingsContent() {
         </div>
       </SectionCard>
 
-      {/* ── Section 3: School Profile ────────────────────────────────── */}
+      {/* ── Section 3: Organization ───────────────────────────────────── */}
+      <SectionCard title="Organization" subtitle="Set your org type and customize terminology.">
+        {loadingProfile ? (
+          <div className="space-y-3">
+            <Pulse className="h-10 w-full rounded-xl" />
+            <Pulse className="h-10 w-full rounded-xl" />
+          </div>
+        ) : (
+          <form onSubmit={handleSaveOrg} className="space-y-5">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Organization Type
+              </label>
+              <select
+                value={orgType}
+                onChange={(e) => handleOrgTypeChange(e.target.value)}
+                className={`${inputClass} bg-white max-w-sm`}
+              >
+                {Object.entries(ORG_PRESETS).map(([key, preset]) => (
+                  <option key={key} value={key}>{preset.label}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <p className="text-sm font-medium text-gray-700 mb-3">
+                Labels
+                {orgType !== "custom" && (
+                  <span className="font-normal text-gray-400 ml-2">
+                    (auto-filled from preset)
+                  </span>
+                )}
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {([
+                  ["intake", "e.g. Intake, Batch, Semester"],
+                  ["class", "e.g. Class Type, Course, Program"],
+                  ["student", "e.g. Student, Trainee"],
+                  ["seat", "e.g. Seat, Slot, Spot"],
+                  ["fee", "e.g. Fee, Tuition, Rate"],
+                ] as [keyof typeof orgLabels, string][]).map(([key, placeholder]) => (
+                  <div key={key}>
+                    <label className="block text-xs text-gray-500 mb-1 capitalize">{key}</label>
+                    <input
+                      type="text"
+                      value={orgLabels[key]}
+                      onChange={(e) => setOrgLabels((prev) => ({ ...prev, [key]: e.target.value }))}
+                      placeholder={placeholder}
+                      readOnly={orgType !== "custom"}
+                      className={`${inputClass} ${orgType !== "custom" ? "bg-gray-50 text-gray-500" : ""}`}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="pt-1">
+              <button
+                type="submit"
+                disabled={savingOrg}
+                className="px-6 py-2.5 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 disabled:opacity-50 transition-colors"
+              >
+                {savingOrg ? "Saving…" : "Save Organization"}
+              </button>
+            </div>
+          </form>
+        )}
+      </SectionCard>
+
+      {/* ── Section 4: School Profile ────────────────────────────────── */}
       <SectionCard title="School Profile" subtitle="Update your school name displayed to students.">
 
         {loadingProfile ? (

@@ -19,6 +19,10 @@ interface PublicClassView {
   enrollment_close_at: string | null;
   status: Class["status"];
   mode: Class["mode"];
+  event_date: string | null;
+  start_time: string | null;
+  end_time: string | null;
+  venue: string | null;
 }
 
 interface PublicIntakeResponse {
@@ -113,7 +117,7 @@ export async function GET(
   // ── Fetch all visible classes (open + full) ──────────────────
   const { data: classes, error: classError } = await supabase
     .from("classes")
-    .select("id, level, fee_mmk, seat_remaining, seat_total, enrollment_close_at, status, mode")
+    .select("id, level, fee_mmk, seat_remaining, seat_total, enrollment_close_at, status, mode, event_date, start_time, end_time, venue")
     .eq("intake_id", intake.id)
     .eq("tenant_id", tenantId)
     .in("status", ["open", "full"])
@@ -139,6 +143,10 @@ export async function GET(
     enrollment_close_at:  c.enrollment_close_at,
     status:               c.status,
     mode:                 c.mode ?? "offline",
+    event_date:           c.event_date ?? null,
+    start_time:           c.start_time ?? null,
+    end_time:             c.end_time ?? null,
+    venue:                c.venue ?? null,
   }));
 
   const response: PublicIntakeResponse = {

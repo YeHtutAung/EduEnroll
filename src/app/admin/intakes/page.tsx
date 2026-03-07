@@ -5,6 +5,7 @@ import Link from "next/link";
 import StatusBadge from "@/components/ui/StatusBadge";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
+import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
 import type { Intake, IntakeStatus } from "@/types/database";
 
 // ── Skeleton ──────────────────────────────────────────────────────────────────
@@ -29,6 +30,7 @@ function RowSkeleton() {
 
 export default function IntakesPage() {
   const toast = useToast();
+  const labels = useTenantLabels();
   const [intakes, setIntakes] = useState<Intake[]>([]);
   const [classCounts, setClassCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
@@ -122,7 +124,7 @@ export default function IntakesPage() {
       <div className="flex items-start justify-between mb-8 gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 leading-tight">
-            Intakes &amp; Classes
+            {labels.intake}s &amp; {labels.class}es
           </h1>
           <p className="text-sm font-myanmar text-gray-400 mt-0.5">
             သင်တန်းနှင့် အတန်းများ
@@ -141,7 +143,7 @@ export default function IntakesPage() {
           >
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
           </svg>
-          Create New Intake
+          Create New {labels.intake}
         </Link>
       </div>
 
@@ -152,15 +154,15 @@ export default function IntakesPage() {
             <div className="w-14 h-14 rounded-full bg-[#f0f4ff] flex items-center justify-center text-2xl">
               🏫
             </div>
-            <p className="text-base font-semibold text-gray-700">No intakes yet</p>
+            <p className="text-base font-semibold text-gray-700">No {labels.intake.toLowerCase()}s yet</p>
             <p className="text-sm text-gray-400 max-w-xs">
-              Create your first intake to start managing classes and enrollments.
+              Create your first {labels.intake.toLowerCase()} to start managing {labels.class.toLowerCase()}es and enrollments.
             </p>
             <Link
               href="/admin/intakes/new"
               className="mt-2 px-5 py-2 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 transition-colors"
             >
-              Create First Intake
+              Create First {labels.intake}
             </Link>
           </div>
         ) : (
@@ -169,7 +171,7 @@ export default function IntakesPage() {
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100 text-left">
                   <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Intake Name
+                    {labels.intake} Name
                   </th>
                   <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                     Year
@@ -178,7 +180,7 @@ export default function IntakesPage() {
                     Status
                   </th>
                   <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    Classes
+                    {labels.class}es
                   </th>
                   <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                     Actions

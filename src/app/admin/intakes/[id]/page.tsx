@@ -7,13 +7,14 @@ import StatusBadge from "@/components/ui/StatusBadge";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
 import { formatMMKSimple } from "@/lib/utils";
-import type { Class, ClassMode, ClassStatus, Intake, IntakeStatus, JlptLevel } from "@/types/database";
+import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
+import type { Class, ClassMode, ClassStatus, Intake, IntakeStatus } from "@/types/database";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const JLPT_LEVELS: JlptLevel[] = ["N5", "N4", "N3", "N2", "N1"];
+const JLPT_LEVELS: string[] = ["N5", "N4", "N3", "N2", "N1"];
 
-const DEFAULT_FEES: Record<JlptLevel, number> = {
+const DEFAULT_FEES: Record<string, number> = {
   N5: 300_000,
   N4: 350_000,
   N3: 400_000,
@@ -21,13 +22,15 @@ const DEFAULT_FEES: Record<JlptLevel, number> = {
   N1: 500_000,
 };
 
-const LEVEL_COLORS: Record<JlptLevel, string> = {
+const LEVEL_COLORS: Record<string, string> = {
   N5: "#1a6b3c",
   N4: "#0891b2",
   N3: "#1a3f8a",
   N2: "#b07d2a",
   N1: "#c0392b",
 };
+
+const DEFAULT_LEVEL_COLOR = "#6b7280";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -92,6 +95,10 @@ interface EditForm {
   enrollment_close_at: string;
   status: ClassStatus;
   mode: ClassMode;
+  event_date: string;
+  start_time: string;
+  end_time: string;
+  venue: string;
 }
 
 function classToForm(cls: Class): EditForm {
@@ -102,6 +109,10 @@ function classToForm(cls: Class): EditForm {
     enrollment_close_at: toDatetimeLocal(cls.enrollment_close_at),
     status: cls.status,
     mode: cls.mode ?? "offline",
+    event_date: cls.event_date ?? "",
+    start_time: cls.start_time ?? "",
+    end_time: cls.end_time ?? "",
+    venue: cls.venue ?? "",
   };
 }
 
@@ -109,10 +120,12 @@ function EditClassModal({
   cls,
   onClose,
   onSaved,
+  showEventFields,
 }: {
   cls: Class;
   onClose: () => void;
   onSaved: (updated: Class) => void;
+  showEventFields: boolean;
 }) {
   const toast = useToast();
   const [form, setForm] = useState<EditForm>(() => classToForm(cls));
@@ -142,6 +155,11 @@ function EditClassModal({
           // Always include both date keys so the server can clear them
           enrollment_open_at: fromDatetimeLocal(form.enrollment_open_at),
           enrollment_close_at: fromDatetimeLocal(form.enrollment_close_at),
+          // Event fields (only meaningful for event org types)
+          event_date: form.event_date || null,
+          start_time: form.start_time || null,
+          end_time: form.end_time || null,
+          venue: form.venue || null,
         }),
       });
       if (!res.ok) {
@@ -174,7 +192,7 @@ function EditClassModal({
         <div className="flex items-center gap-3 mb-6">
           <span
             className="inline-flex items-center justify-center w-10 h-10 rounded-xl text-white text-sm font-bold shrink-0"
-            style={{ backgroundColor: LEVEL_COLORS[cls.level] }}
+            style={{ backgroundColor: LEVEL_COLORS[cls.level] ?? DEFAULT_LEVEL_COLOR }}
           >
             {cls.level}
           </span>
@@ -296,6 +314,54 @@ function EditClassModal({
             </div>
           </div>
 
+          {/* Event fields — shown for non-language-school org types */}
+          {showEventFields && (
+            <>
+              <div className="border-t border-gray-100 pt-4">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Event Details</p>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className={labelClass}>Event Date</label>
+                    <input
+                      type="date"
+                      value={form.event_date}
+                      onChange={(e) => set("event_date", e.target.value)}
+                      className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label className={labelClass}>Start Time</label>
+                    <input
+                      type="time"
+                      value={form.start_time}
+                      onChange={(e) => set("start_time", e.target.value)}
+                      className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label className={labelClass}>End Time</label>
+                    <input
+                      type="time"
+                      value={form.end_time}
+                      onChange={(e) => set("end_time", e.target.value)}
+                      className={inputClass}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className={labelClass}>Venue</label>
+                <input
+                  type="text"
+                  value={form.venue}
+                  onChange={(e) => set("venue", e.target.value)}
+                  className={inputClass}
+                  placeholder="e.g. Room 101, Main Building"
+                />
+              </div>
+            </>
+          )}
+
           {/* Actions */}
           <div className="flex gap-3 pt-2">
             <button
@@ -319,6 +385,267 @@ function EditClassModal({
   );
 }
 
+// ── Add Custom Class Modal ───────────────────────────────────────────────────
+
+interface AddCustomForm {
+  level: string;
+  fee_mmk: string;
+  seat_total: string;
+  mode: ClassMode;
+  event_date: string;
+  start_time: string;
+  end_time: string;
+  venue: string;
+}
+
+function AddCustomClassModal({
+  intakeId,
+  onClose,
+  onCreated,
+  showEventFields,
+}: {
+  intakeId: string;
+  onClose: () => void;
+  onCreated: () => void;
+  showEventFields: boolean;
+}) {
+  const toast = useToast();
+  const [form, setForm] = useState<AddCustomForm>({
+    level: "",
+    fee_mmk: "",
+    seat_total: "30",
+    mode: "offline",
+    event_date: "",
+    start_time: "",
+    end_time: "",
+    venue: "",
+  });
+  const [saving, setSaving] = useState(false);
+
+  function set(key: keyof AddCustomForm, value: string) {
+    setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const level = form.level.trim();
+    const fee = Number(form.fee_mmk);
+    const seats = Number(form.seat_total);
+    if (!level) { toast.error("Level name is required."); return; }
+    if (!fee || fee <= 0) { toast.error("Fee must be a positive number."); return; }
+    if (!seats || seats < 1 || !Number.isInteger(seats)) { toast.error("Seats must be a positive integer."); return; }
+
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/intakes/${intakeId}/classes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          level,
+          fee_mmk: fee,
+          seat_total: seats,
+          status: "draft",
+          mode: form.mode,
+          event_date: form.event_date || null,
+          start_time: form.start_time || null,
+          end_time: form.end_time || null,
+          venue: form.venue || null,
+        }),
+      });
+      if (res.status === 409) {
+        toast.error(`A "${level}" class already exists for this intake.`);
+        return;
+      }
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message ?? err.error ?? "Failed to create class.");
+      }
+      toast.success(`"${level}" class created.`);
+      onCreated();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to create class.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const labelClass = "block text-sm font-medium text-gray-700 mb-1.5";
+  const inputClass =
+    "w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-xl p-6">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 rounded-xl bg-[#1a3f8a] flex items-center justify-center text-white shrink-0">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+          </div>
+          <div>
+            <h2 className="text-lg font-bold text-gray-900">Add Custom Class</h2>
+            <p className="text-xs text-gray-400 mt-0.5">Create a class with any level name</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="ml-auto p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className={labelClass}>Level Name</label>
+            <input
+              type="text"
+              value={form.level}
+              onChange={(e) => set("level", e.target.value)}
+              required
+              className={inputClass}
+              placeholder="e.g. Beginner A, Business Japanese, N5-Prep"
+              autoFocus
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={labelClass}>Fee (MMK)</label>
+              <input
+                type="number"
+                value={form.fee_mmk}
+                onChange={(e) => set("fee_mmk", e.target.value)}
+                min={1}
+                required
+                className={inputClass}
+                placeholder="300000"
+              />
+              {form.fee_mmk && Number(form.fee_mmk) > 0 && (
+                <p className="mt-1 text-xs text-gray-400">
+                  = {formatMMKSimple(Number(form.fee_mmk))}
+                </p>
+              )}
+            </div>
+            <div>
+              <label className={labelClass}>Total Seats</label>
+              <input
+                type="number"
+                value={form.seat_total}
+                onChange={(e) => set("seat_total", e.target.value)}
+                min={1}
+                step={1}
+                required
+                className={inputClass}
+                placeholder="30"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className={labelClass}>Class Mode</label>
+            <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => set("mode", "offline")}
+                className={`px-4 py-2 text-sm font-medium transition-colors ${
+                  form.mode === "offline"
+                    ? "bg-[#6d28d9] text-white"
+                    : "bg-white text-gray-600 hover:bg-gray-50"
+                }`}
+              >
+                🏫 Offline
+              </button>
+              <button
+                type="button"
+                onClick={() => set("mode", "online")}
+                className={`px-4 py-2 text-sm font-medium transition-colors ${
+                  form.mode === "online"
+                    ? "bg-[#6d28d9] text-white"
+                    : "bg-white text-gray-600 hover:bg-gray-50"
+                }`}
+              >
+                💻 Online
+              </button>
+            </div>
+          </div>
+
+          {/* Event fields — shown for non-language-school org types */}
+          {showEventFields && (
+            <>
+              <div className="border-t border-gray-100 pt-4">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Event Details</p>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className={labelClass}>Event Date</label>
+                    <input
+                      type="date"
+                      value={form.event_date}
+                      onChange={(e) => set("event_date", e.target.value)}
+                      className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label className={labelClass}>Start Time</label>
+                    <input
+                      type="time"
+                      value={form.start_time}
+                      onChange={(e) => set("start_time", e.target.value)}
+                      className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label className={labelClass}>End Time</label>
+                    <input
+                      type="time"
+                      value={form.end_time}
+                      onChange={(e) => set("end_time", e.target.value)}
+                      className={inputClass}
+                    />
+                  </div>
+                </div>
+              </div>
+              <div>
+                <label className={labelClass}>Venue</label>
+                <input
+                  type="text"
+                  value={form.venue}
+                  onChange={(e) => set("venue", e.target.value)}
+                  className={inputClass}
+                  placeholder="e.g. Room 101, Main Building"
+                />
+              </div>
+            </>
+          )}
+
+          <div className="flex gap-3 pt-2">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={saving}
+              className="flex-1 px-4 py-2.5 bg-[#1a3f8a] text-white rounded-xl text-sm font-medium hover:bg-blue-900 disabled:opacity-50 transition-colors"
+            >
+              {saving ? "Creating…" : "Create Class"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── Intake Detail Page ────────────────────────────────────────────────────────
 
 export default function IntakeDetailPage({
@@ -329,6 +656,7 @@ export default function IntakeDetailPage({
   if (params.id === "new") redirect("/admin/intakes/new");
 
   const toast = useToast();
+  const tl = useTenantLabels();
   const [intake, setIntake] = useState<Intake | null>(null);
   const [classes, setClasses] = useState<Class[]>([]);
   const [loading, setLoading] = useState(true);
@@ -337,6 +665,7 @@ export default function IntakeDetailPage({
   const [addingClasses, setAddingClasses] = useState(false);
   const [copied, setCopied] = useState(false);
   const [confirmAddAll, setConfirmAddAll] = useState(false);
+  const [showAddCustom, setShowAddCustom] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -426,7 +755,7 @@ export default function IntakeDetailPage({
     }
   }
 
-  async function handleCopyClassLink(level: JlptLevel) {
+  async function handleCopyClassLink(level: string) {
     if (!intake) return;
     const slug = intakeToSlug(intake);
     const url = `${window.location.origin}/enroll/${slug}?level=${level}`;
@@ -494,7 +823,7 @@ export default function IntakeDetailPage({
     );
   }
 
-  const allClassesExist = classes.length >= 5;
+  const allDefaultsExist = JLPT_LEVELS.every((l) => classes.some((c) => c.level === l));
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
@@ -503,13 +832,13 @@ export default function IntakeDetailPage({
       {/* Breadcrumb */}
       <div className="flex items-center gap-2 text-sm text-gray-400 mb-6">
         <Link href="/admin/intakes" className="hover:text-[#1a3f8a] transition-colors">
-          Intakes
+          {tl.intake}s
         </Link>
         <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
         </svg>
         <span className="text-gray-600 font-medium">
-          {loading ? "…" : (intake?.name ?? "Intake")}
+          {loading ? "…" : (intake?.name ?? tl.intake)}
         </span>
       </div>
 
@@ -561,7 +890,7 @@ export default function IntakeDetailPage({
                   <span className="text-xs text-gray-500">{intake.year}</span>
                   <span className="text-xs text-gray-400">·</span>
                   <span className="text-xs text-gray-500">
-                    {classes.length}/5 classes configured
+                    {classes.length} {tl.class.toLowerCase()}{classes.length !== 1 ? "s" : ""} configured
                   </span>
                 </div>
               </div>
@@ -595,8 +924,8 @@ export default function IntakeDetailPage({
                 )}
               </button>
 
-              {/* Add All 5 Classes */}
-              {!allClassesExist && (
+              {/* Add Default Classes (N5–N1) */}
+              {!allDefaultsExist && (
                 <button
                   onClick={() => setConfirmAddAll(true)}
                   disabled={addingClasses}
@@ -615,11 +944,22 @@ export default function IntakeDetailPage({
                       <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                       </svg>
-                      Add All 5 Classes
+                      Add Default Classes (N5–N1)
                     </>
                   )}
                 </button>
               )}
+
+              {/* Add Custom Class */}
+              <button
+                onClick={() => setShowAddCustom(true)}
+                className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:border-[#1a3f8a] hover:text-[#1a3f8a] transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+                + Add Custom {tl.class}
+              </button>
             </div>
           </div>
         ) : null}
@@ -647,9 +987,13 @@ export default function IntakeDetailPage({
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-gray-100">
           <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wider">
-            Classes
+            {tl.class}es
           </h2>
-          <p className="text-xs text-gray-400 font-myanmar mt-0.5">N5 · N4 · N3 · N2 · N1</p>
+          <p className="text-xs text-gray-400 font-myanmar mt-0.5">
+            {classes.length > 0
+              ? classes.map((c) => c.level).join(" · ")
+              : `No ${tl.class.toLowerCase()}es yet`}
+          </p>
         </div>
 
         <div className="overflow-x-auto">
@@ -658,8 +1002,8 @@ export default function IntakeDetailPage({
               <tr className="bg-gray-50 border-b border-gray-100 text-left">
                 <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Level</th>
                 <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Mode</th>
-                <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Fee</th>
-                <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Seats</th>
+                <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">{tl.fee}</th>
+                <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">{tl.seat}s</th>
                 <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Enrollment Window</th>
                 <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
                 <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
@@ -667,126 +1011,105 @@ export default function IntakeDetailPage({
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
-                Array.from({ length: 5 }).map((_, i) => <ClassRowSkeleton key={i} />)
+                Array.from({ length: 3 }).map((_, i) => <ClassRowSkeleton key={i} />)
+              ) : classes.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="px-5 py-12 text-center text-sm text-gray-400">
+                    No {tl.class.toLowerCase()}es yet. Use &ldquo;Add Default Classes (N5–N1)&rdquo; or &ldquo;+ Add Custom {tl.class}&rdquo; to get started.
+                  </td>
+                </tr>
               ) : (
-                <>
-                  {/* Show all 5 levels in canonical order; placeholder rows for missing */}
-                  {JLPT_LEVELS.map((level) => {
-                    const cls = classes.find((c) => c.level === level);
+                classes.map((cls) => {
+                  const taken = cls.seat_total - cls.seat_remaining;
+                  const hasWindow = cls.enrollment_open_at || cls.enrollment_close_at;
+                  const color = LEVEL_COLORS[cls.level] ?? DEFAULT_LEVEL_COLOR;
 
-                    if (!cls) {
-                      return (
-                        <tr key={level} className="bg-gray-50/50">
-                          <td className="px-5 py-4">
-                            <span
-                              className="inline-flex items-center justify-center w-10 h-8 rounded-lg text-xs font-bold text-white/50 border-2 border-dashed"
-                              style={{ borderColor: LEVEL_COLORS[level], color: LEVEL_COLORS[level] }}
-                            >
-                              {level}
-                            </span>
-                          </td>
-                          <td colSpan={6} className="px-5 py-4 text-xs text-gray-400 italic">
-                            Not created yet
-                            {!allClassesExist && (
-                              <span className="ml-2 text-[#1a3f8a] not-italic">
-                                — use &ldquo;Add All 5 Classes&rdquo; to create
-                              </span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    }
+                  return (
+                    <tr
+                      key={cls.id}
+                      className="hover:bg-[#f0f4ff]/40 transition-colors"
+                    >
+                      {/* Level */}
+                      <td className="px-5 py-4">
+                        <span
+                          className="inline-flex items-center justify-center min-w-[2.5rem] h-8 px-2 rounded-lg text-xs font-bold text-white"
+                          style={{ backgroundColor: color }}
+                        >
+                          {cls.level}
+                        </span>
+                      </td>
 
-                    const taken = cls.seat_total - cls.seat_remaining;
-                    const hasWindow = cls.enrollment_open_at || cls.enrollment_close_at;
+                      {/* Mode */}
+                      <td className="px-5 py-4">
+                        <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                          (cls.mode ?? "offline") === "online"
+                            ? "bg-blue-50 text-blue-700"
+                            : "bg-emerald-50 text-emerald-700"
+                        }`}>
+                          {(cls.mode ?? "offline") === "online" ? "💻 Online" : "🏫 Offline"}
+                        </span>
+                      </td>
 
-                    return (
-                      <tr
-                        key={cls.id}
-                        className="hover:bg-[#f0f4ff]/40 transition-colors"
-                      >
-                        {/* Level */}
-                        <td className="px-5 py-4">
-                          <span
-                            className="inline-flex items-center justify-center w-10 h-8 rounded-lg text-xs font-bold text-white"
-                            style={{ backgroundColor: LEVEL_COLORS[level] }}
+                      {/* Fee */}
+                      <td className="px-5 py-4 tabular-nums text-gray-700 font-medium">
+                        {formatMMKSimple(cls.fee_mmk)}
+                      </td>
+
+                      {/* Seats */}
+                      <td className={`px-5 py-4 tabular-nums ${seatColor(cls.seat_remaining, cls.seat_total)}`}>
+                        {taken}
+                        <span className="text-gray-300 mx-0.5">/</span>
+                        {cls.seat_total}
+                        {cls.seat_remaining === 0 && (
+                          <span className="ml-1.5 text-xs">(Full)</span>
+                        )}
+                      </td>
+
+                      {/* Enrollment Window */}
+                      <td className="px-5 py-4 text-gray-500 text-xs">
+                        {hasWindow ? (
+                          <span>
+                            {fmtDate(cls.enrollment_open_at)}
+                            <span className="mx-1.5 text-gray-300">→</span>
+                            {fmtDate(cls.enrollment_close_at)}
+                          </span>
+                        ) : (
+                          <span className="text-gray-300 italic">Not set</span>
+                        )}
+                      </td>
+
+                      {/* Status */}
+                      <td className="px-5 py-4">
+                        <StatusBadge status={cls.status} />
+                      </td>
+
+                      {/* Actions */}
+                      <td className="px-5 py-4">
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => setEditingClass(cls)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-600 text-xs font-medium rounded-lg hover:border-[#1a3f8a] hover:text-[#1a3f8a] transition-colors"
                           >
-                            {level}
-                          </span>
-                        </td>
-
-                        {/* Mode */}
-                        <td className="px-5 py-4">
-                          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                            (cls.mode ?? "offline") === "online"
-                              ? "bg-blue-50 text-blue-700"
-                              : "bg-emerald-50 text-emerald-700"
-                          }`}>
-                            {(cls.mode ?? "offline") === "online" ? "💻 Online" : "🏫 Offline"}
-                          </span>
-                        </td>
-
-                        {/* Fee */}
-                        <td className="px-5 py-4 tabular-nums text-gray-700 font-medium">
-                          {formatMMKSimple(cls.fee_mmk)}
-                        </td>
-
-                        {/* Seats */}
-                        <td className={`px-5 py-4 tabular-nums ${seatColor(cls.seat_remaining, cls.seat_total)}`}>
-                          {taken}
-                          <span className="text-gray-300 mx-0.5">/</span>
-                          {cls.seat_total}
-                          {cls.seat_remaining === 0 && (
-                            <span className="ml-1.5 text-xs">(Full)</span>
-                          )}
-                        </td>
-
-                        {/* Enrollment Window */}
-                        <td className="px-5 py-4 text-gray-500 text-xs">
-                          {hasWindow ? (
-                            <span>
-                              {fmtDate(cls.enrollment_open_at)}
-                              <span className="mx-1.5 text-gray-300">→</span>
-                              {fmtDate(cls.enrollment_close_at)}
-                            </span>
-                          ) : (
-                            <span className="text-gray-300 italic">Not set</span>
-                          )}
-                        </td>
-
-                        {/* Status */}
-                        <td className="px-5 py-4">
-                          <StatusBadge status={cls.status} />
-                        </td>
-
-                        {/* Actions */}
-                        <td className="px-5 py-4">
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              onClick={() => setEditingClass(cls)}
-                              className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-600 text-xs font-medium rounded-lg hover:border-[#1a3f8a] hover:text-[#1a3f8a] transition-colors"
-                            >
-                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-                              </svg>
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => handleCopyClassLink(cls.level)}
-                              title={`Copy ${cls.level} enrollment link`}
-                              className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-600 text-xs font-medium rounded-lg hover:border-[#0891b2] hover:text-[#0891b2] transition-colors"
-                            >
-                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                                <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
-                              </svg>
-                              Link
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </>
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                            </svg>
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleCopyClassLink(cls.level)}
+                            title={`Copy ${cls.level} enrollment link`}
+                            className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-600 text-xs font-medium rounded-lg hover:border-[#0891b2] hover:text-[#0891b2] transition-colors"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+                            </svg>
+                            Link
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -802,18 +1125,32 @@ export default function IntakeDetailPage({
             setClasses((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
             setEditingClass(null);
           }}
+          showEventFields={tl.orgType !== "language_school"}
         />
       )}
 
-      {/* Confirm "Add All 5 Classes" */}
+      {/* Confirm "Add Default Classes (N5–N1)" */}
       {confirmAddAll && (
         <ConfirmModal
           variant="success"
-          title="Add All 5 Classes?"
+          title="Add Default Classes (N5–N1)?"
           message="This will create N5, N4, N3, N2, N1 classes with default fees (300,000 – 500,000 MMK) and 30 seats each. Any levels that already exist will be skipped."
           confirmLabel="Add Classes"
           onConfirm={handleAddAllClasses}
           onCancel={() => setConfirmAddAll(false)}
+        />
+      )}
+
+      {/* Add Custom Class modal */}
+      {showAddCustom && (
+        <AddCustomClassModal
+          intakeId={params.id}
+          onClose={() => setShowAddCustom(false)}
+          onCreated={() => {
+            setShowAddCustom(false);
+            fetchData();
+          }}
+          showEventFields={tl.orgType !== "language_school"}
         />
       )}
 
