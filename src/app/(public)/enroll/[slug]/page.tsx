@@ -231,11 +231,11 @@ function ClassCard({ cls, onSelect, labels }: { cls: PublicClass; onSelect: (id:
         </div>
 
         {/* Fee */}
-        <p className="font-myanmar mb-1 text-2xl font-bold text-gray-900">
+        <p className="mb-1 text-2xl font-bold text-gray-900">
           {cls.fee_formatted}
         </p>
-        <p className="mb-3 text-sm text-gray-500">
-          {formatMMK(cls.fee_mmk).replace(" MMK", "")} Kyat
+        <p className="font-myanmar mb-3 text-sm text-gray-500">
+          {formatMMK(cls.fee_mmk).replace(" MMK", "")} ကျပ်
         </p>
 
         {/* Close date */}
