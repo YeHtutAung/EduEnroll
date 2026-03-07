@@ -67,6 +67,7 @@ export async function POST(request: NextRequest) {
     nrc_number,
     phone,
     email,
+    form_data,
   } = body as Record<string, unknown>;
 
   // ── Validate required fields ──────────────────────────────────
@@ -151,6 +152,14 @@ export async function POST(request: NextRequest) {
           { status: 500 },
         );
     }
+  }
+
+  // ── Save form_data if provided ───────────────────────────────────
+  if (form_data && typeof form_data === "object") {
+    await supabase
+      .from("enrollments")
+      .update({ form_data } as never)
+      .eq("id", payload.enrollment_id);
   }
 
   // ── Fetch active bank accounts for payment instructions ───────

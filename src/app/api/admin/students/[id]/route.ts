@@ -65,6 +65,31 @@ export async function GET(
     proof_signed_url = signed?.signedUrl ?? null;
   }
 
+  // Fetch form field definitions for this enrollment's intake
+  const intakeId = row.class_id
+    ? await (async () => {
+        const { data: cls } = await supabase
+          .from("classes")
+          .select("intake_id")
+          .eq("id", row.class_id)
+          .single() as { data: { intake_id: string } | null; error: unknown };
+        return cls?.intake_id ?? null;
+      })()
+    : null;
+
+  let formFieldDefs: { field_key: string; field_label: string; field_type: string }[] = [];
+  if (intakeId) {
+    const { data: fields } = await supabase
+      .from("intake_form_fields")
+      .select("field_key, field_label, field_type")
+      .eq("intake_id", intakeId)
+      .order("sort_order", { ascending: true }) as {
+      data: typeof formFieldDefs | null;
+      error: unknown;
+    };
+    formFieldDefs = fields ?? [];
+  }
+
   return NextResponse.json({
     enrollment_id:   row.id,
     enrollment_ref:  row.enrollment_ref,
@@ -73,6 +98,8 @@ export async function GET(
     nrc_number:      row.nrc_number ?? null,
     phone:           row.phone,
     email:           row.email ?? null,
+    form_data:       (row as unknown as Record<string, unknown>).form_data ?? {},
+    form_fields:     formFieldDefs,
     status:          row.status,
     enrolled_at:     row.enrolled_at,
     class_level:     row.classes?.level ?? null,

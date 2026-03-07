@@ -8,18 +8,30 @@ interface QuickReply {
   payload: string;
 }
 
+async function callSendAPI(
+  pageToken: string,
+  body: Record<string, unknown>,
+): Promise<void> {
+  const res = await fetch(`${GRAPH_API}/me/messages?access_token=${pageToken}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const errorBody = await res.text().catch(() => "unknown");
+    console.error(`[messenger] Send API error ${res.status}:`, errorBody);
+  }
+}
+
 export async function sendTextMessage(
   pageToken: string,
   recipientPsid: string,
   text: string,
 ): Promise<void> {
-  await fetch(`${GRAPH_API}/me/messages?access_token=${pageToken}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      recipient: { id: recipientPsid },
-      message: { text },
-    }),
+  await callSendAPI(pageToken, {
+    recipient: { id: recipientPsid },
+    message: { text },
   });
 }
 
@@ -29,12 +41,8 @@ export async function sendQuickReplies(
   text: string,
   quickReplies: QuickReply[],
 ): Promise<void> {
-  await fetch(`${GRAPH_API}/me/messages?access_token=${pageToken}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      recipient: { id: recipientPsid },
-      message: { text, quick_replies: quickReplies },
-    }),
+  await callSendAPI(pageToken, {
+    recipient: { id: recipientPsid },
+    message: { text, quick_replies: quickReplies },
   });
 }

@@ -23,6 +23,12 @@ interface StudentRow {
   fee_mmk: number;
 }
 
+interface FormFieldDef {
+  field_key: string;
+  field_label: string;
+  field_type: string;
+}
+
 interface StudentDetail {
   enrollment_id: string;
   enrollment_ref: string;
@@ -31,6 +37,8 @@ interface StudentDetail {
   nrc_number: string | null;
   phone: string;
   email: string | null;
+  form_data: Record<string, string>;
+  form_fields: FormFieldDef[];
   status: EnrollmentStatus;
   enrolled_at: string;
   class_level: JlptLevel | null;
@@ -238,18 +246,46 @@ function StudentDetailModal({
                     Student Information
                   </h3>
 
-                  <DetailRow label="Name (English)" value={detail.student_name_en} />
-                  <DetailRow
-                    label="Name (Myanmar)"
-                    value={
-                      detail.student_name_mm ? (
-                        <span className="font-myanmar">{detail.student_name_mm}</span>
-                      ) : "—"
-                    }
-                  />
-                  <DetailRow label="NRC Number" value={detail.nrc_number ?? "—"} />
-                  <DetailRow label="Phone" value={<code className="text-sm">{detail.phone}</code>} />
-                  <DetailRow label="Email" value={detail.email ?? "—"} />
+                  {/* Dynamic form fields */}
+                  {detail.form_fields.length > 0 && Object.keys(detail.form_data).length > 0 ? (
+                    detail.form_fields.map((f) => {
+                      const val = detail.form_data[f.field_key];
+                      if (!val) return null;
+                      return (
+                        <DetailRow
+                          key={f.field_key}
+                          label={f.field_label}
+                          value={
+                            f.field_key === "name_mm" ? (
+                              <span className="font-myanmar">{val}</span>
+                            ) : f.field_type === "phone" ? (
+                              <code className="text-sm">{val}</code>
+                            ) : f.field_type === "checkbox" ? (
+                              val === "true" ? "Yes" : "No"
+                            ) : (
+                              val
+                            )
+                          }
+                        />
+                      );
+                    })
+                  ) : (
+                    <>
+                      {/* Fallback to legacy columns */}
+                      <DetailRow label="Name (English)" value={detail.student_name_en} />
+                      <DetailRow
+                        label="Name (Myanmar)"
+                        value={
+                          detail.student_name_mm ? (
+                            <span className="font-myanmar">{detail.student_name_mm}</span>
+                          ) : "—"
+                        }
+                      />
+                      <DetailRow label="NRC Number" value={detail.nrc_number ?? "—"} />
+                      <DetailRow label="Phone" value={<code className="text-sm">{detail.phone}</code>} />
+                      <DetailRow label="Email" value={detail.email ?? "—"} />
+                    </>
+                  )}
                   <DetailRow
                     label="Enrollment Ref"
                     value={
