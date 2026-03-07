@@ -128,6 +128,7 @@ function EditClassModal({
   showEventFields: boolean;
 }) {
   const toast = useToast();
+  const tl = useTenantLabels();
   const [form, setForm] = useState<EditForm>(() => classToForm(cls));
   const [saving, setSaving] = useState(false);
 
@@ -285,43 +286,45 @@ function EditClassModal({
             </select>
           </div>
 
-          {/* Mode toggle */}
-          <div>
-            <label className={labelClass}>Class Mode</label>
-            <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden">
-              <button
-                type="button"
-                onClick={() => set("mode", "offline")}
-                className={`px-4 py-2 text-sm font-medium transition-colors ${
-                  form.mode === "offline"
-                    ? "bg-[#6d28d9] text-white"
-                    : "bg-white text-gray-600 hover:bg-gray-50"
-                }`}
-              >
-                🏫 Offline
-              </button>
-              <button
-                type="button"
-                onClick={() => set("mode", "online")}
-                className={`px-4 py-2 text-sm font-medium transition-colors ${
-                  form.mode === "online"
-                    ? "bg-[#6d28d9] text-white"
-                    : "bg-white text-gray-600 hover:bg-gray-50"
-                }`}
-              >
-                💻 Online
-              </button>
+          {/* Mode toggle — hidden for event org */}
+          {tl.orgType !== "event" && (
+            <div>
+              <label className={labelClass}>Class Mode</label>
+              <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => set("mode", "offline")}
+                  className={`px-4 py-2 text-sm font-medium transition-colors ${
+                    form.mode === "offline"
+                      ? "bg-[#6d28d9] text-white"
+                      : "bg-white text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  🏫 Offline
+                </button>
+                <button
+                  type="button"
+                  onClick={() => set("mode", "online")}
+                  className={`px-4 py-2 text-sm font-medium transition-colors ${
+                    form.mode === "online"
+                      ? "bg-[#6d28d9] text-white"
+                      : "bg-white text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  💻 Online
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Event fields — shown for non-language-school org types */}
           {showEventFields && (
             <>
               <div className="border-t border-gray-100 pt-4">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Event Details</p>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className={labelClass}>Event Date</label>
+                    <label className={labelClass}>Start Date</label>
                     <input
                       type="date"
                       value={form.event_date}
@@ -330,18 +333,9 @@ function EditClassModal({
                     />
                   </div>
                   <div>
-                    <label className={labelClass}>Start Time</label>
+                    <label className={labelClass}>End Date</label>
                     <input
-                      type="time"
-                      value={form.start_time}
-                      onChange={(e) => set("start_time", e.target.value)}
-                      className={inputClass}
-                    />
-                  </div>
-                  <div>
-                    <label className={labelClass}>End Time</label>
-                    <input
-                      type="time"
+                      type="date"
                       value={form.end_time}
                       onChange={(e) => set("end_time", e.target.value)}
                       className={inputClass}
@@ -588,9 +582,9 @@ function AddCustomClassModal({
             <>
               <div className="border-t border-gray-100 pt-4">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Event Details</p>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className={labelClass}>Event Date</label>
+                    <label className={labelClass}>Start Date</label>
                     <input
                       type="date"
                       value={form.event_date}
@@ -599,18 +593,9 @@ function AddCustomClassModal({
                     />
                   </div>
                   <div>
-                    <label className={labelClass}>Start Time</label>
+                    <label className={labelClass}>End Date</label>
                     <input
-                      type="time"
-                      value={form.start_time}
-                      onChange={(e) => set("start_time", e.target.value)}
-                      className={inputClass}
-                    />
-                  </div>
-                  <div>
-                    <label className={labelClass}>End Time</label>
-                    <input
-                      type="time"
+                      type="date"
                       value={form.end_time}
                       onChange={(e) => set("end_time", e.target.value)}
                       className={inputClass}
@@ -1008,7 +993,9 @@ export default function IntakeDetailPage({
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100 text-left">
                 <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Level</th>
-                <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Mode</th>
+                {tl.orgType !== "event" && (
+                  <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Mode</th>
+                )}
                 <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">{tl.fee}</th>
                 <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">{tl.seat}s</th>
                 <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Enrollment Window</th>
@@ -1021,7 +1008,7 @@ export default function IntakeDetailPage({
                 Array.from({ length: 3 }).map((_, i) => <ClassRowSkeleton key={i} />)
               ) : classes.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-5 py-12 text-center text-sm text-gray-400">
+                  <td colSpan={tl.orgType === "event" ? 6 : 7} className="px-5 py-12 text-center text-sm text-gray-400">
                     No {tl.class.toLowerCase()}es yet.{" "}
                     {tl.orgType === "language_school"
                       ? <>Use &ldquo;Add Default Classes (N5–N1)&rdquo; or &ldquo;+ Add Custom {tl.class}&rdquo; to get started.</>
@@ -1049,16 +1036,18 @@ export default function IntakeDetailPage({
                         </span>
                       </td>
 
-                      {/* Mode */}
-                      <td className="px-5 py-4">
-                        <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          (cls.mode ?? "offline") === "online"
-                            ? "bg-blue-50 text-blue-700"
-                            : "bg-emerald-50 text-emerald-700"
-                        }`}>
-                          {(cls.mode ?? "offline") === "online" ? "💻 Online" : "🏫 Offline"}
-                        </span>
-                      </td>
+                      {/* Mode — hidden for event org */}
+                      {tl.orgType !== "event" && (
+                        <td className="px-5 py-4">
+                          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                            (cls.mode ?? "offline") === "online"
+                              ? "bg-blue-50 text-blue-700"
+                              : "bg-emerald-50 text-emerald-700"
+                          }`}>
+                            {(cls.mode ?? "offline") === "online" ? "💻 Online" : "🏫 Offline"}
+                          </span>
+                        </td>
+                      )}
 
                       {/* Fee */}
                       <td className="px-5 py-4 tabular-nums text-gray-700 font-medium">
