@@ -20,8 +20,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { school_name_en, school_name_mm, subdomain, admin_email, password } =
-    body as Record<string, unknown>;
+  const {
+    school_name_en, school_name_mm, subdomain, admin_email, password,
+    org_type, label_intake, label_class, label_student, label_seat, label_fee,
+  } = body as Record<string, unknown>;
 
   // ── Validate ────────────────────────────────────────────────────────────────
 
@@ -79,6 +81,12 @@ export async function POST(request: NextRequest) {
       currency: "MMK",
       language: "my+en",
       plan: "starter",
+      ...(org_type && typeof org_type === "string" ? { org_type } : {}),
+      ...(label_intake && typeof label_intake === "string" ? { label_intake: label_intake.trim() } : {}),
+      ...(label_class && typeof label_class === "string" ? { label_class: label_class.trim() } : {}),
+      ...(label_student && typeof label_student === "string" ? { label_student: label_student.trim() } : {}),
+      ...(label_seat && typeof label_seat === "string" ? { label_seat: label_seat.trim() } : {}),
+      ...(label_fee && typeof label_fee === "string" ? { label_fee: label_fee.trim() } : {}),
     } as never)
     .select()
     .single();

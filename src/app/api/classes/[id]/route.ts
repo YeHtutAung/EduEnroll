@@ -49,6 +49,10 @@ export async function PATCH(
     enrollment_close_at,
     status,
     mode,
+    event_date,
+    start_time,
+    end_time,
+    venue,
   } = body as Record<string, unknown>;
 
   const update: Partial<Omit<Class, "id" | "created_at">> = {};
@@ -101,6 +105,38 @@ export async function PATCH(
       return badRequest(`mode must be one of: ${VALID_CLASS_MODES.join(", ")}.`);
     }
     update.mode = mode as ClassMode;
+  }
+
+  // event_date — null is allowed to clear the value
+  if ("event_date" in (body as object)) {
+    if (event_date !== null && typeof event_date !== "string") {
+      return badRequest("event_date must be a date string or null.");
+    }
+    update.event_date = (event_date as string | null) ?? null;
+  }
+
+  // start_time
+  if ("start_time" in (body as object)) {
+    if (start_time !== null && typeof start_time !== "string") {
+      return badRequest("start_time must be a time string or null.");
+    }
+    update.start_time = (start_time as string | null) ?? null;
+  }
+
+  // end_time
+  if ("end_time" in (body as object)) {
+    if (end_time !== null && typeof end_time !== "string") {
+      return badRequest("end_time must be a time string or null.");
+    }
+    update.end_time = (end_time as string | null) ?? null;
+  }
+
+  // venue
+  if ("venue" in (body as object)) {
+    if (venue !== null && typeof venue !== "string") {
+      return badRequest("venue must be a string or null.");
+    }
+    update.venue = (venue as string | null) ?? null;
   }
 
   if (Object.keys(update).length === 0) {

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api";
-import type { Class, EnrollmentStatus, JlptLevel } from "@/types/database";
+import type { Class, EnrollmentStatus } from "@/types/database";
 
 type EnrollmentRow = { status: EnrollmentStatus };
 type PaymentRow    = { status: string; amount_mmk: number };
@@ -64,7 +64,7 @@ export async function GET() {
     .filter((p) => p.status === "verified")
     .reduce((sum, p) => sum + (p.amount_mmk ?? 0), 0);
 
-  const seats_by_class: { level: JlptLevel; seat_remaining: number; seat_total: number }[] =
+  const seats_by_class: { level: string; seat_remaining: number; seat_total: number }[] =
     classes.map((c) => ({
       level:          c.level,
       seat_remaining: c.seat_remaining,

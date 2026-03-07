@@ -5,6 +5,7 @@ import Link from "next/link";
 import StatsCard from "@/components/ui/StatsCard";
 import StatusBadge from "@/components/ui/StatusBadge";
 import { formatMMKSimple } from "@/lib/utils";
+import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
 import type { EnrollmentStatus, JlptLevel } from "@/types/database";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -109,7 +110,7 @@ function SeatsBar({ row }: { row: SeatRow }) {
       <div className="flex items-center justify-between mb-1.5">
         <span className={`text-sm font-bold ${clr.text}`}>{row.level}</span>
         <span className="text-xs text-gray-500 tabular-nums">
-          {taken} <span className="text-gray-300">/</span> {row.seat_total} seats
+          {taken} <span className="text-gray-300">/</span> {row.seat_total}
         </span>
       </div>
       <div className="h-2.5 w-full rounded-full bg-gray-100 overflow-hidden">
@@ -133,6 +134,7 @@ function SeatsBar({ row }: { row: SeatRow }) {
 // ── Dashboard page ────────────────────────────────────────────────────────────
 
 export default function DashboardPage() {
+  const tl = useTenantLabels();
   const [stats,   setStats]   = useState<StatsData | null>(null);
   const [recent,  setRecent]  = useState<RecentEnrollment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -241,7 +243,7 @@ export default function DashboardPage() {
               colorAccent="#1a3f8a"
             />
             <StatsCard
-              title="Confirmed Students"
+              title={`Confirmed ${tl.student}s`}
               value={stats?.confirmed_count ?? 0}
               subtitle="Payment verified"
               colorAccent="#1a6b3c"
@@ -277,7 +279,7 @@ export default function DashboardPage() {
         {/* Seats Overview (wider) */}
         <section className="lg:col-span-3 bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
           <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wider mb-5">
-            Seats Overview
+            {tl.seat}s Overview
           </h2>
 
           {loading ? (
@@ -313,7 +315,7 @@ export default function DashboardPage() {
             >
               <span className="text-xl">🏫</span>
               <div className="min-w-0">
-                <p className="text-sm font-semibold">Create New Intake</p>
+                <p className="text-sm font-semibold">Create New {tl.intake}</p>
                 <p className="text-xs opacity-60 font-myanmar">သင်တန်းအသစ်ဖွင့်မည်</p>
               </div>
               <svg className="w-4 h-4 ml-auto shrink-0 opacity-50 group-hover:opacity-100" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -350,7 +352,7 @@ export default function DashboardPage() {
             >
               <span className="text-xl">👥</span>
               <div className="min-w-0">
-                <p className="text-sm font-semibold">View All Students</p>
+                <p className="text-sm font-semibold">View All {tl.student}s</p>
                 <p className="text-xs opacity-60 font-myanmar">ကျောင်းသားများကြည့်မည်</p>
               </div>
               <svg className="w-4 h-4 ml-auto shrink-0 opacity-50 group-hover:opacity-100" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -396,7 +398,7 @@ export default function DashboardPage() {
           <table className="w-full min-w-[560px] text-sm">
             <thead>
               <tr className="bg-gray-50 text-left">
-                <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Student</th>
+                <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{tl.student}</th>
                 <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Level</th>
                 <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Enrolled</th>
                 <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>

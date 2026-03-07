@@ -5,6 +5,7 @@ import StatusBadge from "@/components/ui/StatusBadge";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import { useToast } from "@/components/ui/Toast";
 import { useRole } from "@/components/admin/RoleContext";
+import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
 import { formatMMKSimple } from "@/lib/utils";
 import type { EnrollmentStatus, Intake, JlptLevel, PaymentStatus } from "@/types/database";
 
@@ -153,6 +154,7 @@ function StudentDetailModal({
   row: StudentRow;
   onClose: () => void;
 }) {
+  const tl = useTenantLabels();
   const [detail, setDetail] = useState<StudentDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -243,7 +245,7 @@ function StudentDetailModal({
                 {/* ── Left: Student info ─────────────────────── */}
                 <div className="space-y-4">
                   <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-                    Student Information
+                    {tl.student} Information
                   </h3>
 
                   {/* Dynamic form fields */}
@@ -316,9 +318,9 @@ function StudentDetailModal({
                       ) : "—"
                     }
                   />
-                  <DetailRow label="Intake" value={detail.intake_name ?? "—"} />
+                  <DetailRow label={tl.intake} value={detail.intake_name ?? "—"} />
                   <DetailRow
-                    label="Fee"
+                    label={tl.fee}
                     value={
                       detail.fee_mmk != null
                         ? <span className="font-semibold text-[#1a3f8a]">{formatMMKSimple(detail.fee_mmk)}</span>
@@ -441,6 +443,7 @@ function DetailRow({
 export default function StudentsPage() {
   const toast = useToast();
   const role = useRole();
+  const tl = useTenantLabels();
   const isOwnerOrAbove = role === "owner" || role === "superadmin";
 
   // Filters
@@ -535,9 +538,9 @@ export default function StudentsPage() {
         "Phone",
         "Enrollment Ref",
         "Level",
-        "Intake",
+        tl.intake,
         "Status",
-        "Fee (MMK)",
+        `${tl.fee} (MMK)`,
         "Enrolled Date",
       ];
 
@@ -576,9 +579,9 @@ export default function StudentsPage() {
       ];
 
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Students");
+      XLSX.utils.book_append_sheet(wb, ws, `${tl.student}s`);
       const date = new Date().toISOString().slice(0, 10);
-      XLSX.writeFile(wb, `NihonMoment-Students-${date}.xlsx`);
+      XLSX.writeFile(wb, `${tl.student}s-${date}.xlsx`);
       toast.success(`Exported ${rows.length} student${rows.length !== 1 ? "s" : ""} to Excel.`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Export failed.");
@@ -598,7 +601,7 @@ export default function StudentsPage() {
       {/* ── Header ──────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between mb-6 gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 leading-tight">Students</h1>
+          <h1 className="text-2xl font-bold text-gray-900 leading-tight">{tl.student}s</h1>
           <p className="text-sm font-myanmar text-gray-400 mt-0.5">ကျောင်းသားများ</p>
         </div>
         {isOwnerOrAbove && (
@@ -771,7 +774,7 @@ export default function StudentsPage() {
             <table className="w-full min-w-[960px] text-sm">
               <thead>
                 <tr className="bg-gray-50 border-b border-gray-100 text-left">
-                  {["No.", "Student Name", "NRC Number", "Phone", "Enrollment Ref", "Level", "Intake", "Fee (MMK)", "Status", "Enrolled"].map(
+                  {["No.", `${tl.student} Name`, "NRC Number", "Phone", "Enrollment Ref", "Level", tl.intake, `${tl.fee} (MMK)`, "Status", "Enrolled"].map(
                     (h) => (
                       <th
                         key={h}

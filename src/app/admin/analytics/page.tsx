@@ -16,6 +16,7 @@ import {
 } from "recharts";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import { formatMMK } from "@/lib/utils";
+import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 interface AnalyticsData {
@@ -79,6 +80,7 @@ function AnalyticsContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const range = (searchParams.get("range") as RangeKey) ?? "30d";
+  const tl = useTenantLabels();
 
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -224,7 +226,7 @@ function AnalyticsContent() {
         {/* Class Distribution */}
         <div className="bg-white rounded-xl border border-gray-200 p-5">
           <h2 className="text-sm font-semibold text-gray-700 mb-1">
-            Class Distribution
+            {tl.class} Distribution
           </h2>
           <p className="text-xs text-gray-400 font-myanmar mb-4">
             အတန်းအလိုက်ခွဲခြမ်း
@@ -288,7 +290,7 @@ function AnalyticsContent() {
       {/* ── Seat Fill Rate ─────────────────────────────────────────── */}
       <div className="bg-white rounded-xl border border-gray-200 p-5">
         <h2 className="text-sm font-semibold text-gray-700 mb-1">
-          Seat Fill Rate
+          {tl.seat} Fill Rate
         </h2>
         <p className="text-xs text-gray-400 font-myanmar mb-4">
           နေရာပြည့်နှုန်း

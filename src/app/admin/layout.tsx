@@ -4,6 +4,8 @@ import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import Sidebar from "@/components/admin/Sidebar";
 import { RoleProvider } from "@/components/admin/RoleContext";
+import { TenantLabelsProvider } from "@/components/admin/TenantLabelsContext";
+import type { TenantLabels } from "@/components/admin/TenantLabelsContext";
 import { ToastProvider } from "@/components/ui/Toast";
 import type { User, UserRole } from "@/types/database";
 import { extractSubdomainFromHost } from "@/lib/tenant";
@@ -67,21 +69,49 @@ export default async function AdminLayout({
   const displayEmail = user.email ?? "";
   const displayRole = (profile.role ?? "staff") as UserRole;
 
-  // Fetch tenant name + logo for sidebar branding
+  // Fetch tenant name + logo + labels for sidebar branding
   let schoolName = "KuuNyi";
   let schoolLogoUrl: string | null = null;
+  const tenantLabels: TenantLabels = {
+    intake: "Intake",
+    class: "Class Type",
+    student: "Student",
+    seat: "Seat",
+    fee: "Fee",
+    orgType: "language_school",
+  };
   if (profile.tenant_id) {
     const { data: tenant } = (await supabase
       .from("tenants")
-      .select("name, logo_url")
+      .select("name, logo_url, org_type, label_intake, label_class, label_student, label_seat, label_fee")
       .eq("id", profile.tenant_id)
-      .single()) as { data: { name: string; logo_url: string | null } | null; error: unknown };
+      .single()) as {
+      data: {
+        name: string;
+        logo_url: string | null;
+        org_type: string;
+        label_intake: string;
+        label_class: string;
+        label_student: string;
+        label_seat: string;
+        label_fee: string;
+      } | null;
+      error: unknown;
+    };
     if (tenant?.name) schoolName = tenant.name;
     if (tenant?.logo_url) schoolLogoUrl = tenant.logo_url;
+    if (tenant) {
+      tenantLabels.intake = tenant.label_intake || "Intake";
+      tenantLabels.class = tenant.label_class || "Class Type";
+      tenantLabels.student = tenant.label_student || "Student";
+      tenantLabels.seat = tenant.label_seat || "Seat";
+      tenantLabels.fee = tenant.label_fee || "Fee";
+    }
   }
 
   return (
     <RoleProvider role={displayRole}>
+      <TenantLabelsProvider labels={tenantLabels}>
       <ToastProvider>
         {/* flex-row: sidebar + content side-by-side on lg+; stacked on mobile */}
         <div className="flex h-screen bg-[#f0f4ff] overflow-hidden">
@@ -99,6 +129,7 @@ export default async function AdminLayout({
           </main>
         </div>
       </ToastProvider>
+      </TenantLabelsProvider>
     </RoleProvider>
   );
 }

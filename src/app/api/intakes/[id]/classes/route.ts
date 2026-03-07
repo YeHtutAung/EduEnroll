@@ -3,7 +3,7 @@ import { requireAuth, badRequest, notFound } from "@/lib/api";
 import { DEFAULT_CLASS_FEES } from "@/types/database";
 import type { Class, ClassMode, Intake, JlptLevel, ClassStatus } from "@/types/database";
 
-const JLPT_LEVELS: JlptLevel[] = ["N5", "N4", "N3", "N2", "N1"];
+const JLPT_LEVELS: string[] = ["N5", "N4", "N3", "N2", "N1"];
 const VALID_CLASS_STATUSES: ClassStatus[] = ["draft", "open", "full", "closed"];
 const VALID_CLASS_MODES: ClassMode[] = ["online", "offline"];
 const DEFAULT_SEAT_TOTAL = 30;
@@ -43,10 +43,15 @@ export async function GET(
     return NextResponse.json({ error: (error as { message: string }).message }, { status: 500 });
   }
 
-  // Sort N5 → N4 → N3 → N2 → N1 (beginner first)
-  const sorted = (data ?? []).sort(
-    (a, b) => JLPT_LEVELS.indexOf(a.level) - JLPT_LEVELS.indexOf(b.level),
-  );
+  // Sort: JLPT levels first (N5→N1), then custom levels alphabetically
+  const sorted = (data ?? []).sort((a, b) => {
+    const ai = JLPT_LEVELS.indexOf(a.level);
+    const bi = JLPT_LEVELS.indexOf(b.level);
+    if (ai !== -1 && bi !== -1) return ai - bi;
+    if (ai !== -1) return -1;
+    if (bi !== -1) return 1;
+    return a.level.localeCompare(b.level);
+  });
 
   return NextResponse.json(sorted);
 }
@@ -96,18 +101,24 @@ export async function POST(
     enrollment_close_at,
     status = "draft",
     mode = "offline",
+    event_date,
+    start_time,
+    end_time,
+    venue,
   } = body as Record<string, unknown>;
 
   // Validate level
-  if (!level || !JLPT_LEVELS.includes(level as JlptLevel)) {
-    return badRequest(`level is required and must be one of: ${JLPT_LEVELS.join(", ")}.`);
+  if (!level || typeof level !== "string" || (level as string).trim() === "") {
+    return badRequest("level is required and must be a non-empty string.");
   }
 
-  // Auto-populate fee from level if not provided
+  // Auto-populate fee from level if not provided (only for standard JLPT levels)
   const resolvedFee =
-    fee_mmk !== undefined ? fee_mmk : DEFAULT_CLASS_FEES[level as JlptLevel];
+    fee_mmk !== undefined
+      ? fee_mmk
+      : DEFAULT_CLASS_FEES[level as JlptLevel] ?? undefined;
 
-  if (typeof resolvedFee !== "number" || resolvedFee <= 0) {
+  if (resolvedFee === undefined || typeof resolvedFee !== "number" || resolvedFee <= 0) {
     return badRequest("fee_mmk must be a positive number.");
   }
   if (typeof seat_total !== "number" || !Number.isInteger(seat_total) || seat_total < 1) {
@@ -131,7 +142,7 @@ export async function POST(
     .insert({
       intake_id: params.id,
       tenant_id: tenantId,
-      level: level as JlptLevel,
+      level: (level as string).trim(),
       fee_mmk: resolvedFee,
       seat_total: seat_total as number,
       seat_remaining: seat_total as number,   // always starts fully available
@@ -139,6 +150,10 @@ export async function POST(
       enrollment_close_at: (enrollment_close_at as string | null) ?? null,
       status: status as ClassStatus,
       mode: mode as ClassMode,
+      event_date: (event_date as string | null) ?? null,
+      start_time: (start_time as string | null) ?? null,
+      end_time: (end_time as string | null) ?? null,
+      venue: (venue as string | null) ?? null,
     } as never)
     .select()
     .single() as ClassResult;

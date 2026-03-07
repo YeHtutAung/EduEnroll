@@ -4,6 +4,25 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
+// ── Org type presets ──────────────────────────────────────────────────────────
+
+interface OrgPreset {
+  label: string;
+  intake: string;
+  class: string;
+  student: string;
+  seat: string;
+  fee: string;
+}
+
+const ORG_PRESETS: Record<string, OrgPreset> = {
+  language_school: { label: "Language School",   intake: "Intake",   class: "Class Type", student: "Student", seat: "Seat", fee: "Fee" },
+  training_center: { label: "Training Center",   intake: "Batch",    class: "Course",     student: "Trainee", seat: "Slot", fee: "Tuition" },
+  university:      { label: "University",         intake: "Semester", class: "Program",    student: "Student", seat: "Seat", fee: "Tuition" },
+  tutoring:        { label: "Tutoring",           intake: "Session",  class: "Subject",    student: "Student", seat: "Spot", fee: "Rate" },
+  custom:          { label: "Custom",             intake: "Intake",   class: "Class Type", student: "Student", seat: "Seat", fee: "Fee" },
+};
+
 export default function RegisterPage() {
   const router = useRouter();
 
@@ -13,10 +32,32 @@ export default function RegisterPage() {
   const [adminEmail, setAdminEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [orgType, setOrgType] = useState("language_school");
+  const [labels, setLabels] = useState({
+    intake: "Intake",
+    class: "Class Type",
+    student: "Student",
+    seat: "Seat",
+    fee: "Fee",
+  });
 
   const [slugStatus, setSlugStatus] = useState<"idle" | "checking" | "available" | "taken">("idle");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<{ en: string; mm: string } | null>(null);
+
+  function handleOrgTypeChange(value: string) {
+    setOrgType(value);
+    if (value !== "custom") {
+      const preset = ORG_PRESETS[value];
+      setLabels({
+        intake: preset.intake,
+        class: preset.class,
+        student: preset.student,
+        seat: preset.seat,
+        fee: preset.fee,
+      });
+    }
+  }
 
   // ─── Live subdomain availability check ──────────────────────────────────────
 
@@ -97,6 +138,12 @@ export default function RegisterPage() {
           subdomain: subdomain.trim(),
           admin_email: adminEmail.trim(),
           password,
+          org_type: orgType,
+          label_intake: labels.intake.trim(),
+          label_class: labels.class.trim(),
+          label_student: labels.student.trim(),
+          label_seat: labels.seat.trim(),
+          label_fee: labels.fee.trim(),
         }),
       });
 
@@ -209,6 +256,55 @@ export default function RegisterPage() {
                 placeholder="ဥပမာ - နီဟွန်းမိုးမန့်"
               />
             </div>
+
+            {/* Organization Type */}
+            <div>
+              <label htmlFor="orgType" className="block text-sm font-medium text-slate-700">
+                Organization Type
+              </label>
+              <select
+                id="orgType"
+                value={orgType}
+                onChange={(e) => handleOrgTypeChange(e.target.value)}
+                className="mt-1.5 w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-[#6d28d9] focus:border-transparent transition"
+              >
+                {Object.entries(ORG_PRESETS).map(([key, preset]) => (
+                  <option key={key} value={key}>{preset.label}</option>
+                ))}
+              </select>
+              {orgType !== "custom" && (
+                <p className="mt-1 text-xs text-slate-400">
+                  Labels: {labels.intake}, {labels.class}, {labels.student}, {labels.seat}, {labels.fee}
+                </p>
+              )}
+            </div>
+
+            {/* Custom labels (only shown for Custom org type) */}
+            {orgType === "custom" && (
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+                <p className="text-xs font-medium text-slate-600">Custom Labels</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {([
+                    ["intake", "Intake label"],
+                    ["class", "Class label"],
+                    ["student", "Student label"],
+                    ["seat", "Seat label"],
+                    ["fee", "Fee label"],
+                  ] as [keyof typeof labels, string][]).map(([key, placeholder]) => (
+                    <div key={key}>
+                      <label className="block text-xs text-slate-500 mb-1 capitalize">{key}</label>
+                      <input
+                        type="text"
+                        value={labels[key]}
+                        onChange={(e) => setLabels((prev) => ({ ...prev, [key]: e.target.value }))}
+                        placeholder={placeholder}
+                        className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#6d28d9] focus:border-transparent transition"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Subdomain */}
             <div>
