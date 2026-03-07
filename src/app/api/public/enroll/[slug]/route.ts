@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
-import { formatMMK } from "@/lib/utils";
+import { formatMMKSimple } from "@/lib/utils";
 import type { Intake, Class } from "@/types/database";
 
 // Always fetch live data — intake/class availability changes in real time
@@ -165,7 +165,7 @@ export async function GET(
     id:                   c.id,
     level:                c.level,
     fee_mmk:              c.fee_mmk,
-    fee_formatted:        formatMMK(c.fee_mmk),
+    fee_formatted:        formatMMKSimple(c.fee_mmk),
     seat_remaining:       c.seat_remaining,
     seat_total:           c.seat_total,
     enrollment_close_at:  c.enrollment_close_at,
