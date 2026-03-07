@@ -410,6 +410,7 @@ function AddCustomClassModal({
   showEventFields: boolean;
 }) {
   const toast = useToast();
+  const tl = useTenantLabels();
   const [form, setForm] = useState<AddCustomForm>({
     level: "",
     fee_mmk: "",
@@ -488,8 +489,8 @@ function AddCustomClassModal({
             </svg>
           </div>
           <div>
-            <h2 className="text-lg font-bold text-gray-900">Add Custom Class</h2>
-            <p className="text-xs text-gray-400 mt-0.5">Create a class with any level name</p>
+            <h2 className="text-lg font-bold text-gray-900">Add Custom {tl.class}</h2>
+            <p className="text-xs text-gray-400 mt-0.5">Create a {tl.class.toLowerCase()} with any name</p>
           </div>
           <button
             onClick={onClose}
@@ -503,14 +504,18 @@ function AddCustomClassModal({
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className={labelClass}>Level Name</label>
+            <label className={labelClass}>{tl.class} Name</label>
             <input
               type="text"
               value={form.level}
               onChange={(e) => set("level", e.target.value)}
               required
               className={inputClass}
-              placeholder="e.g. Beginner A, Business Japanese, N5-Prep"
+              placeholder={tl.orgType === "language_school"
+                ? "e.g. Beginner A, Business Japanese, N5-Prep"
+                : tl.orgType === "event"
+                  ? "e.g. VIP, Standard, Early Bird"
+                  : "e.g. Basic, Premium, Group"}
               autoFocus
             />
           </div>
@@ -548,33 +553,35 @@ function AddCustomClassModal({
             </div>
           </div>
 
-          <div>
-            <label className={labelClass}>Class Mode</label>
-            <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden">
-              <button
-                type="button"
-                onClick={() => set("mode", "offline")}
-                className={`px-4 py-2 text-sm font-medium transition-colors ${
-                  form.mode === "offline"
-                    ? "bg-[#6d28d9] text-white"
-                    : "bg-white text-gray-600 hover:bg-gray-50"
-                }`}
-              >
-                🏫 Offline
-              </button>
-              <button
-                type="button"
-                onClick={() => set("mode", "online")}
-                className={`px-4 py-2 text-sm font-medium transition-colors ${
-                  form.mode === "online"
-                    ? "bg-[#6d28d9] text-white"
-                    : "bg-white text-gray-600 hover:bg-gray-50"
-                }`}
-              >
-                💻 Online
-              </button>
+          {tl.orgType !== "event" && (
+            <div>
+              <label className={labelClass}>Class Mode</label>
+              <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => set("mode", "offline")}
+                  className={`px-4 py-2 text-sm font-medium transition-colors ${
+                    form.mode === "offline"
+                      ? "bg-[#6d28d9] text-white"
+                      : "bg-white text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  🏫 Offline
+                </button>
+                <button
+                  type="button"
+                  onClick={() => set("mode", "online")}
+                  className={`px-4 py-2 text-sm font-medium transition-colors ${
+                    form.mode === "online"
+                      ? "bg-[#6d28d9] text-white"
+                      : "bg-white text-gray-600 hover:bg-gray-50"
+                  }`}
+                >
+                  💻 Online
+                </button>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Event fields — shown for non-language-school org types */}
           {showEventFields && (
@@ -637,7 +644,7 @@ function AddCustomClassModal({
               disabled={saving}
               className="flex-1 px-4 py-2.5 bg-[#1a3f8a] text-white rounded-xl text-sm font-medium hover:bg-blue-900 disabled:opacity-50 transition-colors"
             >
-              {saving ? "Creating…" : "Create Class"}
+              {saving ? "Creating…" : `Create ${tl.class}`}
             </button>
           </div>
         </form>
@@ -924,8 +931,8 @@ export default function IntakeDetailPage({
                 )}
               </button>
 
-              {/* Add Default Classes (N5–N1) */}
-              {!allDefaultsExist && (
+              {/* Add Default Classes (N5–N1) — language_school only */}
+              {tl.orgType === "language_school" && !allDefaultsExist && (
                 <button
                   onClick={() => setConfirmAddAll(true)}
                   disabled={addingClasses}
@@ -1015,7 +1022,10 @@ export default function IntakeDetailPage({
               ) : classes.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-5 py-12 text-center text-sm text-gray-400">
-                    No {tl.class.toLowerCase()}es yet. Use &ldquo;Add Default Classes (N5–N1)&rdquo; or &ldquo;+ Add Custom {tl.class}&rdquo; to get started.
+                    No {tl.class.toLowerCase()}es yet.{" "}
+                    {tl.orgType === "language_school"
+                      ? <>Use &ldquo;Add Default Classes (N5–N1)&rdquo; or &ldquo;+ Add Custom {tl.class}&rdquo; to get started.</>
+                      : <>Use &ldquo;+ Add Custom {tl.class}&rdquo; to get started.</>}
                   </td>
                 </tr>
               ) : (

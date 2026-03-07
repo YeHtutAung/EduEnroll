@@ -48,6 +48,10 @@ export default function Sidebar({ displayName, displayEmail, displayRole, school
   const intakeMm = INTAKE_MM[tl.orgType] ?? INTAKE_MM.language_school;
   const studentMm = STUDENT_MM[tl.orgType] ?? STUDENT_MM.language_school;
 
+  // Simple English pluralization: "Type" → "Types", "Class" → "Classes"
+  const plural = (s: string) =>
+    s.endsWith("s") || s.endsWith("x") || s.endsWith("sh") || s.endsWith("ch") ? s + "es" : s + "s";
+
   const NAV_LINKS: NavLink[] = [
     {
       href: "/admin/dashboard",
@@ -57,13 +61,13 @@ export default function Sidebar({ displayName, displayEmail, displayRole, school
     },
     {
       href: "/admin/intakes",
-      labelEn: `${tl.intake}s & ${tl.class}es`,
+      labelEn: `${plural(tl.intake)} & ${plural(tl.class)}`,
       labelMm: intakeMm,
       emoji: "🏫",
     },
     {
       href: "/admin/students",
-      labelEn: `${tl.student}s`,
+      labelEn: plural(tl.student),
       labelMm: studentMm,
       emoji: "👥",
     },

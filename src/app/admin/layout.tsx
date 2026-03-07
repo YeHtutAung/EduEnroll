@@ -106,6 +106,7 @@ export default async function AdminLayout({
       tenantLabels.student = tenant.label_student || "Student";
       tenantLabels.seat = tenant.label_seat || "Seat";
       tenantLabels.fee = tenant.label_fee || "Fee";
+      tenantLabels.orgType = tenant.org_type || "language_school";
     }
   }
 
