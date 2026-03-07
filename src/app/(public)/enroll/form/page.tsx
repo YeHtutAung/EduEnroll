@@ -415,13 +415,6 @@ function EnrollmentFormPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           class_id: classInfo.id,
-          // Legacy fields for the submit_enrollment RPC
-          student_name_en: dynamicData.name_en ?? "",
-          student_name_mm: dynamicData.name_mm ?? null,
-          nrc_number: dynamicData.nrc ?? null,
-          phone: dynamicData.phone ?? "",
-          email: dynamicData.email ?? null,
-          // Dynamic form data
           form_data: dynamicData,
         }),
       });
