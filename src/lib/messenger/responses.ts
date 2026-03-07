@@ -68,18 +68,24 @@ export async function sendWelcome(
   const supabase = createAdminClient();
   const { data: tenant } = await supabase
     .from("tenants")
-    .select("name")
+    .select("name, messenger_greeting")
     .eq("id", tenantId)
-    .single() as { data: { name: string } | null; error: unknown };
+    .single() as {
+    data: { name: string; messenger_greeting: string | null } | null;
+    error: unknown;
+  };
 
   const school = tenant?.name ?? "KuuNyi";
 
-  await sendQuickReplies(
-    pageToken,
-    senderPsid,
-    `မင်္ဂလာပါ! ${school} မှ ကြိုဆိုပါတယ် 🎌\nHello! Welcome to ${school}\n\nHow can I help you?\nဘာကူညီပေးရမလဲ?`,
-    MAIN_MENU_BUTTONS,
-  );
+  let msg = `မင်္ဂလာပါ! ${school} မှ ကြိုဆိုပါတယ် 🎌\nHello! Welcome to ${school}`;
+
+  if (tenant?.messenger_greeting) {
+    msg += `\n\n${tenant.messenger_greeting}`;
+  }
+
+  msg += `\n\nဘာကူညီပေးရမလဲ? / How can I help you?`;
+
+  await sendQuickReplies(pageToken, senderPsid, msg, MAIN_MENU_BUTTONS);
 }
 
 // ─── 2. Open Intakes ─────────────────────────────────────────────────────────

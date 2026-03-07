@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, badRequest, notFound } from "@/lib/api";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // ─── POST /api/intakes/[id]/form-fields/apply ────────────────────────────────
 // Copy non-default custom fields from source intake to target intakes.
@@ -55,8 +56,11 @@ export async function POST(
     return badRequest("All selected intakes must be in Draft status.");
   }
 
+  // Use admin client to bypass RLS for cross-intake operations
+  const admin = createAdminClient();
+
   // Fetch non-default fields from source
-  const { data: sourceFields } = await supabase
+  const { data: sourceFields } = await admin
     .from("intake_form_fields")
     .select("field_key, field_label, field_type, is_required, options, sort_order")
     .eq("intake_id", params.id)
@@ -77,15 +81,20 @@ export async function POST(
 
   for (const target of draftTargets) {
     // Delete existing non-default fields from target
-    await supabase
+    const { error: delError } = await admin
       .from("intake_form_fields")
       .delete()
       .eq("intake_id", target.id)
       .eq("is_default", false);
 
+    if (delError) {
+      console.error(`[apply] Delete error for ${target.id}:`, delError);
+      continue;
+    }
+
     // Insert source fields into target (if any)
     if (sourceFields && sourceFields.length > 0) {
-      await supabase
+      const { error: insError } = await admin
         .from("intake_form_fields")
         .insert(
           sourceFields.map((f) => ({
@@ -99,6 +108,11 @@ export async function POST(
             is_default: false,
           })) as never[],
         );
+
+      if (insError) {
+        console.error(`[apply] Insert error for ${target.id}:`, insError);
+        continue;
+      }
     }
 
     appliedCount++;
