@@ -20,7 +20,9 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import StatusBadge from "@/components/ui/StatusBadge";
 import { useToast } from "@/components/ui/Toast";
+import type { IntakeStatus } from "@/types/database";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -52,6 +54,13 @@ interface FieldTypeOption {
   icon: string;
 }
 
+interface IntakeItem {
+  id: string;
+  name: string;
+  year: number;
+  status: IntakeStatus;
+}
+
 const FIELD_TYPES: FieldTypeOption[] = [
   { type: "text", label: "Text", icon: "T" },
   { type: "select", label: "Dropdown", icon: "▾" },
@@ -69,13 +78,15 @@ function SortableField({
   field,
   isSelected,
   onSelect,
+  readOnly,
 }: {
   field: FormField;
   isSelected: boolean;
   onSelect: () => void;
+  readOnly: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: field.id });
+    useSortable({ id: field.id, disabled: readOnly });
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -89,29 +100,33 @@ function SortableField({
     <div
       ref={setNodeRef}
       style={style}
-      onClick={onSelect}
-      className={`group flex items-center gap-3 px-4 py-3 rounded-xl border-2 cursor-pointer transition-all ${
-        isSelected
+      onClick={readOnly ? undefined : onSelect}
+      className={`group flex items-center gap-3 px-4 py-3 rounded-xl border-2 transition-all ${
+        readOnly ? "cursor-default opacity-75" : "cursor-pointer"
+      } ${
+        isSelected && !readOnly
           ? "border-[#1a3f8a] bg-blue-50/50 shadow-sm"
           : "border-gray-200 bg-white hover:border-gray-300"
       }`}
     >
       {/* Drag handle */}
-      <button
-        {...attributes}
-        {...listeners}
-        className="text-gray-300 hover:text-gray-500 cursor-grab active:cursor-grabbing shrink-0"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
-          <circle cx="5" cy="3" r="1.5" />
-          <circle cx="11" cy="3" r="1.5" />
-          <circle cx="5" cy="8" r="1.5" />
-          <circle cx="11" cy="8" r="1.5" />
-          <circle cx="5" cy="13" r="1.5" />
-          <circle cx="11" cy="13" r="1.5" />
-        </svg>
-      </button>
+      {!readOnly && (
+        <button
+          {...attributes}
+          {...listeners}
+          className="text-gray-300 hover:text-gray-500 cursor-grab active:cursor-grabbing shrink-0"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <svg className="w-4 h-4" viewBox="0 0 16 16" fill="currentColor">
+            <circle cx="5" cy="3" r="1.5" />
+            <circle cx="11" cy="3" r="1.5" />
+            <circle cx="5" cy="8" r="1.5" />
+            <circle cx="11" cy="8" r="1.5" />
+            <circle cx="5" cy="13" r="1.5" />
+            <circle cx="11" cy="13" r="1.5" />
+          </svg>
+        </button>
+      )}
 
       {/* Type icon */}
       <span className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center text-sm shrink-0">
@@ -367,6 +382,157 @@ function FieldPreview({ field }: { field: FormField }) {
   }
 }
 
+// ─── Apply to Other Intakes Modal ────────────────────────────────────────────
+
+function ApplyModal({
+  sourceIntakeId,
+  onClose,
+  onSuccess,
+}: {
+  sourceIntakeId: string;
+  onClose: () => void;
+  onSuccess: (count: number) => void;
+}) {
+  const toast = useToast();
+  const [intakes, setIntakes] = useState<IntakeItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [applying, setApplying] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    fetch("/api/intakes")
+      .then((r) => r.json())
+      .then((data: IntakeItem[]) => {
+        setIntakes(data.filter((i) => i.id !== sourceIntakeId));
+      })
+      .catch(() => toast.error("Failed to load intakes."))
+      .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sourceIntakeId]);
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function handleApply() {
+    if (selected.size === 0) return;
+    setApplying(true);
+    try {
+      const res = await fetch(`/api/intakes/${sourceIntakeId}/form-fields/apply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetIntakeIds: Array.from(selected) }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error ?? "Failed to apply.");
+      }
+      const data = await res.json();
+      onSuccess(data.applied);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to apply.");
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h2 className="text-lg font-semibold text-gray-900">Apply to Other Intakes</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="w-6 h-6 border-2 border-[#1a3f8a] border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : intakes.length === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-8">No other intakes found.</p>
+          ) : (
+            <div className="space-y-2">
+              {intakes.map((intake) => {
+                const isDraft = intake.status === "draft";
+                const isChecked = selected.has(intake.id);
+                return (
+                  <label
+                    key={intake.id}
+                    className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition-all ${
+                      isDraft
+                        ? isChecked
+                          ? "border-[#1a3f8a] bg-blue-50/50 cursor-pointer"
+                          : "border-gray-200 hover:border-gray-300 cursor-pointer"
+                        : "border-gray-100 bg-gray-50 cursor-not-allowed"
+                    }`}
+                    title={!isDraft ? "Set intake to Draft to edit its form" : undefined}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked}
+                      onChange={() => toggleSelect(intake.id)}
+                      disabled={!isDraft}
+                      className="accent-[#1a3f8a] w-4 h-4 disabled:opacity-30"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-medium truncate ${isDraft ? "text-gray-800" : "text-gray-400"}`}>
+                        {intake.name}
+                      </p>
+                      <p className="text-xs text-gray-400">{intake.year}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <StatusBadge status={intake.status} />
+                      {!isDraft && (
+                        <svg className="w-4 h-4 text-gray-300" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+                        </svg>
+                      )}
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-gray-100">
+          <p className="text-xs text-gray-400 mb-3">
+            Only Draft intakes can receive form changes. Custom fields will be replaced.
+          </p>
+          <div className="flex gap-3">
+            <button
+              onClick={onClose}
+              className="flex-1 px-4 py-2.5 text-sm font-medium text-gray-700 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleApply}
+              disabled={selected.size === 0 || applying}
+              className="flex-1 px-4 py-2.5 text-sm font-medium text-white bg-[#1a3f8a] rounded-xl hover:bg-blue-900 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {applying ? "Applying..." : `Apply to Selected (${selected.size})`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Page ───────────────────────────────────────────────────────────────
 
 export default function FormBuilderPage() {
@@ -376,22 +542,26 @@ export default function FormBuilderPage() {
 
   const [fields, setFields] = useState<FormField[]>([]);
   const [intakeName, setIntakeName] = useState("");
+  const [intakeStatus, setIntakeStatus] = useState<IntakeStatus>("draft");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [showApplyModal, setShowApplyModal] = useState(false);
 
   // Track fields to delete
   const [deletedIds, setDeletedIds] = useState<string[]>([]);
   // Track new fields (no server id yet)
   const [tempCounter, setTempCounter] = useState(0);
 
+  const readOnly = intakeStatus === "open" || intakeStatus === "closed";
+
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  const selectedField = fields.find((f) => f.id === selectedId) ?? null;
+  const selectedField = !readOnly ? (fields.find((f) => f.id === selectedId) ?? null) : null;
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
 
@@ -406,6 +576,7 @@ export default function FormBuilderPage() {
       if (intakeRes.ok) {
         const intake = await intakeRes.json();
         setIntakeName(intake.name ?? "");
+        setIntakeStatus(intake.status ?? "draft");
       }
     } catch {
       toast.error("Failed to load form fields.");
@@ -422,6 +593,7 @@ export default function FormBuilderPage() {
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   function handleDragEnd(event: DragEndEvent) {
+    if (readOnly) return;
     const { active, over } = event;
     if (!over || active.id === over.id) return;
 
@@ -435,6 +607,7 @@ export default function FormBuilderPage() {
   }
 
   function addField(type: FieldType) {
+    if (readOnly) return;
     const typeInfo = FIELD_TYPES.find((t) => t.type === type);
     const newId = `temp-${tempCounter}`;
     setTempCounter((c) => c + 1);
@@ -465,7 +638,6 @@ export default function FormBuilderPage() {
     const field = fields.find((f) => f.id === id);
     if (!field || field.is_default) return;
 
-    // Track server-side fields for deletion
     if (!id.startsWith("temp-")) {
       setDeletedIds((prev) => [...prev, id]);
     }
@@ -480,7 +652,6 @@ export default function FormBuilderPage() {
   async function handleSave() {
     setSaving(true);
     try {
-      // 1. Delete removed fields
       for (const id of deletedIds) {
         await fetch(`/api/intakes/${intakeId}/form-fields`, {
           method: "DELETE",
@@ -489,7 +660,6 @@ export default function FormBuilderPage() {
         });
       }
 
-      // 2. Create new fields
       for (const field of fields) {
         if (field.id.startsWith("temp-")) {
           const res = await fetch(`/api/intakes/${intakeId}/form-fields`, {
@@ -511,7 +681,6 @@ export default function FormBuilderPage() {
         }
       }
 
-      // 3. Update existing fields (sort_order, label, type, required, options)
       for (const field of fields) {
         if (!field.id.startsWith("temp-")) {
           await fetch(`/api/intakes/${intakeId}/form-fields`, {
@@ -532,7 +701,6 @@ export default function FormBuilderPage() {
       toast.success("Form saved successfully.");
       setDirty(false);
       setDeletedIds([]);
-      // Refetch to get server IDs for new fields
       await fetchFields();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save.");
@@ -574,47 +742,76 @@ export default function FormBuilderPage() {
             စာရင်းသွင်းဖောင် ပြင်ဆင်ရန်
           </p>
         </div>
-        <button
-          onClick={handleSave}
-          disabled={!dirty || saving}
-          className="flex items-center gap-2 px-5 py-2.5 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
-        >
-          {saving ? (
-            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-          ) : (
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
-            </svg>
-          )}
-          {saving ? "Saving..." : "Save Form"}
-        </button>
+        {!readOnly && (
+          <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={() => setShowApplyModal(true)}
+              disabled={dirty}
+              className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-gray-700 border border-gray-200 rounded-xl hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              title={dirty ? "Save changes first" : "Copy custom fields to other intakes"}
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 17.25v3.375c0 .621-.504 1.125-1.125 1.125h-9.5a1.125 1.125 0 01-1.125-1.125V7.875c0-.621.504-1.125 1.125-1.125H6.75a9.06 9.06 0 011.5.124m7.5 10.376h3.375c.621 0 1.125-.504 1.125-1.125V11.25c0-4.46-3.243-8.161-7.5-8.876a9.06 9.06 0 00-1.5-.124H9.375c-.621 0-1.125.504-1.125 1.125v3.5m7.5 10.375H9.375a1.125 1.125 0 01-1.125-1.125v-9.25m12 6.625v-1.875a3.375 3.375 0 00-3.375-3.375h-1.5a1.125 1.125 0 01-1.125-1.125v-1.5a3.375 3.375 0 00-3.375-3.375H9.75" />
+              </svg>
+              Apply to Other Intakes
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={!dirty || saving}
+              className="flex items-center gap-2 px-5 py-2.5 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {saving ? (
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                </svg>
+              )}
+              {saving ? "Saving..." : "Save Form"}
+            </button>
+          </div>
+        )}
       </div>
+
+      {/* Read-only banner */}
+      {readOnly && (
+        <div className="mb-6 flex items-center gap-3 px-5 py-3.5 bg-amber-50 border border-amber-200 rounded-xl">
+          <svg className="w-5 h-5 text-amber-500 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+          </svg>
+          <p className="text-sm text-amber-800">
+            This intake is <strong className="capitalize">{intakeStatus}</strong>. Set it to <strong>Draft</strong> to make changes.
+          </p>
+        </div>
+      )}
 
       {/* Main layout */}
       <div className="grid grid-cols-12 gap-6">
         {/* Left: Field type palette */}
         <div className="col-span-12 lg:col-span-3">
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
-            <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
-              Add Field
-            </h2>
-            <div className="grid grid-cols-2 gap-2">
-              {FIELD_TYPES.map((ft) => (
-                <button
-                  key={ft.type}
-                  onClick={() => addField(ft.type)}
-                  className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-xl border border-gray-200 hover:border-[#1a3f8a] hover:bg-blue-50/50 transition-all text-center"
-                >
-                  <span className="text-lg">{ft.icon}</span>
-                  <span className="text-xs font-medium text-gray-600">{ft.label}</span>
-                </button>
-              ))}
+          {!readOnly && (
+            <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+              <h2 className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                Add Field
+              </h2>
+              <div className="grid grid-cols-2 gap-2">
+                {FIELD_TYPES.map((ft) => (
+                  <button
+                    key={ft.type}
+                    onClick={() => addField(ft.type)}
+                    className="flex flex-col items-center gap-1.5 px-3 py-3 rounded-xl border border-gray-200 hover:border-[#1a3f8a] hover:bg-blue-50/50 transition-all text-center"
+                  >
+                    <span className="text-lg">{ft.icon}</span>
+                    <span className="text-xs font-medium text-gray-600">{ft.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Config panel */}
           {selectedField && (
-            <div className="mt-4 bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+            <div className={`${readOnly ? "" : "mt-4"} bg-white rounded-2xl border border-gray-100 shadow-sm p-4`}>
               <FieldConfigPanel
                 field={selectedField}
                 onUpdate={(updates) => updateField(selectedField.id, updates)}
@@ -651,6 +848,7 @@ export default function FormBuilderPage() {
                         key={field.id}
                         field={field}
                         isSelected={selectedId === field.id}
+                        readOnly={readOnly}
                         onSelect={() =>
                           setSelectedId(selectedId === field.id ? null : field.id)
                         }
@@ -681,6 +879,18 @@ export default function FormBuilderPage() {
           </div>
         </div>
       </div>
+
+      {/* Apply Modal */}
+      {showApplyModal && (
+        <ApplyModal
+          sourceIntakeId={intakeId}
+          onClose={() => setShowApplyModal(false)}
+          onSuccess={(count) => {
+            setShowApplyModal(false);
+            toast.success(`Form applied to ${count} intake(s).`);
+          }}
+        />
+      )}
     </div>
   );
 }
