@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import LogoutButton from "@/components/admin/LogoutButton";
+import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
 
 import type { UserRole } from "@/types/database";
 
@@ -23,53 +24,54 @@ interface NavLink {
   ownerOnly?: boolean;
 }
 
-const NAV_LINKS: NavLink[] = [
-  {
-    href: "/admin/dashboard",
-    labelEn: "Dashboard",
-    labelMm: "ဒက်ရှ်ဘုတ်",
-    emoji: "📊",
-  },
-  {
-    href: "/admin/intakes",
-    labelEn: "Intakes & Classes",
-    labelMm: "သင်တန်းများ",
-    emoji: "🏫",
-  },
-  {
-    href: "/admin/students",
-    labelEn: "Students",
-    labelMm: "ကျောင်းသားများ",
-    emoji: "👥",
-  },
-  {
-    href: "/admin/analytics",
-    labelEn: "Analytics",
-    labelMm: "စာရင်းအင်း",
-    emoji: "📈",
-  },
-  {
-    href: "/admin/payments",
-    labelEn: "Payments",
-    labelMm: "ငွေပေးချေမှု",
-    emoji: "💳",
-  },
-  {
-    href: "/admin/announcements",
-    labelEn: "Announcements",
-    labelMm: "ကြေညာချက်",
-    emoji: "📢",
-  },
-  {
-    href: "/admin/settings",
-    labelEn: "Settings",
-    labelMm: "ဆက်တင်",
-    emoji: "⚙️",
-    ownerOnly: true,
-  },
-];
-
 export default function Sidebar({ displayName, displayEmail, displayRole, schoolName, schoolLogoUrl }: SidebarProps) {
+  const tl = useTenantLabels();
+
+  const NAV_LINKS: NavLink[] = [
+    {
+      href: "/admin/dashboard",
+      labelEn: "Dashboard",
+      labelMm: "ဒက်ရှ်ဘုတ်",
+      emoji: "📊",
+    },
+    {
+      href: "/admin/intakes",
+      labelEn: `${tl.intake}s & ${tl.class}es`,
+      labelMm: "သင်တန်းများ",
+      emoji: "🏫",
+    },
+    {
+      href: "/admin/students",
+      labelEn: `${tl.student}s`,
+      labelMm: "ကျောင်းသားများ",
+      emoji: "👥",
+    },
+    {
+      href: "/admin/analytics",
+      labelEn: "Analytics",
+      labelMm: "စာရင်းအင်း",
+      emoji: "📈",
+    },
+    {
+      href: "/admin/payments",
+      labelEn: "Payments",
+      labelMm: "ငွေပေးချေမှု",
+      emoji: "💳",
+    },
+    {
+      href: "/admin/announcements",
+      labelEn: "Announcements",
+      labelMm: "ကြေညာချက်",
+      emoji: "📢",
+    },
+    {
+      href: "/admin/settings",
+      labelEn: "Settings",
+      labelMm: "ဆက်တင်",
+      emoji: "⚙️",
+      ownerOnly: true,
+    },
+  ];
   const [open, setOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const pathname = usePathname();

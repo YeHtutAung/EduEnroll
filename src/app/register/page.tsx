@@ -16,11 +16,12 @@ interface OrgPreset {
 }
 
 const ORG_PRESETS: Record<string, OrgPreset> = {
-  language_school: { label: "Language School",   intake: "Intake",   class: "Class Type", student: "Student", seat: "Seat", fee: "Fee" },
-  training_center: { label: "Training Center",   intake: "Batch",    class: "Course",     student: "Trainee", seat: "Slot", fee: "Tuition" },
-  university:      { label: "University",         intake: "Semester", class: "Program",    student: "Student", seat: "Seat", fee: "Tuition" },
-  tutoring:        { label: "Tutoring",           intake: "Session",  class: "Subject",    student: "Student", seat: "Spot", fee: "Rate" },
-  custom:          { label: "Custom",             intake: "Intake",   class: "Class Type", student: "Student", seat: "Seat", fee: "Fee" },
+  language_school:  { label: "Language School",    intake: "Intake",  class: "Class Type",   student: "Student",      seat: "Seat", fee: "Fee" },
+  event:            { label: "Event",              intake: "Event",   class: "Ticket Type",  student: "Attendee",     seat: "Seat", fee: "Fee" },
+  fitness:          { label: "Fitness",             intake: "Batch",   class: "Class Type",   student: "Member",       seat: "Seat", fee: "Fee" },
+  beauty_wellness:  { label: "Beauty & Wellness",  intake: "Course",  class: "Session Type", student: "Client",       seat: "Seat", fee: "Fee" },
+  training_center:  { label: "Training Center",    intake: "Cohort",  class: "Module Type",  student: "Participant",  seat: "Seat", fee: "Fee" },
+  custom:           { label: "Custom",             intake: "Intake",  class: "Class Type",   student: "Student",      seat: "Seat", fee: "Fee" },
 };
 
 export default function RegisterPage() {
