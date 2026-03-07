@@ -24,12 +24,15 @@ interface IntakeInfo {
   status: string;
 }
 
-interface FormData {
-  student_name_en: string;
-  student_name_mm: string;
-  nrc_number: string;
-  phone: string;
-  email: string;
+interface FormFieldDef {
+  id: string;
+  field_key: string;
+  field_label: string;
+  field_type: string;
+  is_required: boolean;
+  options: string[] | null;
+  sort_order: number;
+  is_default: boolean;
 }
 
 // ─── Myanmar phone validation ────────────────────────────────────────────────
@@ -94,35 +97,6 @@ function StepIndicator({ step }: { step: 1 | 2 }) {
   );
 }
 
-// ─── Form field wrapper ──────────────────────────────────────────────────────
-
-function Field({
-  label,
-  labelMM,
-  required,
-  error,
-  children,
-}: {
-  label: string;
-  labelMM: string;
-  required?: boolean;
-  error?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="mb-5">
-      <label className="mb-1.5 block text-sm font-medium text-gray-700">
-        {label} / <span className="font-myanmar">{labelMM}</span>
-        {required && <span className="ml-1 text-red-500">*</span>}
-      </label>
-      {children}
-      {error && (
-        <p className="mt-1 text-xs text-red-600">{error}</p>
-      )}
-    </div>
-  );
-}
-
 // ─── Loading skeleton ────────────────────────────────────────────────────────
 
 function LoadingSkeleton() {
@@ -167,6 +141,146 @@ function ErrorPage({ message, onBack }: { message: string; onBack?: () => void }
   );
 }
 
+// ─── Dynamic field renderer ──────────────────────────────────────────────────
+
+const INPUT_BASE =
+  "w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 " +
+  "focus:border-[#1a6b3c] focus:outline-none focus:ring-1 focus:ring-[#1a6b3c]";
+const INPUT_ERROR = "border-red-400 focus:border-red-500 focus:ring-red-500";
+
+function DynamicField({
+  field,
+  value,
+  error,
+  onChange,
+}: {
+  field: FormFieldDef;
+  value: string;
+  error?: string;
+  onChange: (val: string) => void;
+}) {
+  const hasError = !!error;
+  const cls = `${INPUT_BASE} ${hasError ? INPUT_ERROR : ""}`;
+
+  let input: React.ReactNode;
+
+  switch (field.field_type) {
+    case "phone":
+      input = (
+        <input
+          type="tel"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={cls}
+          placeholder="09-xxxxxxxxx"
+        />
+      );
+      break;
+    case "date":
+      input = (
+        <input
+          type="date"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={cls}
+        />
+      );
+      break;
+    case "select":
+      input = (
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={`${cls} bg-white`}
+        >
+          <option value="">Select...</option>
+          {(field.options ?? []).map((opt) => (
+            <option key={opt} value={opt}>{opt}</option>
+          ))}
+        </select>
+      );
+      break;
+    case "radio":
+      input = (
+        <div className="space-y-2 mt-1">
+          {(field.options ?? []).map((opt) => (
+            <label key={opt} className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+              <input
+                type="radio"
+                name={field.field_key}
+                checked={value === opt}
+                onChange={() => onChange(opt)}
+                className="accent-[#1a6b3c] w-4 h-4"
+              />
+              {opt}
+            </label>
+          ))}
+        </div>
+      );
+      break;
+    case "checkbox":
+      input = (
+        <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={value === "true"}
+            onChange={(e) => onChange(e.target.checked ? "true" : "")}
+            className="accent-[#1a6b3c] w-4 h-4"
+          />
+          {field.field_label}
+        </label>
+      );
+      break;
+    case "address":
+      input = (
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          rows={3}
+          className={`${cls} resize-none`}
+          placeholder={field.field_label}
+        />
+      );
+      break;
+    case "file":
+      input = (
+        <input
+          type="file"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            onChange(file?.name ?? "");
+          }}
+          className={cls}
+        />
+      );
+      break;
+    default: // text
+      input = (
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={`${cls} ${field.field_key === "name_mm" ? "font-myanmar" : ""}`}
+          placeholder={field.field_label}
+        />
+      );
+      break;
+  }
+
+  return (
+    <div className="mb-5">
+      {field.field_type !== "checkbox" && (
+        <label className="mb-1.5 block text-sm font-medium text-gray-700">
+          {field.field_label}
+          {field.is_required && <span className="ml-1 text-red-500">*</span>}
+        </label>
+      )}
+      {input}
+      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+    </div>
+  );
+}
+
 // ─── Main page ───────────────────────────────────────────────────────────────
 
 export default function EnrollmentFormPageWrapper() {
@@ -186,23 +300,18 @@ function EnrollmentFormPage() {
   // Data state
   const [intake, setIntake] = useState<IntakeInfo | null>(null);
   const [classInfo, setClassInfo] = useState<ClassInfo | null>(null);
+  const [formFields, setFormFields] = useState<FormFieldDef[]>([]);
   const [pageLoading, setPageLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
 
   // Form state
   const [step, setStep] = useState<1 | 2>(1);
-  const [form, setForm] = useState<FormData>({
-    student_name_en: "",
-    student_name_mm: "",
-    nrc_number: "",
-    phone: "",
-    email: "",
-  });
-  const [fieldErrors, setFieldErrors] = useState<Partial<Record<keyof FormData, string>>>({});
+  const [formData, setFormData] = useState<Record<string, string>>({});
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<{ en: string; mm: string } | null>(null);
 
-  // ── Fetch intake + class info ────────────────────────────────
+  // ── Fetch intake + class + form fields ────────────────────────
   useEffect(() => {
     if (!classId || !slug) {
       setPageError("Missing class or intake information. Please go back and select a class.");
@@ -226,6 +335,19 @@ function EnrollmentFormPage() {
           return;
         }
         setClassInfo(found);
+
+        // Fetch form fields for this intake
+        const fieldsRes = await fetch(`/api/public/form-fields?intake_id=${json.intake.id}`);
+        if (fieldsRes.ok) {
+          const fields = (await fieldsRes.json()) as FormFieldDef[];
+          setFormFields(fields);
+          // Initialize form data with empty values
+          const initial: Record<string, string> = {};
+          for (const f of fields) {
+            initial[f.field_key] = "";
+          }
+          setFormData(initial);
+        }
       } catch {
         setPageError("Failed to load. Please try again.");
       } finally {
@@ -237,24 +359,25 @@ function EnrollmentFormPage() {
 
   // ── Validation ───────────────────────────────────────────────
   function validateStep1(): boolean {
-    const errors: Partial<Record<keyof FormData, string>> = {};
+    const errors: Record<string, string> = {};
 
-    if (!form.student_name_en.trim()) {
-      errors.student_name_en = "English name is required.";
-    }
-    if (!form.student_name_mm.trim()) {
-      errors.student_name_mm = "Myanmar name is required.";
-    }
-    if (!form.nrc_number.trim()) {
-      errors.nrc_number = "NRC number is required.";
-    }
-    if (!form.phone.trim()) {
-      errors.phone = "Phone number is required.";
-    } else if (!isValidMyanmarPhone(form.phone)) {
-      errors.phone = "Invalid Myanmar phone number (e.g. 09-xxxxxxxxx).";
-    }
-    if (form.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
-      errors.email = "Invalid email address.";
+    for (const field of formFields) {
+      const val = (formData[field.field_key] ?? "").trim();
+
+      if (field.is_required && !val) {
+        errors[field.field_key] = `${field.field_label} is required.`;
+        continue;
+      }
+
+      if (!val) continue;
+
+      // Type-specific validation
+      if (field.field_type === "phone" && !isValidMyanmarPhone(val)) {
+        errors[field.field_key] = "Invalid Myanmar phone number (e.g. 09-xxxxxxxxx).";
+      }
+      if (field.field_key === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
+        errors[field.field_key] = "Invalid email address.";
+      }
     }
 
     setFieldErrors(errors);
@@ -279,17 +402,27 @@ function EnrollmentFormPage() {
     setSubmitting(true);
     setSubmitError(null);
 
+    // Build form_data from dynamic fields
+    const dynamicData: Record<string, string> = {};
+    for (const field of formFields) {
+      const val = (formData[field.field_key] ?? "").trim();
+      if (val) dynamicData[field.field_key] = val;
+    }
+
     try {
       const res = await fetch("/api/public/enroll", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           class_id: classInfo.id,
-          student_name_en: form.student_name_en.trim(),
-          student_name_mm: form.student_name_mm.trim() || null,
-          nrc_number: form.nrc_number.trim() || null,
-          phone: form.phone.trim(),
-          email: form.email.trim() || null,
+          // Legacy fields for the submit_enrollment RPC
+          student_name_en: dynamicData.name_en ?? "",
+          student_name_mm: dynamicData.name_mm ?? null,
+          nrc_number: dynamicData.nrc ?? null,
+          phone: dynamicData.phone ?? "",
+          email: dynamicData.email ?? null,
+          // Dynamic form data
+          form_data: dynamicData,
         }),
       });
 
@@ -328,12 +461,12 @@ function EnrollmentFormPage() {
   }
 
   // ── Input handler ────────────────────────────────────────────
-  function updateField(field: keyof FormData, value: string) {
-    setForm((prev) => ({ ...prev, [field]: value }));
-    if (fieldErrors[field]) {
+  function updateField(key: string, value: string) {
+    setFormData((prev) => ({ ...prev, [key]: value }));
+    if (fieldErrors[key]) {
       setFieldErrors((prev) => {
         const next = { ...prev };
-        delete next[field];
+        delete next[key];
         return next;
       });
     }
@@ -354,10 +487,6 @@ function EnrollmentFormPage() {
   if (!intake || !classInfo) return null;
 
   const intakeNameMM = getIntakeNameMM(intake.name, intake.year);
-  const inputBase =
-    "w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 " +
-    "focus:border-[#1a6b3c] focus:outline-none focus:ring-1 focus:ring-[#1a6b3c]";
-  const inputError = "border-red-400 focus:border-red-500 focus:ring-red-500";
 
   // ── Step 1: Personal Information ─────────────────────────────
   if (step === 1) {
@@ -385,55 +514,15 @@ function EnrollmentFormPage() {
           Personal Information / <span className="font-myanmar">ကိုယ်ရေးအချက်အလက်</span>
         </h2>
 
-        <Field label="Full Name (English)" labelMM="အမည် (အင်္ဂလိပ်)" required error={fieldErrors.student_name_en}>
-          <input
-            type="text"
-            value={form.student_name_en}
-            onChange={(e) => updateField("student_name_en", e.target.value)}
-            className={`${inputBase} ${fieldErrors.student_name_en ? inputError : ""}`}
-            placeholder="e.g. Mg Mg"
+        {formFields.map((field) => (
+          <DynamicField
+            key={field.id}
+            field={field}
+            value={formData[field.field_key] ?? ""}
+            error={fieldErrors[field.field_key]}
+            onChange={(val) => updateField(field.field_key, val)}
           />
-        </Field>
-
-        <Field label="Full Name (Myanmar)" labelMM="အမည် (မြန်မာ)" required error={fieldErrors.student_name_mm}>
-          <input
-            type="text"
-            value={form.student_name_mm}
-            onChange={(e) => updateField("student_name_mm", e.target.value)}
-            className={`font-myanmar ${inputBase} ${fieldErrors.student_name_mm ? inputError : ""}`}
-            placeholder="ဥပမာ - မောင်မောင်"
-          />
-        </Field>
-
-        <Field label="NRC Number" labelMM="မှတ်ပုံတင်နံပါတ်" required error={fieldErrors.nrc_number}>
-          <input
-            type="text"
-            value={form.nrc_number}
-            onChange={(e) => updateField("nrc_number", e.target.value)}
-            className={`${inputBase} ${fieldErrors.nrc_number ? inputError : ""}`}
-            placeholder="12/OuKaMa(N)123456"
-          />
-        </Field>
-
-        <Field label="Phone" labelMM="ဖုန်းနံပါတ်" required error={fieldErrors.phone}>
-          <input
-            type="tel"
-            value={form.phone}
-            onChange={(e) => updateField("phone", e.target.value)}
-            className={`${inputBase} ${fieldErrors.phone ? inputError : ""}`}
-            placeholder="09-xxxxxxxxx"
-          />
-        </Field>
-
-        <Field label="Email (Optional)" labelMM="အီးမေးလ် (မဖြစ်မနေမလို)" error={fieldErrors.email}>
-          <input
-            type="email"
-            value={form.email}
-            onChange={(e) => updateField("email", e.target.value)}
-            className={`${inputBase} ${fieldErrors.email ? inputError : ""}`}
-            placeholder="example@email.com"
-          />
-        </Field>
+        ))}
 
         <button
           onClick={handleNext}
@@ -478,28 +567,18 @@ function EnrollmentFormPage() {
           Your Information
         </h3>
         <dl className="space-y-2.5 text-sm">
-          <div className="flex justify-between">
-            <dt className="text-gray-500">Name (English)</dt>
-            <dd className="font-medium text-gray-900">{form.student_name_en}</dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="text-gray-500">Name (Myanmar)</dt>
-            <dd className="font-myanmar font-medium text-gray-900">{form.student_name_mm}</dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="text-gray-500">NRC</dt>
-            <dd className="font-medium text-gray-900">{form.nrc_number}</dd>
-          </div>
-          <div className="flex justify-between">
-            <dt className="text-gray-500">Phone</dt>
-            <dd className="font-medium text-gray-900">{form.phone}</dd>
-          </div>
-          {form.email && (
-            <div className="flex justify-between">
-              <dt className="text-gray-500">Email</dt>
-              <dd className="font-medium text-gray-900">{form.email}</dd>
-            </div>
-          )}
+          {formFields.map((field) => {
+            const val = (formData[field.field_key] ?? "").trim();
+            if (!val) return null;
+            return (
+              <div key={field.field_key} className="flex justify-between">
+                <dt className="text-gray-500">{field.field_label}</dt>
+                <dd className={`font-medium text-gray-900 ${field.field_key === "name_mm" ? "font-myanmar" : ""}`}>
+                  {field.field_type === "checkbox" ? (val === "true" ? "Yes" : "No") : val}
+                </dd>
+              </div>
+            );
+          })}
         </dl>
       </div>
 

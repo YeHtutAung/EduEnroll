@@ -89,9 +89,28 @@ export async function POST(request: NextRequest) {
     .select()
     .single() as IntakeResult;
 
-  if (error) {
+  if (error || !data) {
     return NextResponse.json({ error: (error as { message: string }).message }, { status: 500 });
   }
+
+  // Seed 5 default form fields for the new intake
+  const defaultFields = [
+    { field_key: "name_en",  field_label: "Name (English)",  field_type: "text",  is_required: true,  sort_order: 1 },
+    { field_key: "name_mm",  field_label: "Name (Myanmar)",  field_type: "text",  is_required: true,  sort_order: 2 },
+    { field_key: "nrc",      field_label: "NRC Number",      field_type: "text",  is_required: true,  sort_order: 3 },
+    { field_key: "phone",    field_label: "Phone Number",    field_type: "phone", is_required: true,  sort_order: 4 },
+    { field_key: "email",    field_label: "Email Address",   field_type: "text",  is_required: false, sort_order: 5 },
+  ];
+
+  await supabase
+    .from("intake_form_fields")
+    .insert(
+      defaultFields.map((f) => ({
+        intake_id: (data as Intake).id,
+        ...f,
+        is_default: true,
+      })) as never[],
+    );
 
   return NextResponse.json(data, { status: 201 });
 }
