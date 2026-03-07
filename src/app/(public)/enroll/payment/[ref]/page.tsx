@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useParams } from "next/navigation";
-import { formatMMK } from "@/lib/utils";
+import { formatMMK, formatMMKSimple } from "@/lib/utils";
 import type { MyanmarBank } from "@/types/database";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -457,8 +457,8 @@ export default function PaymentInstructionsPage() {
   if (loading) return <LoadingSkeleton />;
   if (error || !enrollment) return <ErrorPage message={error || "Unknown error"} />;
 
-  const feeFormatted = enrollment.fee_formatted ?? formatMMK(enrollment.fee_mmk ?? 0);
-  const feeMyanmarOnly = feeFormatted.replace(" MMK", "");
+  const feeEn = formatMMKSimple(enrollment.fee_mmk ?? 0);       // "300,000 MMK"
+  const feeMm = formatMMK(enrollment.fee_mmk ?? 0).replace(" MMK", ""); // "၃၀၀,၀၀၀"
   const showUpload = enrollment.status === "pending_payment";
 
   return (
@@ -507,13 +507,13 @@ export default function PaymentInstructionsPage() {
             </span>
             <div className="text-sm text-gray-700">
               <p>
-                Transfer <span className="font-semibold text-gray-900">{feeFormatted}</span> to
+                Transfer <span className="font-semibold text-gray-900">{feeEn}</span> to
                 one of the accounts below
               </p>
               <p className="font-myanmar mt-1 text-gray-500">
                 အောက်ပါ အကောင့်များသို့{" "}
                 <span className="font-semibold text-gray-700">
-                  {feeMyanmarOnly} ကျပ်
+                  {feeMm} ကျပ်
                 </span>{" "}
                 လွှဲပါ
               </p>
