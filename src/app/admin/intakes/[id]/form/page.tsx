@@ -142,12 +142,10 @@ function SortableField({
         </p>
       </div>
 
-      {/* Lock icon for defaults */}
+      {/* Default badge */}
       {field.is_default && (
-        <span className="text-gray-300 shrink-0" title="Default field (cannot delete)">
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-          </svg>
+        <span className="text-xs text-gray-400 shrink-0 px-2 py-0.5 bg-gray-100 rounded-full">
+          Default
         </span>
       )}
     </div>
@@ -170,17 +168,7 @@ function FieldConfigPanel({
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-700">Field Settings</h3>
-        {field.is_default && (
-          <span className="text-xs text-gray-400 flex items-center gap-1">
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
-            </svg>
-            Default
-          </span>
-        )}
-      </div>
+      <h3 className="text-sm font-semibold text-gray-700">Field Settings</h3>
 
       {/* Label */}
       <div>
@@ -280,14 +268,12 @@ function FieldConfigPanel({
       )}
 
       {/* Delete button */}
-      {!field.is_default && (
-        <button
-          onClick={onDelete}
-          className="w-full mt-2 px-4 py-2 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
-        >
-          Delete Field
-        </button>
-      )}
+      <button
+        onClick={onDelete}
+        className="w-full mt-2 px-4 py-2 text-sm font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 transition-colors"
+      >
+        Delete Field
+      </button>
     </div>
   );
 }
@@ -636,7 +622,7 @@ export default function FormBuilderPage() {
 
   function deleteField(id: string) {
     const field = fields.find((f) => f.id === id);
-    if (!field || field.is_default) return;
+    if (!field) return;
 
     if (!id.startsWith("temp-")) {
       setDeletedIds((prev) => [...prev, id]);

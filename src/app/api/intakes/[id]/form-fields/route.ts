@@ -226,20 +226,6 @@ export async function DELETE(
     return badRequest("id (field ID) is required.");
   }
 
-  // Check if field is a default field
-  const { data: field } = await supabase
-    .from("intake_form_fields")
-    .select("id, is_default")
-    .eq("id", fieldId)
-    .eq("intake_id", params.id)
-    .single() as { data: { id: string; is_default: boolean } | null; error: unknown };
-
-  if (!field) return notFound("Form field");
-
-  if (field.is_default) {
-    return badRequest("Default fields cannot be deleted.");
-  }
-
   const { error } = await supabase
     .from("intake_form_fields")
     .delete()
