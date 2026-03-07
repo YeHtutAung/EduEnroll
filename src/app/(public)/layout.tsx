@@ -14,22 +14,23 @@ export default async function PublicLayout({ children }: { children: React.React
   let schoolName = "KuuNyi";
   const schoolNameMm: string | null = null;
   let logoUrl: string | null = null;
+  let orgType = "language_school";
 
   if (slug) {
     const supabase = createAdminClient();
     const { data: tenant } = (await supabase
       .from("tenants")
-      .select("name, logo_url")
+      .select("name, logo_url, org_type")
       .eq("subdomain", slug)
-      .maybeSingle()) as { data: { name: string; logo_url: string | null } | null; error: unknown };
+      .maybeSingle()) as { data: { name: string; logo_url: string | null; org_type: string } | null; error: unknown };
 
-    if (tenant?.name) {
-      schoolName = tenant.name;
-    }
-    if (tenant?.logo_url) {
-      logoUrl = tenant.logo_url;
-    }
+    if (tenant?.name) schoolName = tenant.name;
+    if (tenant?.logo_url) logoUrl = tenant.logo_url;
+    if (tenant?.org_type) orgType = tenant.org_type;
   }
+
+  // Org-type specific tagline for header (only shown for language_school)
+  const isLanguageSchool = orgType === "language_school";
 
   return (
     <div className="flex min-h-screen flex-col bg-white">
@@ -48,11 +49,13 @@ export default async function PublicLayout({ children }: { children: React.React
               )}
             </span>
           </Link>
-          <p className="hidden text-right text-xs text-gray-500 sm:block">
-            Japanese Language School
-            <br />
-            <span className="font-myanmar">ဂျပန်ဘာသာ သင်တန်းကျောင်း</span>
-          </p>
+          {isLanguageSchool && (
+            <p className="hidden text-right text-xs text-gray-500 sm:block">
+              Japanese Language School
+              <br />
+              <span className="font-myanmar">ဂျပန်ဘာသာ သင်တန်းကျောင်း</span>
+            </p>
+          )}
         </div>
       </header>
 

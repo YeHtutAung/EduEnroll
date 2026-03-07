@@ -25,9 +25,19 @@ interface PublicClassView {
   venue: string | null;
 }
 
+interface TenantLabelsView {
+  intake: string;
+  class: string;
+  student: string;
+  seat: string;
+  fee: string;
+  orgType: string;
+}
+
 interface PublicIntakeResponse {
   intake: Pick<Intake, "id" | "name" | "year" | "status">;
   classes: PublicClassView[];
+  labels: TenantLabelsView;
 }
 
 // ─── Slug parser ──────────────────────────────────────────────────────────────
@@ -67,6 +77,24 @@ export async function GET(
   }
 
   const supabase = createAdminClient();
+
+  // ── Fetch tenant labels ────────────────────────────────────────
+  const { data: tenantRow } = (await supabase
+    .from("tenants")
+    .select("org_type, label_intake, label_class, label_student, label_seat, label_fee")
+    .eq("id", tenantId)
+    .single()) as {
+    data: { org_type: string; label_intake: string; label_class: string; label_student: string; label_seat: string; label_fee: string } | null;
+    error: unknown;
+  };
+  const labels: TenantLabelsView = {
+    intake:  tenantRow?.label_intake  || "Intake",
+    class:   tenantRow?.label_class   || "Class Type",
+    student: tenantRow?.label_student || "Student",
+    seat:    tenantRow?.label_seat    || "Seat",
+    fee:     tenantRow?.label_fee     || "Fee",
+    orgType: tenantRow?.org_type      || "language_school",
+  };
 
   // ── Find the matching intake (any status) ────────────────────
   const { data: intakes, error: intakeError } = await supabase
@@ -152,6 +180,7 @@ export async function GET(
   const response: PublicIntakeResponse = {
     intake,
     classes: publicClasses,
+    labels,
   };
 
   return NextResponse.json(response);

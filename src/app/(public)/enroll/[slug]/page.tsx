@@ -30,9 +30,24 @@ interface PublicIntake {
   status: string;
 }
 
+interface TenantLabels {
+  intake: string;
+  class: string;
+  student: string;
+  seat: string;
+  fee: string;
+  orgType: string;
+}
+
+const DEFAULT_LABELS: TenantLabels = {
+  intake: "Intake", class: "Class Type", student: "Student",
+  seat: "Seat", fee: "Fee", orgType: "language_school",
+};
+
 interface ApiResponse {
   intake: PublicIntake;
   classes: PublicClass[];
+  labels?: TenantLabels;
 }
 
 interface ApiError {
@@ -92,7 +107,7 @@ const DEFAULT_LEVEL_COLOR = "bg-gray-100 text-gray-800";
 
 // ─── Seats badge ─────────────────────────────────────────────────────────────
 
-function SeatsBadge({ remaining }: { remaining: number }) {
+function SeatsBadge({ remaining, seatLabel }: { remaining: number; seatLabel: string }) {
   if (remaining === 0) {
     return (
       <span className="rounded-full bg-red-100 px-2.5 py-0.5 text-xs font-medium text-red-700">
@@ -106,7 +121,7 @@ function SeatsBadge({ remaining }: { remaining: number }) {
       : "bg-green-100 text-green-700";
   return (
     <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${color}`}>
-      {remaining} seats left
+      {remaining} {seatLabel.toLowerCase()}{remaining !== 1 ? "s" : ""} left
     </span>
   );
 }
@@ -156,7 +171,7 @@ function ErrorPage({ message }: { message: string }) {
 
 // ─── Class card ──────────────────────────────────────────────────────────────
 
-function ClassCard({ cls, onSelect }: { cls: PublicClass; onSelect: (id: string) => void }) {
+function ClassCard({ cls, onSelect, labels }: { cls: PublicClass; onSelect: (id: string) => void; labels: TenantLabels }) {
   const isFull = cls.status === "full" || cls.seat_remaining === 0;
 
   const closeDate = cls.enrollment_close_at
@@ -188,7 +203,7 @@ function ClassCard({ cls, onSelect }: { cls: PublicClass; onSelect: (id: string)
       {isFull && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/60">
           <div className="rounded-lg bg-gray-800 px-4 py-2 text-sm font-semibold text-white">
-            Class Full / <span className="font-myanmar">နေရာပြည့်သွားပြီ</span>
+            Full / <span className="font-myanmar">နေရာပြည့်သွားပြီ</span>
           </div>
         </div>
       )}
@@ -201,7 +216,7 @@ function ClassCard({ cls, onSelect }: { cls: PublicClass; onSelect: (id: string)
           >
             {cls.level}
           </span>
-          <SeatsBadge remaining={cls.seat_remaining} />
+          <SeatsBadge remaining={cls.seat_remaining} seatLabel={labels.seat} />
         </div>
 
         {/* Mode badge */}
@@ -211,7 +226,7 @@ function ClassCard({ cls, onSelect }: { cls: PublicClass; onSelect: (id: string)
               ? "bg-blue-50 text-blue-700"
               : "bg-emerald-50 text-emerald-700"
           }`}>
-            {(cls.mode ?? "offline") === "online" ? "💻 Online Class" : "🏫 Offline Class"}
+            {(cls.mode ?? "offline") === "online" ? "💻 Online" : "🏫 Offline"}
           </span>
         </div>
 
@@ -223,10 +238,10 @@ function ClassCard({ cls, onSelect }: { cls: PublicClass; onSelect: (id: string)
           {formatMMK(cls.fee_mmk).replace(" MMK", "")} Kyat
         </p>
 
-        {/* Enrollment close date */}
+        {/* Close date */}
         {closeDate && (
           <p className="text-xs text-gray-400">
-            Enrollment closes: {closeDate}
+            Closes: {closeDate}
           </p>
         )}
 
@@ -261,7 +276,7 @@ function ClassCard({ cls, onSelect }: { cls: PublicClass; onSelect: (id: string)
         {/* CTA hint */}
         {!isFull && (
           <div className="mt-4 flex items-center text-sm font-medium text-[#1a6b3c]">
-            Enroll Now
+            Register Now
             <svg className="ml-1 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
             </svg>
@@ -381,8 +396,9 @@ function EnrollmentClosedPage({ intake }: { intake?: PublicIntake }) {
 
 // ─── All classes full page ───────────────────────────────────────────────────
 
-function AllClassesFullPage({ intake }: { intake: PublicIntake }) {
-  const intakeNameMM = getIntakeNameMM(intake.name, intake.year);
+function AllClassesFullPage({ intake, labels }: { intake: PublicIntake; labels: TenantLabels }) {
+  const isLanguageSchool = labels.orgType === "language_school";
+  const intakeNameMM = isLanguageSchool ? getIntakeNameMM(intake.name, intake.year) : null;
 
   return (
     <div className="flex flex-col items-center py-16 text-center">
@@ -394,21 +410,25 @@ function AllClassesFullPage({ intake }: { intake: PublicIntake }) {
       </div>
 
       <p className="mb-2 text-sm text-gray-500">
-        {intake.name} / <span className="font-myanmar">{intakeNameMM}</span>
+        {intake.name}{intakeNameMM ? <> / <span className="font-myanmar">{intakeNameMM}</span></> : null}
       </p>
 
-      <h1 className="text-2xl font-bold text-gray-900">All Classes Full</h1>
-      <p className="font-myanmar mt-1 text-lg text-gray-600">
-        အတန်းအားလုံး နေရာပြည့်သွားပြီ
-      </p>
+      <h1 className="text-2xl font-bold text-gray-900">Fully Booked</h1>
+      {isLanguageSchool && (
+        <p className="font-myanmar mt-1 text-lg text-gray-600">
+          အတန်းအားလုံး နေရာပြည့်သွားပြီ
+        </p>
+      )}
 
       <div className="mt-8 max-w-sm rounded-xl border border-orange-200 bg-orange-50 p-5">
         <p className="text-sm text-gray-600">
-          All classes for this intake are currently full. Please check back for the next enrollment period.
+          All {labels.seat.toLowerCase()}s are currently taken. Please check back later.
         </p>
-        <p className="font-myanmar mt-2 text-sm text-gray-500">
-          ဤသင်တန်း၏ အတန်းများ အားလုံး နေရာပြည့်သွားပြီဖြစ်သည်။ နောက်စာရင်းသွင်းချိန်အတွက် ပြန်လည်စစ်ဆေးပါ။
-        </p>
+        {isLanguageSchool && (
+          <p className="font-myanmar mt-2 text-sm text-gray-500">
+            ဤသင်တန်း၏ အတန်းများ အားလုံး နေရာပြည့်သွားပြီဖြစ်သည်။ နောက်စာရင်းသွင်းချိန်အတွက် ပြန်လည်စစ်ဆေးပါ။
+          </p>
+        )}
       </div>
     </div>
   );
@@ -476,12 +496,14 @@ function IntakeLandingContent() {
   const classes = levelFilter
     ? allClasses.filter((c) => c.level === levelFilter)
     : allClasses;
-  const intakeNameMM = getIntakeNameMM(intake.name, intake.year);
+  const tl = data.labels ?? DEFAULT_LABELS;
+  const isLanguageSchool = tl.orgType === "language_school";
+  const intakeNameMM = isLanguageSchool ? getIntakeNameMM(intake.name, intake.year) : null;
 
   // ── All classes full ──────────────────────────────────────────
   const allFull = allClasses.length > 0 && allClasses.every((c) => c.seat_remaining === 0 || c.status === "full");
   if (allFull) {
-    return <AllClassesFullPage intake={intake} />;
+    return <AllClassesFullPage intake={intake} labels={tl} />;
   }
 
   return (
@@ -489,21 +511,25 @@ function IntakeLandingContent() {
       {/* Intake header */}
       <div className="mb-8 text-center">
         <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">{intake.name}</h1>
-        <p className="font-myanmar mt-1 text-lg text-gray-600">{intakeNameMM}</p>
+        {intakeNameMM && (
+          <p className="font-myanmar mt-1 text-lg text-gray-600">{intakeNameMM}</p>
+        )}
       </div>
 
       {/* Class grid */}
       {classes.length === 0 ? (
         <div className="py-16 text-center">
-          <p className="text-lg text-gray-500">No classes available for this intake yet.</p>
-          <p className="font-myanmar mt-1 text-gray-400">
-            ဤသင်တန်းအတွက် အတန်းများ မရှိသေးပါ
-          </p>
+          <p className="text-lg text-gray-500">Nothing available yet. Please check back soon.</p>
+          {isLanguageSchool && (
+            <p className="font-myanmar mt-1 text-gray-400">
+              ဤသင်တန်းအတွက် အတန်းများ မရှိသေးပါ
+            </p>
+          )}
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {classes.map((cls) => (
-            <ClassCard key={cls.id} cls={cls} onSelect={handleSelectClass} />
+            <ClassCard key={cls.id} cls={cls} onSelect={handleSelectClass} labels={tl} />
           ))}
         </div>
       )}
