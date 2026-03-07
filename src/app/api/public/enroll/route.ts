@@ -6,43 +6,18 @@ import type { BankAccount, SubmitEnrollmentResult } from "@/types/database";
 
 // ─── Validation helpers ───────────────────────────────────────────────────────
 
-const UUID_RE    = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const EMAIL_RE   = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-// Myanmar mobile: 09xxxxxxxxx or +959xxxxxxxxx (9-10 digits after country prefix)
-const MM_PHONE_RE = /^(?:\+?95|0)(9\d{7,9})$/;
-
-function isValidMyanmarPhone(phone: string): boolean {
-  return MM_PHONE_RE.test(phone.replace(/[\s\-().]/g, ""));
-}
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ─── POST /api/public/enroll ──────────────────────────────────────────────────
 // Public — no authentication required.
 //
-// Submits a new enrollment for a Nihon Moment class.
-// On success, reserves a seat atomically via the submit_enrollment()
-// Postgres function (SELECT FOR UPDATE transaction).
+// 1. Calls submit_enrollment(p_class_id) to atomically reserve a seat.
+// 2. Updates the enrollment row with form_data + best-effort legacy columns.
 //
 // Request body:
 // {
-//   class_id:          string   (UUID, required)
-//   student_name_en:   string   (required — English name)
-//   student_name_mm?:  string   (optional — Myanmar script name)
-//   nrc_number?:       string   (optional — Myanmar NRC card number)
-//   phone:             string   (required — Myanmar format 09-xxxxxxxxx)
-//   email?:            string   (optional)
-// }
-//
-// Success 201:
-// {
-//   enrollment_ref:  "NM-2026-00042"
-//   class_level:     "N5"
-//   fee_mmk:         300000
-//   fee_formatted:   "၃၀၀,၀၀၀ MMK"
-//   payment: {
-//     instructions_en: string
-//     instructions_mm: string
-//     bank_accounts:   BankAccount[]
-//   }
+//   class_id:   string            (UUID, required)
+//   form_data?: Record<string, string>  (dynamic form fields)
 // }
 
 export async function POST(request: NextRequest) {
@@ -60,53 +35,22 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const {
-    class_id,
-    student_name_en,
-    student_name_mm,
-    nrc_number,
-    phone,
-    email,
-    form_data,
-  } = body as Record<string, unknown>;
+  const { class_id, form_data } = body as Record<string, unknown>;
 
-  // ── Validate required fields ──────────────────────────────────
-  const errors: string[] = [];
-
+  // ── Validate class_id ─────────────────────────────────────────
   if (!class_id || typeof class_id !== "string" || !UUID_RE.test(class_id)) {
-    errors.push("class_id must be a valid UUID.");
-  }
-  if (!student_name_en || typeof student_name_en !== "string" || student_name_en.trim() === "") {
-    errors.push("student_name_en is required.");
-  }
-  if (!phone || typeof phone !== "string") {
-    errors.push("phone is required.");
-  } else if (!isValidMyanmarPhone(phone)) {
-    errors.push("phone must be a valid Myanmar number (09-xxxxxxxxx or +959-xxxxxxxxx).");
-  }
-  if (email !== undefined && email !== null && email !== "") {
-    if (typeof email !== "string" || !EMAIL_RE.test(email)) {
-      errors.push("email must be a valid email address.");
-    }
+    return NextResponse.json(
+      { error: "Validation Error", messages: ["class_id must be a valid UUID."] },
+      { status: 400 },
+    );
   }
 
-  if (errors.length > 0) {
-    return NextResponse.json({ error: "Validation Error", messages: errors }, { status: 400 });
-  }
-
-  // ── Call the atomic Postgres transaction ──────────────────────
+  // ── Call the atomic Postgres transaction (seat reservation) ───
   const supabase = createAdminClient();
 
   const { data: result, error: rpcError } = await supabase.rpc(
     "submit_enrollment",
-    {
-      p_class_id:        class_id as string,
-      p_student_name_en: (student_name_en as string).trim(),
-      p_phone:           (phone          as string).trim(),
-      p_student_name_mm: (student_name_mm as string | null | undefined) ?? null,
-      p_nrc_number:      (nrc_number     as string | null | undefined) ?? null,
-      p_email:           (email          as string | null | undefined) ?? null,
-    } as never,
+    { p_class_id: class_id } as never,
   );
 
   if (rpcError) {
@@ -154,11 +98,22 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // ── Save form_data if provided ───────────────────────────────────
-  if (form_data && typeof form_data === "object") {
+  // ── Update enrollment with form_data + legacy columns ─────────
+  const fd = (form_data && typeof form_data === "object") ? form_data as Record<string, string> : null;
+
+  if (fd) {
+    const updatePayload: Record<string, unknown> = { form_data: fd };
+
+    // Best-effort mapping: populate legacy columns from form_data keys
+    if (fd.name_en) updatePayload.student_name_en = fd.name_en.trim();
+    if (fd.name_mm) updatePayload.student_name_mm = fd.name_mm.trim();
+    if (fd.phone)   updatePayload.phone = fd.phone.trim();
+    if (fd.email)   updatePayload.email = fd.email.trim();
+    if (fd.nrc)     updatePayload.nrc_number = fd.nrc.trim();
+
     await supabase
       .from("enrollments")
-      .update({ form_data } as never)
+      .update(updatePayload as never)
       .eq("id", payload.enrollment_id);
   }
 
