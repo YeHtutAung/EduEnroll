@@ -168,6 +168,7 @@ function UploadSection({
   onUploadSuccess: () => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadingRef = useRef(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<{ en: string; mm: string } | null>(null);
@@ -204,7 +205,8 @@ function UploadSection({
   }
 
   async function handleUpload() {
-    if (!selectedFile) return;
+    if (!selectedFile || uploadingRef.current) return;
+    uploadingRef.current = true;
     setUploading(true);
     setUploadProgress(0);
     setUploadError(null);
@@ -257,6 +259,7 @@ function UploadSection({
         mm: "ကွန်ရက်ချိတ်ဆက်မှု မအောင်မြင်ပါ။ ထပ်မံကြိုးစားပါ။",
       });
     } finally {
+      uploadingRef.current = false;
       setUploading(false);
     }
   }

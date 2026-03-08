@@ -10,6 +10,7 @@ type PendingRow = {
   enrollment: Enrollment;
   payment: Payment;
   class_level: string;
+  intake_id: string;
   intake_name: string;
   proof_signed_url: string | null;
 };
@@ -75,6 +76,7 @@ export async function GET() {
         enrollment,
         payment,
         class_level: classes?.level ?? "",
+        intake_id: classes?.intake_id ?? "",
         intake_name: classes?.intakes?.name ?? "",
         proof_signed_url,
       };

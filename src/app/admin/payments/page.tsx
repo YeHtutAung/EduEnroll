@@ -14,8 +14,15 @@ interface PendingItem {
   enrollment: Enrollment;
   payment: Payment | null;
   class_level: string;
+  intake_id: string;
   intake_name: string;
   proof_signed_url: string | null;
+}
+
+interface FormFieldDef {
+  field_key: string;
+  field_label: string;
+  field_type: string;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -163,6 +170,7 @@ function RejectModal({
   const toast = useToast();
   const [reason, setReason] = useState("");
   const [processing, setProcessing] = useState(false);
+  const savingRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -171,8 +179,10 @@ function RejectModal({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (savingRef.current) return;
     if (!item.payment) return;
     if (!reason.trim()) return;
+    savingRef.current = true;
     setProcessing(true);
     try {
       const res = await fetch(`/api/admin/payments/${item.payment.id}/verify`, {
@@ -189,6 +199,7 @@ function RejectModal({
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Rejection failed.");
     } finally {
+      savingRef.current = false;
       setProcessing(false);
     }
   }
@@ -268,8 +279,18 @@ function ReviewModal({
   onReject: () => void;
 }) {
   const [fullscreenImg, setFullscreenImg] = useState(false);
+  const [formFields, setFormFields] = useState<FormFieldDef[]>([]);
   const { enrollment, payment, class_level, intake_name, proof_signed_url } = item;
   const submitted = payment?.created_at ?? enrollment.enrolled_at;
+
+  // Fetch form field definitions for dynamic labels
+  useEffect(() => {
+    if (!item.intake_id) return;
+    fetch(`/api/public/form-fields?intake_id=${item.intake_id}`)
+      .then((res) => (res.ok ? res.json() : []))
+      .then((fields: FormFieldDef[]) => setFormFields(fields.filter((f) => f.field_type !== "file")))
+      .catch(() => {});
+  }, [item.intake_id]);
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -358,14 +379,33 @@ function ReviewModal({
                 {enrollment.enrollment_ref}
               </code>
             </InfoRow>
-            <InfoRow label="NRC Number">
-              {enrollment.nrc_number ?? <span className="text-white/30 italic">Not provided</span>}
-            </InfoRow>
-            <InfoRow label="Phone">
-              <span className="tabular-nums">{enrollment.phone}</span>
-            </InfoRow>
-            {enrollment.email && (
-              <InfoRow label="Email">{enrollment.email}</InfoRow>
+
+            {/* Dynamic form fields OR legacy fallback */}
+            {formFields.length > 0 && enrollment.form_data ? (
+              formFields.map((f) => {
+                const val = enrollment.form_data?.[f.field_key];
+                if (!val) return null;
+                const isMyanmar = f.field_label.toLowerCase().includes("myanmar");
+                return (
+                  <InfoRow key={f.field_key} label={f.field_label}>
+                    <span className={`${isMyanmar ? "font-myanmar" : ""} ${f.field_type === "phone" ? "tabular-nums" : ""}`}>
+                      {f.field_type === "checkbox" ? (val === "true" ? "Yes" : "No") : val}
+                    </span>
+                  </InfoRow>
+                );
+              })
+            ) : (
+              <>
+                {enrollment.nrc_number && (
+                  <InfoRow label="NRC Number">{enrollment.nrc_number}</InfoRow>
+                )}
+                <InfoRow label="Phone">
+                  <span className="tabular-nums">{enrollment.phone}</span>
+                </InfoRow>
+                {enrollment.email && (
+                  <InfoRow label="Email">{enrollment.email}</InfoRow>
+                )}
+              </>
             )}
 
             <div className="border-t border-white/10 pt-4 space-y-4">
@@ -478,6 +518,7 @@ export default function PaymentsPage() {
   const [approvingItem, setApprovingItem] = useState<PendingItem | null>(null);
   const [rejectingItem, setRejectingItem] = useState<PendingItem | null>(null);
   const [approving, setApproving] = useState(false);
+  const approvingRef = useRef(false);
 
   const fetchQueue = useCallback(async () => {
     setLoading(true);
@@ -508,7 +549,9 @@ export default function PaymentsPage() {
 
   // ── Approve ───────────────────────────────────────────────────────────────
   async function handleApprove() {
+    if (approvingRef.current) return;
     if (!approvingItem?.payment) return;
+    approvingRef.current = true;
     setApproving(true);
     try {
       const res = await fetch(`/api/admin/payments/${approvingItem.payment.id}/verify`, {
@@ -526,6 +569,7 @@ export default function PaymentsPage() {
       toast.error(err instanceof Error ? err.message : "Approval failed.");
       setApprovingItem(null);
     } finally {
+      approvingRef.current = false;
       setApproving(false);
     }
   }

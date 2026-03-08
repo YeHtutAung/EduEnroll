@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import StatusBadge from "@/components/ui/StatusBadge";
@@ -134,6 +134,7 @@ function EditClassModal({
   const tl = useTenantLabels();
   const [form, setForm] = useState<EditForm>(() => classToForm(cls));
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
 
   function set(key: keyof EditForm, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -141,11 +142,13 @@ function EditClassModal({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (savingRef.current) return;
     const fee = Number(form.fee_mmk);
     const seats = Number(form.seat_total);
     if (!fee || fee <= 0) { toast.error("Fee must be a positive number."); return; }
     if (!seats || seats < 1 || !Number.isInteger(seats)) { toast.error("Seats must be a positive integer."); return; }
 
+    savingRef.current = true;
     setSaving(true);
     try {
       const res = await fetch(`/api/classes/${cls.id}`, {
@@ -176,6 +179,7 @@ function EditClassModal({
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to update class.");
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }

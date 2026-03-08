@@ -17,6 +17,7 @@ interface StudentRow {
   student_name_en: string;
   student_name_mm: string | null;
   phone: string;
+  form_data: Record<string, string> | null;
   status: EnrollmentStatus;
   enrolled_at: string;
   class_level: JlptLevel;
@@ -28,6 +29,7 @@ interface FormFieldDef {
   field_key: string;
   field_label: string;
   field_type: string;
+  sort_order: number;
 }
 
 interface StudentDetail {
@@ -133,12 +135,12 @@ function Pulse({ className }: { className: string }) {
   return <div className={`animate-pulse rounded bg-gray-200 ${className}`} />;
 }
 
-function RowSkeleton() {
+function RowSkeleton({ cols }: { cols: number }) {
   return (
     <tr>
-      {[24, 48, 28, 32, 36, 16, 32, 28, 28, 24].map((w, i) => (
+      {Array.from({ length: cols }).map((_, i) => (
         <td key={i} className="px-4 py-3.5">
-          <Pulse className={`h-4 w-${w}`} />
+          <Pulse className="h-4 w-24" />
         </td>
       ))}
     </tr>
@@ -465,11 +467,15 @@ export default function StudentsPage() {
   // Intakes for filter dropdown
   const [intakes, setIntakes] = useState<Intake[]>([]);
 
+  // Dynamic form field columns
+  const [formFields, setFormFields] = useState<FormFieldDef[]>([]);
+
   // Modal
   const [selectedStudent, setSelectedStudent] = useState<StudentRow | null>(null);
 
   // Export
   const [exporting, setExporting] = useState(false);
+  const exportingRef = useRef(false);
 
   // Debounce search
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -495,6 +501,26 @@ export default function StudentsPage() {
       .catch(() => {/* non-critical */});
   }, []);
 
+  // ── Fetch form fields for selected intake (or most recent) ────────────────
+  useEffect(() => {
+    async function loadFields() {
+      // Use filtered intake, or fall back to most recent open/draft intake
+      const targetId = filters.intakeId || intakes.find((i) => i.status === "open")?.id || intakes[0]?.id;
+      if (!targetId) return;
+
+      try {
+        const res = await fetch(`/api/public/form-fields?intake_id=${targetId}`);
+        if (!res.ok) return;
+        const fields = (await res.json()) as FormFieldDef[];
+        // Only include displayable field types (exclude file uploads)
+        setFormFields(fields.filter((f) => f.field_type !== "file"));
+      } catch {
+        // non-critical
+      }
+    }
+    loadFields();
+  }, [filters.intakeId, intakes]);
+
   // ── Fetch students ─────────────────────────────────────────────────────────
   const fetchStudents = useCallback(async () => {
     setLoading(true);
@@ -519,6 +545,8 @@ export default function StudentsPage() {
 
   // ── Export Excel ───────────────────────────────────────────────────────────
   async function handleExport() {
+    if (exportingRef.current) return;
+    exportingRef.current = true;
     setExporting(true);
     try {
       // Fetch all matching records (up to API max of 100)
@@ -530,12 +558,14 @@ export default function StudentsPage() {
 
       const XLSX = await import("xlsx");
 
+      const hasDynamic = formFields.length > 0;
+      const dynamicLabels = hasDynamic
+        ? formFields.map((f) => f.field_label)
+        : ["Name (English)", "Name (Myanmar)", "Phone"];
+
       const headers = [
         "No",
-        "Name (English)",
-        "Name (Myanmar)",
-        "NRC",
-        "Phone",
+        ...dynamicLabels,
         "Enrollment Ref",
         "Level",
         tl.intake,
@@ -546,19 +576,22 @@ export default function StudentsPage() {
 
       const wsData = [
         headers,
-        ...rows.map((s, i) => [
-          i + 1,
-          s.student_name_en,
-          s.student_name_mm ?? "",
-          "", // NRC not available in list API; visible in detail modal
-          s.phone,
-          s.enrollment_ref,
-          s.class_level,
-          s.intake_name,
-          s.status,
-          s.fee_mmk,
-          fmtDate(s.enrolled_at),
-        ]),
+        ...rows.map((s, i) => {
+          const dynamicCols = hasDynamic
+            ? formFields.map((f) => s.form_data?.[f.field_key] ?? "")
+            : [s.student_name_en, s.student_name_mm ?? "", s.phone];
+
+          return [
+            i + 1,
+            ...dynamicCols,
+            s.enrollment_ref,
+            s.class_level,
+            s.intake_name,
+            s.status,
+            s.fee_mmk,
+            fmtDate(s.enrolled_at),
+          ];
+        }),
       ];
 
       const ws = XLSX.utils.aoa_to_sheet(wsData);
@@ -566,10 +599,7 @@ export default function StudentsPage() {
       // Column widths
       ws["!cols"] = [
         { wch: 5 },  // No
-        { wch: 25 }, // Name EN
-        { wch: 20 }, // Name MM
-        { wch: 18 }, // NRC
-        { wch: 16 }, // Phone
+        ...dynamicLabels.map(() => ({ wch: 22 })),
         { wch: 16 }, // Ref
         { wch: 8 },  // Level
         { wch: 22 }, // Intake
@@ -586,6 +616,7 @@ export default function StudentsPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Export failed.");
     } finally {
+      exportingRef.current = false;
       setExporting(false);
     }
   }
@@ -792,104 +823,121 @@ export default function StudentsPage() {
         )}
 
         {/* Table */}
-        {(loading || students.length > 0) && (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[960px] text-sm">
-              <thead>
-                <tr className="bg-gray-50 border-b border-gray-100 text-left">
-                  {["No.", `${tl.student} Name`, "NRC Number", "Phone", "Enrollment Ref", "Level", tl.intake, `${tl.fee} (MMK)`, "Status", "Enrolled"].map(
-                    (h) => (
+        {(loading || students.length > 0) && (() => {
+          // Build dynamic headers: No. + form fields + fixed tail columns
+          const hasDynamic = formFields.length > 0;
+          const dynamicHeaders = hasDynamic
+            ? formFields.map((f) => f.field_label)
+            : [`${tl.student} Name`, "Phone"];
+          const fixedTailHeaders = ["Enrollment Ref", "Level", tl.intake, `${tl.fee} (MMK)`, "Status", "Enrolled"];
+          const allHeaders = ["No.", ...dynamicHeaders, ...fixedTailHeaders];
+
+          return (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[960px] text-sm">
+                <thead>
+                  <tr className="bg-gray-50 border-b border-gray-100 text-left">
+                    {allHeaders.map((h) => (
                       <th
                         key={h}
                         className="px-4 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider whitespace-nowrap"
                       >
                         {h}
                       </th>
-                    ),
-                  )}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {loading
-                  ? Array.from({ length: 8 }).map((_, i) => <RowSkeleton key={i} />)
-                  : students.map((student, idx) => (
-                      <tr
-                        key={student.enrollment_id}
-                        onClick={() => setSelectedStudent(student)}
-                        className="hover:bg-[#f0f4ff]/60 cursor-pointer transition-colors"
-                      >
-                        {/* No. */}
-                        <td className="px-4 py-3.5 text-gray-400 tabular-nums text-xs">
-                          {offset + idx + 1}
-                        </td>
-
-                        {/* Student Name */}
-                        <td className="px-4 py-3.5">
-                          <p className="font-medium text-gray-800 whitespace-nowrap">
-                            {student.student_name_en}
-                          </p>
-                          {student.student_name_mm && (
-                            <p className="text-xs font-myanmar text-gray-400 mt-0.5">
-                              {student.student_name_mm}
-                            </p>
-                          )}
-                        </td>
-
-                        {/* NRC — not in list API */}
-                        <td className="px-4 py-3.5 text-gray-400 text-xs italic">
-                          See detail
-                        </td>
-
-                        {/* Phone */}
-                        <td className="px-4 py-3.5 text-gray-600 whitespace-nowrap tabular-nums text-xs">
-                          {student.phone}
-                        </td>
-
-                        {/* Enrollment Ref */}
-                        <td className="px-4 py-3.5">
-                          <code className="text-xs font-mono text-[#1a3f8a] font-semibold whitespace-nowrap">
-                            {student.enrollment_ref}
-                          </code>
-                        </td>
-
-                        {/* Level */}
-                        <td className="px-4 py-3.5">
-                          <span
-                            className="inline-flex items-center justify-center w-9 h-7 rounded-lg text-xs font-bold text-white"
-                            style={{
-                              backgroundColor:
-                                LEVEL_COLORS[student.class_level] ?? "#1a3f8a",
-                            }}
-                          >
-                            {student.class_level}
-                          </span>
-                        </td>
-
-                        {/* Intake */}
-                        <td className="px-4 py-3.5 text-gray-600 text-xs whitespace-nowrap max-w-[140px]">
-                          <span className="truncate block">{student.intake_name}</span>
-                        </td>
-
-                        {/* Fee */}
-                        <td className="px-4 py-3.5 text-gray-700 tabular-nums text-xs whitespace-nowrap">
-                          {formatMMKSimple(student.fee_mmk)}
-                        </td>
-
-                        {/* Status */}
-                        <td className="px-4 py-3.5">
-                          <StatusBadge status={student.status} />
-                        </td>
-
-                        {/* Enrolled Date */}
-                        <td className="px-4 py-3.5 text-gray-500 text-xs whitespace-nowrap">
-                          {fmtDate(student.enrolled_at)}
-                        </td>
-                      </tr>
                     ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {loading
+                    ? Array.from({ length: 8 }).map((_, i) => <RowSkeleton key={i} cols={allHeaders.length} />)
+                    : students.map((student, idx) => (
+                        <tr
+                          key={student.enrollment_id}
+                          onClick={() => setSelectedStudent(student)}
+                          className="hover:bg-[#f0f4ff]/60 cursor-pointer transition-colors"
+                        >
+                          {/* No. */}
+                          <td className="px-4 py-3.5 text-gray-400 tabular-nums text-xs">
+                            {offset + idx + 1}
+                          </td>
+
+                          {/* Dynamic form fields OR legacy fallback */}
+                          {hasDynamic ? (
+                            formFields.map((f) => {
+                              const val = student.form_data?.[f.field_key] ?? "";
+                              const isMyanmar = f.field_label.toLowerCase().includes("myanmar");
+                              return (
+                                <td key={f.field_key} className="px-4 py-3.5 text-gray-700 text-xs whitespace-nowrap max-w-[180px]">
+                                  <span className={`truncate block ${isMyanmar ? "font-myanmar" : ""} ${f.field_type === "phone" ? "tabular-nums" : ""}`}>
+                                    {val || "—"}
+                                  </span>
+                                </td>
+                              );
+                            })
+                          ) : (
+                            <>
+                              <td className="px-4 py-3.5">
+                                <p className="font-medium text-gray-800 whitespace-nowrap">
+                                  {student.student_name_en}
+                                </p>
+                                {student.student_name_mm && (
+                                  <p className="text-xs font-myanmar text-gray-400 mt-0.5">
+                                    {student.student_name_mm}
+                                  </p>
+                                )}
+                              </td>
+                              <td className="px-4 py-3.5 text-gray-600 whitespace-nowrap tabular-nums text-xs">
+                                {student.phone}
+                              </td>
+                            </>
+                          )}
+
+                          {/* Enrollment Ref */}
+                          <td className="px-4 py-3.5">
+                            <code className="text-xs font-mono text-[#1a3f8a] font-semibold whitespace-nowrap">
+                              {student.enrollment_ref}
+                            </code>
+                          </td>
+
+                          {/* Level */}
+                          <td className="px-4 py-3.5">
+                            <span
+                              className="inline-flex items-center justify-center w-9 h-7 rounded-lg text-xs font-bold text-white"
+                              style={{
+                                backgroundColor:
+                                  LEVEL_COLORS[student.class_level] ?? "#1a3f8a",
+                              }}
+                            >
+                              {student.class_level}
+                            </span>
+                          </td>
+
+                          {/* Intake */}
+                          <td className="px-4 py-3.5 text-gray-600 text-xs whitespace-nowrap max-w-[140px]">
+                            <span className="truncate block">{student.intake_name}</span>
+                          </td>
+
+                          {/* Fee */}
+                          <td className="px-4 py-3.5 text-gray-700 tabular-nums text-xs whitespace-nowrap">
+                            {formatMMKSimple(student.fee_mmk)}
+                          </td>
+
+                          {/* Status */}
+                          <td className="px-4 py-3.5">
+                            <StatusBadge status={student.status} />
+                          </td>
+
+                          {/* Enrolled Date */}
+                          <td className="px-4 py-3.5 text-gray-500 text-xs whitespace-nowrap">
+                            {fmtDate(student.enrolled_at)}
+                          </td>
+                        </tr>
+                      ))}
+                </tbody>
+              </table>
+            </div>
+          );
+        })()}
 
         {/* ── Pagination ──────────────────────────────────────────────── */}
         {!loading && totalPages > 1 && (

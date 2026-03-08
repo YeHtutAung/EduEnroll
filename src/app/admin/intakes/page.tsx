@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import StatusBadge from "@/components/ui/StatusBadge";
 import ConfirmModal from "@/components/ui/ConfirmModal";
@@ -41,6 +41,8 @@ export default function IntakesPage() {
   const [editName, setEditName] = useState("");
   const [editYear, setEditYear] = useState(2026);
   const [savingEdit, setSavingEdit] = useState(false);
+  const statusRef = useRef(false);
+  const savingEditRef = useRef(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -76,6 +78,8 @@ export default function IntakesPage() {
   }, [fetchData]);
 
   async function handleStatusChange(intakeId: string, newStatus: IntakeStatus) {
+    if (statusRef.current) return;
+    statusRef.current = true;
     setUpdatingStatus(intakeId);
     try {
       const res = await fetch(`/api/intakes/${intakeId}`, {
@@ -93,6 +97,7 @@ export default function IntakesPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to update status.");
     } finally {
+      statusRef.current = false;
       setUpdatingStatus(null);
     }
   }
@@ -113,9 +118,11 @@ export default function IntakesPage() {
 
   async function handleSaveIntake(e: React.FormEvent) {
     e.preventDefault();
+    if (savingEditRef.current) return;
     if (!editingIntake) return;
     if (!editName.trim()) { toast.error("Name is required."); return; }
     if (!editYear || editYear < 2020 || editYear > 2100) { toast.error("Year must be between 2020 and 2100."); return; }
+    savingEditRef.current = true;
     setSavingEdit(true);
     try {
       const res = await fetch(`/api/intakes/${editingIntake.id}`, {
@@ -134,6 +141,7 @@ export default function IntakesPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to update.");
     } finally {
+      savingEditRef.current = false;
       setSavingEdit(false);
     }
   }

@@ -125,6 +125,7 @@ export interface Enrollment {
   nrc_number: string | null;    // Myanmar National Registration Card
   phone: string;
   email: string | null;
+  form_data: Record<string, string> | null;
   status: EnrollmentStatus;
   enrolled_at: string;
 }

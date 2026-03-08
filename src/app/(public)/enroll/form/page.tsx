@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import type { JlptLevel, ClassStatus } from "@/types/database";
 
@@ -309,6 +309,7 @@ function EnrollmentFormPage() {
   const [formData, setFormData] = useState<Record<string, string>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [submitError, setSubmitError] = useState<{ en: string; mm: string } | null>(null);
 
   // ── Fetch intake + class + form fields ────────────────────────
@@ -398,7 +399,8 @@ function EnrollmentFormPage() {
 
   // ── Submit enrollment ────────────────────────────────────────
   async function handleSubmit() {
-    if (!classInfo) return;
+    if (!classInfo || submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitting(true);
     setSubmitError(null);
 
@@ -449,6 +451,7 @@ function EnrollmentFormPage() {
         mm: "ကွန်ရက်ချိတ်ဆက်မှု မအောင်မြင်ပါ။ ထပ်မံကြိုးစားပါ။",
       });
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
