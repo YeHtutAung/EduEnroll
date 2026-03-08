@@ -179,29 +179,38 @@ function ClassCard({ cls, onSelect, labels }: { cls: PublicClass; onSelect: (id:
   const alreadyClosed = cls.enrollment_close_at ? now > new Date(cls.enrollment_close_at) : false;
   const isDisabled = isFull || notYetOpen || alreadyClosed;
 
+  const fmtOpts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "numeric" };
+
   const closeDate = cls.enrollment_close_at
-    ? new Date(cls.enrollment_close_at).toLocaleDateString("en-GB", {
-        day: "numeric",
-        month: "short",
-        year: "numeric",
-      })
+    ? new Date(cls.enrollment_close_at).toLocaleDateString("en-GB", fmtOpts)
     : null;
 
   const openDate = cls.enrollment_open_at
     ? new Date(cls.enrollment_open_at).toLocaleDateString("en-GB", {
-        day: "numeric",
-        month: "short",
-        year: "numeric",
+        ...fmtOpts,
         hour: "2-digit",
         minute: "2-digit",
       })
     : null;
 
+  // Determine overlay state
+  const overlayState = isFull
+    ? "full"
+    : notYetOpen
+      ? "not_open"
+      : alreadyClosed
+        ? "closed"
+        : null;
+
   return (
     <div
-      className={`relative overflow-hidden rounded-xl border transition-all ${
+      className={`relative overflow-hidden rounded-xl border-2 transition-all ${
         isDisabled
-          ? "cursor-not-allowed border-gray-200 bg-gray-50 opacity-60"
+          ? overlayState === "not_open"
+            ? "cursor-not-allowed border-amber-200 bg-amber-50/30"
+            : overlayState === "closed"
+              ? "cursor-not-allowed border-red-200 bg-red-50/30"
+              : "cursor-not-allowed border-gray-200 bg-gray-50"
           : "cursor-pointer border-gray-200 bg-white shadow-sm hover:border-[#1a6b3c] hover:shadow-md"
       }`}
       onClick={() => !isDisabled && onSelect(cls.id)}
@@ -214,37 +223,29 @@ function ClassCard({ cls, onSelect, labels }: { cls: PublicClass; onSelect: (id:
         }
       }}
     >
-      {/* Full overlay */}
-      {isFull && (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/60">
-          <div className="rounded-lg bg-gray-800 px-4 py-2 text-sm font-semibold text-white">
-            Full / <span className="font-myanmar">နေရာပြည့်သွားပြီ</span>
-          </div>
+      {/* ── Status banner (top strip) ── */}
+      {overlayState === "full" && (
+        <div className="bg-gray-700 px-4 py-2 text-center text-xs font-semibold text-white tracking-wide">
+          FULL / <span className="font-myanmar font-normal">နေရာပြည့်သွားပြီ</span>
+        </div>
+      )}
+      {overlayState === "not_open" && (
+        <div className="bg-amber-500 px-4 py-2 text-center">
+          <p className="text-xs font-semibold text-white tracking-wide">
+            OPENS {openDate?.toUpperCase()}
+          </p>
+          <p className="font-myanmar text-[10px] text-amber-100 mt-0.5">စာရင်းသွင်းချိန် မရောက်သေးပါ</p>
+        </div>
+      )}
+      {overlayState === "closed" && (
+        <div className="bg-red-500 px-4 py-2 text-center">
+          <p className="text-xs font-semibold text-white tracking-wide">ENROLLMENT CLOSED</p>
+          <p className="font-myanmar text-[10px] text-red-100 mt-0.5">စာရင်းသွင်းချိန် ကုန်ဆုံးသွားပြီ</p>
         </div>
       )}
 
-      {/* Not yet open overlay */}
-      {!isFull && notYetOpen && (
-        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-white/60 gap-1">
-          <div className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white">
-            Opens {openDate}
-          </div>
-          <p className="font-myanmar text-xs text-amber-700">စာရင်းသွင်းချိန် မရောက်သေးပါ</p>
-        </div>
-      )}
-
-      {/* Enrollment closed overlay */}
-      {!isFull && !notYetOpen && alreadyClosed && (
-        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-white/60 gap-1">
-          <div className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white">
-            Enrollment Closed
-          </div>
-          <p className="font-myanmar text-xs text-red-700">စာရင်းသွင်းချိန် ကုန်ဆုံးသွားပြီ</p>
-        </div>
-      )}
-
-      <div className="p-5">
-        {/* Level badge */}
+      <div className={`p-5 ${isDisabled ? "opacity-50" : ""}`}>
+        {/* Level badge + seats */}
         <div className="mb-3 flex items-center justify-between">
           <span
             className={`rounded-full px-3 py-1 text-sm font-bold ${LEVEL_COLORS[cls.level] ?? DEFAULT_LEVEL_COLOR}`}
@@ -273,11 +274,14 @@ function ClassCard({ cls, onSelect, labels }: { cls: PublicClass; onSelect: (id:
           {formatMMK(cls.fee_mmk).replace(" MMK", "")} ကျပ်
         </p>
 
-        {/* Close date */}
-        {closeDate && (
-          <p className="text-xs text-gray-400">
-            Closes: {closeDate}
-          </p>
+        {/* Enrollment window info */}
+        {(cls.enrollment_open_at || cls.enrollment_close_at) && !isDisabled && (
+          <div className="mb-2 flex items-center gap-1.5 text-xs text-gray-400">
+            <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            {closeDate ? `Closes ${closeDate}` : openDate ? `Opens ${openDate}` : null}
+          </div>
         )}
 
         {/* Event details */}
@@ -288,7 +292,7 @@ function ClassCard({ cls, onSelect, labels }: { cls: PublicClass; onSelect: (id:
                 <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
                 </svg>
-                {new Date(cls.event_date + "T00:00:00").toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                {new Date(cls.event_date + "T00:00:00").toLocaleDateString("en-GB", fmtOpts)}
                 {cls.start_time && (
                   <span className="ml-1">
                     {cls.start_time.slice(0, 5)}{cls.end_time ? ` – ${cls.end_time.slice(0, 5)}` : ""}
