@@ -89,6 +89,24 @@ export async function POST(request: NextRequest) {
           },
           { status: 409 },
         );
+      case "ENROLLMENT_NOT_OPEN":
+        return NextResponse.json(
+          {
+            error:   "Enrollment Not Open",
+            message: "Enrollment for this class has not opened yet.",
+            message_mm: "ဤသင်တန်းအတွက် စာရင်းသွင်းချိန် မရောက်သေးပါ။",
+          },
+          { status: 409 },
+        );
+      case "ENROLLMENT_CLOSED":
+        return NextResponse.json(
+          {
+            error:   "Enrollment Closed",
+            message: "Enrollment for this class has closed.",
+            message_mm: "ဤသင်တန်းအတွက် စာရင်းသွင်းချိန် ကုန်ဆုံးသွားပြီဖြစ်သည်။",
+          },
+          { status: 409 },
+        );
       default:
         console.error("[enroll] DB error:", payload.detail);
         return NextResponse.json(

@@ -16,6 +16,7 @@ interface PublicClassView {
   fee_formatted: string;   // e.g. "၃၀၀,၀၀၀ MMK"
   seat_remaining: number;
   seat_total: number;
+  enrollment_open_at: string | null;
   enrollment_close_at: string | null;
   status: Class["status"];
   mode: Class["mode"];
@@ -145,7 +146,7 @@ export async function GET(
   // ── Fetch all visible classes (open + full) ──────────────────
   const { data: classes, error: classError } = await supabase
     .from("classes")
-    .select("id, level, fee_mmk, seat_remaining, seat_total, enrollment_close_at, status, mode, event_date, start_time, end_time, venue")
+    .select("id, level, fee_mmk, seat_remaining, seat_total, enrollment_open_at, enrollment_close_at, status, mode, event_date, start_time, end_time, venue")
     .eq("intake_id", intake.id)
     .eq("tenant_id", tenantId)
     .in("status", ["open", "full"])
@@ -168,6 +169,7 @@ export async function GET(
     fee_formatted:        formatMMKSimple(c.fee_mmk),
     seat_remaining:       c.seat_remaining,
     seat_total:           c.seat_total,
+    enrollment_open_at:   c.enrollment_open_at,
     enrollment_close_at:  c.enrollment_close_at,
     status:               c.status,
     mode:                 c.mode ?? "offline",
