@@ -20,6 +20,7 @@ export interface StudentRow {
   student_name_en: string;
   student_name_mm: string | null;
   phone:           string;
+  form_data:       Record<string, string> | null;
   status:          EnrollmentStatus;
   enrolled_at:     string;
   class_level:     JlptLevel;
@@ -75,6 +76,7 @@ export async function GET(request: NextRequest) {
       student_name_en,
       student_name_mm,
       phone,
+      form_data,
       status,
       enrolled_at,
       classes!inner (
@@ -112,6 +114,7 @@ export async function GET(request: NextRequest) {
       student_name_en: string;
       student_name_mm: string | null;
       phone:           string;
+      form_data:       Record<string, string> | null;
       status:          EnrollmentStatus;
       enrolled_at:     string;
       classes: {
@@ -136,6 +139,7 @@ export async function GET(request: NextRequest) {
     student_name_en: row.student_name_en,
     student_name_mm: row.student_name_mm,
     phone:           row.phone,
+    form_data:       row.form_data,
     status:          row.status,
     enrolled_at:     row.enrolled_at,
     class_level:     row.classes?.level ?? ("" as JlptLevel),

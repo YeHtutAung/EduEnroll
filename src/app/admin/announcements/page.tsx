@@ -61,6 +61,7 @@ export default function AnnouncementsPage() {
   const [history, setHistory] = useState<AnnouncementRow[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
 
+  const sendingRef = useRef(false);
   const messageRef = useRef<HTMLTextAreaElement>(null);
 
   // ── Load intakes on mount ─────────────────────────────────────────────────
@@ -109,6 +110,7 @@ export default function AnnouncementsPage() {
 
   // ── Send ──────────────────────────────────────────────────────────────────
   async function handleSend() {
+    if (sendingRef.current) return;
     if (!selectedIntakeId) {
       toast.error("Please select an intake.");
       return;
@@ -119,6 +121,7 @@ export default function AnnouncementsPage() {
       return;
     }
 
+    sendingRef.current = true;
     setSending(true);
     try {
       const body: Record<string, unknown> = {
@@ -148,6 +151,7 @@ export default function AnnouncementsPage() {
     } catch {
       toast.error("Network error. Please try again.");
     } finally {
+      sendingRef.current = false;
       setSending(false);
     }
   }

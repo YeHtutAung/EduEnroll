@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
@@ -383,6 +383,7 @@ function ApplyModal({
   const [intakes, setIntakes] = useState<IntakeItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [applying, setApplying] = useState(false);
+  const applyingRef = useRef(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   useEffect(() => {
@@ -406,7 +407,9 @@ function ApplyModal({
   }
 
   async function handleApply() {
+    if (applyingRef.current) return;
     if (selected.size === 0) return;
+    applyingRef.current = true;
     setApplying(true);
     try {
       const res = await fetch(`/api/intakes/${sourceIntakeId}/form-fields/apply`, {
@@ -423,6 +426,7 @@ function ApplyModal({
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to apply.");
     } finally {
+      applyingRef.current = false;
       setApplying(false);
     }
   }
@@ -531,6 +535,7 @@ export default function FormBuilderPage() {
   const [intakeStatus, setIntakeStatus] = useState<IntakeStatus>("draft");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [showApplyModal, setShowApplyModal] = useState(false);
@@ -636,6 +641,8 @@ export default function FormBuilderPage() {
   // ── Save ───────────────────────────────────────────────────────────────────
 
   async function handleSave() {
+    if (savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     try {
       for (const id of deletedIds) {
@@ -691,6 +698,7 @@ export default function FormBuilderPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save.");
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }
