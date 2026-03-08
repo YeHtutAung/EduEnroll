@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import { formatMMK } from "@/lib/utils";
-import type { Enrollment, Class, Payment } from "@/types/database";
+import type { Enrollment, Class, Intake, Payment } from "@/types/database";
 import type { EnrollmentStatus, PaymentStatus } from "@/types/database";
 
 // ─── Bilingual status labels ──────────────────────────────────────────────────
@@ -44,7 +44,9 @@ const PAYMENT_STATUS_LABELS: Record<PaymentStatus, { en: string; mm: string }> =
 // ─── Joined row types ─────────────────────────────────────────────────────────
 
 interface EnrollmentWithClass extends Enrollment {
-  classes: Pick<Class, "id" | "level" | "fee_mmk"> | null;
+  classes: Pick<Class, "id" | "level" | "fee_mmk"> & {
+    intakes: Pick<Intake, "name" | "year"> | null;
+  } | null;
 }
 
 type EnrollmentResult = { data: EnrollmentWithClass | null; error: unknown };
@@ -94,7 +96,7 @@ export async function GET(request: NextRequest) {
   // ── Fetch enrollment with class info ─────────────────────────────
   const { data: enrollment, error: enrollmentError } = await supabase
     .from("enrollments")
-    .select("*, classes(id, level, fee_mmk)")
+    .select("*, classes(id, level, fee_mmk, intakes(name, year))")
     .eq("enrollment_ref", ref)
     .eq("tenant_id", tenantId)
     .single() as EnrollmentResult;
@@ -128,15 +130,23 @@ export async function GET(request: NextRequest) {
       }
     : null;
 
+  // ── Build intake slug (e.g. "april-2026") ────────────────────────
+  const intakeInfo = enrollment.classes?.intakes;
+  const intakeSlug = intakeInfo
+    ? `${intakeInfo.name.toLowerCase().replace(/\s+/g, "-")}-${intakeInfo.year}`
+    : null;
+
   return NextResponse.json({
     enrollment_ref:   enrollment.enrollment_ref,
     student_name_en:  enrollment.student_name_en,
     student_name_mm:  enrollment.student_name_mm ?? null,
+    class_id:         enrollment.classes?.id ?? null,
     class_level:      enrollment.classes?.level ?? null,
     fee_mmk:          enrollment.classes?.fee_mmk ?? null,
     fee_formatted:    enrollment.classes?.fee_mmk != null
                         ? formatMMK(enrollment.classes.fee_mmk)
                         : null,
+    intake_slug:      intakeSlug,
     status:           enrollment.status,
     status_label_en:  enrollmentLabel.en,
     status_label_mm:  enrollmentLabel.mm,
