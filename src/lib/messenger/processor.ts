@@ -67,6 +67,12 @@ export async function processMessage(
     return;
   }
 
+  // Greetings → show welcome menu
+  if (/^(hi|hello|hey|start|menu|get started|မင်္ဂလာ|ဟယ်လို)$/i.test(lower)) {
+    await sendWelcome(tenantId, senderPsid, pageToken);
+    return;
+  }
+
   // Keyword matching for free-text messages
   if (lower.includes("fee") || lower.includes("ကြေး") || lower.includes("price") || lower.includes("ticket")) {
     await sendFees(tenantId, senderPsid, pageToken);

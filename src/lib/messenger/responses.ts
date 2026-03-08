@@ -5,6 +5,123 @@ import { formatMMK } from "@/lib/utils";
 import { sendTextMessage, sendQuickReplies } from "./send";
 import type { Enrollment, Class, Payment, BankAccount } from "@/types/database";
 
+// ─── Org type ────────────────────────────────────────────────────────────────
+
+type OrgType = "language_school" | "event" | "training_center";
+
+// ─── Org-aware labels ────────────────────────────────────────────────────────
+
+const ORG_LABELS: Record<OrgType, {
+  menuButtons: { title: string; payload: string }[];
+  welcomeEmoji: string;
+  openIntakesTitle: { en: string; mm: string };
+  openIntakesEmpty: { en: string; mm: string };
+  intakeEmoji: string;
+  classLabel: string;
+  feesTitle: { en: string; mm: string };
+  feesEmpty: { en: string; mm: string };
+  enrollTitle: { en: string; mm: string };
+  enrollEmpty: { en: string; mm: string };
+  enrollAction: { en: string; mm: string };
+  scheduleTitle: { en: string; mm: string };
+  scheduleEmpty: { en: string; mm: string };
+  levelPrefix: string;
+  statusLevelLabel: { en: string; mm: string };
+  statusFeeLabel: { en: string; mm: string };
+  contactFallback: string;
+}> = {
+  language_school: {
+    menuButtons: [
+      { title: "📚 Open Intakes", payload: "OPEN_INTAKES" },
+      { title: "💰 Fees", payload: "FEES" },
+      { title: "📝 How to Enroll", payload: "HOW_TO_ENROLL" },
+      { title: "📅 Schedule", payload: "SCHEDULE" },
+      { title: "🏦 Payment", payload: "PAYMENT" },
+      { title: "📋 Check Status", payload: "CHECK_STATUS" },
+      { title: "💬 Live Agent", payload: "LIVE_AGENT" },
+    ],
+    welcomeEmoji: "🎌",
+    openIntakesTitle: { en: "Open Intakes", mm: "ဖွင့်လှစ်ထားသော သင်တန်းများ" },
+    openIntakesEmpty: { en: "No open intakes currently.", mm: "လောလောဆယ် ဖွင့်လှစ်ထားသော သင်တန်းမရှိပါ" },
+    intakeEmoji: "🎓",
+    classLabel: "Levels",
+    feesTitle: { en: "Course Fees", mm: "သင်တန်းကြေးများ" },
+    feesEmpty: { en: "No fee information available currently.", mm: "လောလောဆယ် သင်တန်းကြေး သတင်းအချက်အလက် မရှိပါ" },
+    enrollTitle: { en: "To enroll", mm: "စာရင်းသွင်းရန်" },
+    enrollEmpty: { en: "No open enrollment available currently.", mm: "လောလောဆယ် စာရင်းသွင်းလို့ မရပါသေး" },
+    enrollAction: { en: "Click the link above and fill in the required information.", mm: "အထက်ပါ link ကိုနှိပ်ပြီး လိုအပ်သော အချက်အလက်များ ဖြည့်ပါ။" },
+    scheduleTitle: { en: "Enrollment Schedule", mm: "စာရင်းသွင်းချိန်" },
+    scheduleEmpty: { en: "No schedule information available currently.", mm: "လောလောဆယ် အချိန်ဇယား မရှိပါ" },
+    levelPrefix: "JLPT ",
+    statusLevelLabel: { en: "Level", mm: "အဆင့်" },
+    statusFeeLabel: { en: "Fee", mm: "ကြေး" },
+    contactFallback: "Please contact the school.",
+  },
+  event: {
+    menuButtons: [
+      { title: "🎪 Events", payload: "OPEN_INTAKES" },
+      { title: "🎫 Tickets", payload: "FEES" },
+      { title: "📝 Register", payload: "HOW_TO_ENROLL" },
+      { title: "📅 Event Date", payload: "SCHEDULE" },
+      { title: "🏦 Payment", payload: "PAYMENT" },
+      { title: "📋 Check Status", payload: "CHECK_STATUS" },
+      { title: "💬 Live Agent", payload: "LIVE_AGENT" },
+    ],
+    welcomeEmoji: "🎉",
+    openIntakesTitle: { en: "Upcoming Events", mm: "လာမည့် ပွဲများ" },
+    openIntakesEmpty: { en: "No upcoming events currently.", mm: "လောလောဆယ် လာမည့်ပွဲ မရှိပါ" },
+    intakeEmoji: "🎪",
+    classLabel: "Ticket Types",
+    feesTitle: { en: "Ticket Prices", mm: "လက်မှတ်စျေးနှုန်းများ" },
+    feesEmpty: { en: "No ticket information available currently.", mm: "လောလောဆယ် လက်မှတ်စျေးနှုန်း မရှိပါ" },
+    enrollTitle: { en: "To register", mm: "မှတ်ပုံတင်ရန်" },
+    enrollEmpty: { en: "No open registration available currently.", mm: "လောလောဆယ် မှတ်ပုံတင်လို့ မရပါသေး" },
+    enrollAction: { en: "Click the link above and fill in the required information.", mm: "အထက်ပါ link ကိုနှိပ်ပြီး လိုအပ်သော အချက်အလက်များ ဖြည့်ပါ။" },
+    scheduleTitle: { en: "Event Schedule", mm: "ပွဲအချိန်ဇယား" },
+    scheduleEmpty: { en: "No event schedule available currently.", mm: "လောလောဆယ် ပွဲအချိန်ဇယား မရှိပါ" },
+    levelPrefix: "",
+    statusLevelLabel: { en: "Ticket Type", mm: "လက်မှတ်အမျိုးအစား" },
+    statusFeeLabel: { en: "Price", mm: "စျေးနှုန်း" },
+    contactFallback: "Please contact us.",
+  },
+  training_center: {
+    menuButtons: [
+      { title: "📚 Courses", payload: "OPEN_INTAKES" },
+      { title: "💰 Fees", payload: "FEES" },
+      { title: "📝 Enroll", payload: "HOW_TO_ENROLL" },
+      { title: "📅 Schedule", payload: "SCHEDULE" },
+      { title: "🏦 Payment", payload: "PAYMENT" },
+      { title: "📋 Check Status", payload: "CHECK_STATUS" },
+      { title: "💬 Live Agent", payload: "LIVE_AGENT" },
+    ],
+    welcomeEmoji: "📖",
+    openIntakesTitle: { en: "Open Courses", mm: "ဖွင့်လှစ်ထားသော သင်တန်းများ" },
+    openIntakesEmpty: { en: "No open courses currently.", mm: "လောလောဆယ် ဖွင့်လှစ်ထားသော သင်တန်းမရှိပါ" },
+    intakeEmoji: "📖",
+    classLabel: "Courses",
+    feesTitle: { en: "Course Fees", mm: "သင်တန်းကြေးများ" },
+    feesEmpty: { en: "No fee information available currently.", mm: "လောလောဆယ် သင်တန်းကြေး သတင်းအချက်အလက် မရှိပါ" },
+    enrollTitle: { en: "To enroll", mm: "စာရင်းသွင်းရန်" },
+    enrollEmpty: { en: "No open enrollment available currently.", mm: "လောလောဆယ် စာရင်းသွင်းလို့ မရပါသေး" },
+    enrollAction: { en: "Click the link above and fill in the required information.", mm: "အထက်ပါ link ကိုနှိပ်ပြီး လိုအပ်သော အချက်အလက်များ ဖြည့်ပါ။" },
+    scheduleTitle: { en: "Enrollment Schedule", mm: "စာရင်းသွင်းချိန်" },
+    scheduleEmpty: { en: "No schedule information available currently.", mm: "လောလောဆယ် အချိန်ဇယား မရှိပါ" },
+    levelPrefix: "",
+    statusLevelLabel: { en: "Course", mm: "သင်တန်း" },
+    statusFeeLabel: { en: "Fee", mm: "ကြေး" },
+    contactFallback: "Please contact us.",
+  },
+};
+
+function getLabels(orgType: string) {
+  return ORG_LABELS[(orgType as OrgType)] ?? ORG_LABELS.language_school;
+}
+
+function getMenuButtons(orgType: string) {
+  const l = getLabels(orgType);
+  return l.menuButtons.map((b) => ({ content_type: "text" as const, ...b }));
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 const MM_DIGITS: Record<string, string> = {
@@ -42,15 +159,15 @@ function intakeToSlug(name: string, year: number): string {
   return `${month}-${year}`;
 }
 
-const MAIN_MENU_BUTTONS = [
-  { content_type: "text" as const, title: "📚 Open Intakes", payload: "OPEN_INTAKES" },
-  { content_type: "text" as const, title: "💰 Fees", payload: "FEES" },
-  { content_type: "text" as const, title: "📝 How to Enroll", payload: "HOW_TO_ENROLL" },
-  { content_type: "text" as const, title: "📅 Schedule", payload: "SCHEDULE" },
-  { content_type: "text" as const, title: "🏦 Payment", payload: "PAYMENT" },
-  { content_type: "text" as const, title: "📋 Check Status", payload: "CHECK_STATUS" },
-  { content_type: "text" as const, title: "💬 Live Agent", payload: "LIVE_AGENT" },
-];
+async function getTenantOrgType(tenantId: string): Promise<string> {
+  const supabase = createAdminClient();
+  const { data } = await supabase
+    .from("tenants")
+    .select("org_type")
+    .eq("id", tenantId)
+    .single() as { data: { org_type: string } | null; error: unknown };
+  return data?.org_type ?? "language_school";
+}
 
 const STATUS_LABELS: Record<string, { en: string; mm: string }> = {
   pending_payment: { en: "Awaiting Payment", mm: "ငွေပေးချေမှု စောင့်ဆိုင်းဆဲ" },
@@ -69,16 +186,18 @@ export async function sendWelcome(
   const supabase = createAdminClient();
   const { data: tenant } = await supabase
     .from("tenants")
-    .select("name, messenger_greeting")
+    .select("name, messenger_greeting, org_type")
     .eq("id", tenantId)
     .single() as {
-    data: { name: string; messenger_greeting: string | null } | null;
+    data: { name: string; messenger_greeting: string | null; org_type: string } | null;
     error: unknown;
   };
 
+  const orgType = tenant?.org_type ?? "language_school";
+  const l = getLabels(orgType);
   const school = tenant?.name ?? "KuuNyi";
 
-  let msg = `မင်္ဂလာပါ! ${school} မှ ကြိုဆိုပါတယ် 🎌\nHello! Welcome to ${school}`;
+  let msg = `မင်္ဂလာပါ! ${school} မှ ကြိုဆိုပါတယ် ${l.welcomeEmoji}\nHello! Welcome to ${school}`;
 
   if (tenant?.messenger_greeting) {
     msg += `\n\n${tenant.messenger_greeting}`;
@@ -86,7 +205,7 @@ export async function sendWelcome(
 
   msg += `\n\nဘာကူညီပေးရမလဲ? / How can I help you?`;
 
-  await sendQuickReplies(pageToken, senderPsid, msg, MAIN_MENU_BUTTONS);
+  await sendQuickReplies(pageToken, senderPsid, msg, getMenuButtons(orgType));
 }
 
 // ─── 2. Open Intakes ─────────────────────────────────────────────────────────
@@ -97,6 +216,8 @@ export async function sendOpenIntakes(
   pageToken: string,
 ): Promise<void> {
   const supabase = createAdminClient();
+  const orgType = await getTenantOrgType(tenantId);
+  const l = getLabels(orgType);
 
   const { data: intakes } = await supabase
     .from("intakes")
@@ -112,12 +233,12 @@ export async function sendOpenIntakes(
     await sendTextMessage(
       pageToken,
       senderPsid,
-      "လောလောဆယ် ဖွင့်လှစ်ထားသော သင်တန်းမရှိပါ\nNo open intakes currently.\n\nPlease check back later!",
+      `${l.openIntakesEmpty.mm}\n${l.openIntakesEmpty.en}\n\nPlease check back later!`,
     );
     return;
   }
 
-  let msg = "📚 ဖွင့်လှစ်ထားသော သင်တန်းများ / Open Intakes\n\n";
+  let msg = `📚 ${l.openIntakesTitle.mm} / ${l.openIntakesTitle.en}\n\n`;
 
   for (const intake of intakes) {
     const { data: classes } = await supabase
@@ -135,13 +256,14 @@ export async function sendOpenIntakes(
       c.seat_remaining > 0 ? c.level : `${c.level} (Full)`,
     );
 
-    msg += `🎓 ${intake.name}\n`;
-    msg += `   Levels: ${levels.join(", ") || "—"}\n\n`;
+    msg += `${l.intakeEmoji} ${intake.name}\n`;
+    msg += `   ${l.classLabel}: ${levels.join(", ") || "—"}\n\n`;
   }
 
+  const buttons = getMenuButtons(orgType);
   await sendQuickReplies(pageToken, senderPsid, msg.trim(), [
-    { content_type: "text", title: "📝 How to Enroll", payload: "HOW_TO_ENROLL" },
-    { content_type: "text", title: "💰 Fees", payload: "FEES" },
+    buttons.find((b) => b.payload === "HOW_TO_ENROLL")!,
+    buttons.find((b) => b.payload === "FEES")!,
     { content_type: "text", title: "🏠 Main Menu", payload: "MAIN_MENU" },
   ]);
 }
@@ -154,6 +276,8 @@ export async function sendFees(
   pageToken: string,
 ): Promise<void> {
   const supabase = createAdminClient();
+  const orgType = await getTenantOrgType(tenantId);
+  const l = getLabels(orgType);
 
   // Find the latest open intake
   const { data: intake } = await supabase
@@ -169,7 +293,7 @@ export async function sendFees(
     await sendTextMessage(
       pageToken,
       senderPsid,
-      "လောလောဆယ် သင်တန်းကြေး သတင်းအချက်အလက် မရှိပါ\nNo fee information available currently.",
+      `${l.feesEmpty.mm}\n${l.feesEmpty.en}`,
     );
     return;
   }
@@ -186,22 +310,25 @@ export async function sendFees(
   };
 
   if (!classes || classes.length === 0) {
-    await sendTextMessage(pageToken, senderPsid, "No classes found for this intake.");
+    await sendTextMessage(pageToken, senderPsid, `No ${l.classLabel.toLowerCase()} found.`);
     return;
   }
 
-  // Sort N5→N1
-  const LEVEL_ORDER = ["N5", "N4", "N3", "N2", "N1"];
-  classes.sort((a, b) => LEVEL_ORDER.indexOf(a.level) - LEVEL_ORDER.indexOf(b.level));
-
-  let msg = `💰 သင်တန်းကြေးများ / Course Fees\n📋 ${intake.name}\n\n`;
-  for (const c of classes) {
-    msg += `${c.level}: ${formatMMK(c.fee_mmk)}\n`;
+  // Only sort by JLPT order for language schools
+  if (orgType === "language_school") {
+    const LEVEL_ORDER = ["N5", "N4", "N3", "N2", "N1"];
+    classes.sort((a, b) => LEVEL_ORDER.indexOf(a.level) - LEVEL_ORDER.indexOf(b.level));
   }
 
+  let msg = `💰 ${l.feesTitle.mm} / ${l.feesTitle.en}\n📋 ${intake.name}\n\n`;
+  for (const c of classes) {
+    msg += `${l.levelPrefix}${c.level}: ${formatMMK(c.fee_mmk)}\n`;
+  }
+
+  const buttons = getMenuButtons(orgType);
   await sendQuickReplies(pageToken, senderPsid, msg.trim(), [
-    { content_type: "text", title: "📝 How to Enroll", payload: "HOW_TO_ENROLL" },
-    { content_type: "text", title: "🏦 Payment", payload: "PAYMENT" },
+    buttons.find((b) => b.payload === "HOW_TO_ENROLL")!,
+    buttons.find((b) => b.payload === "PAYMENT")!,
     { content_type: "text", title: "🏠 Main Menu", payload: "MAIN_MENU" },
   ]);
 }
@@ -214,6 +341,8 @@ export async function sendEnrollLink(
   pageToken: string,
 ): Promise<void> {
   const supabase = createAdminClient();
+  const orgType = await getTenantOrgType(tenantId);
+  const l = getLabels(orgType);
 
   const { data: tenant } = await supabase
     .from("tenants")
@@ -234,7 +363,7 @@ export async function sendEnrollLink(
     await sendTextMessage(
       pageToken,
       senderPsid,
-      "လောလောဆယ် စာရင်းသွင်းလို့ မရပါသေး\nNo open enrollment available currently.",
+      `${l.enrollEmpty.mm}\n${l.enrollEmpty.en}`,
     );
     return;
   }
@@ -245,8 +374,8 @@ export async function sendEnrollLink(
   await sendTextMessage(
     pageToken,
     senderPsid,
-    `စာရင်းသွင်းရန် / To enroll:\n👉 ${url}\n\n` +
-      `အထက်ပါ link ကိုနှိပ်ပြီး လိုအပ်သော အချက်အလက်များ ဖြည့်ပါ။\nClick the link above and fill in the required information.`,
+    `${l.enrollTitle.mm} / ${l.enrollTitle.en}:\n👉 ${url}\n\n` +
+      `${l.enrollAction.mm}\n${l.enrollAction.en}`,
   );
 }
 
@@ -258,6 +387,8 @@ export async function sendSchedule(
   pageToken: string,
 ): Promise<void> {
   const supabase = createAdminClient();
+  const orgType = await getTenantOrgType(tenantId);
+  const l = getLabels(orgType);
 
   const { data: intake } = await supabase
     .from("intakes")
@@ -272,7 +403,7 @@ export async function sendSchedule(
     await sendTextMessage(
       pageToken,
       senderPsid,
-      "လောလောဆယ် အချိန်ဇယား မရှိပါ\nNo schedule information available currently.",
+      `${l.scheduleEmpty.mm}\n${l.scheduleEmpty.en}`,
     );
     return;
   }
@@ -289,17 +420,20 @@ export async function sendSchedule(
   };
 
   if (!classes || classes.length === 0) {
-    await sendTextMessage(pageToken, senderPsid, "No schedule info for this intake.");
+    await sendTextMessage(pageToken, senderPsid, `No schedule info for this ${orgType === "event" ? "event" : "intake"}.`);
     return;
   }
 
-  const LEVEL_ORDER = ["N5", "N4", "N3", "N2", "N1"];
-  classes.sort((a, b) => LEVEL_ORDER.indexOf(a.level) - LEVEL_ORDER.indexOf(b.level));
+  // Only sort by JLPT order for language schools
+  if (orgType === "language_school") {
+    const LEVEL_ORDER = ["N5", "N4", "N3", "N2", "N1"];
+    classes.sort((a, b) => LEVEL_ORDER.indexOf(a.level) - LEVEL_ORDER.indexOf(b.level));
+  }
 
-  let msg = `📅 စာရင်းသွင်းချိန် / Enrollment Schedule\n📋 ${intake.name}\n\n`;
+  let msg = `📅 ${l.scheduleTitle.mm} / ${l.scheduleTitle.en}\n📋 ${intake.name}\n\n`;
 
   for (const c of classes) {
-    msg += `${c.level}:\n`;
+    msg += `${l.levelPrefix}${c.level}:\n`;
     if (c.enrollment_open_at) {
       msg += `  Open: ${formatDateEN(c.enrollment_open_at)} / ${formatDateMM(c.enrollment_open_at)}\n`;
     }
@@ -312,9 +446,10 @@ export async function sendSchedule(
     msg += "\n";
   }
 
+  const buttons = getMenuButtons(orgType);
   await sendQuickReplies(pageToken, senderPsid, msg.trim(), [
-    { content_type: "text", title: "📝 How to Enroll", payload: "HOW_TO_ENROLL" },
-    { content_type: "text", title: "💰 Fees", payload: "FEES" },
+    buttons.find((b) => b.payload === "HOW_TO_ENROLL")!,
+    buttons.find((b) => b.payload === "FEES")!,
     { content_type: "text", title: "🏠 Main Menu", payload: "MAIN_MENU" },
   ]);
 }
@@ -327,6 +462,8 @@ export async function sendPaymentInfo(
   pageToken: string,
 ): Promise<void> {
   const supabase = createAdminClient();
+  const orgType = await getTenantOrgType(tenantId);
+  const l = getLabels(orgType);
 
   const { data: accounts } = await supabase
     .from("bank_accounts")
@@ -348,7 +485,7 @@ export async function sendPaymentInfo(
     await sendTextMessage(
       pageToken,
       senderPsid,
-      "ဘဏ်အကောင့် အချက်အလက် မရှိသေးပါ\nNo bank account info available. Please contact the school.",
+      `ဘဏ်အကောင့် အချက်အလက် မရှိသေးပါ\nNo bank account info available. ${l.contactFallback}`,
     );
     return;
   }
@@ -382,6 +519,8 @@ export async function sendStatusCheck(
   pageToken: string,
 ): Promise<void> {
   const supabase = createAdminClient();
+  const orgType = await getTenantOrgType(tenantId);
+  const l = getLabels(orgType);
 
   const { data: enrollment } = (await supabase
     .from("enrollments")
@@ -418,8 +557,8 @@ export async function sendStatusCheck(
   reply += "\n";
 
   if (enrollment.classes) {
-    reply += `Level / အဆင့်: JLPT ${enrollment.classes.level}\n`;
-    reply += `Fee / ကြေး: ${formatMMK(enrollment.classes.fee_mmk)}\n`;
+    reply += `${l.statusLevelLabel.en} / ${l.statusLevelLabel.mm}: ${l.levelPrefix}${enrollment.classes.level}\n`;
+    reply += `${l.statusFeeLabel.en} / ${l.statusFeeLabel.mm}: ${formatMMK(enrollment.classes.fee_mmk)}\n`;
   }
 
   reply += `\nStatus: ${statusLabel.en}\nအခြေအနေ: ${statusLabel.mm}`;
@@ -489,11 +628,13 @@ export async function sendUnrecognized(
   senderPsid: string,
   pageToken: string,
 ): Promise<void> {
+  const orgType = await getTenantOrgType(tenantId);
+
   await sendQuickReplies(
     pageToken,
     senderPsid,
     "ဝမ်းနည်းပါတယ်၊ နားမလည်ပါ 😊\nSorry, I didn't understand that.\n\nPlease choose an option below:",
-    MAIN_MENU_BUTTONS,
+    getMenuButtons(orgType),
   );
 }
 
