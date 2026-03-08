@@ -630,6 +630,29 @@ export default function StudentsPage() {
         )}
       </div>
 
+      {/* ── Status tabs ─────────────────────────────────────────────── */}
+      <div className="flex gap-1 mb-4 bg-white rounded-xl border border-gray-100 shadow-sm p-1.5">
+        {[
+          { value: "",                  label: "All" },
+          { value: "payment_submitted", label: "Pending Review" },
+          { value: "pending_payment",   label: "Awaiting Payment" },
+          { value: "confirmed",         label: "Confirmed" },
+          { value: "rejected",          label: "Rejected" },
+        ].map((tab) => (
+          <button
+            key={tab.value}
+            onClick={() => setFilter("status", tab.value)}
+            className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+              filters.status === tab.value
+                ? "bg-[#1a3f8a] text-white shadow-sm"
+                : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
       {/* ── Filter bar ──────────────────────────────────────────────── */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm px-5 py-4 mb-5">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">

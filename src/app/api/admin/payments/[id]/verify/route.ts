@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, badRequest, notFound } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { sendEmail, enrollmentApprovedEmail, enrollmentRejectedEmail } from "@/lib/email";
 import type { Class, Enrollment, Payment, PaymentStatus, EnrollmentStatus } from "@/types/database";
 
 type EnrollmentResult = { data: Enrollment | null; error: unknown };
@@ -92,6 +93,36 @@ export async function PATCH(
 
     if (ee) return NextResponse.json({ error: (ee as Error).message }, { status: 500 });
 
+    // Send approval email (best-effort, non-blocking)
+    if (enrollment.email) {
+      const host = request.headers.get("host") ?? "localhost:3005";
+      const proto = host.startsWith("localhost") ? "http" : "https";
+      const statusUrl = `${proto}://${host}/status?ref=${enrollment.enrollment_ref}`;
+
+      const { data: cls2 } = await admin
+        .from("classes")
+        .select("level")
+        .eq("id", enrollment.class_id)
+        .single() as { data: { level: string } | null; error: unknown };
+
+      const emailData = enrollmentApprovedEmail({
+        studentName: enrollment.student_name_en || "Student",
+        enrollmentRef: enrollment.enrollment_ref,
+        classLevel: cls2?.level ?? "",
+        statusUrl,
+      });
+
+      sendEmail({ to: enrollment.email, ...emailData }).catch((err) => {
+        console.error("[verify] Approval email failed:", err);
+      });
+
+      // Mark notification sent
+      await admin
+        .from("enrollments")
+        .update({ status_notified_at: now } as never)
+        .eq("id", enrollment.id);
+    }
+
     return NextResponse.json({
       enrollment: updatedEnrollment,
       payment: { ...payment, status: newPaymentStatus, verified_by: user.id, verified_at: now },
@@ -109,9 +140,14 @@ export async function PATCH(
 
   if (pe) return NextResponse.json({ error: (pe as Error).message }, { status: 500 });
 
+  const enrollUpdatePayload: Record<string, unknown> = { status: newEnrollStatus };
+  if (typeof rejection_reason === "string") {
+    enrollUpdatePayload.rejection_reason = rejection_reason;
+  }
+
   const { data: updatedEnrollment, error: ee } = await admin
     .from("enrollments")
-    .update({ status: newEnrollStatus } as never)
+    .update(enrollUpdatePayload as never)
     .eq("id", enrollment.id)
     .select()
     .single() as EnrollmentResult;
@@ -132,6 +168,37 @@ export async function PATCH(
       .from("classes")
       .update({ seat_remaining: newRemaining } as never)
       .eq("id", enrollment.class_id);
+  }
+
+  // Send rejection email (best-effort, non-blocking)
+  if (enrollment.email) {
+    const host = request.headers.get("host") ?? "localhost:3005";
+    const proto = host.startsWith("localhost") ? "http" : "https";
+    const statusUrl = `${proto}://${host}/status?ref=${enrollment.enrollment_ref}`;
+
+    const clsForLevel = await admin
+      .from("classes")
+      .select("level")
+      .eq("id", enrollment.class_id)
+      .single() as { data: { level: string } | null; error: unknown };
+
+    const emailData = enrollmentRejectedEmail({
+      studentName: enrollment.student_name_en || "Student",
+      enrollmentRef: enrollment.enrollment_ref,
+      classLevel: clsForLevel.data?.level ?? "",
+      reason: typeof rejection_reason === "string" ? rejection_reason : null,
+      statusUrl,
+    });
+
+    sendEmail({ to: enrollment.email, ...emailData }).catch((err) => {
+      console.error("[verify] Rejection email failed:", err);
+    });
+
+    // Mark notification sent
+    await admin
+      .from("enrollments")
+      .update({ status_notified_at: now } as never)
+      .eq("id", enrollment.id);
   }
 
   const responseBody: Record<string, unknown> = {
