@@ -17,6 +17,7 @@ import {
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import { formatMMK } from "@/lib/utils";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
+import { mm } from "@/lib/mm-labels";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 interface AnalyticsData {
@@ -160,7 +161,7 @@ function AnalyticsContent() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           label="Total Enrolled"
-          labelMm="စာရင်းသွင်းသူ စုစုပေါင်း"
+          labelMm={mm(tl.orgType, "totalEnrolled")}
           value={data.total_enrolled.toLocaleString()}
         />
         <StatCard
@@ -190,7 +191,7 @@ function AnalyticsContent() {
             Enrollment Trend
           </h2>
           <p className="text-xs text-gray-400 font-myanmar mb-4">
-            နေ့စဉ်စာရင်းသွင်းမှု
+            {mm(tl.orgType, "enrollmentTrend")}
           </p>
           <ResponsiveContainer width="100%" height={260}>
             <LineChart data={data.daily_enrollments}>

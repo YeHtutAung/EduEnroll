@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, badRequest } from "@/lib/api";
-import type { JlptLevel, Intake } from "@/types/database";
-
-const VALID_LEVELS: JlptLevel[] = ["N5", "N4", "N3", "N2", "N1"];
+import type { Intake } from "@/types/database";
 
 type IntakeResult = { data: Pick<Intake, "id" | "name"> | null; error: unknown };
 
 export interface AnnouncementRow {
   id:           string;
   intake_id:    string | null;
-  class_level:  JlptLevel | null;
+  class_level:  string | null;
   target_label: string;
   message:      string;
   sent_by_id:   string | null;
@@ -63,8 +61,8 @@ export async function POST(request: NextRequest) {
   if (!intake_id || typeof intake_id !== "string") {
     return badRequest("intake_id is required.");
   }
-  if (class_level !== null && !VALID_LEVELS.includes(class_level as JlptLevel)) {
-    return badRequest(`class_level must be null or one of: ${VALID_LEVELS.join(", ")}.`);
+  if (class_level !== null && (typeof class_level !== "string" || class_level.trim() === "")) {
+    return badRequest("class_level must be null or a non-empty string.");
   }
   if (!message || typeof message !== "string" || message.trim() === "") {
     return badRequest("message is required.");
@@ -91,7 +89,7 @@ export async function POST(request: NextRequest) {
     .insert({
       tenant_id:    tenantId,
       intake_id:    intake_id,
-      class_level:  (class_level as JlptLevel | null) ?? null,
+      class_level:  class_level ?? null,
       target_label,
       message:      message.trim(),
       sent_by_id:   user.id,

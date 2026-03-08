@@ -6,6 +6,7 @@ import StatusBadge from "@/components/ui/StatusBadge";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
+import { mm } from "@/lib/mm-labels";
 import type { Intake, IntakeStatus } from "@/types/database";
 
 // ── Skeleton ──────────────────────────────────────────────────────────────────
@@ -172,7 +173,7 @@ export default function IntakesPage() {
             {labels.intake}s &amp; {labels.class}s
           </h1>
           <p className="text-sm font-myanmar text-gray-400 mt-0.5">
-            သင်တန်းနှင့် အတန်းများ
+            {mm(labels.orgType, "intakesAndClasses")}
           </p>
         </div>
         <Link

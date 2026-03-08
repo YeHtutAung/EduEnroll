@@ -74,8 +74,6 @@ interface Filters {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const JLPT_LEVELS: JlptLevel[] = ["N5", "N4", "N3", "N2", "N1"];
-
 const ENROLLMENT_STATUSES: { value: EnrollmentStatus; label: string }[] = [
   { value: "pending_payment",   label: "Pending Payment"   },
   { value: "payment_submitted", label: "Payment Submitted" },
@@ -83,13 +81,14 @@ const ENROLLMENT_STATUSES: { value: EnrollmentStatus; label: string }[] = [
   { value: "rejected",          label: "Rejected"          },
 ];
 
-const LEVEL_COLORS: Record<JlptLevel, string> = {
+const LEVEL_COLORS: Record<string, string> = {
   N5: "#1a6b3c",
   N4: "#0891b2",
   N3: "#1a3f8a",
   N2: "#b07d2a",
   N1: "#c0392b",
 };
+const DEFAULT_LEVEL_COLOR = "#6b7280";
 
 const PAYMENT_STATUS_LABELS: Record<PaymentStatus, { label: string; cls: string }> = {
   pending:  { label: "Pending",  cls: "bg-amber-50 text-amber-800 border border-amber-300" },
@@ -206,11 +205,11 @@ function StudentDetailModal({
           {/* Modal header */}
           <div
             className="px-6 py-4 flex items-center gap-3 border-b border-gray-100"
-            style={{ borderTop: `4px solid ${level ? LEVEL_COLORS[level] : "#1a3f8a"}` }}
+            style={{ borderTop: `4px solid ${level ? (LEVEL_COLORS[level] ?? DEFAULT_LEVEL_COLOR) : DEFAULT_LEVEL_COLOR}` }}
           >
             <div
               className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm shrink-0"
-              style={{ backgroundColor: level ? LEVEL_COLORS[level] : "#1a3f8a" }}
+              style={{ backgroundColor: level ? (LEVEL_COLORS[level] ?? DEFAULT_LEVEL_COLOR) : DEFAULT_LEVEL_COLOR }}
             >
               {level || "?"}
             </div>
@@ -313,7 +312,7 @@ function StudentDetailModal({
                       detail.class_level ? (
                         <span
                           className="inline-flex items-center justify-center w-10 h-7 rounded-lg text-xs font-bold text-white"
-                          style={{ backgroundColor: LEVEL_COLORS[detail.class_level] }}
+                          style={{ backgroundColor: LEVEL_COLORS[detail.class_level ?? ""] ?? DEFAULT_LEVEL_COLOR }}
                         >
                           {detail.class_level}
                         </span>
@@ -470,6 +469,9 @@ export default function StudentsPage() {
   // Dynamic form field columns
   const [formFields, setFormFields] = useState<FormFieldDef[]>([]);
 
+  // Available class levels (derived from loaded students)
+  const [classLevels, setClassLevels] = useState<string[]>([]);
+
   // Modal
   const [selectedStudent, setSelectedStudent] = useState<StudentRow | null>(null);
 
@@ -497,7 +499,21 @@ export default function StudentsPage() {
   useEffect(() => {
     fetch("/api/intakes")
       .then((r) => r.json())
-      .then((data: Intake[]) => setIntakes(data))
+      .then((data: Intake[]) => {
+        setIntakes(data);
+        // Fetch class levels from all intakes
+        Promise.all(
+          data.map((i) =>
+            fetch(`/api/intakes/${i.id}/classes`)
+              .then((r) => r.json())
+              .then((classes: { level: string }[]) => classes.map((c) => c.level))
+              .catch(() => [] as string[]),
+          ),
+        ).then((levelArrays) => {
+          const unique = Array.from(new Set(levelArrays.flat()));
+          setClassLevels(unique);
+        });
+      })
       .catch(() => {/* non-critical */});
   }, []);
 
@@ -726,7 +742,7 @@ export default function StudentsPage() {
             className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] bg-white text-gray-700"
           >
             <option value="">All Levels</option>
-            {JLPT_LEVELS.map((l) => (
+            {classLevels.map((l) => (
               <option key={l} value={l}>{l}</option>
             ))}
           </select>

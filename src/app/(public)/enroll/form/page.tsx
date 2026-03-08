@@ -73,13 +73,14 @@ function getIntakeNameMM(name: string, year: number): string {
 
 // ─── Level badge colors ──────────────────────────────────────────────────────
 
-const LEVEL_COLORS: Record<JlptLevel, string> = {
+const LEVEL_COLORS: Record<string, string> = {
   N5: "bg-emerald-100 text-emerald-800",
   N4: "bg-blue-100 text-blue-800",
   N3: "bg-purple-100 text-purple-800",
   N2: "bg-orange-100 text-orange-800",
   N1: "bg-red-100 text-red-800",
 };
+const DEFAULT_LEVEL_CLASS = "bg-gray-100 text-gray-800";
 
 // ─── Step indicator ──────────────────────────────────────────────────────────
 
@@ -493,7 +494,7 @@ function EnrollmentFormPage() {
         {/* Selected class summary */}
         <div className="mb-8 rounded-xl border border-gray-200 bg-gray-50 p-4">
           <div className="flex items-center gap-3">
-            <span className={`rounded-full px-3 py-1 text-sm font-bold ${LEVEL_COLORS[classInfo.level]}`}>
+            <span className={`rounded-full px-3 py-1 text-sm font-bold ${LEVEL_COLORS[classInfo.level] ?? DEFAULT_LEVEL_CLASS}`}>
               {classInfo.level}
             </span>
             <div>
@@ -545,7 +546,7 @@ function EnrollmentFormPage() {
           Selected Class
         </h3>
         <div className="flex items-center gap-3">
-          <span className={`rounded-full px-3 py-1 text-sm font-bold ${LEVEL_COLORS[classInfo.level]}`}>
+          <span className={`rounded-full px-3 py-1 text-sm font-bold ${LEVEL_COLORS[classInfo.level] ?? DEFAULT_LEVEL_CLASS}`}>
             {classInfo.level}
           </span>
           <div>

@@ -22,6 +22,8 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import StatusBadge from "@/components/ui/StatusBadge";
 import { useToast } from "@/components/ui/Toast";
+import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
+import { mm } from "@/lib/mm-labels";
 import type { IntakeStatus } from "@/types/database";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -529,6 +531,7 @@ export default function FormBuilderPage() {
   const params = useParams();
   const intakeId = params.id as string;
   const toast = useToast();
+  const tl = useTenantLabels();
 
   const [fields, setFields] = useState<FormField[]>([]);
   const [intakeName, setIntakeName] = useState("");
@@ -733,7 +736,7 @@ export default function FormBuilderPage() {
           </div>
           <h1 className="text-2xl font-bold text-gray-900">Edit Enrollment Form</h1>
           <p className="text-sm font-myanmar text-gray-400 mt-0.5">
-            စာရင်းသွင်းဖောင် ပြင်ဆင်ရန်
+            {mm(tl.orgType, "editForm")}
           </p>
         </div>
         {!readOnly && (
