@@ -49,6 +49,7 @@ const MAIN_MENU_BUTTONS = [
   { content_type: "text" as const, title: "📅 Schedule", payload: "SCHEDULE" },
   { content_type: "text" as const, title: "🏦 Payment", payload: "PAYMENT" },
   { content_type: "text" as const, title: "📋 Check Status", payload: "CHECK_STATUS" },
+  { content_type: "text" as const, title: "💬 Live Agent", payload: "LIVE_AGENT" },
 ];
 
 const STATUS_LABELS: Record<string, { en: string; mm: string }> = {
@@ -445,4 +446,102 @@ export async function sendStatusCheck(
     { content_type: "text", title: "🔄 Check Another", payload: "CHECK_STATUS" },
     { content_type: "text", title: "🏠 Main Menu", payload: "MAIN_MENU" },
   ]);
+}
+
+// ─── 8. Live Agent Handoff ──────────────────────────────────────────────────
+
+export async function sendHandoffStart(
+  tenantId: string,
+  senderPsid: string,
+  pageToken: string,
+): Promise<void> {
+  const supabase = createAdminClient();
+
+  // Fetch timeout setting
+  const { data: tenant } = await supabase
+    .from("tenants")
+    .select("handoff_timeout_min")
+    .eq("id", tenantId)
+    .single() as { data: { handoff_timeout_min: number } | null; error: unknown };
+
+  const timeoutMin = tenant?.handoff_timeout_min ?? 15;
+  const expiresAt = new Date(Date.now() + timeoutMin * 60 * 1000).toISOString();
+
+  // Upsert handoff session
+  await supabase
+    .from("messenger_handoffs")
+    .upsert(
+      { tenant_id: tenantId, sender_psid: senderPsid, expires_at: expiresAt } as never,
+      { onConflict: "tenant_id,sender_psid" },
+    );
+
+  await sendTextMessage(
+    pageToken,
+    senderPsid,
+    `💬 Live Agent ကို ချိတ်ဆက်ပေးနေပါသည်။ ခေတ္တစောင့်ပေးပါ 🙏\nConnecting you to a live agent. Please wait...\n\n🤖 Bot ကို ပြန်သုံးလိုပါက "bot" ဟု ရိုက်ပါ။\nType "bot" anytime to return to the bot.`,
+  );
+}
+
+// ─── 9. Unrecognized Input ──────────────────────────────────────────────────
+
+export async function sendUnrecognized(
+  tenantId: string,
+  senderPsid: string,
+  pageToken: string,
+): Promise<void> {
+  await sendQuickReplies(
+    pageToken,
+    senderPsid,
+    "ဝမ်းနည်းပါတယ်၊ နားမလည်ပါ 😊\nSorry, I didn't understand that.\n\nPlease choose an option below:",
+    MAIN_MENU_BUTTONS,
+  );
+}
+
+// ─── 10. Handoff Check ──────────────────────────────────────────────────────
+
+export async function checkHandoff(
+  tenantId: string,
+  senderPsid: string,
+): Promise<boolean> {
+  const supabase = createAdminClient();
+
+  const { data } = await supabase
+    .from("messenger_handoffs")
+    .select("expires_at")
+    .eq("tenant_id", tenantId)
+    .eq("sender_psid", senderPsid)
+    .single() as { data: { expires_at: string } | null; error: unknown };
+
+  if (!data) return false;
+
+  // Check if expired
+  if (new Date(data.expires_at) < new Date()) {
+    // Clean up expired session
+    await supabase
+      .from("messenger_handoffs")
+      .delete()
+      .eq("tenant_id", tenantId)
+      .eq("sender_psid", senderPsid);
+    return false;
+  }
+
+  return true;
+}
+
+// ─── 11. End Handoff ────────────────────────────────────────────────────────
+
+export async function endHandoff(
+  tenantId: string,
+  senderPsid: string,
+  pageToken: string,
+): Promise<void> {
+  const supabase = createAdminClient();
+
+  await supabase
+    .from("messenger_handoffs")
+    .delete()
+    .eq("tenant_id", tenantId)
+    .eq("sender_psid", senderPsid);
+
+  await sendWelcome(tenantId, senderPsid, pageToken);
 }

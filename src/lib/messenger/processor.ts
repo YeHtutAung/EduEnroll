@@ -9,6 +9,10 @@ import {
   sendSchedule,
   sendPaymentInfo,
   sendStatusCheck,
+  sendHandoffStart,
+  sendUnrecognized,
+  checkHandoff,
+  endHandoff,
 } from "./responses";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -30,13 +34,31 @@ export async function processMessage(
   message: MessengerMessage,
   pageToken: string,
 ): Promise<void> {
+  const text = message.text?.trim();
+  const lower = text?.toLowerCase() ?? "";
+
+  // "bot" keyword exits handoff — always check first
+  if (lower === "bot") {
+    await endHandoff(tenantId, senderPsid, pageToken);
+    return;
+  }
+
+  // Check if user is in live-agent handoff mode — bot stays silent
+  let isHandoff = false;
+  try {
+    isHandoff = await checkHandoff(tenantId, senderPsid);
+  } catch {
+    // Handoff check failed — fall through to normal bot
+    isHandoff = false;
+  }
+  if (isHandoff) return;
+
   // Quick reply payloads take priority
   if (message.quick_reply?.payload) {
     await handlePayload(tenantId, senderPsid, message.quick_reply.payload, pageToken);
     return;
   }
 
-  const text = message.text?.trim();
   if (!text) return;
 
   // Check if it looks like a reference number
@@ -46,8 +68,7 @@ export async function processMessage(
   }
 
   // Keyword matching for free-text messages
-  const lower = text.toLowerCase();
-  if (lower.includes("fee") || lower.includes("ကြေး") || lower.includes("price")) {
+  if (lower.includes("fee") || lower.includes("ကြေး") || lower.includes("price") || lower.includes("ticket")) {
     await sendFees(tenantId, senderPsid, pageToken);
     return;
   }
@@ -55,7 +76,7 @@ export async function processMessage(
     await sendEnrollLink(tenantId, senderPsid, pageToken);
     return;
   }
-  if (lower.includes("schedule") || lower.includes("date") || lower.includes("အချိန်")) {
+  if (lower.includes("schedule") || lower.includes("date") || lower.includes("အချိန်") || lower.includes("event")) {
     await sendSchedule(tenantId, senderPsid, pageToken);
     return;
   }
@@ -75,9 +96,13 @@ export async function processMessage(
     await sendOpenIntakes(tenantId, senderPsid, pageToken);
     return;
   }
+  if (lower.includes("agent") || lower.includes("human") || lower.includes("help") || lower.includes("လူ")) {
+    await sendHandoffStart(tenantId, senderPsid, pageToken);
+    return;
+  }
 
-  // Default: send welcome message
-  await sendWelcome(tenantId, senderPsid, pageToken);
+  // Unrecognized input: show "I didn't understand" + menu
+  await sendUnrecognized(tenantId, senderPsid, pageToken);
 }
 
 // ─── Payload router ─────────────────────────────────────────────────────────
@@ -115,6 +140,10 @@ async function handlePayload(
         senderPsid,
         "Please send your enrollment reference number.\nစာရင်းသွင်း ရည်ညွှန်းနံပါတ် ပို့ပေးပါ။\n\nExample: NM-2026-00042",
       );
+      break;
+
+    case "LIVE_AGENT":
+      await sendHandoffStart(tenantId, senderPsid, pageToken);
       break;
 
     case "MAIN_MENU":

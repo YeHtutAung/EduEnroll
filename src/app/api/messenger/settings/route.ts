@@ -11,7 +11,7 @@ export async function GET() {
   const { supabase, tenantId } = auth;
   const { data: tenant } = await supabase
     .from("tenants")
-    .select("messenger_enabled, messenger_page_id, messenger_greeting, subdomain")
+    .select("messenger_enabled, messenger_page_id, messenger_greeting, subdomain, handoff_timeout_min")
     .eq("id", tenantId)
     .single() as {
     data: {
@@ -19,6 +19,7 @@ export async function GET() {
       messenger_page_id: string | null;
       messenger_greeting: string | null;
       subdomain: string;
+      handoff_timeout_min: number;
     } | null;
     error: unknown;
   };
@@ -41,6 +42,7 @@ export async function GET() {
     pageName,
     greeting: tenant.messenger_greeting,
     subdomain: tenant.subdomain,
+    handoffTimeoutMin: tenant.handoff_timeout_min,
   });
 }
 
@@ -61,6 +63,9 @@ export async function PATCH(request: NextRequest) {
   }
   if (typeof body.greeting === "string") {
     updates.messenger_greeting = body.greeting.trim() || null;
+  }
+  if (typeof body.handoffTimeoutMin === "number" && body.handoffTimeoutMin >= 1 && body.handoffTimeoutMin <= 120) {
+    updates.handoff_timeout_min = body.handoffTimeoutMin;
   }
   if (body.disconnect === true) {
     updates.messenger_enabled = false;

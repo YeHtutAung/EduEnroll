@@ -591,6 +591,7 @@ function SettingsContent() {
   const [messengerSaving, setMessengerSaving] = useState(false);
   const [messengerDisconnecting, setMessengerDisconnecting] = useState(false);
   const [messengerTesting, setMessengerTesting] = useState(false);
+  const [handoffTimeoutMin, setHandoffTimeoutMin] = useState(15);
 
   const fetchMessenger = useCallback(async () => {
     setMessengerLoading(true);
@@ -603,6 +604,7 @@ function SettingsContent() {
       setMessengerPageId(data.pageId);
       setMessengerGreeting(data.greeting ?? "");
       setMessengerSubdomain(data.subdomain ?? "");
+      setHandoffTimeoutMin(data.handoffTimeoutMin ?? 15);
     } catch {
       // non-critical
     } finally {
@@ -640,6 +642,23 @@ function SettingsContent() {
       toast.success("Greeting saved.");
     } catch {
       toast.error("Failed to save greeting.");
+    } finally {
+      setMessengerSaving(false);
+    }
+  }
+
+  async function handleMessengerSaveTimeout() {
+    setMessengerSaving(true);
+    try {
+      const res = await fetch("/api/messenger/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ handoffTimeoutMin }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      toast.success("Handoff timeout saved.");
+    } catch {
+      toast.error("Failed to save timeout.");
     } finally {
       setMessengerSaving(false);
     }
@@ -1176,6 +1195,34 @@ function SettingsContent() {
                   className="px-4 py-2 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 disabled:opacity-50 transition-colors"
                 >
                   {messengerSaving ? "Saving…" : "Save Greeting"}
+                </button>
+              </div>
+            </div>
+
+            {/* Live Agent Handoff Timeout */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Live Agent Handoff Timeout{" "}
+                <span className="text-gray-400 font-normal">(minutes)</span>
+              </label>
+              <p className="text-xs text-gray-500 mb-2">
+                When a user requests a live agent, the bot stays silent for this duration.
+              </p>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min={1}
+                  max={120}
+                  value={handoffTimeoutMin}
+                  onChange={(e) => setHandoffTimeoutMin(Math.max(1, Math.min(120, Number(e.target.value) || 1)))}
+                  className="w-24 border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
+                />
+                <button
+                  onClick={handleMessengerSaveTimeout}
+                  disabled={messengerSaving}
+                  className="px-4 py-2 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 disabled:opacity-50 transition-colors"
+                >
+                  {messengerSaving ? "Saving…" : "Save"}
                 </button>
               </div>
             </div>
