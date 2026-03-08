@@ -11,12 +11,23 @@ interface EnrollmentInfo {
   enrollment_ref: string;
   student_name_en: string;
   student_name_mm: string | null;
+  class_id: string | null;
   class_level: string | null;
   fee_mmk: number | null;
   fee_formatted: string | null;
+  intake_slug: string | null;
   status: string;
   status_label_en: string;
   status_label_mm: string;
+}
+
+interface AvailableClass {
+  id: string;
+  level: string;
+  fee_mmk: number;
+  fee_formatted: string;
+  seat_remaining: number;
+  status: string;
 }
 
 interface BankAccountInfo {
@@ -280,16 +291,6 @@ function UploadSection({
         <p className="font-myanmar mt-1 text-sm text-gray-500">
           သင့်ငွေပေးချေမှုကို စစ်ဆေးပြီး စာရင်းသွင်းမှုကို မကြာမီ အတည်ပြုပေးပါမည်။
         </p>
-
-        <a
-          href={`/status?ref=${encodeURIComponent(enrollmentRef)}`}
-          className="mt-6 inline-flex items-center gap-2 rounded-lg bg-[#1a6b3c] px-6 py-3 text-sm font-semibold text-white hover:bg-[#155d33] transition-colors"
-        >
-          Check Status / <span className="font-myanmar">အခြေအနေ စစ်ဆေးမည်</span>
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
-        </a>
       </div>
     );
   }
@@ -413,8 +414,25 @@ export default function PaymentInstructionsPage() {
   const params = useParams<{ ref: string }>();
   const [enrollment, setEnrollment] = useState<EnrollmentInfo | null>(null);
   const [bankAccounts, setBankAccounts] = useState<BankAccountInfo[]>([]);
+  const [availableClasses, setAvailableClasses] = useState<AvailableClass[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Fetch other available classes from the same intake
+  async function fetchAvailableClasses(intakeSlug: string, currentClassId: string | null) {
+    try {
+      const res = await fetch(`/api/public/enroll/${encodeURIComponent(intakeSlug)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const classes = (data.classes ?? []) as AvailableClass[];
+      // Filter out current class and full classes
+      setAvailableClasses(
+        classes.filter((c) => c.id !== currentClassId && c.status === "open" && c.seat_remaining > 0),
+      );
+    } catch {
+      // Non-critical — silently ignore
+    }
+  }
 
   useEffect(() => {
     async function fetchData() {
@@ -437,6 +455,11 @@ export default function PaymentInstructionsPage() {
           const banksData: BankAccountInfo[] = await banksRes.json();
           setBankAccounts(banksData);
         }
+
+        // Fetch available classes if enrollment is past pending_payment
+        if (statusData.intake_slug && statusData.status !== "pending_payment") {
+          fetchAvailableClasses(statusData.intake_slug, statusData.class_id);
+        }
       } catch {
         setError("Failed to load payment information. Please try again.");
       } finally {
@@ -450,7 +473,13 @@ export default function PaymentInstructionsPage() {
     // Re-fetch enrollment to update status
     fetch(`/api/public/status?ref=${encodeURIComponent(params.ref)}`)
       .then((res) => res.json())
-      .then((data) => setEnrollment(data))
+      .then((data: EnrollmentInfo) => {
+        setEnrollment(data);
+        // Fetch available classes after upload
+        if (data.intake_slug) {
+          fetchAvailableClasses(data.intake_slug, data.class_id);
+        }
+      })
       .catch(() => {});
   }
 
@@ -619,6 +648,40 @@ export default function PaymentInstructionsPage() {
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-5 text-center">
           <p className="font-semibold text-blue-800">{enrollment.status_label_en}</p>
           <p className="font-myanmar mt-1 text-sm text-blue-700">{enrollment.status_label_mm}</p>
+        </div>
+      )}
+
+      {/* ── Other available classes ────────────────────────────────── */}
+      {!showUpload && availableClasses.length > 0 && enrollment.intake_slug && (
+        <div className="mt-10 border-t border-gray-200 pt-8">
+          <h3 className="mb-2 text-center text-lg font-semibold text-gray-900">
+            Enroll in Another Class
+          </h3>
+          <p className="font-myanmar mb-6 text-center text-sm text-gray-500">
+            အခြားသင်တန်းတစ်ခု ထပ်မံစာရင်းသွင်းမည်
+          </p>
+          <div className="space-y-3">
+            {availableClasses.map((cls) => (
+              <a
+                key={cls.id}
+                href={`/enroll/${enrollment.intake_slug}`}
+                className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-4 transition-colors hover:border-[#1a3f8a] hover:bg-blue-50/50"
+              >
+                <div>
+                  <p className="text-base font-semibold text-gray-900">{cls.level}</p>
+                  <p className="text-sm text-gray-500">{cls.fee_formatted}</p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-gray-400">
+                    {cls.seat_remaining} seats left
+                  </span>
+                  <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </div>
+              </a>
+            ))}
+          </div>
         </div>
       )}
     </div>

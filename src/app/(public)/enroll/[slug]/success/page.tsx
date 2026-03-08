@@ -372,15 +372,6 @@ function SuccessPage() {
           Upload Payment / <span className="font-myanmar">ငွေလွှဲပြေစာ တင်သွင်းမည်</span>
         </a>
 
-        <a
-          href={`/enroll/${params.slug}/status?ref=${encodeURIComponent(enrollment.enrollment_ref)}`}
-          className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white py-3 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors"
-        >
-          Check Status / <span className="font-myanmar">အခြေအနေ စစ်ဆေးမည်</span>
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-          </svg>
-        </a>
       </div>
 
       {/* ── Other available classes ─────────────────────────────── */}
