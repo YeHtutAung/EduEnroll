@@ -398,7 +398,7 @@ export default function DashboardPage() {
             <thead>
               <tr className="bg-gray-50 text-left">
                 <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{tl.student}</th>
-                <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Level</th>
+                <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{tl.class}</th>
                 <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Enrolled</th>
                 <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
               </tr>

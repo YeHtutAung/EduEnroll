@@ -1049,7 +1049,7 @@ export default function IntakeDetailPage({
           <table className="w-full min-w-[700px] text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100 text-left">
-                <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Level</th>
+                <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">{tl.class}</th>
                 {tl.orgType !== "event" && (
                   <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Mode</th>
                 )}

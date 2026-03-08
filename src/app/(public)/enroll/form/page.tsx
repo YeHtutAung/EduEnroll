@@ -311,6 +311,7 @@ function EnrollmentFormPage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
+  const idempotencyKeyRef = useRef(crypto.randomUUID());
   const [submitError, setSubmitError] = useState<{ en: string; mm: string } | null>(null);
 
   // ── Fetch intake + class + form fields ────────────────────────
@@ -419,6 +420,7 @@ function EnrollmentFormPage() {
         body: JSON.stringify({
           class_id: classInfo.id,
           form_data: dynamicData,
+          idempotency_key: idempotencyKeyRef.current,
         }),
       });
 

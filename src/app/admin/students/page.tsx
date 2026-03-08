@@ -307,7 +307,7 @@ function StudentDetailModal({
                   </h3>
 
                   <DetailRow
-                    label="Level"
+                    label={tl.class}
                     value={
                       detail.class_level ? (
                         <span
@@ -583,7 +583,7 @@ export default function StudentsPage() {
         "No",
         ...dynamicLabels,
         "Enrollment Ref",
-        "Level",
+        tl.class,
         tl.intake,
         "Status",
         `${tl.fee} (MMK)`,
@@ -845,7 +845,7 @@ export default function StudentsPage() {
           const dynamicHeaders = hasDynamic
             ? formFields.map((f) => f.field_label)
             : [`${tl.student} Name`, "Phone"];
-          const fixedTailHeaders = ["Enrollment Ref", "Level", tl.intake, `${tl.fee} (MMK)`, "Status", "Enrolled"];
+          const fixedTailHeaders = ["Enrollment Ref", tl.class, tl.intake, `${tl.fee} (MMK)`, "Status", "Enrolled"];
           const allHeaders = ["No.", ...dynamicHeaders, ...fixedTailHeaders];
 
           return (
