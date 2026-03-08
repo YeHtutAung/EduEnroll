@@ -258,7 +258,7 @@ function StudentDetailModal({
                           key={f.field_key}
                           label={f.field_label}
                           value={
-                            f.field_key === "name_mm" ? (
+                            f.field_label.toLowerCase().includes("myanmar") ? (
                               <span className="font-myanmar">{val}</span>
                             ) : f.field_type === "phone" ? (
                               <code className="text-sm">{val}</code>

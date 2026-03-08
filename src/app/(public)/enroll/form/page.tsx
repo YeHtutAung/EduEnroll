@@ -260,7 +260,7 @@ function DynamicField({
           type="text"
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          className={`${cls} ${field.field_key === "name_mm" ? "font-myanmar" : ""}`}
+          className={`${cls} ${field.field_label.toLowerCase().includes("myanmar") ? "font-myanmar" : ""}`}
           placeholder={field.field_label}
         />
       );
@@ -375,7 +375,7 @@ function EnrollmentFormPage() {
       if (field.field_type === "phone" && !isValidMyanmarPhone(val)) {
         errors[field.field_key] = "Invalid Myanmar phone number (e.g. 09-xxxxxxxxx).";
       }
-      if (field.field_key === "email" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
+      if (field.field_key === "email" && field.field_type === "text" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
         errors[field.field_key] = "Invalid email address.";
       }
     }
@@ -566,7 +566,7 @@ function EnrollmentFormPage() {
             return (
               <div key={field.field_key} className="flex justify-between">
                 <dt className="text-gray-500">{field.field_label}</dt>
-                <dd className={`font-medium text-gray-900 ${field.field_key === "name_mm" ? "font-myanmar" : ""}`}>
+                <dd className={`font-medium text-gray-900 ${field.field_label.toLowerCase().includes("myanmar") ? "font-myanmar" : ""}`}>
                   {field.field_type === "checkbox" ? (val === "true" ? "Yes" : "No") : val}
                 </dd>
               </div>
