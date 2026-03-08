@@ -98,18 +98,12 @@ export default function LandingPage() {
             <span className="text-base font-bold text-slate-900">KuuNyi</span>
           </div>
           <div className="flex items-center gap-3">
-            <Link
-              href="/login"
-              className="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors"
-            >
+            <span className="text-sm font-medium text-slate-400 cursor-not-allowed">
               Sign In
-            </Link>
-            <Link
-              href="/register"
-              className="text-sm font-semibold text-white bg-[#6d28d9] hover:bg-[#5b21b6] px-4 py-2 rounded-lg transition-colors"
-            >
-              Register Free
-            </Link>
+            </span>
+            <span className="text-sm font-semibold text-white bg-[#6d28d9]/50 px-4 py-2 rounded-lg cursor-not-allowed select-none">
+              Coming Soon
+            </span>
           </div>
         </div>
       </header>
@@ -134,13 +128,10 @@ export default function LandingPage() {
         </p>
 
         <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3">
-          <Link
-            href="/register"
-            className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg bg-[#6d28d9] text-white font-semibold hover:bg-[#5b21b6] transition-colors text-sm"
-          >
-            <span>Register Free</span>
-            <span className="font-myanmar font-normal opacity-90">/ အခမဲ့ မှတ်ပုံတင်ပါ</span>
-          </Link>
+          <span className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg bg-[#6d28d9]/50 text-white font-semibold cursor-not-allowed select-none text-sm">
+            <span>Coming Soon</span>
+            <span className="font-myanmar font-normal opacity-90">/ မကြာမီ လာမည်</span>
+          </span>
           <Link
             href="#features"
             className="w-full sm:w-auto inline-flex items-center justify-center px-6 py-3 rounded-lg border border-slate-300 text-slate-700 font-medium hover:bg-slate-50 transition-colors text-sm"
