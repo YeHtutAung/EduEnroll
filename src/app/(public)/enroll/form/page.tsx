@@ -442,7 +442,7 @@ function EnrollmentFormPage() {
       }
 
       const data = await res.json();
-      router.push(`/enroll/payment/${data.enrollment_ref}`);
+      router.push(`/enroll/${slug}/success?ref=${data.enrollment_ref}`);
     } catch {
       setSubmitError({
         en: "Network error. Please check your connection and try again.",

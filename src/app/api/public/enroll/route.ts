@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
-import { formatMMK } from "@/lib/utils";
+import { formatMMK, formatMMKSimple } from "@/lib/utils";
+import { sendEmail, enrollmentConfirmationEmail } from "@/lib/email";
 import type { BankAccount, SubmitEnrollmentResult } from "@/types/database";
 
 // ─── Validation helpers ───────────────────────────────────────────────────────
@@ -133,6 +134,27 @@ export async function POST(request: NextRequest) {
       .from("enrollments")
       .update(updatePayload as never)
       .eq("id", payload.enrollment_id);
+  }
+
+  // ── Send confirmation email (best-effort, non-blocking) ──────
+  if (fd?.email) {
+    const host = request.headers.get("host") ?? "localhost:3005";
+    const proto = host.startsWith("localhost") ? "http" : "https";
+    const baseUrl = `${proto}://${host}`;
+
+    const emailData = enrollmentConfirmationEmail({
+      studentName: fd.name_en?.trim() || "Student",
+      enrollmentRef: payload.enrollment_ref,
+      classLevel: payload.class_level,
+      feeMmk: payload.fee_mmk,
+      feeFormatted: formatMMKSimple(payload.fee_mmk),
+      paymentUrl: `${baseUrl}/enroll/payment/${payload.enrollment_ref}`,
+      statusUrl: `${baseUrl}/status?ref=${payload.enrollment_ref}`,
+    });
+
+    sendEmail({ to: fd.email.trim(), ...emailData }).catch((err) => {
+      console.error("[enroll] Email send failed:", err);
+    });
   }
 
   // ── Fetch active bank accounts for payment instructions ───────

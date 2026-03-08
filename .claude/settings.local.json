@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(npm install:*)",
+      "Bash(ls C:\\\\YHA\\\\006_Claude_Workspace\\\\EduEnroll\\\\src\\\\app\\\\\\(public\\)\\\\enroll\\\\[slug]:*)"
+    ]
+  }
+}

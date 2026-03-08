@@ -99,14 +99,18 @@ export default function Sidebar({ displayName, displayEmail, displayRole, school
   ];
   const [open, setOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
+  const [pendingStudentCount, setPendingStudentCount] = useState(0);
   const pathname = usePathname();
 
-  // Fetch pending payment count once on mount
+  // Fetch pending counts once on mount
   useEffect(() => {
     fetch("/api/admin/stats")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data) setPendingCount(data.payment_submitted_count ?? 0);
+        if (data) {
+          setPendingCount(data.payment_submitted_count ?? 0);
+          setPendingStudentCount(data.payment_submitted_count ?? 0);
+        }
       })
       .catch(() => {});
   }, []);
@@ -233,6 +237,11 @@ export default function Sidebar({ displayName, displayEmail, displayRole, school
                 {link.href === "/admin/payments" && pendingCount > 0 && (
                   <span className="ml-1 shrink-0 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-[#b07d2a] text-white text-xs font-bold leading-none">
                     {pendingCount > 99 ? "99+" : pendingCount}
+                  </span>
+                )}
+                {link.href === "/admin/students" && pendingStudentCount > 0 && (
+                  <span className="ml-1 shrink-0 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-[#b07d2a] text-white text-xs font-bold leading-none">
+                    {pendingStudentCount > 99 ? "99+" : pendingStudentCount}
                   </span>
                 )}
               </Link>
