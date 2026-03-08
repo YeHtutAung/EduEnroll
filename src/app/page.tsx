@@ -34,8 +34,8 @@ const FEATURES = [
     ),
     titleEn: "Online Enrollment Forms",
     titleMm: "အွန်လိုင်း စာရင်းသွင်းပုံစံ",
-    descEn: "Beautiful bilingual forms that students fill out from their phone. No paper, no queues.",
-    descMm: "ကျောင်းသားများ ဖုန်းဖြင့် ဖြည့်သွင်းနိုင်သော နှစ်ဘာသာ ပုံစံများ",
+    descEn: "Beautiful bilingual forms anyone can fill out from their phone. No paper, no queues.",
+    descMm: "ဖုန်းဖြင့် ဖြည့်သွင်းနိုင်သော နှစ်ဘာသာ ပုံစံများ",
   },
   {
     icon: (
@@ -45,8 +45,8 @@ const FEATURES = [
     ),
     titleEn: "Payment Verification",
     titleMm: "ငွေပေးချေမှု အတည်ပြုခြင်း",
-    descEn: "Students upload payment proof. Admins verify with one click. KBZ, AYA, CB supported.",
-    descMm: "ကျောင်းသားများ ငွေလွှဲပြေစာ တင်ပြနိုင်ပြီး အက်မင်က တစ်ချက်နှိပ်ရုံဖြင့် အတည်ပြုနိုင်ပါသည်",
+    descEn: "Participants upload payment proof. Admins verify with one click. KBZ, AYA, CB supported.",
+    descMm: "ငွေလွှဲပြေစာ တင်ပြနိုင်ပြီး အက်မင်က တစ်ချက်နှိပ်ရုံဖြင့် အတည်ပြုနိုင်ပါသည်",
   },
   {
     icon: (
@@ -67,8 +67,8 @@ const FEATURES = [
     ),
     titleEn: "Messenger Chatbot",
     titleMm: "မက်ဆင်းဂျာ ချတ်ဘော့",
-    descEn: "Students enroll and check status directly via Facebook Messenger. No app download required.",
-    descMm: "ကျောင်းသားများ Facebook Messenger မှတဆင့် စာရင်းသွင်းနိုင်ပြီး အခြေအနေ စစ်ဆေးနိုင်ပါသည်",
+    descEn: "Enroll and check status directly via Facebook Messenger. No app download required.",
+    descMm: "Facebook Messenger မှတဆင့် စာရင်းသွင်းနိုင်ပြီး အခြေအနေ စစ်ဆေးနိုင်ပါသည်",
   },
 ];
 
@@ -208,7 +208,7 @@ export default function LandingPage() {
             {[
               { label: "Bilingual UI", labelMm: "နှစ်ဘာသာ", desc: "Myanmar + English throughout" },
               { label: "MMK Payments", labelMm: "မြန်မာကျပ်", desc: "KBZ, AYA, CB, UAB, Yoma" },
-              { label: "Mobile First", labelMm: "မိုဘိုင်းဦးစား", desc: "Students enroll from their phone" },
+              { label: "Mobile First", labelMm: "မိုဘိုင်းဦးစား", desc: "Enroll from any phone" },
               { label: "Messenger Ready", labelMm: "မက်ဆင်းဂျာ အသင့်", desc: "Facebook Messenger chatbot included out of the box." },
             ].map((item) => (
               <div key={item.label} className="flex items-start gap-3">
