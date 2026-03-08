@@ -2,11 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, badRequest, notFound } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendEmail, enrollmentApprovedEmail, enrollmentRejectedEmail } from "@/lib/email";
-import type { Class, Enrollment, Payment, PaymentStatus, EnrollmentStatus } from "@/types/database";
+import type { Enrollment, Payment, PaymentStatus, EnrollmentStatus } from "@/types/database";
 
 type EnrollmentResult = { data: Enrollment | null; error: unknown };
 type PaymentResult    = { data: Payment    | null; error: unknown };
-type ClassResult      = { data: Pick<Class, "seat_remaining" | "seat_total"> | null; error: unknown };
 
 // ─── PATCH /api/admin/payments/[id]/verify ────────────────────────────────────
 // [id] = payment id
@@ -154,21 +153,8 @@ export async function PATCH(
 
   if (ee) return NextResponse.json({ error: (ee as Error).message }, { status: 500 });
 
-  // Increment seat_remaining atomically: read current value then update capped
-  // at seat_total. Admin-only action; low concurrency risk.
-  const { data: cls } = await admin
-    .from("classes")
-    .select("seat_remaining, seat_total")
-    .eq("id", enrollment.class_id)
-    .single() as ClassResult;
-
-  if (cls) {
-    const newRemaining = Math.min(cls.seat_remaining + 1, cls.seat_total);
-    await admin
-      .from("classes")
-      .update({ seat_remaining: newRemaining } as never)
-      .eq("id", enrollment.class_id);
-  }
+  // Seat restore is handled by the trg_enrollments_seats trigger
+  // when enrollment status changes to 'rejected'.
 
   // Send rejection email (best-effort, non-blocking)
   if (enrollment.email) {
