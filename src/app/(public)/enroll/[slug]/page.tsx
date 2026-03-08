@@ -14,6 +14,7 @@ interface PublicClass {
   fee_formatted: string;
   seat_remaining: number;
   seat_total: number;
+  enrollment_open_at: string | null;
   enrollment_close_at: string | null;
   status: ClassStatus;
   mode?: "online" | "offline";
@@ -173,6 +174,10 @@ function ErrorPage({ message }: { message: string }) {
 
 function ClassCard({ cls, onSelect, labels }: { cls: PublicClass; onSelect: (id: string) => void; labels: TenantLabels }) {
   const isFull = cls.status === "full" || cls.seat_remaining === 0;
+  const now = new Date();
+  const notYetOpen = cls.enrollment_open_at ? now < new Date(cls.enrollment_open_at) : false;
+  const alreadyClosed = cls.enrollment_close_at ? now > new Date(cls.enrollment_close_at) : false;
+  const isDisabled = isFull || notYetOpen || alreadyClosed;
 
   const closeDate = cls.enrollment_close_at
     ? new Date(cls.enrollment_close_at).toLocaleDateString("en-GB", {
@@ -182,18 +187,28 @@ function ClassCard({ cls, onSelect, labels }: { cls: PublicClass; onSelect: (id:
       })
     : null;
 
+  const openDate = cls.enrollment_open_at
+    ? new Date(cls.enrollment_open_at).toLocaleDateString("en-GB", {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : null;
+
   return (
     <div
       className={`relative overflow-hidden rounded-xl border transition-all ${
-        isFull
+        isDisabled
           ? "cursor-not-allowed border-gray-200 bg-gray-50 opacity-60"
           : "cursor-pointer border-gray-200 bg-white shadow-sm hover:border-[#1a6b3c] hover:shadow-md"
       }`}
-      onClick={() => !isFull && onSelect(cls.id)}
-      role={isFull ? undefined : "button"}
-      tabIndex={isFull ? undefined : 0}
+      onClick={() => !isDisabled && onSelect(cls.id)}
+      role={isDisabled ? undefined : "button"}
+      tabIndex={isDisabled ? undefined : 0}
       onKeyDown={(e) => {
-        if (!isFull && (e.key === "Enter" || e.key === " ")) {
+        if (!isDisabled && (e.key === "Enter" || e.key === " ")) {
           e.preventDefault();
           onSelect(cls.id);
         }
@@ -205,6 +220,26 @@ function ClassCard({ cls, onSelect, labels }: { cls: PublicClass; onSelect: (id:
           <div className="rounded-lg bg-gray-800 px-4 py-2 text-sm font-semibold text-white">
             Full / <span className="font-myanmar">နေရာပြည့်သွားပြီ</span>
           </div>
+        </div>
+      )}
+
+      {/* Not yet open overlay */}
+      {!isFull && notYetOpen && (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-white/60 gap-1">
+          <div className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white">
+            Opens {openDate}
+          </div>
+          <p className="font-myanmar text-xs text-amber-700">စာရင်းသွင်းချိန် မရောက်သေးပါ</p>
+        </div>
+      )}
+
+      {/* Enrollment closed overlay */}
+      {!isFull && !notYetOpen && alreadyClosed && (
+        <div className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-white/60 gap-1">
+          <div className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white">
+            Enrollment Closed
+          </div>
+          <p className="font-myanmar text-xs text-red-700">စာရင်းသွင်းချိန် ကုန်ဆုံးသွားပြီ</p>
         </div>
       )}
 
@@ -274,7 +309,7 @@ function ClassCard({ cls, onSelect, labels }: { cls: PublicClass; onSelect: (id:
         )}
 
         {/* CTA hint */}
-        {!isFull && (
+        {!isDisabled && (
           <div className="mt-4 flex items-center text-sm font-medium text-[#1a6b3c]">
             Register Now
             <svg className="ml-1 h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

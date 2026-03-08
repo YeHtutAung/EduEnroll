@@ -37,6 +37,10 @@ export default function IntakesPage() {
   const [error, setError] = useState<string | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState<{ intakeId: string; intakeName: string } | null>(null);
+  const [editingIntake, setEditingIntake] = useState<Intake | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editYear, setEditYear] = useState(2026);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -101,6 +105,39 @@ export default function IntakesPage() {
     }
   }
 
+  function openEditIntake(intake: Intake) {
+    setEditName(intake.name);
+    setEditYear(intake.year);
+    setEditingIntake(intake);
+  }
+
+  async function handleSaveIntake(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editingIntake) return;
+    if (!editName.trim()) { toast.error("Name is required."); return; }
+    if (!editYear || editYear < 2020 || editYear > 2100) { toast.error("Year must be between 2020 and 2100."); return; }
+    setSavingEdit(true);
+    try {
+      const res = await fetch(`/api/intakes/${editingIntake.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: editName.trim(), year: editYear }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message ?? err.error ?? "Failed to update.");
+      }
+      const updated = (await res.json()) as Intake;
+      setIntakes((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
+      setEditingIntake(null);
+      toast.success(`${labels.intake} updated.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update.");
+    } finally {
+      setSavingEdit(false);
+    }
+  }
+
   // ── Error state ─────────────────────────────────────────────────────────────
   if (!loading && error) {
     return (
@@ -124,7 +161,7 @@ export default function IntakesPage() {
       <div className="flex items-start justify-between mb-8 gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 leading-tight">
-            {labels.intake}s &amp; {labels.class}es
+            {labels.intake}s &amp; {labels.class}s
           </h1>
           <p className="text-sm font-myanmar text-gray-400 mt-0.5">
             သင်တန်းနှင့် အတန်းများ
@@ -156,7 +193,7 @@ export default function IntakesPage() {
             </div>
             <p className="text-base font-semibold text-gray-700">No {labels.intake.toLowerCase()}s yet</p>
             <p className="text-sm text-gray-400 max-w-xs">
-              Create your first {labels.intake.toLowerCase()} to start managing {labels.class.toLowerCase()}es and enrollments.
+              Create your first {labels.intake.toLowerCase()} to start managing {labels.class.toLowerCase()}s and enrollments.
             </p>
             <Link
               href="/admin/intakes/new"
@@ -180,7 +217,7 @@ export default function IntakesPage() {
                     Status
                   </th>
                   <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                    {labels.class}es
+                    {labels.class}s
                   </th>
                   <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                     Actions
@@ -209,15 +246,12 @@ export default function IntakesPage() {
                           <td className="px-5 py-4">
                             <span
                               className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-xs font-semibold ${
-                                count === 5
+                                count > 0
                                   ? "bg-emerald-50 text-emerald-700"
-                                  : count > 0
-                                    ? "bg-amber-50 text-amber-700"
-                                    : "bg-gray-100 text-gray-500"
+                                  : "bg-gray-100 text-gray-500"
                               }`}
                             >
                               {count}
-                              <span className="opacity-50">/5</span>
                             </span>
                           </td>
                           <td className="px-5 py-4">
@@ -244,6 +278,16 @@ export default function IntakesPage() {
                                 <option value="open">Open</option>
                                 <option value="closed">Closed</option>
                               </select>
+                              <button
+                                onClick={() => openEditIntake(intake)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 text-xs font-medium rounded-lg hover:border-[#1a3f8a] hover:text-[#1a3f8a] transition-colors"
+                                title={`Edit ${labels.intake}`}
+                              >
+                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                                </svg>
+                                Edit
+                              </button>
                               <Link
                                 href={`/admin/intakes/${intake.id}/form`}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 text-xs font-medium rounded-lg hover:bg-gray-50 transition-colors"
@@ -283,6 +327,80 @@ export default function IntakesPage() {
           </div>
         )}
       </div>
+
+      {/* Edit Intake modal */}
+      {editingIntake && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setEditingIntake(null)}
+            aria-hidden="true"
+          />
+          <div className="relative w-full max-w-md bg-white rounded-2xl shadow-xl p-6">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 rounded-xl bg-[#1a3f8a] flex items-center justify-center text-white shrink-0">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                </svg>
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Edit {labels.intake}</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Update name or year</p>
+              </div>
+              <button
+                onClick={() => setEditingIntake(null)}
+                className="ml-auto p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveIntake} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">{labels.intake} Name</label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  required
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
+                  autoFocus
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Year</label>
+                <input
+                  type="number"
+                  value={editYear}
+                  onChange={(e) => setEditYear(Number(e.target.value))}
+                  min={2020}
+                  max={2100}
+                  required
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingIntake(null)}
+                  className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingEdit}
+                  className="flex-1 px-4 py-2.5 bg-[#1a3f8a] text-white rounded-xl text-sm font-medium hover:bg-blue-900 disabled:opacity-50 transition-colors"
+                >
+                  {savingEdit ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Confirm opening intake */}
       {confirmOpen && (

@@ -34,8 +34,10 @@ export type SubmitEnrollmentResult =
     }
   | {
       success: false;
-      error: "CLASS_NOT_FOUND" | "CLASS_NOT_OPEN" | "CLASS_FULL" | "INTERNAL_ERROR";
+      error: "CLASS_NOT_FOUND" | "CLASS_NOT_OPEN" | "CLASS_FULL" | "ENROLLMENT_NOT_OPEN" | "ENROLLMENT_CLOSED" | "INTERNAL_ERROR";
       class_status?: ClassStatus;
+      opens_at?: string;
+      closed_at?: string;
       detail?: string;
     };
 
