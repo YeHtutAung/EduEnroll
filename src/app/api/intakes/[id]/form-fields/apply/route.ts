@@ -59,12 +59,11 @@ export async function POST(
   // Use admin client to bypass RLS for cross-intake operations
   const admin = createAdminClient();
 
-  // Fetch non-default fields from source
+  // Fetch ALL fields from source (both default and custom)
   const { data: sourceFields } = await admin
     .from("intake_form_fields")
-    .select("field_key, field_label, field_type, is_required, options, sort_order")
+    .select("field_key, field_label, field_type, is_required, options, sort_order, is_default")
     .eq("intake_id", params.id)
-    .eq("is_default", false)
     .order("sort_order", { ascending: true }) as {
     data: {
       field_key: string;
@@ -73,6 +72,7 @@ export async function POST(
       is_required: boolean;
       options: unknown;
       sort_order: number;
+      is_default: boolean;
     }[] | null;
     error: unknown;
   };
@@ -80,19 +80,18 @@ export async function POST(
   let appliedCount = 0;
 
   for (const target of draftTargets) {
-    // Delete existing non-default fields from target
+    // Delete ALL existing fields from target (both default and custom)
     const { error: delError } = await admin
       .from("intake_form_fields")
       .delete()
-      .eq("intake_id", target.id)
-      .eq("is_default", false);
+      .eq("intake_id", target.id);
 
     if (delError) {
       console.error(`[apply] Delete error for ${target.id}:`, delError);
       continue;
     }
 
-    // Insert source fields into target (if any)
+    // Insert all source fields into target (preserving is_default flag)
     if (sourceFields && sourceFields.length > 0) {
       const { error: insError } = await admin
         .from("intake_form_fields")
@@ -105,7 +104,7 @@ export async function POST(
             is_required: f.is_required,
             options: f.options,
             sort_order: f.sort_order,
-            is_default: false,
+            is_default: f.is_default,
           })) as never[],
         );
 
