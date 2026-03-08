@@ -120,15 +120,35 @@ export async function POST(request: NextRequest) {
   // ── Update enrollment with form_data + legacy columns ─────────
   const fd = (form_data && typeof form_data === "object") ? form_data as Record<string, string> : null;
 
+  // Fetch field definitions to check types before legacy mapping + email
+  let fieldTypeMap = new Map<string, string>();
   if (fd) {
+    const { data: classRow } = await supabase
+      .from("classes")
+      .select("intake_id")
+      .eq("id", class_id)
+      .single() as { data: { intake_id: string } | null; error: unknown };
+
+    const { data: fieldDefs } = await supabase
+      .from("intake_form_fields")
+      .select("field_key, field_type")
+      .eq("intake_id", classRow?.intake_id ?? "") as { data: { field_key: string; field_type: string }[] | null; error: unknown };
+
+    fieldTypeMap = new Map((fieldDefs ?? []).map((f) => [f.field_key, f.field_type]));
+
     const updatePayload: Record<string, unknown> = { form_data: fd };
 
-    // Best-effort mapping: populate legacy columns from form_data keys
-    if (fd.name_en) updatePayload.student_name_en = fd.name_en.trim();
-    if (fd.name_mm) updatePayload.student_name_mm = fd.name_mm.trim();
-    if (fd.phone)   updatePayload.phone = fd.phone.trim();
-    if (fd.email)   updatePayload.email = fd.email.trim();
-    if (fd.nrc)     updatePayload.nrc_number = fd.nrc.trim();
+    // Best-effort mapping: only populate legacy columns when field type matches expectations
+    if (fd.name_en && fieldTypeMap.get("name_en") === "text")
+      updatePayload.student_name_en = fd.name_en.trim();
+    if (fd.name_mm && fieldTypeMap.get("name_mm") === "text")
+      updatePayload.student_name_mm = fd.name_mm.trim();
+    if (fd.phone && (fieldTypeMap.get("phone") === "phone" || fieldTypeMap.get("phone") === "text"))
+      updatePayload.phone = fd.phone.trim();
+    if (fd.email && fieldTypeMap.get("email") === "text")
+      updatePayload.email = fd.email.trim();
+    if (fd.nrc && fieldTypeMap.get("nrc") === "text")
+      updatePayload.nrc_number = fd.nrc.trim();
 
     await supabase
       .from("enrollments")
@@ -137,7 +157,8 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Send confirmation email (best-effort, non-blocking) ──────
-  if (fd?.email) {
+  // Only send if email field is actually a text field (not repurposed to file/etc.)
+  if (fd?.email && fieldTypeMap.get("email") === "text") {
     const host = request.headers.get("host") ?? "localhost:3005";
     const proto = host.startsWith("localhost") ? "http" : "https";
     const baseUrl = `${proto}://${host}`;
