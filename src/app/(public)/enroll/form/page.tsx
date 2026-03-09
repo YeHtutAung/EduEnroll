@@ -24,6 +24,15 @@ interface IntakeInfo {
   status: string;
 }
 
+interface TenantLabels {
+  intake: string;
+  class: string;
+  student: string;
+  seat: string;
+  fee: string;
+  orgType: string;
+}
+
 interface FormFieldDef {
   id: string;
   field_key: string;
@@ -302,6 +311,7 @@ function EnrollmentFormPage() {
   const [intake, setIntake] = useState<IntakeInfo | null>(null);
   const [classInfo, setClassInfo] = useState<ClassInfo | null>(null);
   const [formFields, setFormFields] = useState<FormFieldDef[]>([]);
+  const [labels, setLabels] = useState<TenantLabels | null>(null);
   const [pageLoading, setPageLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
 
@@ -331,6 +341,7 @@ function EnrollmentFormPage() {
         }
         const json = await res.json();
         setIntake(json.intake);
+        if (json.labels) setLabels(json.labels);
 
         const found = (json.classes as ClassInfo[]).find((c) => c.id === classId);
         if (!found) {
@@ -485,7 +496,8 @@ function EnrollmentFormPage() {
 
   if (!intake || !classInfo) return null;
 
-  const intakeNameMM = getIntakeNameMM(intake.name, intake.year);
+  const isEvent = labels?.orgType === "event";
+  const intakeNameMM = isEvent ? null : getIntakeNameMM(intake.name, intake.year);
 
   // ── Step 1: Personal Information ─────────────────────────────
   if (step === 1) {
@@ -545,7 +557,7 @@ function EnrollmentFormPage() {
       {/* Class summary */}
       <div className="mb-6 rounded-xl border border-gray-200 bg-gray-50 p-5">
         <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-          Selected Class
+          {isEvent ? "Selected Ticket" : "Selected Class"}
         </h3>
         <div className="flex items-center gap-3">
           <span className={`rounded-full px-3 py-1 text-sm font-bold ${LEVEL_COLORS[classInfo.level] ?? DEFAULT_LEVEL_CLASS}`}>
@@ -554,7 +566,7 @@ function EnrollmentFormPage() {
           <div>
             <p className="font-myanmar text-xl font-bold text-gray-900">{classInfo.fee_formatted}</p>
             <p className="text-sm text-gray-500">
-              {intake.name} / <span className="font-myanmar">{intakeNameMM}</span>
+              {intake.name}{intakeNameMM && <> / <span className="font-myanmar">{intakeNameMM}</span></>}
             </p>
           </div>
         </div>
@@ -612,9 +624,7 @@ function EnrollmentFormPage() {
               Submitting...
             </span>
           ) : (
-            <>
-              Confirm / <span className="font-myanmar">စာရင်းသွင်းမည်</span>
-            </>
+            isEvent ? "Confirm Purchase" : <>Confirm / <span className="font-myanmar">စာရင်းသွင်းမည်</span></>
           )}
         </button>
       </div>
