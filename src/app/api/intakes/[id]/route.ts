@@ -53,7 +53,7 @@ export async function PATCH(
     return badRequest("Request body must be valid JSON.");
   }
 
-  const { name, year, status } = body as Record<string, unknown>;
+  const { name, year, status, hero_image_url } = body as Record<string, unknown>;
 
   const update: Partial<Omit<Intake, "id" | "created_at">> = {};
 
@@ -76,6 +76,13 @@ export async function PATCH(
       return badRequest(`status must be one of: ${VALID_STATUSES.join(", ")}.`);
     }
     update.status = status as IntakeStatus;
+  }
+
+  if (hero_image_url !== undefined) {
+    if (hero_image_url !== null && typeof hero_image_url !== "string") {
+      return badRequest("hero_image_url must be a string or null.");
+    }
+    update.hero_image_url = hero_image_url as string | null;
   }
 
   if (Object.keys(update).length === 0) {

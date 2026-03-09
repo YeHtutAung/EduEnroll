@@ -37,7 +37,7 @@ interface TenantLabelsView {
 }
 
 interface PublicIntakeResponse {
-  intake: Pick<Intake, "id" | "name" | "year" | "status">;
+  intake: Pick<Intake, "id" | "name" | "year" | "status" | "hero_image_url">;
   classes: PublicClassView[];
   labels: TenantLabelsView;
 }
@@ -88,7 +88,7 @@ export async function GET(
   // ── Find the matching intake by slug column ────────────────────
   const { data: intakes, error: intakeError } = await supabase
     .from("intakes")
-    .select("id, name, year, status")
+    .select("id, name, year, status, hero_image_url")
     .eq("tenant_id", tenantId)
     .eq("slug", params.slug.toLowerCase())
     .limit(1);
@@ -103,7 +103,7 @@ export async function GET(
     );
   }
 
-  const intake = intakes[0] as Pick<Intake, "id" | "name" | "year" | "status">;
+  const intake = intakes[0] as Pick<Intake, "id" | "name" | "year" | "status" | "hero_image_url">;
 
   if (intake.status === "closed") {
     return NextResponse.json(

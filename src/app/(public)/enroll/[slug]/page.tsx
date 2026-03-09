@@ -30,6 +30,7 @@ interface PublicIntake {
   name: string;
   year: number;
   status: string;
+  hero_image_url?: string | null;
 }
 
 interface TenantLabels {
@@ -499,7 +500,7 @@ function AllClassesFullPage({ intake, labels }: { intake: PublicIntake; labels: 
 const GOLD = "#C9A84C";
 const GOLD_LIGHT = "#E8C97A";
 
-function EventSeatsBadge({ remaining }: { remaining: number }) {
+function EventSeatsBadge({ remaining, total }: { remaining: number; total: number }) {
   if (remaining === 0) {
     return (
       <span className="text-[11px] tracking-wider px-2.5 py-1 rounded-sm border border-red-500/30 bg-red-500/10 text-red-300">
@@ -507,6 +508,8 @@ function EventSeatsBadge({ remaining }: { remaining: number }) {
       </span>
     );
   }
+  const pctLeft = total > 0 ? (remaining / total) * 100 : 100;
+  const isSellingFast = pctLeft <= 30 && remaining > 0;
   const style =
     remaining < 10
       ? "border-[#C9A84C]/30 bg-[#C9A84C]/10 text-[#E8C97A] animate-pulse"
@@ -514,9 +517,17 @@ function EventSeatsBadge({ remaining }: { remaining: number }) {
         ? "border-amber-400/20 bg-amber-400/8 text-amber-200"
         : "border-green-400/20 bg-green-400/8 text-green-300";
   return (
-    <span className={`text-[11px] tracking-wider px-2.5 py-1 rounded-sm border whitespace-nowrap ${style}`}>
-      {remaining.toLocaleString()} seats left
-    </span>
+    <div className="flex flex-col items-end gap-1">
+      {isSellingFast && (
+        <span className="text-[9px] tracking-[2px] uppercase font-semibold px-2 py-0.5 rounded-sm animate-pulse"
+          style={{ background: "rgba(239,68,68,0.15)", color: "#f87171" }}>
+          Selling Fast
+        </span>
+      )}
+      <span className={`text-[11px] tracking-wider px-2.5 py-1 rounded-sm border whitespace-nowrap ${style}`}>
+        {remaining.toLocaleString()} left
+      </span>
+    </div>
   );
 }
 
@@ -624,7 +635,7 @@ function EventTicketCard({
           }`}>
             {cls.level}
           </span>
-          <EventSeatsBadge remaining={cls.seat_remaining} />
+          <EventSeatsBadge remaining={cls.seat_remaining} total={cls.seat_total} />
         </div>
 
         {/* Price */}
@@ -759,32 +770,49 @@ function EventEnrollmentPage({
       />
 
       {/* ── HERO ────────────────────────────────────────────────────── */}
-      <section className="relative min-h-[85vh] flex flex-col items-center justify-center overflow-hidden px-6 py-24 sm:px-12">
-        {/* BG radials */}
-        <div className="absolute inset-0" style={{
-          background: `
-            radial-gradient(ellipse 80% 50% at 50% 0%, rgba(201,168,76,0.12) 0%, transparent 60%),
-            radial-gradient(ellipse 40% 40% at 80% 60%, rgba(201,168,76,0.05) 0%, transparent 50%),
-            radial-gradient(ellipse 60% 60% at 20% 80%, rgba(201,168,76,0.04) 0%, transparent 50%)`,
-        }} />
+      <section className="relative flex flex-col items-center justify-end overflow-hidden px-6 pb-10 pt-16 sm:px-12"
+        style={{ minHeight: intake.hero_image_url ? "50vh" : "85vh" }}>
 
-        {/* Decorative lines */}
-        <div className="absolute inset-0 overflow-hidden pointer-events-none">
-          <div className="absolute left-[15%] top-0 w-px h-full animate-pulse"
-            style={{ background: "linear-gradient(to bottom, transparent, rgba(201,168,76,0.15), transparent)" }} />
-          <div className="absolute right-[15%] top-0 w-px h-full animate-pulse" style={{
-            background: "linear-gradient(to bottom, transparent, rgba(201,168,76,0.15), transparent)",
-            animationDelay: "2s",
-          }} />
-        </div>
+        {/* BG — uploaded banner or fallback gradients */}
+        {intake.hero_image_url ? (
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={intake.hero_image_url}
+              alt=""
+              className="absolute inset-0 w-full h-full object-cover"
+            />
+            {/* Dark gradient overlay for text legibility */}
+            <div className="absolute inset-0" style={{
+              background: "linear-gradient(to top, rgba(8,8,8,0.95) 0%, rgba(8,8,8,0.4) 40%, rgba(8,8,8,0.15) 100%)",
+            }} />
+          </>
+        ) : (
+          <>
+            <div className="absolute inset-0" style={{
+              background: `
+                radial-gradient(ellipse 80% 50% at 50% 0%, rgba(201,168,76,0.12) 0%, transparent 60%),
+                radial-gradient(ellipse 40% 40% at 80% 60%, rgba(201,168,76,0.05) 0%, transparent 50%),
+                radial-gradient(ellipse 60% 60% at 20% 80%, rgba(201,168,76,0.04) 0%, transparent 50%)`,
+            }} />
+            <div className="absolute inset-0 overflow-hidden pointer-events-none">
+              <div className="absolute left-[15%] top-0 w-px h-full animate-pulse"
+                style={{ background: "linear-gradient(to bottom, transparent, rgba(201,168,76,0.15), transparent)" }} />
+              <div className="absolute right-[15%] top-0 w-px h-full animate-pulse" style={{
+                background: "linear-gradient(to bottom, transparent, rgba(201,168,76,0.15), transparent)",
+                animationDelay: "2s",
+              }} />
+            </div>
+          </>
+        )}
 
         {/* Track status button */}
         <a
           href={`/enroll/${slug}/status`}
           target="_blank"
           rel="noopener noreferrer"
-          className="absolute top-6 right-6 sm:top-8 sm:right-12 z-10 flex items-center gap-2 text-[13px] font-medium tracking-[1.5px] uppercase px-4 py-2.5 rounded-sm border transition-all duration-300 hover:bg-[#C9A84C]/10"
-          style={{ color: GOLD, borderColor: "rgba(201,168,76,0.3)" }}
+          className="absolute top-6 right-6 sm:top-8 sm:right-12 z-10 flex items-center gap-2 text-[13px] font-medium tracking-[1.5px] uppercase px-4 py-2.5 rounded-sm border transition-all duration-300 hover:bg-white/10"
+          style={{ color: "#fff", borderColor: "rgba(255,255,255,0.3)", backdropFilter: "blur(8px)", background: "rgba(0,0,0,0.3)" }}
         >
           <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
@@ -792,71 +820,83 @@ function EventEnrollmentPage({
           Track Status
         </a>
 
-        {/* Eyebrow */}
-        {venue && (
-          <div className="relative flex items-center gap-4 mb-6 animate-[fadeUp_0.8s_ease_forwards]"
-            style={{ fontSize: "11px", letterSpacing: "5px", textTransform: "uppercase", color: GOLD }}>
-            <span className="w-10 h-px opacity-50" style={{ background: GOLD }} />
-            {venue}
-            <span className="w-10 h-px opacity-50" style={{ background: GOLD }} />
+        {/* Content overlay — only show text if NO hero image (image speaks for itself) */}
+        {!intake.hero_image_url ? (
+          <>
+            {venue && (
+              <div className="relative flex items-center gap-4 mb-6 animate-[fadeUp_0.8s_ease_forwards]"
+                style={{ fontSize: "11px", letterSpacing: "5px", textTransform: "uppercase", color: GOLD }}>
+                <span className="w-10 h-px opacity-50" style={{ background: GOLD }} />
+                {venue}
+                <span className="w-10 h-px opacity-50" style={{ background: GOLD }} />
+              </div>
+            )}
+
+            <h1 className="relative text-center animate-[fadeUp_0.8s_ease_0.15s_forwards] opacity-0"
+              style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: "clamp(64px, 12vw, 150px)", lineHeight: 0.9, letterSpacing: "4px" }}>
+              {titleMain}
+              <br />
+              <span style={{ WebkitTextStroke: "1px #F8F4EE", color: "transparent" }}>{intake.year}</span>
+              {titleSub && (
+                <span className="block mt-2" style={{
+                  fontFamily: "'Cormorant Garamond', serif",
+                  fontSize: "clamp(22px, 4vw, 44px)",
+                  fontWeight: 300,
+                  fontStyle: "italic",
+                  letterSpacing: "8px",
+                  color: GOLD_LIGHT,
+                }}>
+                  {titleSub}
+                </span>
+              )}
+            </h1>
+          </>
+        ) : (
+          /* With hero image: compact info strip at bottom */
+          <div className="relative z-10 text-center animate-[fadeUp_0.8s_ease_forwards]">
+            <h1 style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: "clamp(36px, 6vw, 64px)", lineHeight: 1, letterSpacing: "4px", textShadow: "0 2px 20px rgba(0,0,0,0.5)" }}>
+              {intake.name}
+            </h1>
           </div>
         )}
 
-        {/* Title */}
-        <h1 className="relative text-center animate-[fadeUp_0.8s_ease_0.15s_forwards] opacity-0"
-          style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: "clamp(64px, 12vw, 150px)", lineHeight: 0.9, letterSpacing: "4px" }}>
-          {titleMain}
-          <br />
-          <span style={{ WebkitTextStroke: "1px #F8F4EE", color: "transparent" }}>{intake.year}</span>
-          {titleSub && (
-            <span className="block mt-2" style={{
-              fontFamily: "'Cormorant Garamond', serif",
-              fontSize: "clamp(22px, 4vw, 44px)",
-              fontWeight: 300,
-              fontStyle: "italic",
-              letterSpacing: "8px",
-              color: GOLD_LIGHT,
-            }}>
-              {titleSub}
-            </span>
-          )}
-        </h1>
-
-        {/* Date strip */}
+        {/* Date/venue strip */}
         {(eventDateStr || closeDateStr || venue) && (
-          <div className="relative mt-10 flex flex-wrap items-center justify-center gap-6 sm:gap-8 animate-[fadeUp_0.8s_ease_0.3s_forwards] opacity-0">
+          <div className="relative z-10 mt-6 flex flex-wrap items-center justify-center gap-6 sm:gap-8 animate-[fadeUp_0.8s_ease_0.3s_forwards] opacity-0">
             {eventDateStr && (
               <div className="text-center">
-                <div className="text-[10px] tracking-[3px] uppercase mb-1" style={{ color: "#888880" }}>Date</div>
+                <div className="text-[10px] tracking-[3px] uppercase mb-1" style={{ color: intake.hero_image_url ? "rgba(255,255,255,0.6)" : "#888880" }}>Date</div>
                 <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "18px", fontWeight: 600 }}>{eventDateStr}</div>
               </div>
             )}
             {eventDateStr && closeDateStr && <div className="w-1 h-1 rounded-full opacity-50" style={{ background: GOLD }} />}
             {closeDateStr && (
               <div className="text-center">
-                <div className="text-[10px] tracking-[3px] uppercase mb-1" style={{ color: "#888880" }}>Registration Closes</div>
+                <div className="text-[10px] tracking-[3px] uppercase mb-1" style={{ color: intake.hero_image_url ? "rgba(255,255,255,0.6)" : "#888880" }}>Registration Closes</div>
                 <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "18px", fontWeight: 600 }}>{closeDateStr}</div>
               </div>
             )}
             {(eventDateStr || closeDateStr) && venue && <div className="w-1 h-1 rounded-full opacity-50" style={{ background: GOLD }} />}
             {venue && (
               <div className="text-center">
-                <div className="text-[10px] tracking-[3px] uppercase mb-1" style={{ color: "#888880" }}>Venue</div>
+                <div className="text-[10px] tracking-[3px] uppercase mb-1" style={{ color: intake.hero_image_url ? "rgba(255,255,255,0.6)" : "#888880" }}>Venue</div>
                 <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "18px", fontWeight: 600 }}>{venue}</div>
               </div>
             )}
           </div>
         )}
 
-        {/* Scroll indicator */}
-        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 animate-[fadeUp_1s_ease_0.6s_forwards] opacity-0">
-          <span className="text-[10px] tracking-[3px] uppercase" style={{ color: "#888880" }}>Tickets</span>
-          <div className="w-px h-10 animate-pulse" style={{ background: `linear-gradient(to bottom, ${GOLD}, transparent)` }} />
-        </div>
+        {/* Scroll indicator — only when no hero image (hero is already short) */}
+        {!intake.hero_image_url && (
+          <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 animate-[fadeUp_1s_ease_0.6s_forwards] opacity-0">
+            <span className="text-[10px] tracking-[3px] uppercase" style={{ color: "#888880" }}>Tickets</span>
+            <div className="w-px h-10 animate-pulse" style={{ background: `linear-gradient(to bottom, ${GOLD}, transparent)` }} />
+          </div>
+        )}
       </section>
 
       {/* ── TICKETS SECTION ─────────────────────────────────────────── */}
-      <section className="px-6 py-16 sm:px-12 sm:py-20">
+      <section id="tickets" className="px-6 py-16 sm:px-12 sm:py-20 scroll-mt-4">
         {/* Section header */}
         <div className="text-center mb-16">
           <div className="text-[10px] tracking-[5px] uppercase mb-3" style={{ color: GOLD }}>Select Your Experience</div>
@@ -911,6 +951,27 @@ function EventEnrollmentPage({
           </div>
         </div>
       </footer>
+
+      {/* Sticky mobile CTA */}
+      {classes.some((c) => c.seat_remaining > 0 && c.status === "open") && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 sm:hidden"
+          style={{ background: "linear-gradient(to top, rgba(8,8,8,0.98), rgba(8,8,8,0.9))", backdropFilter: "blur(12px)" }}>
+          <div className="px-4 py-3 flex items-center justify-between">
+            <div>
+              <div className="text-[11px] tracking-[2px] uppercase" style={{ color: GOLD }}>
+                {classes.filter((c) => c.seat_remaining > 0).length} ticket{classes.filter((c) => c.seat_remaining > 0).length !== 1 ? "s" : ""} available
+              </div>
+              <div className="text-[13px] text-white/60">
+                From {formatMMK(Math.min(...classes.filter((c) => c.seat_remaining > 0).map((c) => c.fee_mmk)))}
+              </div>
+            </div>
+            <a href="#tickets" className="px-5 py-2.5 rounded-sm text-[12px] font-semibold tracking-[1.5px] uppercase transition-all"
+              style={{ background: `linear-gradient(135deg, ${GOLD}, ${GOLD_LIGHT})`, color: "#080808" }}>
+              Buy Tickets
+            </a>
+          </div>
+        </div>
+      )}
 
       {/* Keyframes */}
       <style>{`
