@@ -627,7 +627,6 @@ function SettingsContent() {
   const [messengerTesting, setMessengerTesting] = useState(false);
   const [handoffTimeoutMin, setHandoffTimeoutMin] = useState(15);
   const [menuButtons, setMenuButtons] = useState<MenuButton[]>([]);
-  const [menuButtonsSaving, setMenuButtonsSaving] = useState(false);
 
   const fetchMessenger = useCallback(async () => {
     setMessengerLoading(true);
@@ -667,54 +666,24 @@ function SettingsContent() {
     }
   }
 
-  async function handleMessengerSaveGreeting() {
+  async function handleMessengerSaveAll() {
     setMessengerSaving(true);
     try {
       const res = await fetch("/api/messenger/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ greeting: messengerGreeting }),
+        body: JSON.stringify({
+          greeting: messengerGreeting,
+          handoffTimeoutMin,
+          menuButtons,
+        }),
       });
       if (!res.ok) throw new Error(`${res.status}`);
-      toast.success("Greeting saved.");
+      toast.success("Bot settings saved.");
     } catch {
-      toast.error("Failed to save greeting.");
+      toast.error("Failed to save bot settings.");
     } finally {
       setMessengerSaving(false);
-    }
-  }
-
-  async function handleMessengerSaveTimeout() {
-    setMessengerSaving(true);
-    try {
-      const res = await fetch("/api/messenger/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ handoffTimeoutMin }),
-      });
-      if (!res.ok) throw new Error(`${res.status}`);
-      toast.success("Handoff timeout saved.");
-    } catch {
-      toast.error("Failed to save timeout.");
-    } finally {
-      setMessengerSaving(false);
-    }
-  }
-
-  async function handleMenuButtonsSave() {
-    setMenuButtonsSaving(true);
-    try {
-      const res = await fetch("/api/messenger/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ menuButtons }),
-      });
-      if (!res.ok) throw new Error(`${res.status}`);
-      toast.success("Menu buttons saved.");
-    } catch {
-      toast.error("Failed to save menu buttons.");
-    } finally {
-      setMenuButtonsSaving(false);
     }
   }
 
@@ -1242,15 +1211,6 @@ function SettingsContent() {
                 rows={3}
                 className="w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent resize-none"
               />
-              <div className="flex items-center gap-3 mt-2">
-                <button
-                  onClick={handleMessengerSaveGreeting}
-                  disabled={messengerSaving}
-                  className="px-4 py-2 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 disabled:opacity-50 transition-colors"
-                >
-                  {messengerSaving ? "Saving…" : "Save Greeting"}
-                </button>
-              </div>
             </div>
 
             {/* Live Agent Handoff Timeout */}
@@ -1271,13 +1231,7 @@ function SettingsContent() {
                   onChange={(e) => setHandoffTimeoutMin(Math.max(1, Math.min(120, Number(e.target.value) || 1)))}
                   className="w-24 border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
                 />
-                <button
-                  onClick={handleMessengerSaveTimeout}
-                  disabled={messengerSaving}
-                  className="px-4 py-2 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 disabled:opacity-50 transition-colors"
-                >
-                  {messengerSaving ? "Saving…" : "Save"}
-                </button>
+                <span className="text-xs text-gray-400">min</span>
               </div>
             </div>
 
@@ -1320,15 +1274,17 @@ function SettingsContent() {
                   </div>
                 ))}
               </div>
-              <div className="mt-3">
-                <button
-                  onClick={handleMenuButtonsSave}
-                  disabled={menuButtonsSaving}
-                  className="px-4 py-2 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 disabled:opacity-50 transition-colors"
-                >
-                  {menuButtonsSaving ? "Saving…" : "Save Menu"}
-                </button>
-              </div>
+            </div>
+
+            {/* Save all bot settings */}
+            <div className="pt-2">
+              <button
+                onClick={handleMessengerSaveAll}
+                disabled={messengerSaving}
+                className="px-6 py-2.5 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 disabled:opacity-50 transition-colors"
+              >
+                {messengerSaving ? "Saving…" : "Save Bot Settings"}
+              </button>
             </div>
 
             {/* Actions */}
