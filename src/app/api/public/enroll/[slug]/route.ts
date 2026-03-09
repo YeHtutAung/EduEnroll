@@ -24,6 +24,7 @@ interface PublicClassView {
   start_time: string | null;
   end_time: string | null;
   venue: string | null;
+  image_url: string | null;
 }
 
 interface TenantLabelsView {
@@ -146,7 +147,7 @@ export async function GET(
   // ── Fetch all visible classes (open + full) ──────────────────
   const { data: classes, error: classError } = await supabase
     .from("classes")
-    .select("id, level, fee_mmk, seat_remaining, seat_total, enrollment_open_at, enrollment_close_at, status, mode, event_date, start_time, end_time, venue")
+    .select("id, level, fee_mmk, seat_remaining, seat_total, enrollment_open_at, enrollment_close_at, status, mode, event_date, start_time, end_time, venue, image_url")
     .eq("intake_id", intake.id)
     .eq("tenant_id", tenantId)
     .in("status", ["open", "full"])
@@ -177,6 +178,7 @@ export async function GET(
     start_time:           c.start_time ?? null,
     end_time:             c.end_time ?? null,
     venue:                c.venue ?? null,
+    image_url:            c.image_url ?? null,
   }));
 
   const response: PublicIntakeResponse = {

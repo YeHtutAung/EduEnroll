@@ -123,6 +123,7 @@ export interface Class {
   start_time: string | null;
   end_time: string | null;
   venue: string | null;
+  image_url: string | null;
   created_at: string;
 }
 

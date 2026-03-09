@@ -22,6 +22,7 @@ interface PublicClass {
   start_time?: string | null;
   end_time?: string | null;
   venue?: string | null;
+  image_url?: string | null;
 }
 
 interface PublicIntake {
@@ -309,6 +310,18 @@ function ClassCard({ cls, onSelect, labels }: { cls: PublicClass; onSelect: (id:
                 {cls.venue}
               </p>
             )}
+          </div>
+        )}
+
+        {/* Ticket image */}
+        {cls.image_url && (
+          <div className="mt-3 overflow-hidden rounded-lg">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={cls.image_url}
+              alt={cls.level}
+              className="w-full h-auto object-cover rounded-lg"
+            />
           </div>
         )}
 

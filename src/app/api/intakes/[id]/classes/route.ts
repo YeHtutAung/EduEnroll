@@ -105,6 +105,7 @@ export async function POST(
     start_time,
     end_time,
     venue,
+    image_url,
   } = body as Record<string, unknown>;
 
   // Validate level
@@ -154,6 +155,7 @@ export async function POST(
       start_time: (start_time as string | null) ?? null,
       end_time: (end_time as string | null) ?? null,
       venue: (venue as string | null) ?? null,
+      image_url: (image_url as string | null) ?? null,
     } as never)
     .select()
     .single() as ClassResult;

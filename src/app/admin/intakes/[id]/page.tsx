@@ -8,6 +8,7 @@ import ConfirmModal from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
 import { formatMMKSimple } from "@/lib/utils";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
+import { createClient } from "@/lib/supabase/client";
 import type { Class, ClassMode, ClassStatus, Intake, IntakeStatus } from "@/types/database";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -423,9 +424,24 @@ function AddCustomClassModal({
     venue: "",
   });
   const [saving, setSaving] = useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
 
   function set(key: keyof AddCustomForm, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null;
+    if (!file) { setImageFile(null); setImagePreview(null); return; }
+    if (file.size > 5 * 1024 * 1024) { toast.error("Image must be under 5 MB."); return; }
+    setImageFile(file);
+    setImagePreview(URL.createObjectURL(file));
+  }
+
+  function removeImage() {
+    setImageFile(null);
+    setImagePreview(null);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -439,6 +455,22 @@ function AddCustomClassModal({
 
     setSaving(true);
     try {
+      // Upload image if provided
+      let image_url: string | null = null;
+      if (imageFile) {
+        const supabase = createClient();
+        const ext = imageFile.name.split(".").pop() ?? "png";
+        const path = `${intakeId}/${level.replace(/\s+/g, "-").toLowerCase()}-${Date.now()}.${ext}`;
+        const { error: uploadErr } = await supabase.storage
+          .from("class-images")
+          .upload(path, imageFile, { upsert: true });
+        if (uploadErr) throw new Error("Image upload failed: " + uploadErr.message);
+        const { data: urlData } = supabase.storage
+          .from("class-images")
+          .getPublicUrl(path);
+        image_url = urlData.publicUrl;
+      }
+
       const res = await fetch(`/api/intakes/${intakeId}/classes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -452,6 +484,7 @@ function AddCustomClassModal({
           start_time: form.start_time || null,
           end_time: form.end_time || null,
           venue: form.venue || null,
+          image_url,
         }),
       });
       if (res.status === 409) {
@@ -621,6 +654,43 @@ function AddCustomClassModal({
                 />
               </div>
             </>
+          )}
+
+          {/* Image upload (optional) */}
+          {showEventFields && (
+            <div>
+              <label className={labelClass}>Image (optional)</label>
+              {imagePreview ? (
+                <div className="relative inline-block">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={imagePreview}
+                    alt="Preview"
+                    className="h-32 w-auto rounded-lg border border-gray-200 object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={removeImage}
+                    className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-white text-xs hover:bg-red-600 transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <label className="flex cursor-pointer items-center gap-2 rounded-lg border-2 border-dashed border-gray-300 px-4 py-3 text-sm text-gray-500 hover:border-[#1a3f8a] hover:text-[#1a3f8a] transition-colors">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
+                  </svg>
+                  Upload image (max 5 MB)
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={handleImageChange}
+                    className="hidden"
+                  />
+                </label>
+              )}
+            </div>
           )}
 
           <div className="flex gap-3 pt-2">
