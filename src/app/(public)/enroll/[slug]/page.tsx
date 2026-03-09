@@ -320,7 +320,7 @@ function ClassCard({ cls, onSelect, labels }: { cls: PublicClass; onSelect: (id:
             <img
               src={cls.image_url}
               alt={cls.level}
-              className="w-full h-auto object-cover rounded-lg"
+              className="w-full h-40 object-cover rounded-lg"
             />
           </div>
         )}
