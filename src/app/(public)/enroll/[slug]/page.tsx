@@ -107,7 +107,7 @@ const LEVEL_COLORS: Record<string, string> = {
 
 const DEFAULT_LEVEL_COLOR = "bg-gray-100 text-gray-800";
 
-// ─── Seats badge ─────────────────────────────────────────────────────────────
+// ─── Seats badge (default / language_school) ────────────────────────────────
 
 function SeatsBadge({ remaining, seatLabel }: { remaining: number; seatLabel: string }) {
   if (remaining === 0) {
@@ -171,7 +171,7 @@ function ErrorPage({ message }: { message: string }) {
   );
 }
 
-// ─── Class card ──────────────────────────────────────────────────────────────
+// ─── Class card (default / language_school / training_center) ────────────────
 
 function ClassCard({ cls, onSelect, labels }: { cls: PublicClass; onSelect: (id: string) => void; labels: TenantLabels }) {
   const isFull = cls.status === "full" || cls.seat_remaining === 0;
@@ -492,6 +492,437 @@ function AllClassesFullPage({ intake, labels }: { intake: PublicIntake; labels: 
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── EVENT ORG TYPE — Dark Luxury Theme ──────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const GOLD = "#C9A84C";
+const GOLD_LIGHT = "#E8C97A";
+
+function EventSeatsBadge({ remaining }: { remaining: number }) {
+  if (remaining === 0) {
+    return (
+      <span className="text-[11px] tracking-wider px-2.5 py-1 rounded-sm border border-red-500/30 bg-red-500/10 text-red-300">
+        SOLD OUT
+      </span>
+    );
+  }
+  const style =
+    remaining < 10
+      ? "border-[#C9A84C]/30 bg-[#C9A84C]/10 text-[#E8C97A] animate-pulse"
+      : remaining < 100
+        ? "border-amber-400/20 bg-amber-400/8 text-amber-200"
+        : "border-green-400/20 bg-green-400/8 text-green-300";
+  return (
+    <span className={`text-[11px] tracking-wider px-2.5 py-1 rounded-sm border whitespace-nowrap ${style}`}>
+      {remaining.toLocaleString()} seats left
+    </span>
+  );
+}
+
+function EventTicketCard({
+  cls,
+  onSelect,
+  isHighestTier,
+  index,
+}: {
+  cls: PublicClass;
+  onSelect: (id: string) => void;
+  isHighestTier: boolean;
+  index: number;
+}) {
+  const isFull = cls.status === "full" || cls.seat_remaining === 0;
+  const now = new Date();
+  const notYetOpen = cls.enrollment_open_at ? now < new Date(cls.enrollment_open_at) : false;
+  const alreadyClosed = cls.enrollment_close_at ? now > new Date(cls.enrollment_close_at) : false;
+  const isDisabled = isFull || notYetOpen || alreadyClosed;
+
+  const fmtOpts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "numeric" };
+  const closeDate = cls.enrollment_close_at
+    ? new Date(cls.enrollment_close_at).toLocaleDateString("en-GB", fmtOpts)
+    : null;
+  const openDate = cls.enrollment_open_at
+    ? new Date(cls.enrollment_open_at).toLocaleDateString("en-GB", { ...fmtOpts, hour: "2-digit", minute: "2-digit" })
+    : null;
+
+  const overlayState = isFull ? "full" : notYetOpen ? "not_open" : alreadyClosed ? "closed" : null;
+
+  const priceNum = cls.fee_mmk.toLocaleString();
+
+  return (
+    <div
+      className={`group relative overflow-hidden transition-all duration-500 cursor-pointer ${
+        isHighestTier
+          ? "bg-gradient-to-br from-[#171208] to-[#1a1508]"
+          : "bg-[#111]"
+      } ${isDisabled ? "opacity-60 cursor-not-allowed" : "hover:-translate-y-1.5"}`}
+      style={{ animationDelay: `${index * 0.1}s` }}
+      onClick={() => !isDisabled && onSelect(cls.id)}
+      role={isDisabled ? undefined : "button"}
+      tabIndex={isDisabled ? undefined : 0}
+      onKeyDown={(e) => {
+        if (!isDisabled && (e.key === "Enter" || e.key === " ")) {
+          e.preventDefault();
+          onSelect(cls.id);
+        }
+      }}
+    >
+      {/* Gold gradient overlay on hover */}
+      <div className={`absolute inset-0 bg-gradient-to-br from-[#C9A84C]/[0.08] to-transparent transition-opacity duration-500 ${
+        isHighestTier ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+      }`} />
+
+      {/* Shimmer border on hover */}
+      <div className="absolute inset-0 rounded-none border border-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500"
+        style={{
+          background: "linear-gradient(#111, #111) padding-box, linear-gradient(135deg, #C9A84C, transparent 60%) border-box",
+        }}
+      />
+
+      {/* Large watermark label */}
+      <div className="absolute -bottom-5 -right-2 select-none pointer-events-none leading-none"
+        style={{
+          fontFamily: "'Bebas Neue', sans-serif",
+          fontSize: "140px",
+          letterSpacing: "4px",
+          color: isHighestTier ? "rgba(201,168,76,0.04)" : "rgba(255,255,255,0.02)",
+        }}
+      >
+        {cls.level}
+      </div>
+
+      {/* Status banner */}
+      {overlayState === "full" && (
+        <div className="relative z-10 bg-white/5 px-6 py-2.5 text-center text-[11px] font-medium tracking-[3px] text-white/60 uppercase">
+          SOLD OUT / <span className="font-myanmar font-normal tracking-normal">နေရာပြည့်သွားပြီ</span>
+        </div>
+      )}
+      {overlayState === "not_open" && (
+        <div className="relative z-10 px-6 py-2.5 text-center" style={{ background: "rgba(201,168,76,0.15)" }}>
+          <p className="text-[11px] font-medium tracking-[3px] uppercase" style={{ color: GOLD_LIGHT }}>
+            OPENS {openDate?.toUpperCase()}
+          </p>
+          <p className="font-myanmar text-[10px] mt-0.5" style={{ color: "rgba(201,168,76,0.6)" }}>
+            စာရင်းသွင်းချိန် မရောက်သေးပါ
+          </p>
+        </div>
+      )}
+      {overlayState === "closed" && (
+        <div className="relative z-10 bg-red-500/10 px-6 py-2.5 text-center">
+          <p className="text-[11px] font-medium tracking-[3px] text-red-300 uppercase">ENROLLMENT CLOSED</p>
+          <p className="font-myanmar text-[10px] text-red-400/60 mt-0.5">စာရင်းသွင်းချိန် ကုန်ဆုံးသွားပြီ</p>
+        </div>
+      )}
+
+      <div className="relative z-10 px-8 py-10 sm:px-10 sm:py-12">
+        {/* Tier + Seats */}
+        <div className="flex items-start justify-between mb-8">
+          <span className={`text-[11px] font-medium tracking-[3px] uppercase px-3 py-1.5 rounded-sm border ${
+            isHighestTier
+              ? "border-[#C9A84C]/40 text-[#C9A84C]"
+              : "border-white/10 text-[#888880]"
+          }`}>
+            {cls.level}
+          </span>
+          <EventSeatsBadge remaining={cls.seat_remaining} />
+        </div>
+
+        {/* Price */}
+        <div className="mb-8">
+          <div
+            className="text-[52px] sm:text-[56px] font-bold leading-none mb-1.5 tracking-wider"
+            style={{
+              fontFamily: "'Bebas Neue', sans-serif",
+              ...(isHighestTier
+                ? { background: `linear-gradient(135deg, ${GOLD_LIGHT}, ${GOLD})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }
+                : { color: "#F8F4EE" }),
+            }}
+          >
+            {priceNum}
+          </div>
+          <div className="font-myanmar text-base tracking-wider" style={{ color: "#888880" }}>
+            {formatMMK(cls.fee_mmk).replace(" MMK", "")} ကျပ် · MMK
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div className="w-full h-px mb-7" style={{
+          background: isHighestTier
+            ? "linear-gradient(to right, rgba(201,168,76,0.2), transparent)"
+            : "linear-gradient(to right, rgba(255,255,255,0.06), transparent)",
+        }} />
+
+        {/* Meta rows */}
+        <div className="flex flex-col gap-3 mb-8">
+          <div className="flex items-center gap-3 text-[13px]" style={{ color: "#888880" }}>
+            <span className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" style={{ boxShadow: "0 0 6px rgba(255,107,107,0.5)" }} />
+            {(cls.mode ?? "offline") === "online" ? "Online Event" : "Offline Event"}
+          </div>
+          {closeDate && !isDisabled && (
+            <div className="flex items-center gap-3 text-[13px]" style={{ color: "#888880" }}>
+              <svg className="w-3.5 h-3.5 opacity-50 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5" />
+              </svg>
+              Closes {closeDate}
+            </div>
+          )}
+          {cls.event_date && (
+            <div className="flex items-center gap-3 text-[13px]" style={{ color: "#888880" }}>
+              <svg className="w-3.5 h-3.5 opacity-50 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5" />
+              </svg>
+              {new Date(cls.event_date + "T00:00:00").toLocaleDateString("en-GB", fmtOpts)}
+            </div>
+          )}
+          {cls.venue && (
+            <div className="flex items-center gap-3 text-[13px]" style={{ color: "#888880" }}>
+              <svg className="w-3.5 h-3.5 opacity-50 shrink-0" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+              </svg>
+              {cls.venue}
+            </div>
+          )}
+        </div>
+
+        {/* Ticket image */}
+        {cls.image_url && (
+          <div className="mb-8 overflow-hidden rounded">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={cls.image_url} alt={cls.level} className="w-full h-40 object-cover" />
+          </div>
+        )}
+
+        {/* Register button */}
+        {!isDisabled && (
+          <button className={`group/btn relative w-full flex items-center justify-between px-6 py-4 text-[13px] font-medium tracking-[2px] uppercase rounded-sm border overflow-hidden transition-all duration-300 ${
+            isHighestTier
+              ? "border-[#C9A84C]/40 text-[#E8C97A] hover:border-[#C9A84C] bg-gradient-to-r from-[#C9A84C]/15 to-[#C9A84C]/5 hover:from-[#C9A84C]/25 hover:to-[#C9A84C]/10"
+              : "border-white/12 text-[#F8F4EE] hover:border-white/30"
+          }`}>
+            <span className="absolute left-0 top-0 bottom-0 w-0 bg-white/5 transition-all duration-500 group-hover/btn:w-full" />
+            <span className="relative">Register Now</span>
+            <svg className="relative w-5 h-5 transition-transform duration-300 group-hover/btn:translate-x-1" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12h15m0 0l-6.75-6.75M19.5 12l-6.75 6.75" />
+            </svg>
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function EventEnrollmentPage({
+  intake,
+  classes,
+  slug,
+  onSelect,
+}: {
+  intake: PublicIntake;
+  classes: PublicClass[];
+  slug: string;
+  onSelect: (id: string) => void;
+}) {
+  // Extract event info from first class that has it
+  const firstWithEvent = classes.find((c) => c.event_date || c.venue);
+  const fmtOpts: Intl.DateTimeFormatOptions = { day: "numeric", month: "long", year: "numeric" };
+  const eventDateStr = firstWithEvent?.event_date
+    ? new Date(firstWithEvent.event_date + "T00:00:00").toLocaleDateString("en-GB", fmtOpts)
+    : null;
+  const closeDateStr = classes.find((c) => c.enrollment_close_at)?.enrollment_close_at
+    ? new Date(classes.find((c) => c.enrollment_close_at)!.enrollment_close_at!).toLocaleDateString("en-GB", fmtOpts)
+    : null;
+  const venue = firstWithEvent?.venue ?? null;
+
+  // Find the highest priced tier for special styling
+  const maxFee = Math.max(...classes.map((c) => c.fee_mmk));
+
+  // Parse event name — split into title words
+  const nameParts = intake.name.split(" ");
+  const titleMain = nameParts.slice(0, -1).join(" ") || intake.name;
+  const titleSub = nameParts.length > 1 ? nameParts[nameParts.length - 1] : "";
+
+  return (
+    <div className="-mx-4 sm:-mx-6 -my-6 sm:-my-10" style={{ background: "#080808", color: "#F8F4EE" }}>
+      {/* Google Fonts */}
+      {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+      <link
+        href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500&display=swap"
+        rel="stylesheet"
+      />
+
+      {/* Grain overlay */}
+      <div className="fixed inset-0 pointer-events-none z-[9999] opacity-[0.35]"
+        style={{
+          backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E")`,
+        }}
+      />
+
+      {/* ── HERO ────────────────────────────────────────────────────── */}
+      <section className="relative min-h-[85vh] flex flex-col items-center justify-center overflow-hidden px-6 py-24 sm:px-12">
+        {/* BG radials */}
+        <div className="absolute inset-0" style={{
+          background: `
+            radial-gradient(ellipse 80% 50% at 50% 0%, rgba(201,168,76,0.12) 0%, transparent 60%),
+            radial-gradient(ellipse 40% 40% at 80% 60%, rgba(201,168,76,0.05) 0%, transparent 50%),
+            radial-gradient(ellipse 60% 60% at 20% 80%, rgba(201,168,76,0.04) 0%, transparent 50%)`,
+        }} />
+
+        {/* Decorative lines */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute left-[15%] top-0 w-px h-full animate-pulse"
+            style={{ background: "linear-gradient(to bottom, transparent, rgba(201,168,76,0.15), transparent)" }} />
+          <div className="absolute right-[15%] top-0 w-px h-full animate-pulse" style={{
+            background: "linear-gradient(to bottom, transparent, rgba(201,168,76,0.15), transparent)",
+            animationDelay: "2s",
+          }} />
+        </div>
+
+        {/* Track status button */}
+        <a
+          href={`/enroll/${slug}/status`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="absolute top-6 right-6 sm:top-8 sm:right-12 z-10 flex items-center gap-2 text-[13px] font-medium tracking-[1.5px] uppercase px-4 py-2.5 rounded-sm border transition-all duration-300 hover:bg-[#C9A84C]/10"
+          style={{ color: GOLD, borderColor: "rgba(201,168,76,0.3)" }}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+          </svg>
+          Track Status
+        </a>
+
+        {/* Eyebrow */}
+        {venue && (
+          <div className="relative flex items-center gap-4 mb-6 animate-[fadeUp_0.8s_ease_forwards]"
+            style={{ fontSize: "11px", letterSpacing: "5px", textTransform: "uppercase", color: GOLD }}>
+            <span className="w-10 h-px opacity-50" style={{ background: GOLD }} />
+            {venue}
+            <span className="w-10 h-px opacity-50" style={{ background: GOLD }} />
+          </div>
+        )}
+
+        {/* Title */}
+        <h1 className="relative text-center animate-[fadeUp_0.8s_ease_0.15s_forwards] opacity-0"
+          style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: "clamp(64px, 12vw, 150px)", lineHeight: 0.9, letterSpacing: "4px" }}>
+          {titleMain}
+          <br />
+          <span style={{ WebkitTextStroke: "1px #F8F4EE", color: "transparent" }}>{intake.year}</span>
+          {titleSub && (
+            <span className="block mt-2" style={{
+              fontFamily: "'Cormorant Garamond', serif",
+              fontSize: "clamp(22px, 4vw, 44px)",
+              fontWeight: 300,
+              fontStyle: "italic",
+              letterSpacing: "8px",
+              color: GOLD_LIGHT,
+            }}>
+              {titleSub}
+            </span>
+          )}
+        </h1>
+
+        {/* Date strip */}
+        {(eventDateStr || closeDateStr || venue) && (
+          <div className="relative mt-10 flex flex-wrap items-center justify-center gap-6 sm:gap-8 animate-[fadeUp_0.8s_ease_0.3s_forwards] opacity-0">
+            {eventDateStr && (
+              <div className="text-center">
+                <div className="text-[10px] tracking-[3px] uppercase mb-1" style={{ color: "#888880" }}>Date</div>
+                <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "18px", fontWeight: 600 }}>{eventDateStr}</div>
+              </div>
+            )}
+            {eventDateStr && closeDateStr && <div className="w-1 h-1 rounded-full opacity-50" style={{ background: GOLD }} />}
+            {closeDateStr && (
+              <div className="text-center">
+                <div className="text-[10px] tracking-[3px] uppercase mb-1" style={{ color: "#888880" }}>Registration Closes</div>
+                <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "18px", fontWeight: 600 }}>{closeDateStr}</div>
+              </div>
+            )}
+            {(eventDateStr || closeDateStr) && venue && <div className="w-1 h-1 rounded-full opacity-50" style={{ background: GOLD }} />}
+            {venue && (
+              <div className="text-center">
+                <div className="text-[10px] tracking-[3px] uppercase mb-1" style={{ color: "#888880" }}>Venue</div>
+                <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "18px", fontWeight: 600 }}>{venue}</div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Scroll indicator */}
+        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 animate-[fadeUp_1s_ease_0.6s_forwards] opacity-0">
+          <span className="text-[10px] tracking-[3px] uppercase" style={{ color: "#888880" }}>Tickets</span>
+          <div className="w-px h-10 animate-pulse" style={{ background: `linear-gradient(to bottom, ${GOLD}, transparent)` }} />
+        </div>
+      </section>
+
+      {/* ── TICKETS SECTION ─────────────────────────────────────────── */}
+      <section className="px-6 py-16 sm:px-12 sm:py-20">
+        {/* Section header */}
+        <div className="text-center mb-16">
+          <div className="text-[10px] tracking-[5px] uppercase mb-3" style={{ color: GOLD }}>Select Your Experience</div>
+          <h2 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "38px", fontWeight: 300, fontStyle: "italic" }}>
+            Choose Your Tier
+          </h2>
+        </div>
+
+        {/* Ticket grid */}
+        {classes.length === 0 ? (
+          <div className="py-16 text-center">
+            <p className="text-lg" style={{ color: "#888880" }}>Nothing available yet. Please check back soon.</p>
+          </div>
+        ) : (
+          <div className="relative max-w-[1200px] mx-auto">
+            {/* Decorative gold corner frame */}
+            <div className="absolute inset-[-1px] pointer-events-none opacity-20" style={{
+              background: `linear-gradient(135deg, ${GOLD} 0%, transparent 40%, transparent 60%, ${GOLD} 100%)`,
+            }} />
+            <div className={`grid gap-px ${
+              classes.length === 1
+                ? "grid-cols-1 max-w-md mx-auto"
+                : classes.length === 2
+                  ? "grid-cols-1 sm:grid-cols-2"
+                  : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3"
+            }`}>
+              {classes.map((cls, i) => (
+                <EventTicketCard
+                  key={cls.id}
+                  cls={cls}
+                  onSelect={onSelect}
+                  isHighestTier={cls.fee_mmk === maxFee && classes.length > 1}
+                  index={i}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* ── FOOTER ──────────────────────────────────────────────────── */}
+      <footer className="px-6 py-12 sm:px-12 border-t border-white/5">
+        <div className="max-w-[1200px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
+          <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: "22px", letterSpacing: "4px", opacity: 0.5 }}>
+            {intake.name}
+          </div>
+          <div className="text-[12px] tracking-wider" style={{ color: "#888880" }}>
+            Powered by{" "}
+            <a href="https://www.kuunyi.com" target="_blank" rel="noopener noreferrer" className="transition-opacity hover:opacity-70" style={{ color: GOLD }}>
+              KuuNyi
+            </a>
+          </div>
+        </div>
+      </footer>
+
+      {/* Keyframes */}
+      <style>{`
+        @keyframes fadeUp {
+          from { opacity: 0; transform: translateY(30px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
 // ─── Main page ───────────────────────────────────────────────────────────────
 
 export default function IntakeLandingPage() {
@@ -564,6 +995,19 @@ function IntakeLandingContent() {
     return <AllClassesFullPage intake={intake} labels={tl} />;
   }
 
+  // ── Event org type → dark luxury theme ────────────────────────
+  if (tl.orgType === "event") {
+    return (
+      <EventEnrollmentPage
+        intake={intake}
+        classes={classes}
+        slug={params.slug}
+        onSelect={handleSelectClass}
+      />
+    );
+  }
+
+  // ── Default theme (language_school, training_center) ──────────
   return (
     <div>
       {/* Intake header */}
