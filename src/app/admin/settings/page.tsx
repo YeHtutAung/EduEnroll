@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
 import { createClient } from "@/lib/supabase/client";
-import type { BankAccount, MyanmarBank } from "@/types/database";
+import type { BankAccount, MyanmarBank, MenuButton } from "@/types/database";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -22,6 +22,40 @@ const BANK_STYLES: Record<
   Yoma:  { bg: "bg-teal-100",    text: "text-teal-800",    dot: "bg-teal-500"    },
   Other: { bg: "bg-gray-100",    text: "text-gray-600",    dot: "bg-gray-400"    },
 };
+
+const DEFAULT_MENU_BUTTONS: Record<string, MenuButton[]> = {
+  language_school: [
+    { key: "OPEN_INTAKES", title: "📚 Open Intakes", visible: true },
+    { key: "FEES", title: "💰 Fees", visible: true },
+    { key: "HOW_TO_ENROLL", title: "📝 How to Enroll", visible: true },
+    { key: "SCHEDULE", title: "📅 Schedule", visible: true },
+    { key: "PAYMENT", title: "🏦 Payment", visible: true },
+    { key: "CHECK_STATUS", title: "📋 Check Status", visible: true },
+    { key: "LIVE_AGENT", title: "💬 Live Agent", visible: true },
+  ],
+  event: [
+    { key: "OPEN_INTAKES", title: "🎪 Events", visible: true },
+    { key: "FEES", title: "🎫 Tickets", visible: true },
+    { key: "HOW_TO_ENROLL", title: "📝 Register", visible: true },
+    { key: "SCHEDULE", title: "📅 Event Date", visible: true },
+    { key: "PAYMENT", title: "🏦 Payment", visible: true },
+    { key: "CHECK_STATUS", title: "📋 Check Status", visible: true },
+    { key: "LIVE_AGENT", title: "💬 Live Agent", visible: true },
+  ],
+  training_center: [
+    { key: "OPEN_INTAKES", title: "📚 Courses", visible: true },
+    { key: "FEES", title: "💰 Fees", visible: true },
+    { key: "HOW_TO_ENROLL", title: "📝 Enroll", visible: true },
+    { key: "SCHEDULE", title: "📅 Schedule", visible: true },
+    { key: "PAYMENT", title: "🏦 Payment", visible: true },
+    { key: "CHECK_STATUS", title: "📋 Check Status", visible: true },
+    { key: "LIVE_AGENT", title: "💬 Live Agent", visible: true },
+  ],
+};
+
+function getDefaultMenuButtons(orgType: string): MenuButton[] {
+  return DEFAULT_MENU_BUTTONS[orgType] ?? DEFAULT_MENU_BUTTONS.language_school;
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -591,6 +625,9 @@ function SettingsContent() {
   const [messengerSaving, setMessengerSaving] = useState(false);
   const [messengerDisconnecting, setMessengerDisconnecting] = useState(false);
   const [messengerTesting, setMessengerTesting] = useState(false);
+  const [handoffTimeoutMin, setHandoffTimeoutMin] = useState(15);
+  const [menuButtons, setMenuButtons] = useState<MenuButton[]>([]);
+  const [menuButtonsSaving, setMenuButtonsSaving] = useState(false);
 
   const fetchMessenger = useCallback(async () => {
     setMessengerLoading(true);
@@ -603,6 +640,8 @@ function SettingsContent() {
       setMessengerPageId(data.pageId);
       setMessengerGreeting(data.greeting ?? "");
       setMessengerSubdomain(data.subdomain ?? "");
+      setHandoffTimeoutMin(data.handoffTimeoutMin ?? 15);
+      setMenuButtons(data.menuButtons ?? getDefaultMenuButtons(orgType));
     } catch {
       // non-critical
     } finally {
@@ -642,6 +681,40 @@ function SettingsContent() {
       toast.error("Failed to save greeting.");
     } finally {
       setMessengerSaving(false);
+    }
+  }
+
+  async function handleMessengerSaveTimeout() {
+    setMessengerSaving(true);
+    try {
+      const res = await fetch("/api/messenger/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ handoffTimeoutMin }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      toast.success("Handoff timeout saved.");
+    } catch {
+      toast.error("Failed to save timeout.");
+    } finally {
+      setMessengerSaving(false);
+    }
+  }
+
+  async function handleMenuButtonsSave() {
+    setMenuButtonsSaving(true);
+    try {
+      const res = await fetch("/api/messenger/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ menuButtons }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      toast.success("Menu buttons saved.");
+    } catch {
+      toast.error("Failed to save menu buttons.");
+    } finally {
+      setMenuButtonsSaving(false);
     }
   }
 
@@ -1176,6 +1249,84 @@ function SettingsContent() {
                   className="px-4 py-2 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 disabled:opacity-50 transition-colors"
                 >
                   {messengerSaving ? "Saving…" : "Save Greeting"}
+                </button>
+              </div>
+            </div>
+
+            {/* Live Agent Handoff Timeout */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Live Agent Handoff Timeout{" "}
+                <span className="text-gray-400 font-normal">(minutes)</span>
+              </label>
+              <p className="text-xs text-gray-500 mb-2">
+                When a user requests a live agent, the bot stays silent for this duration.
+              </p>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min={1}
+                  max={120}
+                  value={handoffTimeoutMin}
+                  onChange={(e) => setHandoffTimeoutMin(Math.max(1, Math.min(120, Number(e.target.value) || 1)))}
+                  className="w-24 border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
+                />
+                <button
+                  onClick={handleMessengerSaveTimeout}
+                  disabled={messengerSaving}
+                  className="px-4 py-2 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 disabled:opacity-50 transition-colors"
+                >
+                  {messengerSaving ? "Saving…" : "Save"}
+                </button>
+              </div>
+            </div>
+
+            {/* Menu Buttons */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Menu Buttons
+              </label>
+              <p className="text-xs text-gray-500 mb-3">
+                Customize the quick-reply buttons shown to users in Messenger.
+              </p>
+              <div className="space-y-2">
+                {menuButtons.map((btn, idx) => (
+                  <div key={btn.key} className="flex items-center gap-3">
+                    <input
+                      type="text"
+                      value={btn.title}
+                      onChange={(e) => {
+                        setMenuButtons((prev) =>
+                          prev.map((b, i) =>
+                            i === idx ? { ...b, title: e.target.value } : b,
+                          ),
+                        );
+                      }}
+                      className="flex-1 border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
+                    />
+                    <span className="text-xs text-gray-400 w-20 truncate" title={btn.key}>
+                      {btn.key}
+                    </span>
+                    <Toggle
+                      checked={btn.visible}
+                      onChange={() => {
+                        setMenuButtons((prev) =>
+                          prev.map((b, i) =>
+                            i === idx ? { ...b, visible: !b.visible } : b,
+                          ),
+                        );
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3">
+                <button
+                  onClick={handleMenuButtonsSave}
+                  disabled={menuButtonsSaving}
+                  className="px-4 py-2 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 disabled:opacity-50 transition-colors"
+                >
+                  {menuButtonsSaving ? "Saving…" : "Save Menu"}
                 </button>
               </div>
             </div>

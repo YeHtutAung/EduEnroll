@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { class_id, form_data } = body as Record<string, unknown>;
+  const { class_id, form_data, idempotency_key } = body as Record<string, unknown>;
 
   // ── Validate class_id ─────────────────────────────────────────
   if (!class_id || typeof class_id !== "string" || !UUID_RE.test(class_id)) {
@@ -49,9 +49,11 @@ export async function POST(request: NextRequest) {
   // ── Call the atomic Postgres transaction (seat reservation) ───
   const supabase = createAdminClient();
 
+  const idemKey = typeof idempotency_key === "string" ? idempotency_key : null;
+
   const { data: result, error: rpcError } = await supabase.rpc(
     "submit_enrollment",
-    { p_class_id: class_id } as never,
+    { p_class_id: class_id, p_idempotency_key: idemKey } as never,
   );
 
   if (rpcError) {

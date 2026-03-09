@@ -5,7 +5,8 @@ import { useToast } from "@/components/ui/Toast";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import EmptyState from "@/components/ui/EmptyState";
 import type { AnnouncementRow } from "@/app/api/admin/announcements/route";
-import type { JlptLevel } from "@/types/database";
+import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
+import { mm } from "@/lib/mm-labels";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -18,11 +19,9 @@ interface Intake {
 
 interface ClassRow {
   id: string;
-  level: JlptLevel;
+  level: string;
   status: string;
 }
-
-const JLPT_LEVELS: JlptLevel[] = ["N5", "N4", "N3", "N2", "N1"];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -44,6 +43,7 @@ function truncate(text: string, max = 120) {
 
 export default function AnnouncementsPage() {
   const toast = useToast();
+  const tl = useTenantLabels();
 
   // ── Intakes list ──────────────────────────────────────────────────────────
   const [intakes, setIntakes] = useState<Intake[]>([]);
@@ -53,7 +53,7 @@ export default function AnnouncementsPage() {
   const [selectedIntakeId, setSelectedIntakeId] = useState("");
   const [classes, setClasses] = useState<ClassRow[]>([]);
   const [classesLoading, setClassesLoading] = useState(false);
-  const [selectedLevel, setSelectedLevel] = useState<JlptLevel | "">("");
+  const [selectedLevel, setSelectedLevel] = useState("");
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
 
@@ -158,7 +158,7 @@ export default function AnnouncementsPage() {
 
   // ── Derived ───────────────────────────────────────────────────────────────
   const selectedIntake = intakes.find((i) => i.id === selectedIntakeId);
-  const availableLevels = JLPT_LEVELS.filter((l) => classes.some((c) => c.level === l));
+  const availableLevels = Array.from(new Set(classes.map((c) => c.level)));
   const targetPreview = selectedIntake
     ? selectedLevel
       ? `${selectedLevel} — ${selectedIntake.name}`
@@ -221,7 +221,7 @@ export default function AnnouncementsPage() {
               ) : (
                 <select
                   value={selectedLevel}
-                  onChange={(e) => setSelectedLevel(e.target.value as JlptLevel | "")}
+                  onChange={(e) => setSelectedLevel(e.target.value)}
                   className="w-full h-9 px-3 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1a3f8a]/30 focus:border-[#1a3f8a] text-[#0f1225] disabled:opacity-50"
                   disabled={sending || !selectedIntakeId}
                 >
@@ -257,7 +257,7 @@ export default function AnnouncementsPage() {
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               rows={5}
-              placeholder="မင်္ဂလာပါ။ သင်တန်းနှင့် ပတ်သက်သော အကြောင်းကြားချက်…&#10;&#10;Hello. This is an announcement regarding your class…"
+              placeholder={mm(tl.orgType, "announcementPlaceholder")}
               className="w-full px-3 py-2.5 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1a3f8a]/30 focus:border-[#1a3f8a] text-[#0f1225] placeholder-gray-300 resize-none font-myanmar leading-relaxed disabled:opacity-50"
               disabled={sending}
             />

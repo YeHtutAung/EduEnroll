@@ -6,6 +6,7 @@ import StatsCard from "@/components/ui/StatsCard";
 import StatusBadge from "@/components/ui/StatusBadge";
 import { formatMMKSimple } from "@/lib/utils";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
+import { mm } from "@/lib/mm-labels";
 import type { EnrollmentStatus, JlptLevel } from "@/types/database";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -288,11 +289,9 @@ export default function DashboardPage() {
             </div>
           ) : stats?.seats_by_class?.length ? (
             <div className="space-y-5">
-              {(["N5", "N4", "N3", "N2", "N1"] as JlptLevel[]).map((level) => {
-                const row = stats.seats_by_class.find((r) => r.level === level);
-                if (!row) return null;
-                return <SeatsBar key={level} row={row} />;
-              })}
+              {stats.seats_by_class.map((row) => (
+                <SeatsBar key={row.level} row={row} />
+              ))}
             </div>
           ) : (
             <div className="py-10 text-center text-sm text-gray-400">
@@ -316,7 +315,7 @@ export default function DashboardPage() {
               <span className="text-xl">🏫</span>
               <div className="min-w-0">
                 <p className="text-sm font-semibold">Create New {tl.intake}</p>
-                <p className="text-xs opacity-60 font-myanmar">သင်တန်းအသစ်ဖွင့်မည်</p>
+                <p className="text-xs opacity-60 font-myanmar">{mm(tl.orgType, "createIntake")}</p>
               </div>
               <svg className="w-4 h-4 ml-auto shrink-0 opacity-50 group-hover:opacity-100" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 4.5L21 12m0 0l-7.5 7.5M21 12H3" />
@@ -384,7 +383,7 @@ export default function DashboardPage() {
             <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wider">
               Recent Enrollments
             </h2>
-            <p className="text-xs text-gray-400 font-myanmar mt-0.5">နောက်ဆုံး စာရင်းသွင်းမှုများ</p>
+            <p className="text-xs text-gray-400 font-myanmar mt-0.5">{mm(tl.orgType, "recentEnrollments")}</p>
           </div>
           <Link
             href="/admin/students"
@@ -399,7 +398,7 @@ export default function DashboardPage() {
             <thead>
               <tr className="bg-gray-50 text-left">
                 <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{tl.student}</th>
-                <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Level</th>
+                <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">{tl.class}</th>
                 <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Enrolled</th>
                 <th className="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
               </tr>

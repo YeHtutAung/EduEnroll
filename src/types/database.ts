@@ -6,7 +6,8 @@ export type UserRole = "superadmin" | "owner" | "staff";
 
 export type IntakeStatus = "draft" | "open" | "closed";
 
-export type JlptLevel = "N5" | "N4" | "N3" | "N2" | "N1";
+/** Standard JLPT levels. Custom levels (e.g. "VIP", "GA") are also valid strings. */
+export type JlptLevel = "N5" | "N4" | "N3" | "N2" | "N1" | (string & {});
 
 export type ClassStatus = "draft" | "open" | "full" | "closed";
 
@@ -43,13 +44,21 @@ export type SubmitEnrollmentResult =
 
 // ─── Default class fees (MMK) ─────────────────────────────────────────────────
 
-export const DEFAULT_CLASS_FEES: Record<JlptLevel, number> = {
+export const DEFAULT_CLASS_FEES: Record<string, number> = {
   N5: 300_000,
   N4: 350_000,
   N3: 400_000,
   N2: 450_000,
   N1: 500_000,
 };
+
+// ─── Menu button shape (stored in tenants.menu_buttons JSONB) ────────────────
+
+export interface MenuButton {
+  key: string;
+  title: string;
+  visible: boolean;
+}
 
 // ─── Row types ────────────────────────────────────────────────────────────────
 
@@ -72,6 +81,8 @@ export interface Tenant {
   messenger_page_token: string | null;
   messenger_verify_token: string | null;
   messenger_greeting: string | null;
+  handoff_timeout_min: number;
+  menu_buttons: MenuButton[] | null;
   created_at: string;
 }
 

@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, badRequest } from "@/lib/api";
 import type { EnrollmentStatus, JlptLevel } from "@/types/database";
 
-const VALID_LEVELS: JlptLevel[]          = ["N5", "N4", "N3", "N2", "N1"];
 const VALID_STATUSES: EnrollmentStatus[] = [
   "pending_payment",
   "payment_submitted",
@@ -59,9 +58,6 @@ export async function GET(request: NextRequest) {
     ? Math.min(pageSizeRaw, MAX_PAGE_SIZE)
     : DEFAULT_PAGE_SIZE;
 
-  if (class_level && !VALID_LEVELS.includes(class_level as JlptLevel)) {
-    return badRequest(`class_level must be one of: ${VALID_LEVELS.join(", ")}.`);
-  }
   if (status && !VALID_STATUSES.includes(status as EnrollmentStatus)) {
     return badRequest(`status must be one of: ${VALID_STATUSES.join(", ")}.`);
   }
