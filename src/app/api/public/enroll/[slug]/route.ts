@@ -42,22 +42,10 @@ interface PublicIntakeResponse {
   labels: TenantLabelsView;
 }
 
-// ─── Slug parser ──────────────────────────────────────────────────────────────
-// Converts "april-2026" → { month: "april", year: 2026 }
-// Supports multi-word months: "new-year-2026" → month: "new year"
+// ─── Slug validation ─────────────────────────────────────────────────────────
 
-function parseIntakeSlug(slug: string): { month: string; year: number } | null {
-  const parts = slug.toLowerCase().split("-");
-  if (parts.length < 2) return null;
-
-  const rawYear = parts[parts.length - 1];
-  const year = parseInt(rawYear, 10);
-  if (isNaN(year) || year < 2020 || year > 2100) return null;
-
-  const month = parts.slice(0, -1).join(" "); // "april" or "new year"
-  if (!month) return null;
-
-  return { month, year };
+function isValidSlug(slug: string): boolean {
+  return slug.length > 0 && slug.length < 200;
 }
 
 // ─── GET /api/public/enroll/[slug] ───────────────────────────────────────────
@@ -70,10 +58,9 @@ export async function GET(
   const tenantId = await resolveTenantId();
   if (tenantId instanceof NextResponse) return tenantId;
 
-  const parsed = parseIntakeSlug(params.slug);
-  if (!parsed) {
+  if (!isValidSlug(params.slug)) {
     return NextResponse.json(
-      { error: "Invalid slug format. Expected: {month}-{year}  e.g. april-2026" },
+      { error: "Invalid slug." },
       { status: 400 },
     );
   }
@@ -98,13 +85,12 @@ export async function GET(
     orgType: tenantRow?.org_type      || "language_school",
   };
 
-  // ── Find the matching intake (any status) ────────────────────
+  // ── Find the matching intake by slug column ────────────────────
   const { data: intakes, error: intakeError } = await supabase
     .from("intakes")
     .select("id, name, year, status")
     .eq("tenant_id", tenantId)
-    .eq("year", parsed.year)
-    .ilike("name", `%${parsed.month}%`)
+    .eq("slug", params.slug.toLowerCase())
     .limit(1);
 
   if (intakeError) {

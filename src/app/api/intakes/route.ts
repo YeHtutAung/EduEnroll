@@ -78,12 +78,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Generate a stable slug from the name (first word + year)
+  const slug = (name as string).trim().split(/\s+/)[0].toLowerCase() + "-" + year;
+
   const { data, error } = await supabase
     .from("intakes")
     .insert({
       tenant_id: tenantId,
       name: (name as string).trim(),
       year: year as number,
+      slug,
       status: status as IntakeStatus,
     } as never)
     .select()

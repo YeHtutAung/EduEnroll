@@ -101,6 +101,7 @@ export interface Intake {
   tenant_id: string;
   name: string;                 // e.g. "April 2026 Intake" / "ဧပြီ ၂၀၂၆ စာရင်းသွင်းမှု"
   year: number;
+  slug: string;                 // stable URL slug, set once on creation (e.g. "april-2026")
   status: IntakeStatus;
   created_at: string;
 }

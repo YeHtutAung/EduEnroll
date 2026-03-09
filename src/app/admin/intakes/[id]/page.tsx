@@ -36,7 +36,8 @@ const DEFAULT_LEVEL_COLOR = "#6b7280";
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function intakeToSlug(intake: Intake): string {
-  // "April 2026 Intake" → "april-2026"
+  // Use stored slug if available, otherwise derive from name
+  if (intake.slug) return intake.slug;
   const firstWord = intake.name.split(" ")[0].toLowerCase();
   return `${firstWord}-${intake.year}`;
 }
