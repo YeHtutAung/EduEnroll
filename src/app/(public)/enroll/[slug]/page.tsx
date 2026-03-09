@@ -256,74 +256,80 @@ function ClassCard({ cls, onSelect, labels }: { cls: PublicClass; onSelect: (id:
           <SeatsBadge remaining={cls.seat_remaining} seatLabel={labels.seat} />
         </div>
 
-        {/* Mode badge */}
-        <div className="mb-3">
-          <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
-            (cls.mode ?? "offline") === "online"
-              ? "bg-blue-50 text-blue-700"
-              : "bg-emerald-50 text-emerald-700"
-          }`}>
-            {(cls.mode ?? "offline") === "online" ? "💻 Online" : "🏫 Offline"}
-          </span>
-        </div>
+        {/* Content area: side-by-side when image exists */}
+        <div className={cls.image_url ? "flex gap-4" : ""}>
+          {/* Text content */}
+          <div className={cls.image_url ? "flex-1 min-w-0" : ""}>
+            {/* Mode badge */}
+            <div className="mb-3">
+              <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                (cls.mode ?? "offline") === "online"
+                  ? "bg-blue-50 text-blue-700"
+                  : "bg-emerald-50 text-emerald-700"
+              }`}>
+                {(cls.mode ?? "offline") === "online" ? "💻 Online" : "🏫 Offline"}
+              </span>
+            </div>
 
-        {/* Fee */}
-        <p className="mb-1 text-2xl font-bold text-gray-900">
-          {cls.fee_formatted}
-        </p>
-        <p className="font-myanmar mb-3 text-sm text-gray-500">
-          {formatMMK(cls.fee_mmk).replace(" MMK", "")} ကျပ်
-        </p>
+            {/* Fee */}
+            <p className="mb-1 text-2xl font-bold text-gray-900">
+              {cls.fee_formatted}
+            </p>
+            <p className="font-myanmar mb-3 text-sm text-gray-500">
+              {formatMMK(cls.fee_mmk).replace(" MMK", "")} ကျပ်
+            </p>
 
-        {/* Enrollment window info */}
-        {(cls.enrollment_open_at || cls.enrollment_close_at) && !isDisabled && (
-          <div className="mb-2 flex items-center gap-1.5 text-xs text-gray-400">
-            <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            {closeDate ? `Closes ${closeDate}` : openDate ? `Opens ${openDate}` : null}
-          </div>
-        )}
-
-        {/* Event details */}
-        {(cls.event_date || cls.venue) && (
-          <div className="mt-2 space-y-1 text-xs text-gray-500">
-            {cls.event_date && (
-              <p className="flex items-center gap-1.5">
-                <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+            {/* Enrollment window info */}
+            {(cls.enrollment_open_at || cls.enrollment_close_at) && !isDisabled && (
+              <div className="mb-2 flex items-center gap-1.5 text-xs text-gray-400">
+                <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
-                {new Date(cls.event_date + "T00:00:00").toLocaleDateString("en-GB", fmtOpts)}
-                {cls.start_time && (
-                  <span className="ml-1">
-                    {cls.start_time.slice(0, 5)}{cls.end_time ? ` – ${cls.end_time.slice(0, 5)}` : ""}
-                  </span>
+                {closeDate ? `Closes ${closeDate}` : openDate ? `Opens ${openDate}` : null}
+              </div>
+            )}
+
+            {/* Event details */}
+            {(cls.event_date || cls.venue) && (
+              <div className="mt-2 space-y-1 text-xs text-gray-500">
+                {cls.event_date && (
+                  <p className="flex items-center gap-1.5">
+                    <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                    </svg>
+                    {new Date(cls.event_date + "T00:00:00").toLocaleDateString("en-GB", fmtOpts)}
+                    {cls.start_time && (
+                      <span className="ml-1">
+                        {cls.start_time.slice(0, 5)}{cls.end_time ? ` – ${cls.end_time.slice(0, 5)}` : ""}
+                      </span>
+                    )}
+                  </p>
                 )}
-              </p>
-            )}
-            {cls.venue && (
-              <p className="flex items-center gap-1.5">
-                <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
-                </svg>
-                {cls.venue}
-              </p>
+                {cls.venue && (
+                  <p className="flex items-center gap-1.5">
+                    <svg className="w-3.5 h-3.5 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+                    </svg>
+                    {cls.venue}
+                  </p>
+                )}
+              </div>
             )}
           </div>
-        )}
 
-        {/* Ticket image */}
-        {cls.image_url && (
-          <div className="mt-3 overflow-hidden rounded-lg">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={cls.image_url}
-              alt={cls.level}
-              className="w-full h-40 object-cover rounded-lg"
-            />
-          </div>
-        )}
+          {/* Ticket image — right side */}
+          {cls.image_url && (
+            <div className="w-28 shrink-0 self-center overflow-hidden rounded-lg">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={cls.image_url}
+                alt={cls.level}
+                className="w-full h-full object-cover rounded-lg"
+              />
+            </div>
+          )}
+        </div>
 
         {/* CTA hint */}
         {!isDisabled && (
