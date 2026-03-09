@@ -712,7 +712,7 @@ function EventTicketCard({
               : "border-white/12 text-[#F8F4EE] hover:border-white/30"
           }`}>
             <span className="absolute left-0 top-0 bottom-0 w-0 bg-white/5 transition-all duration-500 group-hover/btn:w-full" />
-            <span className="relative">Register Now</span>
+            <span className="relative">Buy Now</span>
             <svg className="relative w-5 h-5 transition-transform duration-300 group-hover/btn:translate-x-1" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12h15m0 0l-6.75-6.75M19.5 12l-6.75 6.75" />
             </svg>
@@ -770,130 +770,151 @@ function EventEnrollmentPage({
       />
 
       {/* ── HERO ────────────────────────────────────────────────────── */}
-      <section className="relative flex flex-col items-center justify-end overflow-hidden px-6 pb-10 pt-16 sm:px-12"
-        style={{ minHeight: intake.hero_image_url ? "50vh" : "85vh" }}>
-
-        {/* BG — uploaded banner or fallback gradients */}
-        {intake.hero_image_url ? (
-          <>
+      {intake.hero_image_url ? (
+        <>
+          {/* Banner image — clean, no text overlay */}
+          <section className="relative overflow-hidden">
+            {/* Track status button */}
+            <a
+              href={`/enroll/${slug}/status`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="absolute top-6 right-6 sm:top-8 sm:right-12 z-10 flex items-center gap-2 text-[13px] font-medium tracking-[1.5px] uppercase px-4 py-2.5 rounded-sm border transition-all duration-300 hover:bg-white/10"
+              style={{ color: "#fff", borderColor: "rgba(255,255,255,0.3)", backdropFilter: "blur(8px)", background: "rgba(0,0,0,0.3)" }}
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+              </svg>
+              Track Status
+            </a>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={intake.hero_image_url}
-              alt=""
-              className="absolute inset-0 w-full h-full object-cover"
+              alt={intake.name}
+              className="w-full object-cover"
+              style={{ maxHeight: "55vh" }}
             />
-            {/* Dark gradient overlay for text legibility */}
-            <div className="absolute inset-0" style={{
-              background: "linear-gradient(to top, rgba(8,8,8,0.95) 0%, rgba(8,8,8,0.4) 40%, rgba(8,8,8,0.15) 100%)",
+          </section>
+
+          {/* Info strip — separate dark section below banner */}
+          {(eventDateStr || closeDateStr || venue) && (
+            <section className="px-6 py-8 sm:px-12" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
+              <div className="flex flex-wrap items-center justify-center gap-8 sm:gap-12 animate-[fadeUp_0.8s_ease_forwards]">
+                {eventDateStr && (
+                  <div className="text-center">
+                    <div className="text-[10px] tracking-[3px] uppercase mb-1.5" style={{ color: GOLD }}>Date</div>
+                    <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "20px", fontWeight: 600 }}>{eventDateStr}</div>
+                  </div>
+                )}
+                {eventDateStr && closeDateStr && <div className="w-1 h-1 rounded-full" style={{ background: GOLD, opacity: 0.4 }} />}
+                {closeDateStr && (
+                  <div className="text-center">
+                    <div className="text-[10px] tracking-[3px] uppercase mb-1.5" style={{ color: GOLD }}>Registration Closes</div>
+                    <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "20px", fontWeight: 600 }}>{closeDateStr}</div>
+                  </div>
+                )}
+                {(eventDateStr || closeDateStr) && venue && <div className="w-1 h-1 rounded-full" style={{ background: GOLD, opacity: 0.4 }} />}
+                {venue && (
+                  <div className="text-center">
+                    <div className="text-[10px] tracking-[3px] uppercase mb-1.5" style={{ color: GOLD }}>Venue</div>
+                    <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "20px", fontWeight: 600 }}>{venue}</div>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+        </>
+      ) : (
+        /* No hero image — original full-height gradient hero */
+        <section className="relative min-h-[85vh] flex flex-col items-center justify-center overflow-hidden px-6 py-24 sm:px-12">
+          <div className="absolute inset-0" style={{
+            background: `
+              radial-gradient(ellipse 80% 50% at 50% 0%, rgba(201,168,76,0.12) 0%, transparent 60%),
+              radial-gradient(ellipse 40% 40% at 80% 60%, rgba(201,168,76,0.05) 0%, transparent 50%),
+              radial-gradient(ellipse 60% 60% at 20% 80%, rgba(201,168,76,0.04) 0%, transparent 50%)`,
+          }} />
+          <div className="absolute inset-0 overflow-hidden pointer-events-none">
+            <div className="absolute left-[15%] top-0 w-px h-full animate-pulse"
+              style={{ background: "linear-gradient(to bottom, transparent, rgba(201,168,76,0.15), transparent)" }} />
+            <div className="absolute right-[15%] top-0 w-px h-full animate-pulse" style={{
+              background: "linear-gradient(to bottom, transparent, rgba(201,168,76,0.15), transparent)",
+              animationDelay: "2s",
             }} />
-          </>
-        ) : (
-          <>
-            <div className="absolute inset-0" style={{
-              background: `
-                radial-gradient(ellipse 80% 50% at 50% 0%, rgba(201,168,76,0.12) 0%, transparent 60%),
-                radial-gradient(ellipse 40% 40% at 80% 60%, rgba(201,168,76,0.05) 0%, transparent 50%),
-                radial-gradient(ellipse 60% 60% at 20% 80%, rgba(201,168,76,0.04) 0%, transparent 50%)`,
-            }} />
-            <div className="absolute inset-0 overflow-hidden pointer-events-none">
-              <div className="absolute left-[15%] top-0 w-px h-full animate-pulse"
-                style={{ background: "linear-gradient(to bottom, transparent, rgba(201,168,76,0.15), transparent)" }} />
-              <div className="absolute right-[15%] top-0 w-px h-full animate-pulse" style={{
-                background: "linear-gradient(to bottom, transparent, rgba(201,168,76,0.15), transparent)",
-                animationDelay: "2s",
-              }} />
+          </div>
+
+          {/* Track status button */}
+          <a
+            href={`/enroll/${slug}/status`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="absolute top-6 right-6 sm:top-8 sm:right-12 z-10 flex items-center gap-2 text-[13px] font-medium tracking-[1.5px] uppercase px-4 py-2.5 rounded-sm border transition-all duration-300 hover:bg-[#C9A84C]/10"
+            style={{ color: GOLD, borderColor: "rgba(201,168,76,0.3)" }}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+            </svg>
+            Track Status
+          </a>
+
+          {venue && (
+            <div className="relative flex items-center gap-4 mb-6 animate-[fadeUp_0.8s_ease_forwards]"
+              style={{ fontSize: "11px", letterSpacing: "5px", textTransform: "uppercase", color: GOLD }}>
+              <span className="w-10 h-px opacity-50" style={{ background: GOLD }} />
+              {venue}
+              <span className="w-10 h-px opacity-50" style={{ background: GOLD }} />
             </div>
-          </>
-        )}
+          )}
 
-        {/* Track status button */}
-        <a
-          href={`/enroll/${slug}/status`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="absolute top-6 right-6 sm:top-8 sm:right-12 z-10 flex items-center gap-2 text-[13px] font-medium tracking-[1.5px] uppercase px-4 py-2.5 rounded-sm border transition-all duration-300 hover:bg-white/10"
-          style={{ color: "#fff", borderColor: "rgba(255,255,255,0.3)", backdropFilter: "blur(8px)", background: "rgba(0,0,0,0.3)" }}
-        >
-          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-          </svg>
-          Track Status
-        </a>
-
-        {/* Content overlay — only show text if NO hero image (image speaks for itself) */}
-        {!intake.hero_image_url ? (
-          <>
-            {venue && (
-              <div className="relative flex items-center gap-4 mb-6 animate-[fadeUp_0.8s_ease_forwards]"
-                style={{ fontSize: "11px", letterSpacing: "5px", textTransform: "uppercase", color: GOLD }}>
-                <span className="w-10 h-px opacity-50" style={{ background: GOLD }} />
-                {venue}
-                <span className="w-10 h-px opacity-50" style={{ background: GOLD }} />
-              </div>
+          <h1 className="relative text-center animate-[fadeUp_0.8s_ease_0.15s_forwards] opacity-0"
+            style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: "clamp(64px, 12vw, 150px)", lineHeight: 0.9, letterSpacing: "4px" }}>
+            {titleMain}
+            <br />
+            <span style={{ WebkitTextStroke: "1px #F8F4EE", color: "transparent" }}>{intake.year}</span>
+            {titleSub && (
+              <span className="block mt-2" style={{
+                fontFamily: "'Cormorant Garamond', serif",
+                fontSize: "clamp(22px, 4vw, 44px)",
+                fontWeight: 300,
+                fontStyle: "italic",
+                letterSpacing: "8px",
+                color: GOLD_LIGHT,
+              }}>
+                {titleSub}
+              </span>
             )}
+          </h1>
 
-            <h1 className="relative text-center animate-[fadeUp_0.8s_ease_0.15s_forwards] opacity-0"
-              style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: "clamp(64px, 12vw, 150px)", lineHeight: 0.9, letterSpacing: "4px" }}>
-              {titleMain}
-              <br />
-              <span style={{ WebkitTextStroke: "1px #F8F4EE", color: "transparent" }}>{intake.year}</span>
-              {titleSub && (
-                <span className="block mt-2" style={{
-                  fontFamily: "'Cormorant Garamond', serif",
-                  fontSize: "clamp(22px, 4vw, 44px)",
-                  fontWeight: 300,
-                  fontStyle: "italic",
-                  letterSpacing: "8px",
-                  color: GOLD_LIGHT,
-                }}>
-                  {titleSub}
-                </span>
+          {(eventDateStr || closeDateStr || venue) && (
+            <div className="relative mt-10 flex flex-wrap items-center justify-center gap-6 sm:gap-8 animate-[fadeUp_0.8s_ease_0.3s_forwards] opacity-0">
+              {eventDateStr && (
+                <div className="text-center">
+                  <div className="text-[10px] tracking-[3px] uppercase mb-1" style={{ color: "#888880" }}>Date</div>
+                  <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "18px", fontWeight: 600 }}>{eventDateStr}</div>
+                </div>
               )}
-            </h1>
-          </>
-        ) : (
-          /* With hero image: compact info strip at bottom */
-          <div className="relative z-10 text-center animate-[fadeUp_0.8s_ease_forwards]">
-            <h1 style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: "clamp(36px, 6vw, 64px)", lineHeight: 1, letterSpacing: "4px", textShadow: "0 2px 20px rgba(0,0,0,0.5)" }}>
-              {intake.name}
-            </h1>
-          </div>
-        )}
+              {eventDateStr && closeDateStr && <div className="w-1 h-1 rounded-full opacity-50" style={{ background: GOLD }} />}
+              {closeDateStr && (
+                <div className="text-center">
+                  <div className="text-[10px] tracking-[3px] uppercase mb-1" style={{ color: "#888880" }}>Registration Closes</div>
+                  <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "18px", fontWeight: 600 }}>{closeDateStr}</div>
+                </div>
+              )}
+              {(eventDateStr || closeDateStr) && venue && <div className="w-1 h-1 rounded-full opacity-50" style={{ background: GOLD }} />}
+              {venue && (
+                <div className="text-center">
+                  <div className="text-[10px] tracking-[3px] uppercase mb-1" style={{ color: "#888880" }}>Venue</div>
+                  <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "18px", fontWeight: 600 }}>{venue}</div>
+                </div>
+              )}
+            </div>
+          )}
 
-        {/* Date/venue strip */}
-        {(eventDateStr || closeDateStr || venue) && (
-          <div className="relative z-10 mt-6 flex flex-wrap items-center justify-center gap-6 sm:gap-8 animate-[fadeUp_0.8s_ease_0.3s_forwards] opacity-0">
-            {eventDateStr && (
-              <div className="text-center">
-                <div className="text-[10px] tracking-[3px] uppercase mb-1" style={{ color: intake.hero_image_url ? "rgba(255,255,255,0.6)" : "#888880" }}>Date</div>
-                <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "18px", fontWeight: 600 }}>{eventDateStr}</div>
-              </div>
-            )}
-            {eventDateStr && closeDateStr && <div className="w-1 h-1 rounded-full opacity-50" style={{ background: GOLD }} />}
-            {closeDateStr && (
-              <div className="text-center">
-                <div className="text-[10px] tracking-[3px] uppercase mb-1" style={{ color: intake.hero_image_url ? "rgba(255,255,255,0.6)" : "#888880" }}>Registration Closes</div>
-                <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "18px", fontWeight: 600 }}>{closeDateStr}</div>
-              </div>
-            )}
-            {(eventDateStr || closeDateStr) && venue && <div className="w-1 h-1 rounded-full opacity-50" style={{ background: GOLD }} />}
-            {venue && (
-              <div className="text-center">
-                <div className="text-[10px] tracking-[3px] uppercase mb-1" style={{ color: intake.hero_image_url ? "rgba(255,255,255,0.6)" : "#888880" }}>Venue</div>
-                <div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "18px", fontWeight: 600 }}>{venue}</div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Scroll indicator — only when no hero image (hero is already short) */}
-        {!intake.hero_image_url && (
           <div className="absolute bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center gap-2 animate-[fadeUp_1s_ease_0.6s_forwards] opacity-0">
             <span className="text-[10px] tracking-[3px] uppercase" style={{ color: "#888880" }}>Tickets</span>
             <div className="w-px h-10 animate-pulse" style={{ background: `linear-gradient(to bottom, ${GOLD}, transparent)` }} />
           </div>
-        )}
-      </section>
+        </section>
+      )}
 
       {/* ── TICKETS SECTION ─────────────────────────────────────────── */}
       <section id="tickets" className="px-6 py-16 sm:px-12 sm:py-20 scroll-mt-4">
