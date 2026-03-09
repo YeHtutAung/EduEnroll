@@ -641,7 +641,7 @@ function SettingsContent() {
       setMessengerGreeting(data.greeting ?? "");
       setMessengerSubdomain(data.subdomain ?? "");
       setHandoffTimeoutMin(data.handoffTimeoutMin ?? 15);
-      setMenuButtons(data.menuButtons ?? getDefaultMenuButtons(orgType));
+      setMenuButtons(data.menuButtons ?? getDefaultMenuButtons(data.orgType ?? "language_school"));
     } catch {
       // non-critical
     } finally {

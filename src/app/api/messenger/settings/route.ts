@@ -12,7 +12,7 @@ export async function GET() {
   const { supabase, tenantId } = auth;
   const { data: tenant } = await supabase
     .from("tenants")
-    .select("messenger_enabled, messenger_page_id, messenger_greeting, subdomain, handoff_timeout_min, menu_buttons")
+    .select("messenger_enabled, messenger_page_id, messenger_greeting, subdomain, handoff_timeout_min, menu_buttons, org_type")
     .eq("id", tenantId)
     .single() as {
     data: {
@@ -22,6 +22,7 @@ export async function GET() {
       subdomain: string;
       handoff_timeout_min: number;
       menu_buttons: MenuButton[] | null;
+      org_type: string;
     } | null;
     error: unknown;
   };
@@ -46,6 +47,7 @@ export async function GET() {
     subdomain: tenant.subdomain,
     handoffTimeoutMin: tenant.handoff_timeout_min,
     menuButtons: tenant.menu_buttons,
+    orgType: tenant.org_type,
   });
 }
 
