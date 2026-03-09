@@ -52,6 +52,14 @@ export const DEFAULT_CLASS_FEES: Record<string, number> = {
   N1: 500_000,
 };
 
+// ─── Menu button shape (stored in tenants.menu_buttons JSONB) ────────────────
+
+export interface MenuButton {
+  key: string;
+  title: string;
+  visible: boolean;
+}
+
 // ─── Row types ────────────────────────────────────────────────────────────────
 
 export interface Tenant {
@@ -73,6 +81,8 @@ export interface Tenant {
   messenger_page_token: string | null;
   messenger_verify_token: string | null;
   messenger_greeting: string | null;
+  handoff_timeout_min: number;
+  menu_buttons: MenuButton[] | null;
   created_at: string;
 }
 

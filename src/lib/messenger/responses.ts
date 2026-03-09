@@ -3,7 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatMMK } from "@/lib/utils";
 import { sendTextMessage, sendQuickReplies } from "./send";
-import type { Enrollment, Class, Payment, BankAccount } from "@/types/database";
+import type { Enrollment, Class, Payment, BankAccount, MenuButton } from "@/types/database";
 
 // ─── Org type ────────────────────────────────────────────────────────────────
 
@@ -117,7 +117,12 @@ function getLabels(orgType: string) {
   return ORG_LABELS[(orgType as OrgType)] ?? ORG_LABELS.language_school;
 }
 
-function getMenuButtons(orgType: string) {
+function getMenuButtons(orgType: string, customButtons?: MenuButton[] | null) {
+  if (customButtons && customButtons.length > 0) {
+    return customButtons
+      .filter((b) => b.visible)
+      .map((b) => ({ content_type: "text" as const, title: b.title, payload: b.key }));
+  }
   const l = getLabels(orgType);
   return l.menuButtons.map((b) => ({ content_type: "text" as const, ...b }));
 }
@@ -159,14 +164,17 @@ function intakeToSlug(name: string, year: number): string {
   return `${month}-${year}`;
 }
 
-async function getTenantOrgType(tenantId: string): Promise<string> {
+async function getTenantInfo(tenantId: string): Promise<{ orgType: string; menuButtons: MenuButton[] | null }> {
   const supabase = createAdminClient();
   const { data } = await supabase
     .from("tenants")
-    .select("org_type")
+    .select("org_type, menu_buttons")
     .eq("id", tenantId)
-    .single() as { data: { org_type: string } | null; error: unknown };
-  return data?.org_type ?? "language_school";
+    .single() as { data: { org_type: string; menu_buttons: MenuButton[] | null } | null; error: unknown };
+  return {
+    orgType: data?.org_type ?? "language_school",
+    menuButtons: data?.menu_buttons ?? null,
+  };
 }
 
 const STATUS_LABELS: Record<string, { en: string; mm: string }> = {
@@ -186,14 +194,15 @@ export async function sendWelcome(
   const supabase = createAdminClient();
   const { data: tenant } = await supabase
     .from("tenants")
-    .select("name, messenger_greeting, org_type")
+    .select("name, messenger_greeting, org_type, menu_buttons")
     .eq("id", tenantId)
     .single() as {
-    data: { name: string; messenger_greeting: string | null; org_type: string } | null;
+    data: { name: string; messenger_greeting: string | null; org_type: string; menu_buttons: MenuButton[] | null } | null;
     error: unknown;
   };
 
   const orgType = tenant?.org_type ?? "language_school";
+  const customButtons = tenant?.menu_buttons ?? null;
   const l = getLabels(orgType);
   const school = tenant?.name ?? "KuuNyi";
 
@@ -205,7 +214,7 @@ export async function sendWelcome(
 
   msg += `\n\nဘာကူညီပေးရမလဲ? / How can I help you?`;
 
-  await sendQuickReplies(pageToken, senderPsid, msg, getMenuButtons(orgType));
+  await sendQuickReplies(pageToken, senderPsid, msg, getMenuButtons(orgType, customButtons));
 }
 
 // ─── 2. Open Intakes ─────────────────────────────────────────────────────────
@@ -216,7 +225,7 @@ export async function sendOpenIntakes(
   pageToken: string,
 ): Promise<void> {
   const supabase = createAdminClient();
-  const orgType = await getTenantOrgType(tenantId);
+  const { orgType, menuButtons: customButtons } = await getTenantInfo(tenantId);
   const l = getLabels(orgType);
 
   const { data: intakes } = await supabase
@@ -260,12 +269,12 @@ export async function sendOpenIntakes(
     msg += `   ${l.classLabel}: ${levels.join(", ") || "—"}\n\n`;
   }
 
-  const buttons = getMenuButtons(orgType);
+  const buttons = getMenuButtons(orgType, customButtons);
   await sendQuickReplies(pageToken, senderPsid, msg.trim(), [
     buttons.find((b) => b.payload === "HOW_TO_ENROLL")!,
     buttons.find((b) => b.payload === "FEES")!,
     { content_type: "text", title: "🏠 Main Menu", payload: "MAIN_MENU" },
-  ]);
+  ].filter((b): b is { content_type: "text"; title: string; payload: string } => !!b));
 }
 
 // ─── 3. Fees ─────────────────────────────────────────────────────────────────
@@ -276,7 +285,7 @@ export async function sendFees(
   pageToken: string,
 ): Promise<void> {
   const supabase = createAdminClient();
-  const orgType = await getTenantOrgType(tenantId);
+  const { orgType, menuButtons: customButtons } = await getTenantInfo(tenantId);
   const l = getLabels(orgType);
 
   // Find the latest open intake
@@ -325,12 +334,12 @@ export async function sendFees(
     msg += `${l.levelPrefix}${c.level}: ${formatMMK(c.fee_mmk)}\n`;
   }
 
-  const buttons = getMenuButtons(orgType);
+  const buttons = getMenuButtons(orgType, customButtons);
   await sendQuickReplies(pageToken, senderPsid, msg.trim(), [
     buttons.find((b) => b.payload === "HOW_TO_ENROLL")!,
     buttons.find((b) => b.payload === "PAYMENT")!,
     { content_type: "text", title: "🏠 Main Menu", payload: "MAIN_MENU" },
-  ]);
+  ].filter((b): b is { content_type: "text"; title: string; payload: string } => !!b));
 }
 
 // ─── 4. Enroll Link ──────────────────────────────────────────────────────────
@@ -341,7 +350,7 @@ export async function sendEnrollLink(
   pageToken: string,
 ): Promise<void> {
   const supabase = createAdminClient();
-  const orgType = await getTenantOrgType(tenantId);
+  const { orgType } = await getTenantInfo(tenantId);
   const l = getLabels(orgType);
 
   const { data: tenant } = await supabase
@@ -387,7 +396,7 @@ export async function sendSchedule(
   pageToken: string,
 ): Promise<void> {
   const supabase = createAdminClient();
-  const orgType = await getTenantOrgType(tenantId);
+  const { orgType, menuButtons: customButtons } = await getTenantInfo(tenantId);
   const l = getLabels(orgType);
 
   const { data: intake } = await supabase
@@ -446,12 +455,12 @@ export async function sendSchedule(
     msg += "\n";
   }
 
-  const buttons = getMenuButtons(orgType);
+  const buttons = getMenuButtons(orgType, customButtons);
   await sendQuickReplies(pageToken, senderPsid, msg.trim(), [
     buttons.find((b) => b.payload === "HOW_TO_ENROLL")!,
     buttons.find((b) => b.payload === "FEES")!,
     { content_type: "text", title: "🏠 Main Menu", payload: "MAIN_MENU" },
-  ]);
+  ].filter((b): b is { content_type: "text"; title: string; payload: string } => !!b));
 }
 
 // ─── 6. Payment Info ─────────────────────────────────────────────────────────
@@ -462,7 +471,7 @@ export async function sendPaymentInfo(
   pageToken: string,
 ): Promise<void> {
   const supabase = createAdminClient();
-  const orgType = await getTenantOrgType(tenantId);
+  const { orgType } = await getTenantInfo(tenantId);
   const l = getLabels(orgType);
 
   const { data: accounts } = await supabase
@@ -519,7 +528,7 @@ export async function sendStatusCheck(
   pageToken: string,
 ): Promise<void> {
   const supabase = createAdminClient();
-  const orgType = await getTenantOrgType(tenantId);
+  const { orgType } = await getTenantInfo(tenantId);
   const l = getLabels(orgType);
 
   const { data: enrollment } = (await supabase
@@ -628,13 +637,13 @@ export async function sendUnrecognized(
   senderPsid: string,
   pageToken: string,
 ): Promise<void> {
-  const orgType = await getTenantOrgType(tenantId);
+  const { orgType, menuButtons: customButtons } = await getTenantInfo(tenantId);
 
   await sendQuickReplies(
     pageToken,
     senderPsid,
     "ဝမ်းနည်းပါတယ်၊ နားမလည်ပါ 😊\nSorry, I didn't understand that.\n\nPlease choose an option below:",
-    getMenuButtons(orgType),
+    getMenuButtons(orgType, customButtons),
   );
 }
 
