@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth, badRequest } from "@/lib/api";
+import { requireAuth, requireOwner, badRequest } from "@/lib/api";
 import type { Intake, IntakeStatus } from "@/types/database";
 
 const VALID_STATUSES: IntakeStatus[] = ["draft", "open", "closed"];
@@ -39,7 +39,7 @@ export async function GET() {
 // Nihon Moment runs 4 intakes per year: January, April, July, October.
 
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth();
+  const auth = await requireOwner();
   if (auth instanceof NextResponse) return auth;
   const { supabase, tenantId } = auth;
 

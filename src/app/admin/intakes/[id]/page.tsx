@@ -8,6 +8,7 @@ import ConfirmModal from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
 import { formatMMKSimple } from "@/lib/utils";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
+import { useRole } from "@/components/admin/RoleContext";
 import { createClient } from "@/lib/supabase/client";
 import type { Class, ClassMode, ClassStatus, Intake, IntakeStatus } from "@/types/database";
 
@@ -799,6 +800,8 @@ export default function IntakeDetailPage({
 
   const toast = useToast();
   const tl = useTenantLabels();
+  const role = useRole();
+  const isOwner = role === "owner";
   const [intake, setIntake] = useState<Intake | null>(null);
   const [classes, setClasses] = useState<Class[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1050,19 +1053,21 @@ export default function IntakeDetailPage({
                   <h1 className="text-xl font-bold text-gray-900 leading-tight">
                     {intake.name}
                   </h1>
-                  <button
-                    onClick={openEditIntake}
-                    title={`Edit ${tl.intake}`}
-                    className="p-1 rounded-md text-gray-400 hover:text-[#1a3f8a] hover:bg-blue-50 transition-colors"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-                    </svg>
-                  </button>
+                  {isOwner && (
+                    <button
+                      onClick={openEditIntake}
+                      title={`Edit ${tl.intake}`}
+                      className="p-1 rounded-md text-gray-400 hover:text-[#1a3f8a] hover:bg-blue-50 transition-colors"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                      </svg>
+                    </button>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 mt-1">
                   <StatusBadge status={intake.status} />
-                  <select
+                  {isOwner && <select
                     value={intake.status}
                     onChange={(e) => requestStatusChange(e.target.value as IntakeStatus)}
                     disabled={updatingStatus}
@@ -1077,7 +1082,7 @@ export default function IntakeDetailPage({
                     <option value="draft">Draft</option>
                     <option value="open">Open</option>
                     <option value="closed">Closed</option>
-                  </select>
+                  </select>}
                   <span className="text-xs text-gray-400">·</span>
                   <span className="text-xs text-gray-500">{intake.year}</span>
                   <span className="text-xs text-gray-400">·</span>
@@ -1116,8 +1121,8 @@ export default function IntakeDetailPage({
                 )}
               </button>
 
-              {/* Add Default Classes (N5–N1) — language_school only */}
-              {tl.orgType === "language_school" && !allDefaultsExist && (
+              {/* Add Default Classes (N5–N1) — language_school only, owner only */}
+              {isOwner && tl.orgType === "language_school" && !allDefaultsExist && (
                 <button
                   onClick={() => setConfirmAddAll(true)}
                   disabled={addingClasses}
@@ -1142,16 +1147,18 @@ export default function IntakeDetailPage({
                 </button>
               )}
 
-              {/* Add Custom Class */}
-              <button
-                onClick={() => setShowAddCustom(true)}
-                className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:border-[#1a3f8a] hover:text-[#1a3f8a] transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                </svg>
-                + Add Custom {tl.class}
-              </button>
+              {/* Add Custom Class — owner only */}
+              {isOwner && (
+                <button
+                  onClick={() => setShowAddCustom(true)}
+                  className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:border-[#1a3f8a] hover:text-[#1a3f8a] transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                  </svg>
+                  + Add Custom {tl.class}
+                </button>
+              )}
             </div>
           </div>
         ) : null}
@@ -1285,15 +1292,17 @@ export default function IntakeDetailPage({
                       {/* Actions */}
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => setEditingClass(cls)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-600 text-xs font-medium rounded-lg hover:border-[#1a3f8a] hover:text-[#1a3f8a] transition-colors"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-                            </svg>
-                            Edit
-                          </button>
+                          {isOwner && (
+                            <button
+                              onClick={() => setEditingClass(cls)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-600 text-xs font-medium rounded-lg hover:border-[#1a3f8a] hover:text-[#1a3f8a] transition-colors"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                              </svg>
+                              Edit
+                            </button>
+                          )}
                           <button
                             onClick={() => handleCopyClassLink(cls.level)}
                             title={`Copy ${cls.level} enrollment link`}

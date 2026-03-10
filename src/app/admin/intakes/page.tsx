@@ -6,6 +6,7 @@ import StatusBadge from "@/components/ui/StatusBadge";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
+import { useRole } from "@/components/admin/RoleContext";
 import { mm } from "@/lib/mm-labels";
 import { createClient } from "@/lib/supabase/client";
 import type { Intake, IntakeStatus } from "@/types/database";
@@ -33,6 +34,8 @@ function RowSkeleton() {
 export default function IntakesPage() {
   const toast = useToast();
   const labels = useTenantLabels();
+  const role = useRole();
+  const isOwner = role === "owner";
   const [intakes, setIntakes] = useState<Intake[]>([]);
   const [classCounts, setClassCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
@@ -202,21 +205,23 @@ export default function IntakesPage() {
             {mm(labels.orgType, "intakesAndClasses")}
           </p>
         </div>
-        <Link
-          href="/admin/intakes/new"
-          className="flex items-center gap-2 px-4 py-2.5 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 transition-colors shadow-sm shrink-0"
-        >
-          <svg
-            className="w-4 h-4"
-            fill="none"
-            viewBox="0 0 24 24"
-            strokeWidth={2.5}
-            stroke="currentColor"
+        {isOwner && (
+          <Link
+            href="/admin/intakes/new"
+            className="flex items-center gap-2 px-4 py-2.5 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 transition-colors shadow-sm shrink-0"
           >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-          </svg>
-          Create New {labels.intake}
-        </Link>
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={2.5}
+              stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            Create New {labels.intake}
+          </Link>
+        )}
       </div>
 
       {/* Table card */}
@@ -230,12 +235,14 @@ export default function IntakesPage() {
             <p className="text-sm text-gray-400 max-w-xs">
               Create your first {labels.intake.toLowerCase()} to start managing {labels.class.toLowerCase()}s and enrollments.
             </p>
-            <Link
-              href="/admin/intakes/new"
-              className="mt-2 px-5 py-2 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 transition-colors"
-            >
-              Create First {labels.intake}
-            </Link>
+            {isOwner && (
+              <Link
+                href="/admin/intakes/new"
+                className="mt-2 px-5 py-2 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 transition-colors"
+              >
+                Create First {labels.intake}
+              </Link>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -291,38 +298,42 @@ export default function IntakesPage() {
                           </td>
                           <td className="px-5 py-4">
                             <div className="flex items-center gap-2">
-                              <select
-                                value={intake.status}
-                                onChange={(e) =>
-                                  requestStatusChange(
-                                    intake.id,
-                                    intake.name,
-                                    e.target.value as IntakeStatus,
-                                  )
-                                }
-                                disabled={updatingStatus === intake.id}
-                                className={`text-xs font-medium rounded-lg border px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent transition-colors disabled:opacity-50 ${
-                                  intake.status === "open"
-                                    ? "border-emerald-300 text-emerald-700"
-                                    : intake.status === "closed"
-                                      ? "border-red-300 text-red-600"
-                                      : "border-gray-300 text-gray-600"
-                                }`}
-                              >
-                                <option value="draft">Draft</option>
-                                <option value="open">Open</option>
-                                <option value="closed">Closed</option>
-                              </select>
-                              <button
-                                onClick={() => openEditIntake(intake)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 text-xs font-medium rounded-lg hover:border-[#1a3f8a] hover:text-[#1a3f8a] transition-colors"
-                                title={`Edit ${labels.intake}`}
-                              >
-                                <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-                                </svg>
-                                Edit
-                              </button>
+                              {isOwner && (
+                                <select
+                                  value={intake.status}
+                                  onChange={(e) =>
+                                    requestStatusChange(
+                                      intake.id,
+                                      intake.name,
+                                      e.target.value as IntakeStatus,
+                                    )
+                                  }
+                                  disabled={updatingStatus === intake.id}
+                                  className={`text-xs font-medium rounded-lg border px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent transition-colors disabled:opacity-50 ${
+                                    intake.status === "open"
+                                      ? "border-emerald-300 text-emerald-700"
+                                      : intake.status === "closed"
+                                        ? "border-red-300 text-red-600"
+                                        : "border-gray-300 text-gray-600"
+                                  }`}
+                                >
+                                  <option value="draft">Draft</option>
+                                  <option value="open">Open</option>
+                                  <option value="closed">Closed</option>
+                                </select>
+                              )}
+                              {isOwner && (
+                                <button
+                                  onClick={() => openEditIntake(intake)}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 text-xs font-medium rounded-lg hover:border-[#1a3f8a] hover:text-[#1a3f8a] transition-colors"
+                                  title={`Edit ${labels.intake}`}
+                                >
+                                  <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                                  </svg>
+                                  Edit
+                                </button>
+                              )}
                               <Link
                                 href={`/admin/intakes/${intake.id}/form`}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 text-gray-600 text-xs font-medium rounded-lg hover:bg-gray-50 transition-colors"

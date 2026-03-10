@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth, badRequest } from "@/lib/api";
+import { requireAuth, requireOwner, badRequest } from "@/lib/api";
 import type { BankAccount, MyanmarBank } from "@/types/database";
 
 const VALID_BANKS: MyanmarBank[] = ["KBZ", "AYA", "CB", "UAB", "Yoma", "Other"];
@@ -34,7 +34,7 @@ export async function GET() {
 // Body: { bank_name, account_number, account_holder, is_active? }
 
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth();
+  const auth = await requireOwner();
   if (auth instanceof NextResponse) return auth;
   const { supabase, tenantId } = auth;
 
