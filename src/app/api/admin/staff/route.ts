@@ -27,13 +27,13 @@ export async function GET() {
 }
 
 // ─── POST /api/admin/staff ──────────────────────────────────────────────────
-// Create a staff invite. Owner-only.
-// Body: { email: string }
+// Create a staff account directly. Owner-only.
+// Body: { email: string, password: string, full_name?: string }
 
 export async function POST(request: NextRequest) {
   const auth = await requireOwner();
   if (auth instanceof NextResponse) return auth;
-  const { tenantId, user } = auth;
+  const { tenantId } = auth;
 
   let body: unknown;
   try {
@@ -42,10 +42,13 @@ export async function POST(request: NextRequest) {
     return badRequest("Request body must be valid JSON.");
   }
 
-  const { email } = body as Record<string, unknown>;
+  const { email, password, full_name } = body as Record<string, unknown>;
 
   if (!email || typeof email !== "string" || !email.includes("@")) {
     return badRequest("A valid email address is required.");
+  }
+  if (!password || typeof password !== "string" || password.length < 6) {
+    return badRequest("Password must be at least 6 characters.");
   }
 
   const trimmedEmail = email.trim().toLowerCase();
@@ -66,42 +69,46 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Check for pending invite
-  const { data: pendingInvite } = await admin
-    .from("staff_invites")
-    .select("id")
-    .eq("tenant_id", tenantId)
-    .eq("email", trimmedEmail)
-    .is("accepted_at", null)
-    .gt("expires_at", new Date().toISOString())
-    .maybeSingle() as { data: { id: string } | null; error: unknown };
-
-  if (pendingInvite) {
-    return NextResponse.json(
-      { error: "An invite is already pending for this email." },
-      { status: 409 },
-    );
-  }
-
-  // Create invite
-  const { data: invite, error: inviteError } = await admin
-    .from("staff_invites")
-    .insert({
-      tenant_id: tenantId,
+  // Create auth user
+  const { data: authData, error: authError } =
+    await admin.auth.admin.createUser({
       email: trimmedEmail,
-      invited_by: user.id,
-    } as never)
-    .select()
-    .single();
+      password: password as string,
+      email_confirm: true,
+    });
 
-  if (inviteError || !invite) {
-    console.error("[staff] Invite insert error:", inviteError?.message);
+  if (authError || !authData.user) {
+    console.error("[staff] Auth create error:", authError?.message);
     return NextResponse.json(
-      { error: "Failed to create invite." },
+      { error: authError?.message ?? "Failed to create user account." },
       { status: 500 },
     );
   }
 
-  // Return the invite (the frontend or a future email integration can use the token)
-  return NextResponse.json(invite, { status: 201 });
+  // Create user profile with staff role
+  const { data: profile, error: profileError } = await admin
+    .from("users")
+    .insert({
+      id: authData.user.id,
+      tenant_id: tenantId,
+      email: trimmedEmail,
+      role: "staff",
+      full_name: typeof full_name === "string" && full_name.trim()
+        ? full_name.trim()
+        : trimmedEmail.split("@")[0],
+    } as never)
+    .select()
+    .single() as { data: User | null; error: unknown };
+
+  if (profileError || !profile) {
+    console.error("[staff] Profile insert error:", (profileError as Error)?.message);
+    // Clean up: remove the auth user we just created
+    await admin.auth.admin.deleteUser(authData.user.id);
+    return NextResponse.json(
+      { error: "Failed to create staff profile." },
+      { status: 500 },
+    );
+  }
+
+  return NextResponse.json(profile, { status: 201 });
 }

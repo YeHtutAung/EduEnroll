@@ -47,36 +47,44 @@ function Pulse({ className }: { className: string }) {
 
 // ─── Invite Modal ─────────────────────────────────────────────────────────────
 
-function InviteModal({
+function AddStaffModal({
   onClose,
-  onInvited,
+  onCreated,
 }: {
   onClose: () => void;
-  onInvited: () => void;
+  onCreated: () => void;
 }) {
   const toast = useToast();
-  const [email, setEmail] = useState("");
-  const [sending, setSending] = useState(false);
+  const [form, setForm] = useState({ full_name: "", email: "", password: "" });
+  const [saving, setSaving] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setSending(true);
+    if (form.password.length < 6) {
+      toast.error("Password must be at least 6 characters.");
+      return;
+    }
+    setSaving(true);
     try {
       const res = await fetch("/api/admin/staff", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim() }),
+        body: JSON.stringify({
+          email: form.email.trim(),
+          password: form.password,
+          full_name: form.full_name.trim(),
+        }),
       });
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.error ?? `${res.status}`);
       }
-      toast.success(`Invite sent to ${email.trim()}`);
-      onInvited();
+      toast.success(`Staff account created for ${form.email.trim()}`);
+      onCreated();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to send invite.");
+      toast.error(err instanceof Error ? err.message : "Failed to create staff account.");
     } finally {
-      setSending(false);
+      setSaving(false);
     }
   }
 
@@ -92,26 +100,52 @@ function InviteModal({
       />
       <div className="relative w-full max-w-md bg-white rounded-2xl shadow-xl p-6">
         <h2 className="text-lg font-bold text-gray-900 mb-1">
-          Invite Staff Member
+          Add Staff Member
         </h2>
         <p className="text-sm text-gray-500 font-myanmar mb-5">
-          ဝန်ထမ်းအသစ် ဖိတ်ကြားရန်
+          ဝန်ထမ်းအသစ် ထည့်သွင်းရန်
         </p>
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              Full Name
+            </label>
+            <input
+              type="text"
+              value={form.full_name}
+              onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))}
+              placeholder="e.g. Aung Aung"
+              className={inputClass}
+            />
+          </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
               Email Address
             </label>
             <input
               type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              value={form.email}
+              onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
               required
               placeholder="staff@example.com"
               className={inputClass}
             />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              Password
+            </label>
+            <input
+              type="text"
+              value={form.password}
+              onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+              required
+              minLength={6}
+              placeholder="Min 6 characters"
+              className={inputClass}
+            />
             <p className="mt-1.5 text-xs text-gray-400">
-              They will receive an invite link to join as staff.
+              Share this password with the staff member. They can change it later in Settings.
             </p>
           </div>
           <div className="flex gap-3 pt-2">
@@ -124,10 +158,10 @@ function InviteModal({
             </button>
             <button
               type="submit"
-              disabled={sending}
+              disabled={saving}
               className="flex-1 px-4 py-2.5 bg-[#1a3f8a] text-white rounded-xl text-sm font-medium hover:bg-blue-900 disabled:opacity-50 transition-colors"
             >
-              {sending ? "Sending…" : "Send Invite"}
+              {saving ? "Creating…" : "Create Account"}
             </button>
           </div>
         </form>
@@ -222,7 +256,7 @@ export default function StaffPage() {
               d="M12 4.5v15m7.5-7.5h-15"
             />
           </svg>
-          Invite Staff Member
+          Add Staff Member
         </button>
       </div>
 
@@ -316,11 +350,11 @@ export default function StaffPage() {
         )}
       </div>
 
-      {/* Invite modal */}
+      {/* Add staff modal */}
       {showInvite && (
-        <InviteModal
+        <AddStaffModal
           onClose={() => setShowInvite(false)}
-          onInvited={() => {
+          onCreated={() => {
             setShowInvite(false);
             fetchStaff();
           }}
