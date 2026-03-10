@@ -75,7 +75,22 @@ export async function GET(request: NextRequest) {
   ]);
 
   if (enrollmentsRes.error || classesRes.error || paymentsRes.error) {
-    return NextResponse.json({ error: "Failed to fetch analytics" }, { status: 500 });
+    console.error("[analytics] Query errors:", {
+      enrollments: enrollmentsRes.error,
+      classes: classesRes.error,
+      payments: paymentsRes.error,
+    });
+    return NextResponse.json(
+      {
+        error: "Failed to fetch analytics",
+        details: {
+          enrollments: enrollmentsRes.error ? String(enrollmentsRes.error) : null,
+          classes: classesRes.error ? String(classesRes.error) : null,
+          payments: paymentsRes.error ? String(paymentsRes.error) : null,
+        },
+      },
+      { status: 500 },
+    );
   }
 
   let enrollments = enrollmentsRes.data ?? [];

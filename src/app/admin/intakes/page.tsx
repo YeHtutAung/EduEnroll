@@ -7,6 +7,7 @@ import ConfirmModal from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
 import { mm } from "@/lib/mm-labels";
+import { createClient } from "@/lib/supabase/client";
 import type { Intake, IntakeStatus } from "@/types/database";
 
 // ── Skeleton ──────────────────────────────────────────────────────────────────
@@ -42,6 +43,9 @@ export default function IntakesPage() {
   const [editName, setEditName] = useState("");
   const [editYear, setEditYear] = useState(2026);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [heroFile, setHeroFile] = useState<File | null>(null);
+  const [heroPreview, setHeroPreview] = useState<string | null>(null);
+  const [removeHeroFlag, setRemoveHeroFlag] = useState(false);
   const statusRef = useRef(false);
   const savingEditRef = useRef(false);
 
@@ -114,6 +118,9 @@ export default function IntakesPage() {
   function openEditIntake(intake: Intake) {
     setEditName(intake.name);
     setEditYear(intake.year);
+    setHeroFile(null);
+    setHeroPreview(intake.hero_image_url ?? null);
+    setRemoveHeroFlag(false);
     setEditingIntake(intake);
   }
 
@@ -126,10 +133,29 @@ export default function IntakesPage() {
     savingEditRef.current = true;
     setSavingEdit(true);
     try {
+      // Upload hero image if a new file was selected
+      let heroUrl: string | null | undefined;
+      if (heroFile) {
+        const supabase = createClient();
+        const ext = heroFile.name.split(".").pop() ?? "jpg";
+        const path = `${editingIntake.tenant_id}/${editingIntake.id}/hero-${Date.now()}.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from("intake-images")
+          .upload(path, heroFile, { upsert: true });
+        if (uploadError) throw new Error("Hero image upload failed! " + uploadError.message);
+        const { data: publicUrlData } = supabase.storage.from("intake-images").getPublicUrl(path);
+        heroUrl = publicUrlData.publicUrl;
+      } else if (removeHeroFlag) {
+        heroUrl = null;
+      }
+
+      const patchBody: Record<string, unknown> = { name: editName.trim(), year: editYear };
+      if (heroUrl !== undefined) patchBody.hero_image_url = heroUrl;
+
       const res = await fetch(`/api/intakes/${editingIntake.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: editName.trim(), year: editYear }),
+        body: JSON.stringify(patchBody),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -390,6 +416,44 @@ export default function IntakesPage() {
                   className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
                 />
               </div>
+
+              {/* Hero banner upload */}
+              <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">Hero Banner</label>
+                  <p className="text-xs text-gray-400 mb-2">Displayed on the public enrollment page. Recommended: 1920×800+</p>
+                  {(heroPreview && !removeHeroFlag) ? (
+                    <div className="relative rounded-lg overflow-hidden border border-gray-200">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={heroFile ? URL.createObjectURL(heroFile) : heroPreview} alt="Hero preview" className="w-full h-32 object-cover" />
+                      <button
+                        type="button"
+                        onClick={() => { setHeroFile(null); setHeroPreview(null); setRemoveHeroFlag(true); }}
+                        className="absolute top-2 right-2 p-1 bg-red-500 text-white rounded-full hover:bg-red-600 transition-colors"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  ) : (
+                    <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-[#1a3f8a] transition-colors">
+                      <svg className="w-6 h-6 text-gray-400 mb-1" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.41a2.25 2.25 0 013.182 0l2.909 2.91m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+                      </svg>
+                      <span className="text-xs text-gray-500">Upload hero banner</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const f = e.target.files?.[0];
+                          if (f) { setHeroFile(f); setHeroPreview(URL.createObjectURL(f)); setRemoveHeroFlag(false); }
+                        }}
+                      />
+                    </label>
+                  )}
+              </div>
+
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"

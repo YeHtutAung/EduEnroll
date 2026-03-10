@@ -158,7 +158,8 @@ function formatDateEN(iso: string): string {
   });
 }
 
-function intakeToSlug(name: string, year: number): string {
+function intakeToSlug(slug: string | null, name: string, year: number): string {
+  if (slug) return slug;
   const monthMatch = name.match(/january|february|march|april|may|june|july|august|september|october|november|december/i);
   const month = monthMatch ? monthMatch[0].toLowerCase() : name.toLowerCase().replace(/\s+/g, "-");
   return `${month}-${year}`;
@@ -230,11 +231,11 @@ export async function sendOpenIntakes(
 
   const { data: intakes } = await supabase
     .from("intakes")
-    .select("id, name, year")
+    .select("id, name, year, slug")
     .eq("tenant_id", tenantId)
     .eq("status", "open")
     .order("year", { ascending: true }) as {
-    data: { id: string; name: string; year: number }[] | null;
+    data: { id: string; name: string; year: number; slug: string | null }[] | null;
     error: unknown;
   };
 
@@ -361,12 +362,12 @@ export async function sendEnrollLink(
 
   const { data: intake } = await supabase
     .from("intakes")
-    .select("name, year")
+    .select("name, year, slug")
     .eq("tenant_id", tenantId)
     .eq("status", "open")
     .order("year", { ascending: false })
     .limit(1)
-    .single() as { data: { name: string; year: number } | null; error: unknown };
+    .single() as { data: { name: string; year: number; slug: string | null } | null; error: unknown };
 
   if (!tenant || !intake) {
     await sendTextMessage(
@@ -377,7 +378,7 @@ export async function sendEnrollLink(
     return;
   }
 
-  const slug = intakeToSlug(intake.name, intake.year);
+  const slug = intakeToSlug(intake.slug, intake.name, intake.year);
   const url = `https://${tenant.subdomain}.kuunyi.com/enroll/${slug}`;
 
   await sendTextMessage(
@@ -429,7 +430,8 @@ export async function sendSchedule(
   };
 
   if (!classes || classes.length === 0) {
-    await sendTextMessage(pageToken, senderPsid, `No schedule info for this ${orgType === "event" ? "event" : "intake"}.`);
+    const scheduleLabel = orgType === "event" ? "event" : orgType === "training_center" ? "course" : "intake";
+    await sendTextMessage(pageToken, senderPsid, `No schedule info for this ${scheduleLabel}.`);
     return;
   }
 
