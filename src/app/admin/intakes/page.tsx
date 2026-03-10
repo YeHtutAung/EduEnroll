@@ -418,8 +418,7 @@ export default function IntakesPage() {
               </div>
 
               {/* Hero banner upload */}
-              {labels.orgType === "event" && (
-                <div>
+              <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">Hero Banner</label>
                   <p className="text-xs text-gray-400 mb-2">Displayed on the public enrollment page. Recommended: 1920×800+</p>
                   {(heroPreview && !removeHeroFlag) ? (
@@ -453,8 +452,7 @@ export default function IntakesPage() {
                       />
                     </label>
                   )}
-                </div>
-              )}
+              </div>
 
               <div className="flex gap-3 pt-2">
                 <button

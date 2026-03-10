@@ -430,7 +430,8 @@ export async function sendSchedule(
   };
 
   if (!classes || classes.length === 0) {
-    await sendTextMessage(pageToken, senderPsid, `No schedule info for this ${orgType === "event" ? "event" : "intake"}.`);
+    const scheduleLabel = orgType === "event" ? "event" : orgType === "training_center" ? "course" : "intake";
+    await sendTextMessage(pageToken, senderPsid, `No schedule info for this ${scheduleLabel}.`);
     return;
   }
 
