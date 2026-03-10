@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth, requireOwner, badRequest, notFound } from "@/lib/api";
+import { requireOwner, badRequest, notFound } from "@/lib/api";
 import type { Class, ClassMode, ClassStatus } from "@/types/database";
 
 const VALID_CLASS_STATUSES: ClassStatus[] = ["draft", "open", "full", "closed"];
