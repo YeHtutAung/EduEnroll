@@ -86,14 +86,14 @@ export async function resolveTenantId(): Promise<string | NextResponse> {
 }
 
 /**
- * Same as requireAuth but also checks that the user is an owner or superadmin.
- * Returns 403 if the user is a staff member.
+ * Same as requireAuth but restricted to tenant owners only.
+ * Returns 403 for all other roles including superadmin.
  */
 export async function requireOwner(): Promise<AuthContext | NextResponse> {
   const auth = await requireAuth();
   if (auth instanceof NextResponse) return auth;
 
-  if (auth.user.role !== "owner" && auth.user.role !== "superadmin") {
+  if (auth.user.role !== "owner") {
     return NextResponse.json(
       { error: "Forbidden", message: "Owner access required." },
       { status: 403 },

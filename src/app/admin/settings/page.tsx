@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
 import { createClient } from "@/lib/supabase/client";
+import SettingsTabs from "@/components/admin/SettingsTabs";
 import type { BankAccount, MyanmarBank, MenuButton } from "@/types/database";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -748,6 +749,9 @@ function SettingsContent() {
         <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
         <p className="text-sm font-myanmar text-gray-400 mt-0.5">ဆက်တင်များ</p>
       </div>
+
+      {/* Tab bar */}
+      <SettingsTabs />
 
       {/* ── Section 1: Bank Accounts ─────────────────────────────────── */}
       <SectionCard

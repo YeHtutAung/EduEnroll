@@ -1,14 +1,19 @@
 "use client";
 
+import SettingsTabs from "@/components/admin/SettingsTabs";
+
 export default function BillingPage() {
   return (
-    <div className="min-h-screen bg-[#f0f4ff] px-6 py-8 lg:px-8">
+    <div className="min-h-screen bg-[#f0f4ff] px-6 py-8 lg:px-8 space-y-8">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Billing</h1>
-        <p className="text-sm font-myanmar text-gray-400 mt-0.5">ငွေတောင်းခံခြင်း</p>
+        <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
+        <p className="text-sm font-myanmar text-gray-400 mt-0.5">ဆက်တင်များ</p>
       </div>
 
-      <div className="mt-8 bg-white rounded-2xl border border-gray-100 shadow-sm p-8 max-w-lg">
+      {/* Tab bar */}
+      <SettingsTabs />
+
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-8 max-w-lg">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center">
             <svg

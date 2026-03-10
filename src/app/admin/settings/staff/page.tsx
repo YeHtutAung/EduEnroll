@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useToast } from "@/components/ui/Toast";
+import ConfirmModal from "@/components/ui/ConfirmModal";
+import SettingsTabs from "@/components/admin/SettingsTabs";
 import type { User, UserRole } from "@/types/database";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -141,13 +143,14 @@ export default function StaffPage() {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [showInvite, setShowInvite] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<StaffMember | null>(null);
 
   const fetchStaff = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch("/api/admin/staff");
       if (res.status === 403) {
-        // Staff user trying to access — redirect
         window.location.href = "/admin/dashboard";
         return;
       }
@@ -164,12 +167,40 @@ export default function StaffPage() {
     fetchStaff();
   }, [fetchStaff]);
 
+  async function handleRemove(member: StaffMember) {
+    setRemovingId(member.id);
+    try {
+      const res = await fetch(`/api/admin/staff/${member.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message ?? err.error ?? `${res.status}`);
+      }
+      toast.success(`${member.full_name ?? member.email} has been removed.`);
+      setStaff((prev) => prev.filter((s) => s.id !== member.id));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to remove staff member.");
+    } finally {
+      setRemovingId(null);
+      setConfirmRemove(null);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-[#f0f4ff] px-6 py-8 lg:px-8 space-y-8">
       {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
+        <p className="text-sm font-myanmar text-gray-400 mt-0.5">ဆက်တင်များ</p>
+      </div>
+
+      {/* Tab bar */}
+      <SettingsTabs />
+
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Staff Members</h1>
+          <h2 className="text-lg font-bold text-gray-900">Staff Members</h2>
           <p className="text-sm font-myanmar text-gray-400 mt-0.5">
             ဝန်ထမ်းများ စီမံခန့်ခွဲရန်
           </p>
@@ -239,6 +270,9 @@ export default function StaffPage() {
                   <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                     Joined
                   </th>
+                  <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -263,6 +297,17 @@ export default function StaffPage() {
                     <td className="px-5 py-4 text-gray-500 text-xs">
                       {fmtDate(member.created_at)}
                     </td>
+                    <td className="px-5 py-4">
+                      {member.role === "staff" && (
+                        <button
+                          onClick={() => setConfirmRemove(member)}
+                          disabled={removingId === member.id}
+                          className="px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+                        >
+                          {removingId === member.id ? "Removing…" : "Remove"}
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -279,6 +324,18 @@ export default function StaffPage() {
             setShowInvite(false);
             fetchStaff();
           }}
+        />
+      )}
+
+      {/* Confirm remove modal */}
+      {confirmRemove && (
+        <ConfirmModal
+          variant="danger"
+          title="Remove Staff Member?"
+          message={`Are you sure you want to remove ${confirmRemove.full_name ?? confirmRemove.email}? They will lose access to the admin panel immediately.`}
+          confirmLabel="Remove"
+          onConfirm={() => handleRemove(confirmRemove)}
+          onCancel={() => setConfirmRemove(null)}
         />
       )}
     </div>

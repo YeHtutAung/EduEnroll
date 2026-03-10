@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth, badRequest, notFound } from "@/lib/api";
+import { requireAuth, requireOwner, badRequest, notFound } from "@/lib/api";
 import type { Class, ClassMode, ClassStatus } from "@/types/database";
 
 const VALID_CLASS_STATUSES: ClassStatus[] = ["draft", "open", "full", "closed"];
@@ -21,7 +21,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: { id: string } },
 ) {
-  const auth = await requireAuth();
+  const auth = await requireOwner();
   if (auth instanceof NextResponse) return auth;
   const { supabase, tenantId } = auth;
 

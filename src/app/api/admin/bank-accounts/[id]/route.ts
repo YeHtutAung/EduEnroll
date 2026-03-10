@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth, badRequest, notFound } from "@/lib/api";
+import { requireOwner, badRequest, notFound } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { BankAccount } from "@/types/database";
 
@@ -13,7 +13,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: { id: string } },
 ) {
-  const auth = await requireAuth();
+  const auth = await requireOwner();
   if (auth instanceof NextResponse) return auth;
   const { supabase, tenantId } = auth;
 
@@ -68,7 +68,7 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: { id: string } },
 ) {
-  const auth = await requireAuth();
+  const auth = await requireOwner();
   if (auth instanceof NextResponse) return auth;
   const { supabase, tenantId } = auth;
 
