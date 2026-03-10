@@ -5,7 +5,7 @@ import { requireAuth } from "@/lib/api";
 type EnrollmentRow = {
   id: string;
   status: string;
-  created_at: string;
+  enrolled_at: string;
   class_id: string;
 };
 
@@ -50,9 +50,9 @@ export async function GET(request: NextRequest) {
   const [enrollmentsRes, classesRes, paymentsRes] = await Promise.all([
     supabase
       .from("enrollments")
-      .select("id, status, created_at, class_id")
+      .select("id, status, enrolled_at, class_id")
       .eq("tenant_id", tenantId)
-      .order("created_at", { ascending: true }) as unknown as Promise<{
+      .order("enrolled_at", { ascending: true }) as unknown as Promise<{
       data: EnrollmentRow[] | null;
       error: unknown;
     }>,
@@ -120,7 +120,7 @@ export async function GET(request: NextRequest) {
       enrollments = enrollments.filter((e) => classIds.has(e.class_id));
     }
   } else if (dateFrom) {
-    enrollments = enrollments.filter((e) => e.created_at >= dateFrom);
+    enrollments = enrollments.filter((e) => e.enrolled_at >= dateFrom);
   }
 
   // Build a class lookup
@@ -138,7 +138,7 @@ export async function GET(request: NextRequest) {
     dailyMap.set(d, 0);
   }
   for (const e of enrollments) {
-    const day = e.created_at.slice(0, 10);
+    const day = e.enrolled_at.slice(0, 10);
     if (day >= thirtyDaysAgo) {
       dailyMap.set(day, (dailyMap.get(day) ?? 0) + 1);
     }
@@ -204,7 +204,7 @@ export async function GET(request: NextRequest) {
 
   // ─── 6. Average payment hours ─────────────────────────────────────────
   const enrollmentCreatedMap = new Map(
-    enrollments.map((e) => [e.id, new Date(e.created_at).getTime()])
+    enrollments.map((e) => [e.id, new Date(e.enrolled_at).getTime()])
   );
   let totalHours = 0;
   let paymentCount = 0;
