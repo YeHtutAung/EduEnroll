@@ -143,11 +143,14 @@ login() {
   local PROJECT_REF
   PROJECT_REF=$(echo "$SUPABASE_URL" | sed 's|https://\([^.]*\)\..*|\1|')
 
-  # Build session cookie for Next.js
+  # Build session cookie for Next.js (@supabase/ssr 0.9+ uses base64url encoding)
   local COOKIE_NAME="sb-${PROJECT_REF}-auth-token"
   local SESSION_JSON
   SESSION_JSON=$(echo "$AUTH_RESP" | jq -c '{access_token,token_type,expires_at,refresh_token,user}')
-  AUTH_H=(-H "Cookie: ${COOKIE_NAME}=${SESSION_JSON}")
+  # base64url encode: standard base64, then replace +→-, /→_, strip trailing =
+  local B64_SESSION
+  B64_SESSION=$(echo -n "$SESSION_JSON" | base64 -w0 | tr '+/' '-_' | tr -d '=')
+  AUTH_H=(-H "Cookie: ${COOKIE_NAME}=base64-${B64_SESSION}")
 
   echo -e "  ${GREEN}✓${RESET} Logged in as ${TEST_EMAIL} (project: ${PROJECT_REF})"
 
@@ -183,7 +186,7 @@ test_intakes() {
   local INTAKE_NAME="Test ${TIMESTAMP}"
   local RESP
   RESP=$(admin_post "/api/intakes" \
-    "{\"name\":\"${INTAKE_NAME}\",\"year\":2026,\"status\":\"draft\"}" 2>/dev/null) || RESP=""
+    "{\"name\":\"${INTAKE_NAME}\",\"year\":2026,\"status\":\"draft\"}") || RESP=""
 
   if echo "$RESP" | jq -e '.id' &>/dev/null; then
     INTAKE_ID=$(echo "$RESP" | jq -r '.id')
@@ -195,7 +198,7 @@ test_intakes() {
   fi
 
   # Open the intake so public enrollment can see it
-  RESP=$(admin_patch "/api/intakes/${INTAKE_ID}" '{"status":"open"}' 2>/dev/null) || RESP=""
+  RESP=$(admin_patch "/api/intakes/${INTAKE_ID}" '{"status":"open"}' ) || RESP=""
   if echo "$RESP" | jq -e '.status == "open"' &>/dev/null; then
     pass "PATCH /api/intakes/${INTAKE_ID:0:8}… — status set to open"
   else
@@ -203,7 +206,7 @@ test_intakes() {
   fi
 
   # List intakes
-  RESP=$(admin_get "/api/intakes" 2>/dev/null) || RESP="[]"
+  RESP=$(admin_get "/api/intakes") || RESP="[]"
   if echo "$RESP" | jq -e 'type == "array"' &>/dev/null; then
     local COUNT; COUNT=$(echo "$RESP" | jq 'length')
     pass "GET /api/intakes — returned ${COUNT} intake(s)"
@@ -237,7 +240,7 @@ test_classes() {
     local RESP
     RESP=$(admin_post "/api/intakes/${INTAKE_ID}/classes" \
       "{\"level\":\"${LEVEL}\",\"fee_mmk\":${FEE},\"seat_total\":30,\"status\":\"open\"}" \
-      2>/dev/null) || RESP=""
+      ) || RESP=""
 
     if echo "$RESP" | jq -e '.id' &>/dev/null; then
       CLASS_IDS[$LEVEL]=$(echo "$RESP" | jq -r '.id')
@@ -260,7 +263,7 @@ test_classes() {
 
   # List classes for the intake
   local RESP
-  RESP=$(admin_get "/api/intakes/${INTAKE_ID}/classes" 2>/dev/null) || RESP="[]"
+  RESP=$(admin_get "/api/intakes/${INTAKE_ID}/classes") || RESP="[]"
   local CLASS_COUNT; CLASS_COUNT=$(echo "$RESP" | jq 'length')
   if [[ "$CLASS_COUNT" == "5" ]]; then
     pass "GET /api/intakes/{id}/classes — all 5 classes listed"
@@ -290,7 +293,7 @@ test_public_intake() {
   fi
 
   local RESP
-  RESP=$(pub_get "/api/public/enroll/${INTAKE_SLUG}" 2>/dev/null) || RESP=""
+  RESP=$(pub_get "/api/public/enroll/${INTAKE_SLUG}" ) || RESP=""
 
   if echo "$RESP" | jq -e '.intake.status == "open"' &>/dev/null; then
     local COUNT; COUNT=$(echo "$RESP" | jq '.classes | length')
@@ -345,7 +348,7 @@ test_submit_enrollment() {
     '{class_id: $class_id, form_data: {name_en: "Ko Aung", name_mm: "ကိုအောင်", nrc: "12/OuKaMa(N)123456", phone: "09123456789", email: "ko.aung@example.com"}}')
 
   local RESP
-  RESP=$(pub_post "/api/public/enroll" "$BODY" 2>/dev/null) || RESP=""
+  RESP=$(pub_post "/api/public/enroll" "$BODY" ) || RESP=""
 
   if echo "$RESP" | jq -e '.enrollment_ref' &>/dev/null; then
     ENROLLMENT_REF=$(echo "$RESP" | jq -r '.enrollment_ref')
@@ -406,7 +409,7 @@ test_enrollment_status() {
   fi
 
   local RESP
-  RESP=$(pub_get "/api/public/status?ref=${ENROLLMENT_REF}" 2>/dev/null) || RESP=""
+  RESP=$(pub_get "/api/public/status?ref=${ENROLLMENT_REF}" ) || RESP=""
 
   if echo "$RESP" | jq -e '.enrollment_ref' &>/dev/null; then
     local STATUS; STATUS=$(echo "$RESP" | jq -r '.status')
@@ -454,7 +457,7 @@ test_admin_stats() {
   if [[ $SKIP_ADMIN -eq 1 ]]; then skip "GET /api/admin/stats (auth required)"; return; fi
 
   local RESP
-  RESP=$(admin_get "/api/admin/stats" 2>/dev/null) || RESP=""
+  RESP=$(admin_get "/api/admin/stats" ) || RESP=""
 
   if echo "$RESP" | jq -e 'has("total_enrollments")' &>/dev/null; then
     local TOTAL; TOTAL=$(echo "$RESP" | jq '.total_enrollments')
@@ -489,7 +492,7 @@ test_admin_students() {
   if [[ $SKIP_ADMIN -eq 1 ]]; then skip "GET /api/admin/students (auth required)"; return; fi
 
   local RESP
-  RESP=$(admin_get "/api/admin/students" 2>/dev/null) || RESP=""
+  RESP=$(admin_get "/api/admin/students" ) || RESP=""
 
   if echo "$RESP" | jq -e '.data' &>/dev/null; then
     local COUNT; COUNT=$(echo "$RESP" | jq '.data | length')
@@ -508,7 +511,7 @@ test_admin_students() {
   fi
 
   # Filter by status
-  RESP=$(admin_get "/api/admin/students?status=pending_payment" 2>/dev/null) || RESP=""
+  RESP=$(admin_get "/api/admin/students?status=pending_payment" ) || RESP=""
   if echo "$RESP" | jq -e '.data' &>/dev/null; then
     local STATUSES_OK; STATUSES_OK=$(echo "$RESP" | jq '[.data[].status] | all(. == "pending_payment")')
     if [[ "$STATUSES_OK" == "true" || $(echo "$RESP" | jq '.data | length') == "0" ]]; then
@@ -519,7 +522,7 @@ test_admin_students() {
   fi
 
   # Filter by class_level (now TEXT, not enum)
-  RESP=$(admin_get "/api/admin/students?class_level=N3" 2>/dev/null) || RESP=""
+  RESP=$(admin_get "/api/admin/students?class_level=N3" ) || RESP=""
   if echo "$RESP" | jq -e '.data' &>/dev/null; then
     local N3_OK; N3_OK=$(echo "$RESP" | jq '[.data[].class_level] | all(. == "N3")')
     if [[ "$N3_OK" == "true" || $(echo "$RESP" | jq '.data | length') == "0" ]]; then
@@ -531,7 +534,7 @@ test_admin_students() {
 
   # Search by name
   if [[ -n "$ENROLLMENT_REF" ]]; then
-    RESP=$(admin_get "/api/admin/students?search=Ko+Aung" 2>/dev/null) || RESP=""
+    RESP=$(admin_get "/api/admin/students?search=Ko+Aung" ) || RESP=""
     if echo "$RESP" | jq -e '.data' &>/dev/null; then
       local FOUND; FOUND=$(echo "$RESP" | jq '.data | length')
       if [[ "$FOUND" -ge 1 ]]; then
@@ -543,7 +546,7 @@ test_admin_students() {
   fi
 
   # Pagination: page_size=2
-  RESP=$(admin_get "/api/admin/students?page_size=2" 2>/dev/null) || RESP=""
+  RESP=$(admin_get "/api/admin/students?page_size=2" ) || RESP=""
   local PS; PS=$(echo "$RESP" | jq '.pagination.page_size')
   if [[ "$PS" == "2" ]]; then
     pass "GET /api/admin/students?page_size=2 — pagination.page_size=2 correct"
@@ -559,7 +562,7 @@ test_admin_pending_payments() {
   if [[ $SKIP_ADMIN -eq 1 ]]; then skip "GET /api/admin/payments/pending (auth required)"; return; fi
 
   local RESP
-  RESP=$(admin_get "/api/admin/payments/pending" 2>/dev/null) || RESP=""
+  RESP=$(admin_get "/api/admin/payments/pending" ) || RESP=""
 
   if echo "$RESP" | jq -e 'type == "array"' &>/dev/null; then
     local COUNT; COUNT=$(echo "$RESP" | jq 'length')
@@ -585,7 +588,7 @@ test_bank_accounts() {
 
   # List
   local RESP
-  RESP=$(admin_get "/api/admin/bank-accounts" 2>/dev/null) || RESP=""
+  RESP=$(admin_get "/api/admin/bank-accounts" ) || RESP=""
 
   if echo "$RESP" | jq -e 'type == "array"' &>/dev/null; then
     local COUNT; COUNT=$(echo "$RESP" | jq 'length')
@@ -598,7 +601,7 @@ test_bank_accounts() {
   # Create a test account
   RESP=$(admin_post "/api/admin/bank-accounts" \
     '{"bank_name":"CB","account_number":"CB-TEST-001","account_holder":"Test Holder","is_active":true}' \
-    2>/dev/null) || RESP=""
+    ) || RESP=""
 
   local TEST_ACCOUNT_ID=""
   if echo "$RESP" | jq -e '.id' &>/dev/null; then
@@ -610,7 +613,7 @@ test_bank_accounts() {
   fi
 
   # PATCH: toggle is_active to false
-  RESP=$(admin_patch "/api/admin/bank-accounts/${TEST_ACCOUNT_ID}" '{"is_active":false}' 2>/dev/null) || RESP=""
+  RESP=$(admin_patch "/api/admin/bank-accounts/${TEST_ACCOUNT_ID}" '{"is_active":false}' ) || RESP=""
   if echo "$RESP" | jq -e '.is_active == false' &>/dev/null; then
     pass "PATCH /api/admin/bank-accounts/{id} — is_active toggled to false"
   else
@@ -619,7 +622,7 @@ test_bank_accounts() {
 
   # PATCH: update account_holder
   RESP=$(admin_patch "/api/admin/bank-accounts/${TEST_ACCOUNT_ID}" \
-    '{"account_holder":"Updated Holder"}' 2>/dev/null) || RESP=""
+    '{"account_holder":"Updated Holder"}' ) || RESP=""
   if echo "$RESP" | jq -e '.account_holder == "Updated Holder"' &>/dev/null; then
     pass "PATCH /api/admin/bank-accounts/{id} — account_holder updated"
   else
