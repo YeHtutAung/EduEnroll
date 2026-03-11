@@ -1,0 +1,54 @@
+# ─── KuuNyi Staging Tests — API + Security Audit ──────────────────
+# Runs after Vercel deploys the staging branch.
+# Waits for the preview URL, then runs api-tests.sh and security-audit.sh.
+
+name: Staging Tests
+
+on:
+  push:
+    branches: [staging]
+
+jobs:
+  wait-for-vercel:
+    name: Wait for Vercel Preview
+    runs-on: ubuntu-latest
+    outputs:
+      preview_url: ${{ steps.get-url.outputs.url }}
+    steps:
+      - name: Wait for Vercel deployment
+        uses: patrickedqvist/wait-for-vercel-preview@v1.3.2
+        id: get-url
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          max_timeout: 300
+          environment: Preview
+
+  api-tests:
+    name: API Tests
+    needs: wait-for-vercel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run API tests
+        run: bash api-tests.sh
+        env:
+          BASE_URL: ${{ needs.wait-for-vercel.outputs.preview_url }}
+          SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.STAGING_SUPABASE_ANON_KEY }}
+          TEST_EMAIL: ${{ secrets.STAGING_TEST_EMAIL }}
+          TEST_PASSWORD: ${{ secrets.STAGING_TEST_PASSWORD }}
+
+  security-audit:
+    name: Security Audit
+    needs: wait-for-vercel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tenant isolation audit
+        run: bash security-audit.sh
+        env:
+          BASE_URL: ${{ needs.wait-for-vercel.outputs.preview_url }}
+          SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}

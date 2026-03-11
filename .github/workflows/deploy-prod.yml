@@ -1,0 +1,55 @@
+# ─── KuuNyi Production Deploy Gate ─────────────────────────────────
+# Runs when main is updated (merge from staging).
+# Vercel auto-deploys main to production — this workflow runs a
+# post-deploy health check to verify the deploy succeeded.
+
+name: Production Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  health-check:
+    name: Post-Deploy Health Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for Vercel production deploy
+        run: sleep 60
+
+      - name: Check production is reachable
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.PRODUCTION_URL }}")
+          echo "Production returned HTTP ${STATUS}"
+          if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 400 ]; then
+            echo "Production is healthy."
+          else
+            echo "ERROR: Production returned ${STATUS}"
+            exit 1
+          fi
+
+      - name: Check public enrollment API
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.PRODUCTION_URL }}/api/public/enroll/april-2026")
+          echo "Public enrollment API returned HTTP ${STATUS}"
+          if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 500 ]; then
+            echo "API is responding."
+          else
+            echo "ERROR: API returned ${STATUS}"
+            exit 1
+          fi
+
+  notify:
+    name: Deploy Notification
+    needs: health-check
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Report result
+        run: |
+          if [ "${{ needs.health-check.result }}" == "success" ]; then
+            echo "✅ Production deploy successful"
+          else
+            echo "❌ Production deploy may have issues — check manually"
+            exit 1
+          fi
