@@ -20,6 +20,12 @@ set -euo pipefail
 BASE_URL="${BASE_URL:-http://localhost:3005}"
 SB_URL="${SUPABASE_URL:?Set SUPABASE_URL}"
 SB_KEY="${SUPABASE_SERVICE_ROLE_KEY:?Set SUPABASE_SERVICE_ROLE_KEY}"
+
+# Vercel Automation Bypass header (for protected preview deployments)
+BYPASS_H=""
+if [ -n "${VERCEL_AUTOMATION_BYPASS_SECRET:-}" ]; then
+  BYPASS_H="x-vercel-protection-bypass: ${VERCEL_AUTOMATION_BYPASS_SECRET}"
+fi
 TIMESTAMP=$(date +%s)
 
 PASS_COUNT=0
@@ -39,6 +45,7 @@ echo ""
 
 echo "▸ Registering school-a-${TIMESTAMP}..."
 RES_A=$(curl -sL -w "\n%{http_code}" -X POST "${BASE_URL}/api/saas/register" \
+  ${BYPASS_H:+-H "$BYPASS_H"} \
   -H "Content-Type: application/json" \
   -d "{
     \"school_name_en\": \"School A Test\",
@@ -62,6 +69,7 @@ echo "  tenant_id: ${TENANT_A}"
 
 echo "▸ Registering school-b-${TIMESTAMP}..."
 RES_B=$(curl -sL -w "\n%{http_code}" -X POST "${BASE_URL}/api/saas/register" \
+  ${BYPASS_H:+-H "$BYPASS_H"} \
   -H "Content-Type: application/json" \
   -d "{
     \"school_name_en\": \"School B Test\",
@@ -199,10 +207,12 @@ test_endpoint() {
 
   if [ "$METHOD" = "GET" ]; then
     RESPONSE=$(curl -sL -w "\n%{http_code}" "$URL" \
+      ${BYPASS_H:+-H "$BYPASS_H"} \
       -H "Cookie: sb-access-token=${ACCESS_TOKEN}" \
       -H "Authorization: Bearer ${ACCESS_TOKEN}")
   else
     RESPONSE=$(curl -sL -w "\n%{http_code}" -X "$METHOD" "$URL" \
+      ${BYPASS_H:+-H "$BYPASS_H"} \
       -H "Cookie: sb-access-token=${ACCESS_TOKEN}" \
       -H "Authorization: Bearer ${ACCESS_TOKEN}" \
       -H "Content-Type: application/json" \

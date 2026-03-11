@@ -24,7 +24,7 @@ jobs:
       - name: Verify staging is reachable
         run: |
           for i in 1 2 3 4 5; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.STAGING_URL }}")
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" -H "x-vercel-protection-bypass: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}" "${{ secrets.STAGING_URL }}")
             echo "Attempt ${i}: HTTP ${STATUS}"
             if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 500 ]; then
               echo "Staging is ready."
@@ -50,6 +50,7 @@ jobs:
           SUPABASE_ANON_KEY: ${{ secrets.STAGING_SUPABASE_ANON_KEY }}
           TEST_EMAIL: ${{ secrets.STAGING_TEST_EMAIL }}
           TEST_PASSWORD: ${{ secrets.STAGING_TEST_PASSWORD }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
 
   security-audit:
     name: Security Audit
@@ -64,3 +65,4 @@ jobs:
           BASE_URL: ${{ secrets.STAGING_URL }}
           SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
