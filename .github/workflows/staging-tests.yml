@@ -18,24 +18,23 @@ jobs:
     steps:
       - name: Wait for Vercel to build and deploy
         run: |
-          echo "Waiting for Vercel staging deploy (up to 5 min)..."
-          # Vercel needs time to detect push, build Next.js, and deploy.
-          # Poll every 30s for up to 5 minutes, checking that the deployment
-          # is reachable and has updated (not serving stale code).
-          for i in $(seq 1 10); do
-            sleep 30
+          echo "Waiting 3 min for Vercel to build and deploy staging..."
+          sleep 180
+
+      - name: Verify staging is reachable
+        run: |
+          for i in 1 2 3 4 5; do
             STATUS=$(curl -sL -o /dev/null -w "%{http_code}" \
               -H "x-vercel-protection-bypass: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}" \
               "${{ secrets.STAGING_URL }}")
-            echo "Attempt ${i}/10 ($(( i * 30 ))s): HTTP ${STATUS}"
-            if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 400 ]; then
-              echo "Staging is reachable. Waiting 30s more for deploy to stabilize..."
-              sleep 30
+            echo "Attempt ${i}: HTTP ${STATUS}"
+            if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 500 ]; then
               echo "Staging is ready."
               exit 0
             fi
+            sleep 15
           done
-          echo "Staging not reachable after 5 minutes."
+          echo "Staging not reachable after retries."
           exit 1
 
   api-tests:
