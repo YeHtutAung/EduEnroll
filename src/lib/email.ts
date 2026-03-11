@@ -5,7 +5,9 @@ import { Resend } from "resend";
 export const FROM_EMAIL = process.env.FROM_EMAIL ?? "noreply@kuunyi.com";
 export const EMAIL_FOOTER_URL = "https://www.kuunyi.com";
 
-const resend = new Resend(process.env.RESEND_API_KEY);
+function getResend() {
+  return new Resend(process.env.RESEND_API_KEY);
+}
 
 // ─── Send email helper ──────────────────────────────────────────────────────
 
@@ -22,7 +24,7 @@ export async function sendEmail({ to, subject, html }: SendEmailParams): Promise
   }
 
   try {
-    const { error } = await resend.emails.send({
+    const { error } = await getResend().emails.send({
       from: FROM_EMAIL,
       to,
       subject,
