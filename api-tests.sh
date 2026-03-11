@@ -144,7 +144,8 @@ login() {
   PROJECT_REF=$(echo "$SUPABASE_URL" | sed 's|https://\([^.]*\)\..*|\1|')
 
   # Use Bearer token auth for API requests (supported by requireAuth)
-  AUTH_H=(-H "Authorization: Bearer ${ACCESS_TOKEN}")
+  # Send both Authorization and x-supabase-auth (Vercel may strip Authorization)
+  AUTH_H=(-H "Authorization: Bearer ${ACCESS_TOKEN}" -H "x-supabase-auth: Bearer ${ACCESS_TOKEN}")
 
   echo -e "  ${GREEN}✓${RESET} Logged in as ${TEST_EMAIL} (project: ${PROJECT_REF})"
 

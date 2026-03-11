@@ -21,7 +21,9 @@ export interface AuthContext {
  */
 export async function requireAuth(): Promise<AuthContext | NextResponse> {
   const headersList = headers();
-  const authHeader = headersList.get("authorization");
+  // Check both standard Authorization header and custom x-supabase-auth
+  // (Vercel's proxy may strip Authorization on certain deployments)
+  const authHeader = headersList.get("authorization") ?? headersList.get("x-supabase-auth");
 
   let supabase: ReturnType<typeof createClient> | ReturnType<typeof createAdminClient>;
   let authUser: { id: string } | null = null;

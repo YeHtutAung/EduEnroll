@@ -44,6 +44,47 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Debug — test auth header passthrough
+        run: |
+          # Get a token
+          TOKEN_RESP=$(curl -sf -X POST \
+            "$SUPABASE_URL/auth/v1/token?grant_type=password" \
+            -H "apikey: $SUPABASE_ANON_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{\"email\":\"$TEST_EMAIL\",\"password\":\"$TEST_PASSWORD\"}")
+          TOKEN=$(echo "$TOKEN_RESP" | jq -r '.access_token // empty')
+          echo "Got token: ${TOKEN:0:20}..."
+
+          # Test with Authorization header
+          echo "--- Authorization header ---"
+          curl -sL -w "\nHTTP: %{http_code}" \
+            -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
+            -H "Authorization: Bearer $TOKEN" \
+            "$BASE_URL/api/intakes" | tail -5
+          echo ""
+
+          # Test with x-supabase-auth header
+          echo "--- x-supabase-auth header ---"
+          curl -sL -w "\nHTTP: %{http_code}" \
+            -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
+            -H "x-supabase-auth: Bearer $TOKEN" \
+            "$BASE_URL/api/intakes" | tail -5
+          echo ""
+
+          # Test without any auth (should 401)
+          echo "--- No auth ---"
+          curl -sL -w "\nHTTP: %{http_code}" \
+            -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
+            "$BASE_URL/api/intakes" | tail -5
+          echo ""
+        env:
+          BASE_URL: ${{ secrets.STAGING_URL }}
+          SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.STAGING_SUPABASE_ANON_KEY }}
+          TEST_EMAIL: ${{ secrets.STAGING_TEST_EMAIL }}
+          TEST_PASSWORD: ${{ secrets.STAGING_TEST_PASSWORD }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+
       - name: Run API tests
         run: bash api-tests.sh
         env:
