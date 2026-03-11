@@ -109,6 +109,11 @@ INTAKE_RES=$(curl -s -X POST "${SB_URL}/rest/v1/intakes" \
     \"status\": \"open\"
   }")
 INTAKE_ID=$(echo "$INTAKE_RES" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+if [ -z "$INTAKE_ID" ]; then
+  echo "  ERROR: Failed to create intake in school-a"
+  echo "  Response: $INTAKE_RES"
+  exit 1
+fi
 echo "  intake: ${INTAKE_ID}"
 
 # Create a class in school-a

@@ -69,14 +69,26 @@ if [[ -n "${VERCEL_AUTOMATION_BYPASS_SECRET:-}" ]]; then
   BYPASS_H=(-H "x-vercel-protection-bypass: ${VERCEL_AUTOMATION_BYPASS_SECRET}")
 fi
 
-# HTTP helpers — output body; non-2xx causes empty output (curl -f)
+# HTTP helpers — output body and status; non-2xx returns body + writes status to stderr
 # -L follows redirects (Vercel returns 308 for trailing slash / HTTPS)
-pub_get()    { curl -sfL "${BYPASS_H[@]}" "${TENANT_H[@]}" "$BASE_URL$1"; }
-pub_post()   { curl -sfL "${BYPASS_H[@]}" "${TENANT_H[@]}" -X POST  -H "Content-Type: application/json" -d "$2" "$BASE_URL$1"; }
-admin_get()  { curl -sfL "${BYPASS_H[@]}" "${AUTH_H[@]}" "$BASE_URL$1"; }
-admin_post() { curl -sfL "${BYPASS_H[@]}" "${AUTH_H[@]}" -X POST  -H "Content-Type: application/json" -d "$2" "$BASE_URL$1"; }
-admin_patch(){ curl -sfL "${BYPASS_H[@]}" "${AUTH_H[@]}" -X PATCH -H "Content-Type: application/json" -d "$2" "$BASE_URL$1"; }
-admin_del()  { curl -sfL "${BYPASS_H[@]}" "${AUTH_H[@]}" -X DELETE "$BASE_URL$1"; }
+_curl_check() {
+  local RESP STATUS
+  RESP=$(curl -sL -w "\n%{http_code}" "${@}")
+  STATUS=$(echo "$RESP" | tail -1)
+  BODY=$(echo "$RESP" | sed '$d')
+  if [[ "$STATUS" -ge 200 && "$STATUS" -lt 300 ]]; then
+    echo "$BODY"
+  else
+    echo "  [DEBUG] HTTP ${STATUS}: $(echo "$BODY" | head -c 200)" >&2
+    return 1
+  fi
+}
+pub_get()    { _curl_check "${BYPASS_H[@]}" "${TENANT_H[@]}" "$BASE_URL$1"; }
+pub_post()   { _curl_check "${BYPASS_H[@]}" "${TENANT_H[@]}" -X POST  -H "Content-Type: application/json" -d "$2" "$BASE_URL$1"; }
+admin_get()  { _curl_check "${BYPASS_H[@]}" "${AUTH_H[@]}" "$BASE_URL$1"; }
+admin_post() { _curl_check "${BYPASS_H[@]}" "${AUTH_H[@]}" -X POST  -H "Content-Type: application/json" -d "$2" "$BASE_URL$1"; }
+admin_patch(){ _curl_check "${BYPASS_H[@]}" "${AUTH_H[@]}" -X PATCH -H "Content-Type: application/json" -d "$2" "$BASE_URL$1"; }
+admin_del()  { _curl_check "${BYPASS_H[@]}" "${AUTH_H[@]}" -X DELETE "$BASE_URL$1"; }
 
 # Return HTTP status code only (-L follows redirects)
 http_code() { curl -sL "${BYPASS_H[@]}" -o /dev/null -w "%{http_code}" "${@}"; }
