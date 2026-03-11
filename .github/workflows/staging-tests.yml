@@ -1,6 +1,9 @@
 # ─── KuuNyi Staging Tests — API + Security Audit ──────────────────
 # Runs after Vercel deploys the staging branch.
-# Waits for the preview URL, then runs api-tests.sh and security-audit.sh.
+# Waits for the staging URL to be ready, then runs api-tests.sh
+# and security-audit.sh in parallel.
+#
+# Required secret: STAGING_URL (e.g. https://edu-enroll-xi-git-staging-xxx.vercel.app)
 
 name: Staging Tests
 
@@ -9,23 +12,32 @@ on:
     branches: [staging]
 
 jobs:
-  wait-for-vercel:
-    name: Wait for Vercel Preview
+  wait-for-deploy:
+    name: Wait for Staging Deploy
     runs-on: ubuntu-latest
-    outputs:
-      preview_url: ${{ steps.get-url.outputs.url }}
     steps:
-      - name: Wait for Vercel deployment
-        uses: patrickedqvist/wait-for-vercel-preview@v1.3.2
-        id: get-url
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          max_timeout: 300
-          environment: Preview
+      - name: Wait for Vercel to build
+        run: |
+          echo "Waiting 90s for Vercel staging deploy..."
+          sleep 90
+
+      - name: Verify staging is reachable
+        run: |
+          for i in 1 2 3 4 5; do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.STAGING_URL }}")
+            echo "Attempt ${i}: HTTP ${STATUS}"
+            if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 500 ]; then
+              echo "Staging is ready."
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "Staging not reachable after 5 attempts."
+          exit 1
 
   api-tests:
     name: API Tests
-    needs: wait-for-vercel
+    needs: wait-for-deploy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,7 +45,7 @@ jobs:
       - name: Run API tests
         run: bash api-tests.sh
         env:
-          BASE_URL: ${{ needs.wait-for-vercel.outputs.preview_url }}
+          BASE_URL: ${{ secrets.STAGING_URL }}
           SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.STAGING_SUPABASE_ANON_KEY }}
           TEST_EMAIL: ${{ secrets.STAGING_TEST_EMAIL }}
@@ -41,7 +53,7 @@ jobs:
 
   security-audit:
     name: Security Audit
-    needs: wait-for-vercel
+    needs: wait-for-deploy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -49,6 +61,6 @@ jobs:
       - name: Run tenant isolation audit
         run: bash security-audit.sh
         env:
-          BASE_URL: ${{ needs.wait-for-vercel.outputs.preview_url }}
+          BASE_URL: ${{ secrets.STAGING_URL }}
           SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
