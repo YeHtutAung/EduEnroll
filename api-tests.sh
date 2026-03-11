@@ -57,15 +57,16 @@ skip() { echo -e "  ${YELLOW}– SKIP${RESET}  $1"; ((SKIP++)) || true; }
 header() { echo -e "\n${BOLD}━━━ $1 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}"; }
 
 # HTTP helpers — output body; non-2xx causes empty output (curl -f)
-pub_get()    { curl -sf "$BASE_URL$1"; }
-pub_post()   { curl -sf -X POST  -H "Content-Type: application/json" -d "$2" "$BASE_URL$1"; }
-admin_get()  { curl -sf "${AUTH_H[@]}" "$BASE_URL$1"; }
-admin_post() { curl -sf "${AUTH_H[@]}" -X POST  -H "Content-Type: application/json" -d "$2" "$BASE_URL$1"; }
-admin_patch(){ curl -sf "${AUTH_H[@]}" -X PATCH -H "Content-Type: application/json" -d "$2" "$BASE_URL$1"; }
-admin_del()  { curl -sf "${AUTH_H[@]}" -X DELETE "$BASE_URL$1"; }
+# -L follows redirects (Vercel returns 308 for trailing slash / HTTPS)
+pub_get()    { curl -sfL "$BASE_URL$1"; }
+pub_post()   { curl -sfL -X POST  -H "Content-Type: application/json" -d "$2" "$BASE_URL$1"; }
+admin_get()  { curl -sfL "${AUTH_H[@]}" "$BASE_URL$1"; }
+admin_post() { curl -sfL "${AUTH_H[@]}" -X POST  -H "Content-Type: application/json" -d "$2" "$BASE_URL$1"; }
+admin_patch(){ curl -sfL "${AUTH_H[@]}" -X PATCH -H "Content-Type: application/json" -d "$2" "$BASE_URL$1"; }
+admin_del()  { curl -sfL "${AUTH_H[@]}" -X DELETE "$BASE_URL$1"; }
 
-# Return HTTP status code only
-http_code() { curl -s -o /dev/null -w "%{http_code}" "${@}"; }
+# Return HTTP status code only (-L follows redirects)
+http_code() { curl -sL -o /dev/null -w "%{http_code}" "${@}"; }
 
 check_deps() {
   local missing=()

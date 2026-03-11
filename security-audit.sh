@@ -38,7 +38,7 @@ echo ""
 # ── Step 1: Register two test schools ────────────────────────────────────────
 
 echo "▸ Registering school-a-${TIMESTAMP}..."
-RES_A=$(curl -s -w "\n%{http_code}" -X POST "${BASE_URL}/api/saas/register" \
+RES_A=$(curl -sL -w "\n%{http_code}" -X POST "${BASE_URL}/api/saas/register" \
   -H "Content-Type: application/json" \
   -d "{
     \"school_name_en\": \"School A Test\",
@@ -61,7 +61,7 @@ USER_A=$(echo "$BODY_A" | grep -o '"user_id":"[^"]*"' | cut -d'"' -f4)
 echo "  tenant_id: ${TENANT_A}"
 
 echo "▸ Registering school-b-${TIMESTAMP}..."
-RES_B=$(curl -s -w "\n%{http_code}" -X POST "${BASE_URL}/api/saas/register" \
+RES_B=$(curl -sL -w "\n%{http_code}" -X POST "${BASE_URL}/api/saas/register" \
   -H "Content-Type: application/json" \
   -d "{
     \"school_name_en\": \"School B Test\",
@@ -198,11 +198,11 @@ test_endpoint() {
   local BODY="${4:-}"
 
   if [ "$METHOD" = "GET" ]; then
-    RESPONSE=$(curl -s -w "\n%{http_code}" "$URL" \
+    RESPONSE=$(curl -sL -w "\n%{http_code}" "$URL" \
       -H "Cookie: sb-access-token=${ACCESS_TOKEN}" \
       -H "Authorization: Bearer ${ACCESS_TOKEN}")
   else
-    RESPONSE=$(curl -s -w "\n%{http_code}" -X "$METHOD" "$URL" \
+    RESPONSE=$(curl -sL -w "\n%{http_code}" -X "$METHOD" "$URL" \
       -H "Cookie: sb-access-token=${ACCESS_TOKEN}" \
       -H "Authorization: Bearer ${ACCESS_TOKEN}" \
       -H "Content-Type: application/json" \
