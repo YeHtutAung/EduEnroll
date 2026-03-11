@@ -199,18 +199,8 @@ if [ -z "$ACCESS_TOKEN" ]; then
 fi
 echo "  Got access token for school-b"
 
-# Build proper session cookie for Next.js @supabase/ssr (base64url encoding)
-PROJECT_REF=$(echo "$SB_URL" | sed 's|https://\([^.]*\)\..*|\1|')
-COOKIE_NAME="sb-${PROJECT_REF}-auth-token"
-# Minimal session JSON the SSR client needs
-SESSION_JSON=$(echo "$TOKEN_RES" | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-print(json.dumps({k: d[k] for k in ('access_token','token_type','expires_at','refresh_token','user') if k in d}))
-" 2>/dev/null || echo "{\"access_token\":\"${ACCESS_TOKEN}\"}")
-# base64url encode: standard base64, then replace +→-, /→_, strip trailing =
-B64_SESSION=$(echo -n "$SESSION_JSON" | base64 -w0 | tr '+/' '-_' | tr -d '=')
-COOKIE_HEADER="${COOKIE_NAME}=base64-${B64_SESSION}"
+# Use Bearer token auth for API requests
+AUTH_HEADER="Authorization: Bearer ${ACCESS_TOKEN}"
 
 # ── Step 4: Cross-tenant access tests ────────────────────────────────────────
 
@@ -228,11 +218,11 @@ test_endpoint() {
   if [ "$METHOD" = "GET" ]; then
     RESPONSE=$(curl -sL -w "\n%{http_code}" "$URL" \
       ${BYPASS_H:+-H "$BYPASS_H"} \
-      -H "Cookie: ${COOKIE_HEADER}")
+      -H "${AUTH_HEADER}")
   else
     RESPONSE=$(curl -sL -w "\n%{http_code}" -X "$METHOD" "$URL" \
       ${BYPASS_H:+-H "$BYPASS_H"} \
-      -H "Cookie: ${COOKIE_HEADER}" \
+      -H "${AUTH_HEADER}" \
       -H "Content-Type: application/json" \
       -d "$BODY")
   fi

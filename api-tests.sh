@@ -143,14 +143,8 @@ login() {
   local PROJECT_REF
   PROJECT_REF=$(echo "$SUPABASE_URL" | sed 's|https://\([^.]*\)\..*|\1|')
 
-  # Build session cookie for Next.js (@supabase/ssr 0.9+ uses base64url encoding)
-  local COOKIE_NAME="sb-${PROJECT_REF}-auth-token"
-  local SESSION_JSON
-  SESSION_JSON=$(echo "$AUTH_RESP" | jq -c '{access_token,token_type,expires_at,refresh_token,user}')
-  # base64url encode: standard base64, then replace +→-, /→_, strip trailing =
-  local B64_SESSION
-  B64_SESSION=$(echo -n "$SESSION_JSON" | base64 -w0 | tr '+/' '-_' | tr -d '=')
-  AUTH_H=(-H "Cookie: ${COOKIE_NAME}=base64-${B64_SESSION}")
+  # Use Bearer token auth for API requests (supported by requireAuth)
+  AUTH_H=(-H "Authorization: Bearer ${ACCESS_TOKEN}")
 
   echo -e "  ${GREEN}✓${RESET} Logged in as ${TEST_EMAIL} (project: ${PROJECT_REF})"
 

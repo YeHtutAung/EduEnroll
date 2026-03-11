@@ -6,7 +6,7 @@ import { extractSubdomainFromHost } from "@/lib/tenant";
 import type { User } from "@/types/database";
 
 export interface AuthContext {
-  supabase: ReturnType<typeof createClient>;
+  supabase: ReturnType<typeof createClient> | ReturnType<typeof createAdminClient>;
   user: User;
   tenantId: string;
 }
@@ -20,14 +20,32 @@ export interface AuthContext {
  *   if (auth instanceof NextResponse) return auth;
  */
 export async function requireAuth(): Promise<AuthContext | NextResponse> {
-  const supabase = createClient();
+  const headersList = headers();
+  const authHeader = headersList.get("authorization");
 
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
+  let supabase: ReturnType<typeof createClient> | ReturnType<typeof createAdminClient>;
+  let authUser: { id: string } | null = null;
 
-  if (authError || !user) {
+  if (authHeader?.startsWith("Bearer ")) {
+    // Bearer token auth (API clients, CI) — use admin client so queries work
+    // without cookie-based RLS session. Tenant isolation is enforced via tenantId.
+    const token = authHeader.substring(7);
+    const adminClient = createAdminClient();
+    const { data, error } = await adminClient.auth.getUser(token);
+    if (!error && data.user) {
+      authUser = data.user;
+    }
+    supabase = adminClient;
+  } else {
+    // Cookie-based auth (browser)
+    supabase = createClient();
+    const { data, error } = await supabase.auth.getUser();
+    if (!error && data.user) {
+      authUser = data.user;
+    }
+  }
+
+  if (!authUser) {
     return NextResponse.json(
       { error: "Unauthorized", message: "Valid session required." },
       { status: 401 },
@@ -37,7 +55,7 @@ export async function requireAuth(): Promise<AuthContext | NextResponse> {
   const { data: profile } = await supabase
     .from("users")
     .select("*")
-    .eq("id", user.id)
+    .eq("id", authUser.id)
     .single() as { data: User | null; error: unknown };
 
   if (!profile) {
