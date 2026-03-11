@@ -104,6 +104,7 @@ INTAKE_RES=$(curl -s -X POST "${SB_URL}/rest/v1/intakes" \
   -d "{
     \"tenant_id\": \"${TENANT_A}\",
     \"name\": \"Test Intake\",
+    \"slug\": \"test-intake-${TIMESTAMP}\",
     \"year\": 2026,
     \"status\": \"open\"
   }")
@@ -166,8 +167,9 @@ curl -s -X POST "${SB_URL}/rest/v1/announcements" \
   -H "Content-Type: application/json" \
   -d "{
     \"tenant_id\": \"${TENANT_A}\",
+    \"intake_id\": \"${INTAKE_ID}\",
     \"message\": \"Test announcement\",
-    \"posted_by\": \"${USER_A}\"
+    \"sent_by_id\": \"${USER_A}\"
   }" > /dev/null 2>&1
 echo "  announcement created"
 
@@ -192,6 +194,17 @@ if [ -z "$ACCESS_TOKEN" ]; then
 fi
 echo "  Got access token for school-b"
 
+# Build proper session cookie for Next.js @supabase/ssr
+PROJECT_REF=$(echo "$SB_URL" | sed 's|https://\([^.]*\)\..*|\1|')
+COOKIE_NAME="sb-${PROJECT_REF}-auth-token"
+# Minimal session JSON the SSR client needs
+SESSION_JSON=$(echo "$TOKEN_RES" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(json.dumps({k: d[k] for k in ('access_token','token_type','expires_at','refresh_token','user') if k in d}))
+" 2>/dev/null || echo "{\"access_token\":\"${ACCESS_TOKEN}\"}")
+COOKIE_HEADER="${COOKIE_NAME}=${SESSION_JSON}"
+
 # ── Step 4: Cross-tenant access tests ────────────────────────────────────────
 
 echo ""
@@ -208,13 +221,11 @@ test_endpoint() {
   if [ "$METHOD" = "GET" ]; then
     RESPONSE=$(curl -sL -w "\n%{http_code}" "$URL" \
       ${BYPASS_H:+-H "$BYPASS_H"} \
-      -H "Cookie: sb-access-token=${ACCESS_TOKEN}" \
-      -H "Authorization: Bearer ${ACCESS_TOKEN}")
+      -H "Cookie: ${COOKIE_HEADER}")
   else
     RESPONSE=$(curl -sL -w "\n%{http_code}" -X "$METHOD" "$URL" \
       ${BYPASS_H:+-H "$BYPASS_H"} \
-      -H "Cookie: sb-access-token=${ACCESS_TOKEN}" \
-      -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+      -H "Cookie: ${COOKIE_HEADER}" \
       -H "Content-Type: application/json" \
       -d "$BODY")
   fi
@@ -327,24 +338,25 @@ echo ""
 echo "▸ Cleaning up test data..."
 
 # Delete test data using service role
-curl -s -X DELETE "${SB_URL}/rest/v1/announcements?tenant_id=eq.${TENANT_A}" \
-  -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
-curl -s -X DELETE "${SB_URL}/rest/v1/bank_accounts?tenant_id=eq.${TENANT_A}" \
-  -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
-curl -s -X DELETE "${SB_URL}/rest/v1/enrollments?tenant_id=eq.${TENANT_A}" \
-  -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
-curl -s -X DELETE "${SB_URL}/rest/v1/classes?tenant_id=eq.${TENANT_A}" \
-  -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
-curl -s -X DELETE "${SB_URL}/rest/v1/intakes?tenant_id=eq.${TENANT_A}" \
-  -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
-curl -s -X DELETE "${SB_URL}/rest/v1/users?tenant_id=eq.${TENANT_A}" \
-  -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
-curl -s -X DELETE "${SB_URL}/rest/v1/users?tenant_id=eq.${TENANT_B}" \
-  -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
-curl -s -X DELETE "${SB_URL}/rest/v1/tenants?id=eq.${TENANT_A}" \
-  -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
-curl -s -X DELETE "${SB_URL}/rest/v1/tenants?id=eq.${TENANT_B}" \
-  -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
+# Delete in dependency order (children before parents)
+for TID in "${TENANT_A}" "${TENANT_B}"; do
+  curl -s -X DELETE "${SB_URL}/rest/v1/announcements?tenant_id=eq.${TID}" \
+    -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
+  curl -s -X DELETE "${SB_URL}/rest/v1/bank_accounts?tenant_id=eq.${TID}" \
+    -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
+  curl -s -X DELETE "${SB_URL}/rest/v1/enrollments?tenant_id=eq.${TID}" \
+    -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
+  curl -s -X DELETE "${SB_URL}/rest/v1/classes?tenant_id=eq.${TID}" \
+    -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
+  curl -s -X DELETE "${SB_URL}/rest/v1/intake_form_fields?intake_id=in.(select id from intakes where tenant_id=eq.${TID})" \
+    -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
+  curl -s -X DELETE "${SB_URL}/rest/v1/intakes?tenant_id=eq.${TID}" \
+    -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
+  curl -s -X DELETE "${SB_URL}/rest/v1/users?tenant_id=eq.${TID}" \
+    -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
+  curl -s -X DELETE "${SB_URL}/rest/v1/tenants?id=eq.${TID}" \
+    -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
+done
 
 echo "  Done."
 

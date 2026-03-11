@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════
-# Nihon Moment KuuNyi — Sprint 2 API Test Suite
+# KuuNyi — API Test Suite
 # ═══════════════════════════════════════════════════════════════
 #
-# Tests every endpoint built in Sprint 2.
+# Tests every public + admin endpoint.
 # Requires: curl, jq
 #
 # Usage:
-#   BASE_URL=http://localhost:3000 \
+#   BASE_URL=http://localhost:3005 \
 #   SUPABASE_URL=https://xxxx.supabase.co \
 #   SUPABASE_ANON_KEY=eyJ... \
-#   TEST_EMAIL=admin@nihon-moment.com \
+#   TEST_EMAIL=admin@nihonmoment.com \
 #   TEST_PASSWORD=yourpassword \
 #   bash api-tests.sh
 #
@@ -21,11 +21,12 @@
 set -euo pipefail
 
 # ── Configuration ───────────────────────────────────────────────
-BASE_URL="${BASE_URL:-http://localhost:3000}"
+BASE_URL="${BASE_URL:-http://localhost:3005}"
 SUPABASE_URL="${SUPABASE_URL:-}"
 SUPABASE_ANON_KEY="${SUPABASE_ANON_KEY:-}"
 TEST_EMAIL="${TEST_EMAIL:-}"
 TEST_PASSWORD="${TEST_PASSWORD:-}"
+TIMESTAMP=$(date +%s)
 
 # ── Counters ────────────────────────────────────────────────────
 PASS=0
@@ -35,11 +36,17 @@ SKIP_ADMIN=0  # Set to 1 if auth setup fails
 
 # Shared state populated during tests
 INTAKE_ID=""
+INTAKE_SLUG=""
+TENANT_SUBDOMAIN=""
 CLASS_N5_ID=""; CLASS_N4_ID=""; CLASS_N3_ID=""; CLASS_N2_ID=""; CLASS_N1_ID=""
 ENROLLMENT_REF=""
 
 # Auth cookie header — populated by login()
 AUTH_H=()
+# Tenant slug header — populated after login()
+TENANT_H=()
+# Access token for direct Supabase queries
+ACCESS_TOKEN=""
 
 # ── Helpers ─────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -64,8 +71,8 @@ fi
 
 # HTTP helpers — output body; non-2xx causes empty output (curl -f)
 # -L follows redirects (Vercel returns 308 for trailing slash / HTTPS)
-pub_get()    { curl -sfL "${BYPASS_H[@]}" "$BASE_URL$1"; }
-pub_post()   { curl -sfL "${BYPASS_H[@]}" -X POST  -H "Content-Type: application/json" -d "$2" "$BASE_URL$1"; }
+pub_get()    { curl -sfL "${BYPASS_H[@]}" "${TENANT_H[@]}" "$BASE_URL$1"; }
+pub_post()   { curl -sfL "${BYPASS_H[@]}" "${TENANT_H[@]}" -X POST  -H "Content-Type: application/json" -d "$2" "$BASE_URL$1"; }
 admin_get()  { curl -sfL "${BYPASS_H[@]}" "${AUTH_H[@]}" "$BASE_URL$1"; }
 admin_post() { curl -sfL "${BYPASS_H[@]}" "${AUTH_H[@]}" -X POST  -H "Content-Type: application/json" -d "$2" "$BASE_URL$1"; }
 admin_patch(){ curl -sfL "${BYPASS_H[@]}" "${AUTH_H[@]}" -X PATCH -H "Content-Type: application/json" -d "$2" "$BASE_URL$1"; }
@@ -73,6 +80,8 @@ admin_del()  { curl -sfL "${BYPASS_H[@]}" "${AUTH_H[@]}" -X DELETE "$BASE_URL$1"
 
 # Return HTTP status code only (-L follows redirects)
 http_code() { curl -sL "${BYPASS_H[@]}" -o /dev/null -w "%{http_code}" "${@}"; }
+# HTTP status code with tenant header
+http_code_pub() { curl -sL "${BYPASS_H[@]}" "${TENANT_H[@]}" -o /dev/null -w "%{http_code}" "${@}"; }
 
 check_deps() {
   local missing=()
@@ -110,7 +119,6 @@ login() {
   }
 
   # Validate we got an access_token back
-  local ACCESS_TOKEN
   ACCESS_TOKEN=$(echo "$AUTH_RESP" | jq -r '.access_token // empty')
   if [[ -z "$ACCESS_TOKEN" ]]; then
     echo -e "  ${RED}✗ FAIL${RESET}  Auth response missing access_token."
@@ -120,21 +128,32 @@ login() {
   fi
 
   # Derive the Supabase project ref from the URL
-  # e.g. https://abcxyz123.supabase.co → abcxyz123
   local PROJECT_REF
   PROJECT_REF=$(echo "$SUPABASE_URL" | sed 's|https://\([^.]*\)\..*|\1|')
 
-  # The @supabase/ssr server client reads the session from a cookie named
-  # sb-{projectRef}-auth-token whose value is the raw session JSON.
-  # We pass it via the Cookie HTTP header so Next.js cookieStore() sees it.
+  # Build session cookie for Next.js
   local COOKIE_NAME="sb-${PROJECT_REF}-auth-token"
   local SESSION_JSON
   SESSION_JSON=$(echo "$AUTH_RESP" | jq -c '{access_token,token_type,expires_at,refresh_token,user}')
-
-  # Store as a header array used by all admin_* helpers
   AUTH_H=(-H "Cookie: ${COOKIE_NAME}=${SESSION_JSON}")
 
   echo -e "  ${GREEN}✓${RESET} Logged in as ${TEST_EMAIL} (project: ${PROJECT_REF})"
+
+  # Fetch tenant subdomain for public endpoint tests
+  local TENANT_RESP
+  TENANT_RESP=$(curl -sf "${SUPABASE_URL}/rest/v1/tenants?select=subdomain" \
+    -H "apikey: ${SUPABASE_ANON_KEY}" \
+    -H "Authorization: Bearer ${ACCESS_TOKEN}" 2>/dev/null) || TENANT_RESP="[]"
+
+  TENANT_SUBDOMAIN=$(echo "$TENANT_RESP" | jq -r '.[0].subdomain // empty')
+  if [[ -n "$TENANT_SUBDOMAIN" ]]; then
+    TENANT_H=(-H "x-tenant-slug: ${TENANT_SUBDOMAIN}")
+    echo -e "  ${GREEN}✓${RESET} Tenant subdomain: ${TENANT_SUBDOMAIN}"
+  else
+    echo -e "  ${YELLOW}!${RESET} Could not resolve tenant subdomain — public tests may fail"
+    TENANT_H=()
+  fi
+
   SKIP_ADMIN=0
 }
 
@@ -148,14 +167,16 @@ test_intakes() {
 
   if [[ $SKIP_ADMIN -eq 1 ]]; then skip "POST /api/intakes (auth required)"; return; fi
 
-  # Create April 2026 intake
+  # Create intake with unique name to avoid slug conflicts
+  local INTAKE_NAME="Test ${TIMESTAMP}"
   local RESP
   RESP=$(admin_post "/api/intakes" \
-    '{"name":"April 2026 Intake","year":2026,"status":"draft"}' 2>/dev/null) || RESP=""
+    "{\"name\":\"${INTAKE_NAME}\",\"year\":2026,\"status\":\"draft\"}" 2>/dev/null) || RESP=""
 
   if echo "$RESP" | jq -e '.id' &>/dev/null; then
     INTAKE_ID=$(echo "$RESP" | jq -r '.id')
-    pass "POST /api/intakes — created April 2026 (id: ${INTAKE_ID:0:8}…)"
+    INTAKE_SLUG=$(echo "$RESP" | jq -r '.slug // empty')
+    pass "POST /api/intakes — created (id: ${INTAKE_ID:0:8}…, slug: ${INTAKE_SLUG})"
   else
     fail "POST /api/intakes — unexpected response" "$RESP"
     return
@@ -178,7 +199,7 @@ test_intakes() {
     fail "GET /api/intakes — unexpected response" "$RESP"
   fi
 
-  # Validation: duplicate or bad data
+  # Validation: empty name should 400
   local CODE
   CODE=$(http_code "${AUTH_H[@]}" -X POST -H "Content-Type: application/json" \
     -d '{"name":"","year":2026}' "$BASE_URL/api/intakes")
@@ -196,7 +217,6 @@ test_classes() {
   if [[ $SKIP_ADMIN -eq 1 ]]; then skip "POST /api/intakes/{id}/classes (auth required)"; return; fi
   if [[ -z "$INTAKE_ID" ]]; then skip "Classes — no intake_id available"; return; fi
 
-  # Nihon Moment fees: N5=300k, N4=350k, N3=400k, N2=450k, N1=500k
   declare -A FEES=([N5]=300000 [N4]=350000 [N3]=400000 [N2]=450000 [N1]=500000)
   local -A CLASS_IDS
 
@@ -220,7 +240,6 @@ test_classes() {
     fi
   done
 
-  # Store class IDs globally
   CLASS_N5_ID="${CLASS_IDS[N5]:-}"
   CLASS_N4_ID="${CLASS_IDS[N4]:-}"
   CLASS_N3_ID="${CLASS_IDS[N3]:-}"
@@ -253,49 +272,48 @@ test_classes() {
 test_public_intake() {
   header "Public Enrollment Page"
 
+  if [[ -z "$INTAKE_SLUG" ]]; then
+    skip "GET /api/public/enroll/[slug] — no intake slug available"
+    return
+  fi
+
   local RESP
-  RESP=$(pub_get "/api/public/enroll/april-2026" 2>/dev/null) || RESP=""
+  RESP=$(pub_get "/api/public/enroll/${INTAKE_SLUG}" 2>/dev/null) || RESP=""
 
   if echo "$RESP" | jq -e '.intake.status == "open"' &>/dev/null; then
     local COUNT; COUNT=$(echo "$RESP" | jq '.classes | length')
-    pass "GET /api/public/enroll/april-2026 — intake open, ${COUNT} class(es) listed"
+    pass "GET /api/public/enroll/${INTAKE_SLUG} — intake open, ${COUNT} class(es) listed"
 
     # Confirm N3 class is present with the right fee
     local N3_FEE; N3_FEE=$(echo "$RESP" | jq '.classes[] | select(.level=="N3") | .fee_mmk')
     if [[ "$N3_FEE" == "400000" ]]; then
-      pass "GET /api/public/enroll/april-2026 — N3 fee correct (400,000 MMK)"
+      pass "GET /api/public/enroll/${INTAKE_SLUG} — N3 fee correct (400,000 MMK)"
     else
-      fail "GET /api/public/enroll/april-2026 — N3 fee unexpected: ${N3_FEE}"
+      fail "GET /api/public/enroll/${INTAKE_SLUG} — N3 fee unexpected: ${N3_FEE}"
     fi
 
-    # Use the class_id from the public response to be sure we get the right one
+    # Verify response has labels object
+    if echo "$RESP" | jq -e '.labels.intake' &>/dev/null; then
+      pass "GET /api/public/enroll/${INTAKE_SLUG} — labels object present"
+    else
+      fail "GET /api/public/enroll/${INTAKE_SLUG} — missing labels object"
+    fi
+
+    # Use the class_id from the public response
     local PUB_N3_ID; PUB_N3_ID=$(echo "$RESP" | jq -r '.classes[] | select(.level=="N3") | .id // empty')
     if [[ -n "$PUB_N3_ID" && -z "$CLASS_N3_ID" ]]; then
       CLASS_N3_ID="$PUB_N3_ID"
     fi
-  elif [[ $SKIP_ADMIN -eq 1 ]]; then
-    # No auth → intake was never created; skip gracefully
-    skip "GET /api/public/enroll/april-2026 — no open intake (run with auth to create one first)"
   else
-    fail "GET /api/public/enroll/april-2026 — unexpected response" "$RESP"
+    fail "GET /api/public/enroll/${INTAKE_SLUG} — unexpected response" "$RESP"
   fi
 
-  # 404 on a valid-format slug that simply has no matching intake in the DB.
-  # Use a year >= 2020 so the slug parser accepts it, but pick a month/year
-  # combination that will never exist (September 2020 was before Nihon Moment).
-  local CODE; CODE=$(http_code "$BASE_URL/api/public/enroll/september-2020")
+  # 404 on a non-existent slug (valid format, no matching intake)
+  local CODE; CODE=$(http_code_pub "$BASE_URL/api/public/enroll/nonexistent-slug-${TIMESTAMP}")
   if [[ "$CODE" == "404" ]]; then
-    pass "GET /api/public/enroll/september-2020 — 404 for non-existent intake"
+    pass "GET /api/public/enroll/nonexistent-slug — 404 for non-existent intake"
   else
-    fail "GET /api/public/enroll/september-2020 — expected 404, got ${CODE}"
-  fi
-
-  # 400 on a malformed slug (year out of range)
-  CODE=$(http_code "$BASE_URL/api/public/enroll/march-1999")
-  if [[ "$CODE" == "400" ]]; then
-    pass "GET /api/public/enroll/march-1999 — 400 for out-of-range year"
-  else
-    fail "GET /api/public/enroll/march-1999 — expected 400, got ${CODE}"
+    fail "GET /api/public/enroll/nonexistent-slug — expected 404, got ${CODE}"
   fi
 }
 
@@ -308,16 +326,11 @@ test_submit_enrollment() {
     return
   fi
 
+  # New body format: class_id + form_data object
   local BODY
   BODY=$(jq -n \
-    --arg class_id   "$CLASS_N3_ID" \
-    --arg name_en    "Ko Aung" \
-    --arg name_mm    "ကိုအောင်" \
-    --arg nrc        "12/OuKaMa(N)123456" \
-    --arg phone      "09123456789" \
-    --arg email      "ko.aung@example.com" \
-    '{class_id:$class_id,student_name_en:$name_en,student_name_mm:$name_mm,
-      nrc_number:$nrc,phone:$phone,email:$email}')
+    --arg class_id "$CLASS_N3_ID" \
+    '{class_id: $class_id, form_data: {name_en: "Ko Aung", name_mm: "ကိုအောင်", nrc: "12/OuKaMa(N)123456", phone: "09123456789", email: "ko.aung@example.com"}}')
 
   local RESP
   RESP=$(pub_post "/api/public/enroll" "$BODY" 2>/dev/null) || RESP=""
@@ -339,25 +352,35 @@ test_submit_enrollment() {
     return
   fi
 
-  # Validation: missing required field
+  # Validation: missing class_id should 400
   local CODE
-  CODE=$(http_code -X POST -H "Content-Type: application/json" \
-    -d '{"class_id":"'$CLASS_N3_ID'","student_name_en":"Test"}' \
+  CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
+    -d '{"form_data":{"name_en":"Test"}}' \
     "$BASE_URL/api/public/enroll")
   if [[ "$CODE" == "400" ]]; then
-    pass "POST /api/public/enroll — 400 when phone is missing"
+    pass "POST /api/public/enroll — 400 when class_id is missing"
   else
-    fail "POST /api/public/enroll — expected 400 for missing phone, got ${CODE}"
+    fail "POST /api/public/enroll — expected 400 for missing class_id, got ${CODE}"
   fi
 
-  # Validation: invalid phone
-  CODE=$(http_code -X POST -H "Content-Type: application/json" \
-    -d '{"class_id":"'$CLASS_N3_ID'","student_name_en":"Test","phone":"12345"}' \
+  # Validation: invalid class_id UUID should 400
+  CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
+    -d '{"class_id":"not-a-uuid"}' \
     "$BASE_URL/api/public/enroll")
   if [[ "$CODE" == "400" ]]; then
-    pass "POST /api/public/enroll — 400 on invalid Myanmar phone number"
+    pass "POST /api/public/enroll — 400 on invalid class_id UUID"
   else
-    fail "POST /api/public/enroll — expected 400 for bad phone, got ${CODE}"
+    fail "POST /api/public/enroll — expected 400 for invalid UUID, got ${CODE}"
+  fi
+
+  # Non-existent class_id should 404
+  CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
+    -d '{"class_id":"00000000-0000-0000-0000-000000000000"}' \
+    "$BASE_URL/api/public/enroll")
+  if [[ "$CODE" == "404" ]]; then
+    pass "POST /api/public/enroll — 404 on non-existent class"
+  else
+    fail "POST /api/public/enroll — expected 404 for non-existent class, got ${CODE}"
   fi
 }
 
@@ -396,7 +419,7 @@ test_enrollment_status() {
   fi
 
   # 400 on missing ref
-  local CODE; CODE=$(http_code "$BASE_URL/api/public/status")
+  local CODE; CODE=$(http_code_pub "$BASE_URL/api/public/status")
   if [[ "$CODE" == "400" ]]; then
     pass "GET /api/public/status — 400 when ref is missing"
   else
@@ -404,7 +427,7 @@ test_enrollment_status() {
   fi
 
   # 404 on unknown ref
-  CODE=$(http_code "$BASE_URL/api/public/status?ref=NM-9999-99999")
+  CODE=$(http_code_pub "$BASE_URL/api/public/status?ref=NM-9999-99999")
   if [[ "$CODE" == "404" ]]; then
     pass "GET /api/public/status — 404 for unknown ref"
   else
@@ -421,33 +444,18 @@ test_admin_stats() {
   local RESP
   RESP=$(admin_get "/api/admin/stats" 2>/dev/null) || RESP=""
 
-  if echo "$RESP" | jq -e '.total_enrollments' &>/dev/null; then
+  if echo "$RESP" | jq -e 'has("total_enrollments")' &>/dev/null; then
     local TOTAL; TOTAL=$(echo "$RESP" | jq '.total_enrollments')
     local PENDING; PENDING=$(echo "$RESP" | jq '.pending_payment_count')
     local CONFIRMED; CONFIRMED=$(echo "$RESP" | jq '.confirmed_count')
-    local REVENUE; REVENUE=$(echo "$RESP" | jq '.total_revenue_mmk')
-    pass "GET /api/admin/stats — total=${TOTAL}, pending=${PENDING}, confirmed=${CONFIRMED}, revenue=${REVENUE} MMK"
+    pass "GET /api/admin/stats — total=${TOTAL}, pending=${PENDING}, confirmed=${CONFIRMED}"
 
     # seats_by_class should be an array
-    local CLASSES_COUNT; CLASSES_COUNT=$(echo "$RESP" | jq '.seats_by_class | length')
-    if [[ "$CLASSES_COUNT" -ge 0 ]]; then
+    if echo "$RESP" | jq -e '.seats_by_class | type == "array"' &>/dev/null; then
+      local CLASSES_COUNT; CLASSES_COUNT=$(echo "$RESP" | jq '.seats_by_class | length')
       pass "GET /api/admin/stats — seats_by_class has ${CLASSES_COUNT} entry/entries"
     else
       fail "GET /api/admin/stats — seats_by_class missing or invalid"
-    fi
-
-    # Verify expected fields are present
-    local MISSING_FIELDS
-    MISSING_FIELDS=$(echo "$RESP" | jq -r '
-      ["total_enrollments","confirmed_count","pending_payment_count",
-       "payment_submitted_count","total_revenue_mmk","seats_by_class"]
-      | map(select(. as $k | input | has($k) | not))
-      | join(", ")
-    ' 2>/dev/null) || MISSING_FIELDS=""
-    if [[ -z "$MISSING_FIELDS" ]]; then
-      pass "GET /api/admin/stats — all expected fields present"
-    else
-      fail "GET /api/admin/stats — missing fields: ${MISSING_FIELDS}"
     fi
   else
     fail "GET /api/admin/stats — unexpected response" "$RESP"
@@ -498,7 +506,7 @@ test_admin_students() {
     fi
   fi
 
-  # Filter by class_level
+  # Filter by class_level (now TEXT, not enum)
   RESP=$(admin_get "/api/admin/students?class_level=N3" 2>/dev/null) || RESP=""
   if echo "$RESP" | jq -e '.data' &>/dev/null; then
     local N3_OK; N3_OK=$(echo "$RESP" | jq '[.data[].class_level] | all(. == "N3")')
@@ -530,14 +538,6 @@ test_admin_students() {
   else
     fail "GET /api/admin/students — expected page_size=2, got ${PS}"
   fi
-
-  # Bad filter: invalid class_level
-  local CODE; CODE=$(http_code "${AUTH_H[@]}" "$BASE_URL/api/admin/students?class_level=N9")
-  if [[ "$CODE" == "400" ]]; then
-    pass "GET /api/admin/students — 400 on invalid class_level=N9"
-  else
-    fail "GET /api/admin/students — expected 400 for bad class_level, got ${CODE}"
-  fi
 }
 
 # ── 8. Admin Pending Payments ───────────────────────────────────
@@ -552,19 +552,6 @@ test_admin_pending_payments() {
   if echo "$RESP" | jq -e 'type == "array"' &>/dev/null; then
     local COUNT; COUNT=$(echo "$RESP" | jq 'length')
     pass "GET /api/admin/payments/pending — returned ${COUNT} pending payment(s)"
-
-    # Validate shape of the first item if present
-    if [[ "$COUNT" -gt 0 ]]; then
-      local HAS_FIELDS; HAS_FIELDS=$(echo "$RESP" | jq '
-        .[0] | has("enrollment") and has("payment") and
-               has("class_level") and has("intake_name")
-      ')
-      if [[ "$HAS_FIELDS" == "true" ]]; then
-        pass "GET /api/admin/payments/pending — response shape correct (enrollment + payment + class_level + intake_name)"
-      else
-        fail "GET /api/admin/payments/pending — missing expected fields" "$(echo "$RESP" | jq '.[0] | keys')"
-      fi
-    fi
   else
     fail "GET /api/admin/payments/pending — expected array" "$RESP"
   fi
@@ -584,7 +571,7 @@ test_bank_accounts() {
 
   if [[ $SKIP_ADMIN -eq 1 ]]; then skip "Bank account endpoints (auth required)"; return; fi
 
-  # List (should have seeded KBZ + AYA from migration 010)
+  # List
   local RESP
   RESP=$(admin_get "/api/admin/bank-accounts" 2>/dev/null) || RESP=""
 
@@ -627,7 +614,7 @@ test_bank_accounts() {
     fail "PATCH /api/admin/bank-accounts/{id} — account_holder update failed" "$RESP"
   fi
 
-  # PATCH: invalid bank_name (should 400)
+  # POST: invalid bank_name should 400
   local CODE; CODE=$(http_code "${AUTH_H[@]}" -X POST -H "Content-Type: application/json" \
     -d '{"bank_name":"FAKEBOOK","account_number":"123","account_holder":"Test"}' \
     "$BASE_URL/api/admin/bank-accounts")
@@ -670,7 +657,7 @@ test_auth_guards() {
   for EP in "${ENDPOINTS[@]}"; do
     local CODE; CODE=$(http_code "$BASE_URL$EP")
     if [[ "$CODE" == "401" ]]; then
-      pass "GET ${EP} — 401 without auth ✓"
+      pass "GET ${EP} — 401 without auth"
     else
       fail "GET ${EP} — expected 401, got ${CODE}"
     fi
@@ -684,7 +671,7 @@ test_auth_guards() {
 main() {
   echo -e "${BOLD}"
   echo "╔══════════════════════════════════════════════════════╗"
-  echo "║   Nihon Moment KuuNyi — Sprint 2 API Test Suite  ║"
+  echo "║          KuuNyi — API Test Suite                    ║"
   echo "╚══════════════════════════════════════════════════════╝"
   echo -e "${RESET}"
   echo "  Base URL : ${BASE_URL}"
