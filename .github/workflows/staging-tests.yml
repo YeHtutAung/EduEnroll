@@ -55,28 +55,31 @@ jobs:
           TOKEN=$(echo "$TOKEN_RESP" | jq -r '.access_token // empty')
           echo "Got token: ${TOKEN:0:20}..."
 
-          # Test with Authorization header
-          echo "--- Authorization header ---"
-          curl -sL -w "\nHTTP: %{http_code}" \
+          # Verify token works directly with Supabase
+          echo "--- Direct Supabase getUser ---"
+          curl -s "${SUPABASE_URL}/auth/v1/user" \
+            -H "apikey: ${SUPABASE_ANON_KEY}" \
+            -H "Authorization: Bearer $TOKEN" | jq '{id: .id, email: .email}' 2>/dev/null || echo "FAILED"
+
+          # Test with both headers
+          echo "--- Authorization + x-supabase-auth headers ---"
+          RESP=$(curl -sL -w "\n%{http_code}" \
             -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
             -H "Authorization: Bearer $TOKEN" \
-            "$BASE_URL/api/intakes" | tail -5
-          echo ""
-
-          # Test with x-supabase-auth header
-          echo "--- x-supabase-auth header ---"
-          curl -sL -w "\nHTTP: %{http_code}" \
-            -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
             -H "x-supabase-auth: Bearer $TOKEN" \
-            "$BASE_URL/api/intakes" | tail -5
-          echo ""
+            "$BASE_URL/api/intakes")
+          echo "$RESP" | tail -5
 
-          # Test without any auth (should 401)
-          echo "--- No auth ---"
-          curl -sL -w "\nHTTP: %{http_code}" \
+          # Test a GET that should show different response if new code is deployed
+          echo "--- POST intake with auth ---"
+          RESP2=$(curl -sL -w "\n%{http_code}" \
             -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
-            "$BASE_URL/api/intakes" | tail -5
-          echo ""
+            -H "Authorization: Bearer $TOKEN" \
+            -H "x-supabase-auth: Bearer $TOKEN" \
+            -H "Content-Type: application/json" \
+            -X POST -d '{"name":"CI Debug Test","year":2026}' \
+            "$BASE_URL/api/intakes")
+          echo "$RESP2" | tail -5
         env:
           BASE_URL: ${{ secrets.STAGING_URL }}
           SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}

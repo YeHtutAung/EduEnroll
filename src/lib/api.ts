@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createBareClient, type SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { extractSubdomainFromHost } from "@/lib/tenant";
-import type { User } from "@/types/database";
+import type { User, Database } from "@/types/database";
 
 export interface AuthContext {
-  supabase: ReturnType<typeof createClient> | ReturnType<typeof createAdminClient>;
+  supabase: SupabaseClient<Database>;
   user: User;
   tenantId: string;
 }
@@ -25,19 +26,26 @@ export async function requireAuth(): Promise<AuthContext | NextResponse> {
   // (Vercel's proxy may strip Authorization on certain deployments)
   const authHeader = headersList.get("authorization") ?? headersList.get("x-supabase-auth");
 
-  let supabase: ReturnType<typeof createClient> | ReturnType<typeof createAdminClient>;
+  let supabase: SupabaseClient<Database>;
   let authUser: { id: string } | null = null;
 
   if (authHeader?.startsWith("Bearer ")) {
-    // Bearer token auth (API clients, CI) — use admin client so queries work
-    // without cookie-based RLS session. Tenant isolation is enforced via tenantId.
+    // Bearer token auth (API clients, CI) — create a client with the user's
+    // token so RLS works correctly via auth.uid(). No service role key needed.
     const token = authHeader.substring(7);
-    const adminClient = createAdminClient();
-    const { data, error } = await adminClient.auth.getUser(token);
+    const tokenClient = createBareClient<Database>(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        global: { headers: { Authorization: `Bearer ${token}` } },
+        auth: { persistSession: false, autoRefreshToken: false },
+      },
+    );
+    const { data, error } = await tokenClient.auth.getUser(token);
     if (!error && data.user) {
       authUser = data.user;
     }
-    supabase = adminClient;
+    supabase = tokenClient;
   } else {
     // Cookie-based auth (browser)
     supabase = createClient();
