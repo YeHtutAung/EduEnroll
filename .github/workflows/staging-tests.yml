@@ -23,18 +23,25 @@ jobs:
           sleep 180
 
       - name: Verify staging is reachable and check deployed version
+        env:
+          STAGING_URL: ${{ secrets.STAGING_URL }}
+          BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
+          echo "Staging URL length: ${#STAGING_URL}"
+          echo "Bypass secret length: ${#BYPASS_SECRET}"
           for i in 1 2 3 4 5 6; do
-            RESP=$(curl -sL -f \
-              -H "x-vercel-protection-bypass: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}" \
-              "${{ secrets.STAGING_URL }}/api/health" 2>/dev/null || echo '{}')
+            HTTP_CODE=$(curl -sL -o /tmp/resp.txt -w "%{http_code}" \
+              -H "x-vercel-protection-bypass: ${BYPASS_SECRET}" \
+              "${STAGING_URL}/api/health" 2>&1 || echo "curl_failed")
+            RESP=$(cat /tmp/resp.txt 2>/dev/null || echo "")
+            echo "Attempt ${i}: HTTP ${HTTP_CODE} (body length: ${#RESP})"
+            echo "  Body: ${RESP:0:200}"
             STATUS=$(echo "$RESP" | jq -r '.status // empty' 2>/dev/null || echo "")
             if [ "$STATUS" = "ok" ]; then
               echo "Staging is ready:"
               echo "$RESP" | jq .
               exit 0
             fi
-            echo "Attempt ${i}: not ready yet (response: ${RESP:0:100})"
             sleep 15
           done
           echo "Staging not reachable after retries."
