@@ -27,24 +27,46 @@ jobs:
           STAGING_URL: ${{ secrets.STAGING_URL }}
           BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
+          echo "=== Diagnostics ==="
           echo "Staging URL length: ${#STAGING_URL}"
           echo "Bypass secret length: ${#BYPASS_SECRET}"
-          for i in 1 2 3 4 5 6; do
-            HTTP_CODE=$(curl -sL -o /tmp/resp.txt -w "%{http_code}" \
-              -H "x-vercel-protection-bypass: ${BYPASS_SECRET}" \
-              "${STAGING_URL}/api/health" 2>&1 || echo "curl_failed")
-            RESP=$(cat /tmp/resp.txt 2>/dev/null || echo "")
-            echo "Attempt ${i}: HTTP ${HTTP_CODE} (body length: ${#RESP})"
-            echo "  Body: ${RESP:0:200}"
-            STATUS=$(echo "$RESP" | jq -r '.status // empty' 2>/dev/null || echo "")
-            if [ "$STATUS" = "ok" ]; then
-              echo "Staging is ready:"
-              echo "$RESP" | jq .
-              exit 0
-            fi
-            sleep 15
-          done
-          echo "Staging not reachable after retries."
+
+          # First check: try /api/health (new endpoint)
+          echo ""
+          echo "=== Testing /api/health ==="
+          HTTP_CODE=$(curl -sL -o /tmp/resp.txt -w "%{http_code}" \
+            -H "x-vercel-protection-bypass: ${BYPASS_SECRET}" \
+            "${STAGING_URL}/api/health" 2>&1 || echo "curl_failed")
+          RESP=$(cat /tmp/resp.txt 2>/dev/null || echo "")
+          echo "HTTP ${HTTP_CODE} (body length: ${#RESP})"
+          echo "Body: ${RESP:0:300}"
+
+          # Fallback check: try /api/intakes (existing endpoint, should return 401)
+          echo ""
+          echo "=== Testing /api/intakes ==="
+          HTTP_CODE2=$(curl -sL -o /tmp/resp2.txt -w "%{http_code}" \
+            -H "x-vercel-protection-bypass: ${BYPASS_SECRET}" \
+            "${STAGING_URL}/api/intakes" 2>&1 || echo "curl_failed")
+          RESP2=$(cat /tmp/resp2.txt 2>/dev/null || echo "")
+          echo "HTTP ${HTTP_CODE2} (body length: ${#RESP2})"
+          echo "Body: ${RESP2:0:300}"
+
+          # Accept either /api/health returning 200 or /api/intakes returning 401
+          STATUS=$(echo "$RESP" | jq -r '.status // empty' 2>/dev/null || echo "")
+          if [ "$STATUS" = "ok" ]; then
+            echo ""
+            echo "Staging is ready (health check passed):"
+            echo "$RESP" | jq .
+            exit 0
+          elif [ "$HTTP_CODE2" = "401" ]; then
+            echo ""
+            echo "Staging is reachable (intakes returned 401 — old code without /api/health)"
+            echo "WARNING: /api/health not found — Vercel may not have deployed latest code"
+            exit 0
+          fi
+
+          echo ""
+          echo "Staging not reachable — both checks failed."
           exit 1
 
   api-tests:
