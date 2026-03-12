@@ -52,8 +52,9 @@ export async function POST(request: NextRequest) {
   if (bank_name.trim().length > 50) {
     return badRequest("bank_name must be 50 characters or fewer.");
   }
-  if (!account_number || typeof account_number !== "string" || account_number.trim() === "") {
-    return badRequest("account_number is required.");
+  // account_number is optional when a QR code is provided (e.g. KPay, Wave Money)
+  if (!qr_code_url && (!account_number || typeof account_number !== "string" || account_number.trim() === "")) {
+    return badRequest("account_number is required (unless a QR code is provided).");
   }
   if (!account_holder || typeof account_holder !== "string" || account_holder.trim() === "") {
     return badRequest("account_holder is required.");
@@ -70,7 +71,7 @@ export async function POST(request: NextRequest) {
     .insert({
       tenant_id:      tenantId,
       bank_name:      bank_name.trim(),
-      account_number: account_number.trim(),
+      account_number: typeof account_number === "string" ? account_number.trim() : "",
       account_holder: account_holder.trim(),
       qr_code_url:    (qr_code_url as string | null) ?? null,
       is_active,

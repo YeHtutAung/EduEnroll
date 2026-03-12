@@ -237,8 +237,8 @@ function AddBankModal({
               type="text"
               value={form.account_number}
               onChange={(e) => setForm((f) => ({ ...f, account_number: e.target.value }))}
-              required
-              placeholder="e.g. 1234567890"
+              required={!qrFile}
+              placeholder={qrFile ? "Optional with QR code" : "e.g. 1234567890"}
               className={inputClass}
             />
           </div>
