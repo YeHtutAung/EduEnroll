@@ -14,6 +14,7 @@ export async function GET() {
     version: process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? "local",
     ref: process.env.VERCEL_GIT_COMMIT_REF ?? "unknown",
     debug: {
+      supabase_url: process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/https?:\/\//, "").split(".")[0] ?? null,
       has_authorization: !!authHeader,
       authorization_prefix: authHeader?.substring(0, 15) ?? null,
       has_x_supabase_auth: !!supabaseAuthHeader,

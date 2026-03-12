@@ -95,10 +95,12 @@ jobs:
 
           # Test: do auth headers reach the API route?
           echo "--- Health endpoint WITH x-supabase-auth ---"
-          curl -s \
+          HEALTH_RESP=$(curl -sL \
             -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
             -H "x-supabase-auth: Bearer $TOKEN" \
-            "$BASE_URL/api/health" | jq . 2>/dev/null || echo "FAILED"
+            "$BASE_URL/api/health" || echo "curl_failed")
+          echo "Raw response (first 500 chars): ${HEALTH_RESP:0:500}"
+          echo "$HEALTH_RESP" | jq . 2>/dev/null || echo "(not valid JSON)"
 
           # Test auth on intakes endpoint
           echo "--- x-supabase-auth → /api/intakes ---"
