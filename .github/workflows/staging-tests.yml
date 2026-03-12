@@ -10,6 +10,7 @@ name: Staging Tests
 on:
   push:
     branches: [staging]
+  workflow_dispatch:
 
 jobs:
   wait-for-deploy:
@@ -21,17 +22,19 @@ jobs:
           echo "Waiting 3 min for Vercel to build and deploy staging..."
           sleep 180
 
-      - name: Verify staging is reachable
+      - name: Verify staging is reachable and check deployed version
         run: |
-          for i in 1 2 3 4 5; do
-            STATUS=$(curl -sL -o /dev/null -w "%{http_code}" \
+          for i in 1 2 3 4 5 6; do
+            RESP=$(curl -sL \
               -H "x-vercel-protection-bypass: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}" \
-              "${{ secrets.STAGING_URL }}")
-            echo "Attempt ${i}: HTTP ${STATUS}"
-            if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 500 ]; then
-              echo "Staging is ready."
+              "${{ secrets.STAGING_URL }}/api/health" 2>/dev/null)
+            STATUS=$(echo "$RESP" | jq -r '.status // empty' 2>/dev/null)
+            if [ "$STATUS" = "ok" ]; then
+              echo "Staging is ready:"
+              echo "$RESP" | jq .
               exit 0
             fi
+            echo "Attempt ${i}: not ready yet (response: ${RESP:0:100})"
             sleep 15
           done
           echo "Staging not reachable after retries."
