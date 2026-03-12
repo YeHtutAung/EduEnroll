@@ -9,10 +9,11 @@ export function extractSubdomainFromHost(host: string): string | null {
   // "nihon-moment.localhost" → "nihon-moment"
   if (parts.length === 2 && parts[1] === "localhost") return parts[0];
 
-  // "nihon-moment.kuunyi.com" → "nihon-moment"
+  // "tmf.kuunyi.com" → "tmf"
+  // "tmf.staging.kuunyi.com" → "tmf"
   if (hostname.endsWith(".kuunyi.com")) {
-    const sub = parts.slice(0, parts.length - 2).join(".");
-    return sub && sub !== "www" ? sub : null;
+    const sub = parts[0];
+    return sub && sub !== "www" && sub !== "staging" ? sub : null;
   }
 
   // "nihon-moment.edu-enroll-xi.vercel.app" → "nihon-moment"
