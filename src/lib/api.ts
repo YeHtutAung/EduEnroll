@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createBareClient, type SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { extractSubdomainFromHost } from "@/lib/tenant";
-import type { User } from "@/types/database";
+import type { User, Database } from "@/types/database";
 
 export interface AuthContext {
-  supabase: ReturnType<typeof createClient>;
+  supabase: SupabaseClient<Database>;
   user: User;
   tenantId: string;
 }
@@ -20,14 +21,43 @@ export interface AuthContext {
  *   if (auth instanceof NextResponse) return auth;
  */
 export async function requireAuth(): Promise<AuthContext | NextResponse> {
-  const supabase = createClient();
+  const headersList = headers();
+  // Prefer x-supabase-auth over Authorization:
+  // Vercel Deployment Protection intercepts the Authorization header and returns
+  // an HTML challenge page, even when x-vercel-protection-bypass is present.
+  // The custom x-supabase-auth header bypasses this issue.
+  const authHeader = headersList.get("x-supabase-auth") ?? headersList.get("authorization");
 
-  const {
-    data: { user },
-    error: authError,
-  } = await supabase.auth.getUser();
+  let supabase: SupabaseClient<Database>;
+  let authUser: { id: string } | null = null;
 
-  if (authError || !user) {
+  if (authHeader?.startsWith("Bearer ")) {
+    // Bearer token auth (API clients, CI) — create a client with the user's
+    // token so RLS works correctly via auth.uid(). No service role key needed.
+    const token = authHeader.substring(7);
+    const tokenClient = createBareClient<Database>(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        global: { headers: { Authorization: `Bearer ${token}` } },
+        auth: { persistSession: false, autoRefreshToken: false },
+      },
+    );
+    const { data, error } = await tokenClient.auth.getUser(token);
+    if (!error && data.user) {
+      authUser = data.user;
+    }
+    supabase = tokenClient;
+  } else {
+    // Cookie-based auth (browser)
+    supabase = createClient();
+    const { data, error } = await supabase.auth.getUser();
+    if (!error && data.user) {
+      authUser = data.user;
+    }
+  }
+
+  if (!authUser) {
     return NextResponse.json(
       { error: "Unauthorized", message: "Valid session required." },
       { status: 401 },
@@ -37,7 +67,7 @@ export async function requireAuth(): Promise<AuthContext | NextResponse> {
   const { data: profile } = await supabase
     .from("users")
     .select("*")
-    .eq("id", user.id)
+    .eq("id", authUser.id)
     .single() as { data: User | null; error: unknown };
 
   if (!profile) {

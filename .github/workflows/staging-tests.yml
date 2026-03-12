@@ -1,0 +1,102 @@
+# ─── KuuNyi Staging Tests — API + Security Audit ──────────────────
+# Runs after Vercel deploys the staging branch.
+# Waits for the staging URL to be ready, then runs api-tests.sh
+# and security-audit.sh in parallel.
+#
+# Required secret: STAGING_URL (e.g. https://edu-enroll-xi-git-staging-xxx.vercel.app)
+
+name: Staging Tests
+
+on:
+  push:
+    branches: [staging]
+  workflow_dispatch:
+
+jobs:
+  wait-for-deploy:
+    name: Wait for Staging Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for Vercel to build and deploy
+        run: |
+          echo "Waiting 3 min for Vercel to build and deploy staging..."
+          sleep 180
+
+      - name: Verify staging is reachable and check deployed version
+        env:
+          STAGING_URL: ${{ secrets.STAGING_URL }}
+          BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+        run: |
+          echo "=== Diagnostics ==="
+          echo "Staging URL length: ${#STAGING_URL}"
+          echo "Bypass secret length: ${#BYPASS_SECRET}"
+
+          # First check: try /api/health (new endpoint)
+          echo ""
+          echo "=== Testing /api/health ==="
+          HTTP_CODE=$(curl -sL -o /tmp/resp.txt -w "%{http_code}" \
+            -H "x-vercel-protection-bypass: ${BYPASS_SECRET}" \
+            "${STAGING_URL}/api/health" 2>&1 || echo "curl_failed")
+          RESP=$(cat /tmp/resp.txt 2>/dev/null || echo "")
+          echo "HTTP ${HTTP_CODE} (body length: ${#RESP})"
+          echo "Body: ${RESP:0:300}"
+
+          # Fallback check: try /api/intakes (existing endpoint, should return 401)
+          echo ""
+          echo "=== Testing /api/intakes ==="
+          HTTP_CODE2=$(curl -sL -o /tmp/resp2.txt -w "%{http_code}" \
+            -H "x-vercel-protection-bypass: ${BYPASS_SECRET}" \
+            "${STAGING_URL}/api/intakes" 2>&1 || echo "curl_failed")
+          RESP2=$(cat /tmp/resp2.txt 2>/dev/null || echo "")
+          echo "HTTP ${HTTP_CODE2} (body length: ${#RESP2})"
+          echo "Body: ${RESP2:0:300}"
+
+          # Accept either /api/health returning 200 or /api/intakes returning 401
+          STATUS=$(echo "$RESP" | jq -r '.status // empty' 2>/dev/null || echo "")
+          if [ "$STATUS" = "ok" ]; then
+            echo ""
+            echo "Staging is ready (health check passed):"
+            echo "$RESP" | jq .
+            exit 0
+          elif [ "$HTTP_CODE2" = "401" ]; then
+            echo ""
+            echo "Staging is reachable (intakes returned 401 — old code without /api/health)"
+            echo "WARNING: /api/health not found — Vercel may not have deployed latest code"
+            exit 0
+          fi
+
+          echo ""
+          echo "Staging not reachable — both checks failed."
+          exit 1
+
+  api-tests:
+    name: API Tests
+    needs: wait-for-deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run API tests
+        run: bash api-tests.sh
+        env:
+          BASE_URL: ${{ secrets.STAGING_URL }}
+          SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.STAGING_SUPABASE_ANON_KEY }}
+          TEST_EMAIL: ${{ secrets.STAGING_TEST_EMAIL }}
+          TEST_PASSWORD: ${{ secrets.STAGING_TEST_PASSWORD }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
+
+  security-audit:
+    name: Security Audit
+    needs: wait-for-deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run tenant isolation audit
+        run: bash security-audit.sh
+        env:
+          BASE_URL: ${{ secrets.STAGING_URL }}
+          SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.STAGING_SUPABASE_SERVICE_ROLE_KEY }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
