@@ -54,6 +54,7 @@ export async function PATCH(
     end_time,
     venue,
     image_url,
+    max_tickets_per_person,
   } = body as Record<string, unknown>;
 
   const update: Partial<Omit<Class, "id" | "created_at">> = {};
@@ -146,6 +147,14 @@ export async function PATCH(
       return badRequest("image_url must be a string or null.");
     }
     update.image_url = (image_url as string | null) ?? null;
+  }
+
+  // max_tickets_per_person
+  if (max_tickets_per_person !== undefined) {
+    if (typeof max_tickets_per_person !== "number" || !Number.isInteger(max_tickets_per_person) || max_tickets_per_person < 1) {
+      return badRequest("max_tickets_per_person must be a positive integer.");
+    }
+    update.max_tickets_per_person = max_tickets_per_person;
   }
 
   if (Object.keys(update).length === 0) {

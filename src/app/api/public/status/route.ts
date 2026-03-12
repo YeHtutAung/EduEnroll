@@ -146,6 +146,7 @@ export async function GET(request: NextRequest) {
     fee_formatted:    enrollment.classes?.fee_mmk != null
                         ? formatMMK(enrollment.classes.fee_mmk)
                         : null,
+    quantity:          enrollment.quantity ?? 1,
     intake_slug:      intakeSlug,
     status:           enrollment.status,
     status_label_en:  enrollmentLabel.en,

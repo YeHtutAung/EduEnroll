@@ -33,14 +33,17 @@ export type SubmitEnrollmentResult =
       fee_mmk: number;
       tenant_id: string;
       seat_remaining: number;
+      quantity: number;
     }
   | {
       success: false;
-      error: "CLASS_NOT_FOUND" | "CLASS_NOT_OPEN" | "CLASS_FULL" | "ENROLLMENT_NOT_OPEN" | "ENROLLMENT_CLOSED" | "INTERNAL_ERROR";
+      error: "CLASS_NOT_FOUND" | "CLASS_NOT_OPEN" | "CLASS_FULL" | "NOT_ENOUGH_SEATS" | "EXCEEDS_MAX_TICKETS" | "ENROLLMENT_NOT_OPEN" | "ENROLLMENT_CLOSED" | "INTERNAL_ERROR";
       class_status?: ClassStatus;
       opens_at?: string;
       closed_at?: string;
       detail?: string;
+      max?: number;
+      seat_remaining?: number;
     };
 
 // ─── Default class fees (MMK) ─────────────────────────────────────────────────
@@ -127,6 +130,7 @@ export interface Class {
   end_time: string | null;
   venue: string | null;
   image_url: string | null;
+  max_tickets_per_person: number;
   created_at: string;
 }
 
@@ -141,6 +145,7 @@ export interface Enrollment {
   phone: string;
   email: string | null;
   form_data: Record<string, string> | null;
+  quantity: number;
   status: EnrollmentStatus;
   enrolled_at: string;
 }
