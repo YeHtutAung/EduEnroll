@@ -5,7 +5,7 @@ import type { BankAccount } from "@/types/database";
 
 export const dynamic = "force-dynamic";
 
-type PublicBankAccount = Pick<BankAccount, "bank_name" | "account_number" | "account_holder">;
+type PublicBankAccount = Pick<BankAccount, "bank_name" | "account_number" | "account_holder" | "qr_code_url">;
 
 // ─── GET /api/public/bank-accounts ──────────────────────────────────────────
 // Public — no authentication required.
@@ -19,7 +19,7 @@ export async function GET() {
 
   const { data, error } = await supabase
     .from("bank_accounts")
-    .select("bank_name, account_number, account_holder")
+    .select("bank_name, account_number, account_holder, qr_code_url")
     .eq("tenant_id", tenantId)
     .eq("is_active", true)
     .order("bank_name") as { data: PublicBankAccount[] | null; error: unknown };

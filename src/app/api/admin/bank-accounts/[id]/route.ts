@@ -24,14 +24,17 @@ export async function PATCH(
     return badRequest("Request body must be valid JSON.");
   }
 
-  const { is_active, account_number, account_holder } = body as Record<string, unknown>;
+  const { is_active, account_number, account_holder, bank_name, qr_code_url } =
+    body as Record<string, unknown>;
 
   if (
     is_active === undefined &&
     account_number === undefined &&
-    account_holder === undefined
+    account_holder === undefined &&
+    bank_name === undefined &&
+    qr_code_url === undefined
   ) {
-    return badRequest("Provide at least one field to update: is_active, account_number, account_holder.");
+    return badRequest("Provide at least one field to update.");
   }
   if (is_active !== undefined && typeof is_active !== "boolean") {
     return badRequest("is_active must be a boolean.");
@@ -42,11 +45,19 @@ export async function PATCH(
   if (account_holder !== undefined && (typeof account_holder !== "string" || account_holder.trim() === "")) {
     return badRequest("account_holder must be a non-empty string.");
   }
+  if (bank_name !== undefined && (typeof bank_name !== "string" || bank_name.trim() === "")) {
+    return badRequest("bank_name must be a non-empty string.");
+  }
+  if (qr_code_url !== undefined && qr_code_url !== null && typeof qr_code_url !== "string") {
+    return badRequest("qr_code_url must be a string or null.");
+  }
 
   const patch: Record<string, unknown> = {};
   if (is_active !== undefined)      patch.is_active      = is_active;
   if (account_number !== undefined) patch.account_number = (account_number as string).trim();
   if (account_holder !== undefined) patch.account_holder = (account_holder as string).trim();
+  if (bank_name !== undefined)      patch.bank_name      = (bank_name as string).trim();
+  if (qr_code_url !== undefined)    patch.qr_code_url    = qr_code_url;
 
   const { data, error } = await supabase
     .from("bank_accounts")
@@ -72,25 +83,32 @@ export async function DELETE(
   if (auth instanceof NextResponse) return auth;
   const { supabase, tenantId } = auth;
 
-  // Verify existence (session client, RLS scoped to tenant) → 404 if not found
+  // Verify existence and get qr_code_url for cleanup
   const { data: existing } = await supabase
     .from("bank_accounts")
-    .select("id")
+    .select("id, qr_code_url")
     .eq("id", params.id)
     .eq("tenant_id", tenantId)
-    .single() as BankAccountResult;
+    .single() as { data: { id: string; qr_code_url: string | null } | null; error: unknown };
 
   if (!existing) return notFound("Bank account");
 
-  // Use service-role client for the DELETE: migration 007 has no DELETE RLS
-  // policy (only SELECT/INSERT/UPDATE), so the session client silently ignores
-  // the delete. Admin client bypasses RLS and guarantees the row is removed.
   const admin = createAdminClient();
+
+  // Clean up QR code image from storage if it exists
+  if (existing.qr_code_url) {
+    const url = new URL(existing.qr_code_url);
+    const path = url.pathname.replace("/storage/v1/object/public/qr-codes/", "");
+    if (path) {
+      await admin.storage.from("qr-codes").remove([path]);
+    }
+  }
+
   const { error } = await admin
     .from("bank_accounts")
     .delete()
     .eq("id", params.id)
-    .eq("tenant_id", tenantId); // keep tenant scope even with service role
+    .eq("tenant_id", tenantId);
 
   if (error) {
     return NextResponse.json({ error: (error as Error).message }, { status: 500 });

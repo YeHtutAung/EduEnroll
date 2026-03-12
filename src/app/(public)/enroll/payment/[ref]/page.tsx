@@ -3,8 +3,6 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams } from "next/navigation";
 import { formatMMK, formatMMKSimple } from "@/lib/utils";
-import type { MyanmarBank } from "@/types/database";
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface EnrollmentInfo {
@@ -31,9 +29,10 @@ interface AvailableClass {
 }
 
 interface BankAccountInfo {
-  bank_name: MyanmarBank;
+  bank_name: string;
   account_number: string;
   account_holder: string;
+  qr_code_url: string | null;
 }
 
 // ─── Myanmar numerals ────────────────────────────────────────────────────────
@@ -43,12 +42,14 @@ interface BankAccountInfo {
 // ─── Bank badge colors ───────────────────────────────────────────────────────
 
 const BANK_COLORS: Record<string, string> = {
-  KBZ:   "bg-green-100 text-green-800",
-  AYA:   "bg-blue-100 text-blue-800",
-  CB:    "bg-yellow-100 text-yellow-800",
-  UAB:   "bg-purple-100 text-purple-800",
-  Yoma:  "bg-orange-100 text-orange-800",
-  Other: "bg-gray-100 text-gray-700",
+  KBZ:          "bg-green-100 text-green-800",
+  AYA:          "bg-blue-100 text-blue-800",
+  CB:           "bg-yellow-100 text-yellow-800",
+  UAB:          "bg-purple-100 text-purple-800",
+  Yoma:         "bg-orange-100 text-orange-800",
+  "Wave Money": "bg-sky-100 text-sky-800",
+  KPay:         "bg-green-100 text-green-800",
+  "OK$":        "bg-orange-100 text-orange-800",
 };
 
 // ─── Copy button ─────────────────────────────────────────────────────────────
@@ -636,20 +637,32 @@ export default function PaymentInstructionsPage() {
             {bankAccounts.map((account, i) => (
               <div
                 key={i}
-                className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-4"
+                className="rounded-xl border border-gray-200 bg-white p-4"
               >
-                <div>
-                  <span
-                    className={`mb-1.5 inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                      BANK_COLORS[account.bank_name] ?? BANK_COLORS.Other
-                    }`}
-                  >
-                    {account.bank_name}
-                  </span>
-                  <p className="text-sm font-medium text-gray-900">{account.account_holder}</p>
-                  <p className="font-mono text-sm text-gray-600">{account.account_number}</p>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span
+                      className={`mb-1.5 inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                        BANK_COLORS[account.bank_name] ?? "bg-gray-100 text-gray-700"
+                      }`}
+                    >
+                      {account.bank_name}
+                    </span>
+                    <p className="text-sm font-medium text-gray-900">{account.account_holder}</p>
+                    <p className="font-mono text-sm text-gray-600">{account.account_number}</p>
+                  </div>
+                  <CopyButton text={account.account_number} size="small" />
                 </div>
-                <CopyButton text={account.account_number} size="small" />
+                {account.qr_code_url && (
+                  <div className="mt-3 flex justify-center">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={account.qr_code_url}
+                      alt={`${account.bank_name} QR Code`}
+                      className="h-40 w-40 rounded-lg border border-gray-100 object-contain bg-white"
+                    />
+                  </div>
+                )}
               </div>
             ))}
           </div>

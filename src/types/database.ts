@@ -19,7 +19,8 @@ export type EnrollmentStatus =
 
 export type PaymentStatus = "pending" | "verified" | "rejected";
 
-export type MyanmarBank = "KBZ" | "AYA" | "CB" | "UAB" | "Yoma" | "Other";
+/** @deprecated Use plain string instead. Kept for backward compatibility. */
+export type MyanmarBank = string;
 
 // ─── RPC return shapes ────────────────────────────────────────────────────────
 
@@ -160,10 +161,11 @@ export interface Payment {
 export interface BankAccount {
   id: string;
   tenant_id: string;
-  bank_name: MyanmarBank;
+  bank_name: string;
   account_number: string;
   account_holder: string;
   is_active: boolean;
+  qr_code_url: string | null;
   created_at: string;
 }
 

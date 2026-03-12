@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, requireOwner, badRequest } from "@/lib/api";
-import type { BankAccount, MyanmarBank } from "@/types/database";
-
-const VALID_BANKS: MyanmarBank[] = ["KBZ", "AYA", "CB", "UAB", "Yoma", "Other"];
+import type { BankAccount } from "@/types/database";
 
 type BankAccountResult  = { data: BankAccount   | null; error: unknown };
 type BankAccountsResult = { data: BankAccount[] | null; error: unknown };
@@ -31,7 +29,7 @@ export async function GET() {
 // ─── POST /api/admin/bank-accounts ────────────────────────────────────────────
 // Create a new bank account for the tenant.
 //
-// Body: { bank_name, account_number, account_holder, is_active? }
+// Body: { bank_name, account_number, account_holder, qr_code_url?, is_active? }
 
 export async function POST(request: NextRequest) {
   const auth = await requireOwner();
@@ -45,11 +43,14 @@ export async function POST(request: NextRequest) {
     return badRequest("Request body must be valid JSON.");
   }
 
-  const { bank_name, account_number, account_holder, is_active = true } =
+  const { bank_name, account_number, account_holder, qr_code_url, is_active = true } =
     body as Record<string, unknown>;
 
-  if (!bank_name || !VALID_BANKS.includes(bank_name as MyanmarBank)) {
-    return badRequest(`bank_name must be one of: ${VALID_BANKS.join(", ")}.`);
+  if (!bank_name || typeof bank_name !== "string" || bank_name.trim() === "") {
+    return badRequest("bank_name is required.");
+  }
+  if (bank_name.trim().length > 50) {
+    return badRequest("bank_name must be 50 characters or fewer.");
   }
   if (!account_number || typeof account_number !== "string" || account_number.trim() === "") {
     return badRequest("account_number is required.");
@@ -60,14 +61,18 @@ export async function POST(request: NextRequest) {
   if (typeof is_active !== "boolean") {
     return badRequest("is_active must be a boolean.");
   }
+  if (qr_code_url !== undefined && qr_code_url !== null && typeof qr_code_url !== "string") {
+    return badRequest("qr_code_url must be a string or null.");
+  }
 
   const { data, error } = await supabase
     .from("bank_accounts")
     .insert({
       tenant_id:      tenantId,
-      bank_name:      bank_name as MyanmarBank,
+      bank_name:      bank_name.trim(),
       account_number: account_number.trim(),
       account_holder: account_holder.trim(),
+      qr_code_url:    (qr_code_url as string | null) ?? null,
       is_active,
     } as never)
     .select()
