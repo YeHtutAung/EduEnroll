@@ -6,7 +6,8 @@ export type UserRole = "superadmin" | "owner" | "staff";
 
 export type IntakeStatus = "draft" | "open" | "closed";
 
-export type JlptLevel = "N5" | "N4" | "N3" | "N2" | "N1";
+/** Standard JLPT levels. Custom levels (e.g. "VIP", "GA") are also valid strings. */
+export type JlptLevel = "N5" | "N4" | "N3" | "N2" | "N1" | (string & {});
 
 export type ClassStatus = "draft" | "open" | "full" | "closed";
 
@@ -18,7 +19,8 @@ export type EnrollmentStatus =
 
 export type PaymentStatus = "pending" | "verified" | "rejected";
 
-export type MyanmarBank = "KBZ" | "AYA" | "CB" | "UAB" | "Yoma" | "Other";
+/** @deprecated Use plain string instead. Kept for backward compatibility. */
+export type MyanmarBank = string;
 
 // ─── RPC return shapes ────────────────────────────────────────────────────────
 
@@ -43,13 +45,21 @@ export type SubmitEnrollmentResult =
 
 // ─── Default class fees (MMK) ─────────────────────────────────────────────────
 
-export const DEFAULT_CLASS_FEES: Record<JlptLevel, number> = {
+export const DEFAULT_CLASS_FEES: Record<string, number> = {
   N5: 300_000,
   N4: 350_000,
   N3: 400_000,
   N2: 450_000,
   N1: 500_000,
 };
+
+// ─── Menu button shape (stored in tenants.menu_buttons JSONB) ────────────────
+
+export interface MenuButton {
+  key: string;
+  title: string;
+  visible: boolean;
+}
 
 // ─── Row types ────────────────────────────────────────────────────────────────
 
@@ -72,6 +82,8 @@ export interface Tenant {
   messenger_page_token: string | null;
   messenger_verify_token: string | null;
   messenger_greeting: string | null;
+  handoff_timeout_min: number;
+  menu_buttons: MenuButton[] | null;
   created_at: string;
 }
 
@@ -90,6 +102,8 @@ export interface Intake {
   tenant_id: string;
   name: string;                 // e.g. "April 2026 Intake" / "ဧပြီ ၂၀၂၆ စာရင်းသွင်းမှု"
   year: number;
+  slug: string;                 // stable URL slug, set once on creation (e.g. "april-2026")
+  hero_image_url: string | null; // hero banner for public enrollment page
   status: IntakeStatus;
   created_at: string;
 }
@@ -112,6 +126,7 @@ export interface Class {
   start_time: string | null;
   end_time: string | null;
   venue: string | null;
+  image_url: string | null;
   created_at: string;
 }
 
@@ -146,10 +161,11 @@ export interface Payment {
 export interface BankAccount {
   id: string;
   tenant_id: string;
-  bank_name: MyanmarBank;
+  bank_name: string;
   account_number: string;
   account_holder: string;
   is_active: boolean;
+  qr_code_url: string | null;
   created_at: string;
 }
 

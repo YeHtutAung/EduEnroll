@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { formatMMK, formatMMKSimple } from "@/lib/utils";
-import type { MyanmarBank, ClassStatus } from "@/types/database";
+import type { ClassStatus } from "@/types/database";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -20,9 +20,10 @@ interface EnrollmentInfo {
 }
 
 interface BankAccountInfo {
-  bank_name: MyanmarBank;
+  bank_name: string;
   account_number: string;
   account_holder: string;
+  qr_code_url: string | null;
 }
 
 interface PublicClass {
@@ -37,12 +38,14 @@ interface PublicClass {
 // ─── Bank badge colors ───────────────────────────────────────────────────────
 
 const BANK_COLORS: Record<string, string> = {
-  KBZ:   "bg-green-100 text-green-800",
-  AYA:   "bg-blue-100 text-blue-800",
-  CB:    "bg-yellow-100 text-yellow-800",
-  UAB:   "bg-purple-100 text-purple-800",
-  Yoma:  "bg-orange-100 text-orange-800",
-  Other: "bg-gray-100 text-gray-700",
+  KBZ:          "bg-green-100 text-green-800",
+  AYA:          "bg-blue-100 text-blue-800",
+  CB:           "bg-yellow-100 text-yellow-800",
+  UAB:          "bg-purple-100 text-purple-800",
+  Yoma:         "bg-orange-100 text-orange-800",
+  "Wave Money": "bg-sky-100 text-sky-800",
+  KPay:         "bg-green-100 text-green-800",
+  "OK$":        "bg-orange-100 text-orange-800",
 };
 
 // ─── Copy button ──────────────────────────────────────────────────────────────
@@ -164,6 +167,7 @@ function SuccessPage() {
   const [enrollment, setEnrollment] = useState<EnrollmentInfo | null>(null);
   const [bankAccounts, setBankAccounts] = useState<BankAccountInfo[]>([]);
   const [otherClasses, setOtherClasses] = useState<PublicClass[]>([]);
+  const [orgType, setOrgType] = useState<string>("language_school");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -196,6 +200,7 @@ function SuccessPage() {
 
         if (intakeRes.ok) {
           const intakeData = await intakeRes.json();
+          if (intakeData.labels?.orgType) setOrgType(intakeData.labels.orgType);
           const available = (intakeData.classes ?? []).filter(
             (c: PublicClass) => c.status === "open" && c.seat_remaining > 0,
           );
@@ -239,10 +244,14 @@ function SuccessPage() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
           </svg>
         </div>
-        <h1 className="text-2xl font-bold text-gray-900">Enrollment Successful!</h1>
-        <p className="font-myanmar mt-1 text-lg text-gray-600">
-          စာရင်းသွင်းမှု အောင်မြင်ပါသည်
-        </p>
+        <h1 className="text-2xl font-bold text-gray-900">
+          {orgType === "event" ? "Purchase Successful!" : "Enrollment Successful!"}
+        </h1>
+        {orgType !== "event" && (
+          <p className="font-myanmar mt-1 text-lg text-gray-600">
+            စာရင်းသွင်းမှု အောင်မြင်ပါသည်
+          </p>
+        )}
         {enrollment.student_name_en && (
           <p className="mt-2 text-sm text-gray-500">
             Welcome, <span className="font-semibold text-gray-700">{enrollment.student_name_en}</span>
@@ -256,11 +265,13 @@ function SuccessPage() {
       {/* ── Enrollment reference ───────────────────────────────── */}
       <div className="mb-8 rounded-xl bg-[#1a6b3c]/10 p-6 text-center">
         <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-[#1a6b3c]">
-          Your Enrollment Reference
+          {orgType === "event" ? "Your Order Reference" : "Your Enrollment Reference"}
         </p>
-        <p className="font-myanmar mb-3 text-xs text-gray-500">
-          သင့်စာရင်းသွင်းမှု ရည်ညွှန်းကုဒ်
-        </p>
+        {orgType !== "event" && (
+          <p className="font-myanmar mb-3 text-xs text-gray-500">
+            သင့်စာရင်းသွင်းမှု ရည်ညွှန်းကုဒ်
+          </p>
+        )}
         <p className="font-mono text-3xl font-bold text-[#1a6b3c] leading-tight">
           {enrollment.enrollment_ref}
         </p>
@@ -270,9 +281,11 @@ function SuccessPage() {
         <p className="mt-3 text-xs text-gray-500">
           Save this reference — you&apos;ll need it to check your status and make payment.
         </p>
-        <p className="font-myanmar mt-1 text-xs text-gray-400">
-          ဤရည်ညွှန်းကုဒ်ကို သိမ်းထားပါ — အခြေအနေစစ်ဆေးရန်နှင့် ငွေပေးချေရန် လိုအပ်ပါမည်။
-        </p>
+        {orgType !== "event" && (
+          <p className="font-myanmar mt-1 text-xs text-gray-400">
+            ဤရည်ညွှန်းကုဒ်ကို သိမ်းထားပါ — အခြေအနေစစ်ဆေးရန်နှင့် ငွေပေးချေရန် လိုအပ်ပါမည်။
+          </p>
+        )}
       </div>
 
       {/* ── Class & fee summary ────────────────────────────────── */}
@@ -287,7 +300,7 @@ function SuccessPage() {
             {feeEn && (
               <p className="text-lg font-bold text-gray-900">{feeEn}</p>
             )}
-            {feeMm && (
+            {feeMm && orgType !== "event" && (
               <p className="font-myanmar text-sm text-gray-500">{feeMm} ကျပ်</p>
             )}
           </div>
@@ -299,9 +312,11 @@ function SuccessPage() {
         <h2 className="mb-4 text-lg font-semibold text-gray-900">
           Next Step: Make Payment
         </h2>
-        <p className="font-myanmar mb-5 text-sm text-gray-500">
-          နောက်တစ်ဆင့်: ငွေပေးချေပါ
-        </p>
+        {orgType !== "event" && (
+          <p className="font-myanmar mb-5 text-sm text-gray-500">
+            နောက်တစ်ဆင့်: ငွေပေးချေပါ
+          </p>
+        )}
 
         <ol className="space-y-4">
           <li className="flex gap-3">
@@ -310,9 +325,11 @@ function SuccessPage() {
               <p>
                 Transfer {feeEn && <span className="font-semibold text-gray-900">{feeEn}</span>} to one of the bank accounts below
               </p>
-              <p className="font-myanmar mt-1 text-gray-500">
-                အောက်ပါ ဘဏ်အကောင့်သို့ {feeMm && <span className="font-semibold text-gray-700">{feeMm} ကျပ်</span>} လွှဲပါ
-              </p>
+              {orgType !== "event" && (
+                <p className="font-myanmar mt-1 text-gray-500">
+                  အောက်ပါ ဘဏ်အကောင့်သို့ {feeMm && <span className="font-semibold text-gray-700">{feeMm} ကျပ်</span>} လွှဲပါ
+                </p>
+              )}
             </div>
           </li>
           <li className="flex gap-3">
@@ -321,16 +338,20 @@ function SuccessPage() {
               <p>
                 Use <span className="font-mono font-bold text-red-600">{enrollment.enrollment_ref}</span> as the transfer note
               </p>
-              <p className="font-myanmar mt-1 text-gray-500">
-                ငွေလွှဲမှတ်ချက်တွင် <span className="font-mono font-bold text-red-600">{enrollment.enrollment_ref}</span> ထည့်ပါ
-              </p>
+              {orgType !== "event" && (
+                <p className="font-myanmar mt-1 text-gray-500">
+                  ငွေလွှဲမှတ်ချက်တွင် <span className="font-mono font-bold text-red-600">{enrollment.enrollment_ref}</span> ထည့်ပါ
+                </p>
+              )}
             </div>
           </li>
           <li className="flex gap-3">
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1a6b3c] text-sm font-bold text-white">3</span>
             <div className="text-sm text-gray-700">
               <p>Upload the transfer screenshot on the payment page</p>
-              <p className="font-myanmar mt-1 text-gray-500">ငွေလွှဲပြေစာ ဓာတ်ပုံကို ငွေပေးချေရန်စာမျက်နှာတွင် တင်သွင်းပါ</p>
+              {orgType !== "event" && (
+                <p className="font-myanmar mt-1 text-gray-500">ငွေလွှဲပြေစာ ဓာတ်ပုံကို ငွေပေးချေရန်စာမျက်နှာတွင် တင်သွင်းပါ</p>
+              )}
             </div>
           </li>
         </ol>
@@ -340,19 +361,31 @@ function SuccessPage() {
       {bankAccounts.length > 0 && (
         <div className="mb-8">
           <h3 className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-500">
-            Bank Accounts / <span className="font-myanmar normal-case">ဘဏ်အကောင့်များ</span>
+            Bank Accounts{orgType !== "event" && <> / <span className="font-myanmar normal-case">ဘဏ်အကောင့်များ</span></>}
           </h3>
           <div className="space-y-3">
             {bankAccounts.map((account, i) => (
-              <div key={i} className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-4">
-                <div>
-                  <span className={`mb-1.5 inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${BANK_COLORS[account.bank_name] ?? BANK_COLORS.Other}`}>
-                    {account.bank_name}
-                  </span>
-                  <p className="text-sm font-medium text-gray-900">{account.account_holder}</p>
-                  <p className="font-mono text-sm text-gray-600">{account.account_number}</p>
+              <div key={i} className="rounded-xl border border-gray-200 bg-white p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className={`mb-1.5 inline-block rounded-full px-2.5 py-0.5 text-xs font-semibold ${BANK_COLORS[account.bank_name] ?? "bg-gray-100 text-gray-700"}`}>
+                      {account.bank_name}
+                    </span>
+                    <p className="text-sm font-medium text-gray-900">{account.account_holder}</p>
+                    <p className="font-mono text-sm text-gray-600">{account.account_number}</p>
+                  </div>
+                  <CopySmall text={account.account_number} />
                 </div>
-                <CopySmall text={account.account_number} />
+                {account.qr_code_url && (
+                  <div className="mt-3 flex justify-center">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={account.qr_code_url}
+                      alt={`${account.bank_name} QR Code`}
+                      className="h-40 w-40 rounded-lg border border-gray-100 object-contain bg-white"
+                    />
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -369,7 +402,9 @@ function SuccessPage() {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
               d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
           </svg>
-          Upload Payment / <span className="font-myanmar">ငွေလွှဲပြေစာ တင်သွင်းမည်</span>
+          {orgType === "event"
+            ? "Upload Payment"
+            : <>Upload Payment / <span className="font-myanmar">ငွေလွှဲပြေစာ တင်သွင်းမည်</span></>}
         </a>
 
       </div>
@@ -378,7 +413,7 @@ function SuccessPage() {
       {otherClasses.length > 1 && (
         <div className="border-t border-gray-200 pt-8">
           <h3 className="mb-4 text-sm font-semibold text-gray-500 uppercase tracking-wide">
-            Other Available Classes
+            {orgType === "event" ? "Other Available Tickets" : "Other Available Classes"}
           </h3>
           <div className="grid gap-3 sm:grid-cols-2">
             {otherClasses
@@ -395,7 +430,7 @@ function SuccessPage() {
                   </span>
                   <div>
                     <p className="text-sm font-semibold text-gray-900">{cls.fee_formatted}</p>
-                    <p className="text-xs text-green-600">{cls.seat_remaining} seats left</p>
+                    <p className="text-xs text-green-600">{cls.seat_remaining} {orgType === "event" ? "left" : "seats left"}</p>
                   </div>
                 </a>
               ))}

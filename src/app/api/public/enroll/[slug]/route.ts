@@ -24,6 +24,7 @@ interface PublicClassView {
   start_time: string | null;
   end_time: string | null;
   venue: string | null;
+  image_url: string | null;
 }
 
 interface TenantLabelsView {
@@ -36,27 +37,15 @@ interface TenantLabelsView {
 }
 
 interface PublicIntakeResponse {
-  intake: Pick<Intake, "id" | "name" | "year" | "status">;
+  intake: Pick<Intake, "id" | "name" | "year" | "status" | "hero_image_url">;
   classes: PublicClassView[];
   labels: TenantLabelsView;
 }
 
-// ─── Slug parser ──────────────────────────────────────────────────────────────
-// Converts "april-2026" → { month: "april", year: 2026 }
-// Supports multi-word months: "new-year-2026" → month: "new year"
+// ─── Slug validation ─────────────────────────────────────────────────────────
 
-function parseIntakeSlug(slug: string): { month: string; year: number } | null {
-  const parts = slug.toLowerCase().split("-");
-  if (parts.length < 2) return null;
-
-  const rawYear = parts[parts.length - 1];
-  const year = parseInt(rawYear, 10);
-  if (isNaN(year) || year < 2020 || year > 2100) return null;
-
-  const month = parts.slice(0, -1).join(" "); // "april" or "new year"
-  if (!month) return null;
-
-  return { month, year };
+function isValidSlug(slug: string): boolean {
+  return slug.length > 0 && slug.length < 200;
 }
 
 // ─── GET /api/public/enroll/[slug] ───────────────────────────────────────────
@@ -69,10 +58,9 @@ export async function GET(
   const tenantId = await resolveTenantId();
   if (tenantId instanceof NextResponse) return tenantId;
 
-  const parsed = parseIntakeSlug(params.slug);
-  if (!parsed) {
+  if (!isValidSlug(params.slug)) {
     return NextResponse.json(
-      { error: "Invalid slug format. Expected: {month}-{year}  e.g. april-2026" },
+      { error: "Invalid slug." },
       { status: 400 },
     );
   }
@@ -97,13 +85,12 @@ export async function GET(
     orgType: tenantRow?.org_type      || "language_school",
   };
 
-  // ── Find the matching intake (any status) ────────────────────
+  // ── Find the matching intake by slug column ────────────────────
   const { data: intakes, error: intakeError } = await supabase
     .from("intakes")
-    .select("id, name, year, status")
+    .select("id, name, year, status, hero_image_url")
     .eq("tenant_id", tenantId)
-    .eq("year", parsed.year)
-    .ilike("name", `%${parsed.month}%`)
+    .eq("slug", params.slug.toLowerCase())
     .limit(1);
 
   if (intakeError) {
@@ -116,7 +103,7 @@ export async function GET(
     );
   }
 
-  const intake = intakes[0] as Pick<Intake, "id" | "name" | "year" | "status">;
+  const intake = intakes[0] as Pick<Intake, "id" | "name" | "year" | "status" | "hero_image_url">;
 
   if (intake.status === "closed") {
     return NextResponse.json(
@@ -146,7 +133,7 @@ export async function GET(
   // ── Fetch all visible classes (open + full) ──────────────────
   const { data: classes, error: classError } = await supabase
     .from("classes")
-    .select("id, level, fee_mmk, seat_remaining, seat_total, enrollment_open_at, enrollment_close_at, status, mode, event_date, start_time, end_time, venue")
+    .select("id, level, fee_mmk, seat_remaining, seat_total, enrollment_open_at, enrollment_close_at, status, mode, event_date, start_time, end_time, venue, image_url")
     .eq("intake_id", intake.id)
     .eq("tenant_id", tenantId)
     .in("status", ["open", "full"])
@@ -177,6 +164,7 @@ export async function GET(
     start_time:           c.start_time ?? null,
     end_time:             c.end_time ?? null,
     venue:                c.venue ?? null,
+    image_url:            c.image_url ?? null,
   }));
 
   const response: PublicIntakeResponse = {

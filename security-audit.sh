@@ -20,6 +20,12 @@ set -euo pipefail
 BASE_URL="${BASE_URL:-http://localhost:3005}"
 SB_URL="${SUPABASE_URL:?Set SUPABASE_URL}"
 SB_KEY="${SUPABASE_SERVICE_ROLE_KEY:?Set SUPABASE_SERVICE_ROLE_KEY}"
+
+# Vercel Automation Bypass header (for protected preview deployments)
+BYPASS_H=""
+if [ -n "${VERCEL_AUTOMATION_BYPASS_SECRET:-}" ]; then
+  BYPASS_H="x-vercel-protection-bypass: ${VERCEL_AUTOMATION_BYPASS_SECRET}"
+fi
 TIMESTAMP=$(date +%s)
 
 PASS_COUNT=0
@@ -38,7 +44,8 @@ echo ""
 # ── Step 1: Register two test schools ────────────────────────────────────────
 
 echo "▸ Registering school-a-${TIMESTAMP}..."
-RES_A=$(curl -s -w "\n%{http_code}" -X POST "${BASE_URL}/api/saas/register" \
+RES_A=$(curl -sL -w "\n%{http_code}" -X POST "${BASE_URL}/api/saas/register" \
+  ${BYPASS_H:+-H "$BYPASS_H"} \
   -H "Content-Type: application/json" \
   -d "{
     \"school_name_en\": \"School A Test\",
@@ -61,7 +68,8 @@ USER_A=$(echo "$BODY_A" | grep -o '"user_id":"[^"]*"' | cut -d'"' -f4)
 echo "  tenant_id: ${TENANT_A}"
 
 echo "▸ Registering school-b-${TIMESTAMP}..."
-RES_B=$(curl -s -w "\n%{http_code}" -X POST "${BASE_URL}/api/saas/register" \
+RES_B=$(curl -sL -w "\n%{http_code}" -X POST "${BASE_URL}/api/saas/register" \
+  ${BYPASS_H:+-H "$BYPASS_H"} \
   -H "Content-Type: application/json" \
   -d "{
     \"school_name_en\": \"School B Test\",
@@ -96,10 +104,16 @@ INTAKE_RES=$(curl -s -X POST "${SB_URL}/rest/v1/intakes" \
   -d "{
     \"tenant_id\": \"${TENANT_A}\",
     \"name\": \"Test Intake\",
+    \"slug\": \"test-intake-${TIMESTAMP}\",
     \"year\": 2026,
     \"status\": \"open\"
   }")
 INTAKE_ID=$(echo "$INTAKE_RES" | grep -o '"id":"[^"]*"' | head -1 | cut -d'"' -f4)
+if [ -z "$INTAKE_ID" ]; then
+  echo "  ERROR: Failed to create intake in school-a"
+  echo "  Response: $INTAKE_RES"
+  exit 1
+fi
 echo "  intake: ${INTAKE_ID}"
 
 # Create a class in school-a
@@ -158,8 +172,9 @@ curl -s -X POST "${SB_URL}/rest/v1/announcements" \
   -H "Content-Type: application/json" \
   -d "{
     \"tenant_id\": \"${TENANT_A}\",
+    \"intake_id\": \"${INTAKE_ID}\",
     \"message\": \"Test announcement\",
-    \"posted_by\": \"${USER_A}\"
+    \"sent_by_id\": \"${USER_A}\"
   }" > /dev/null 2>&1
 echo "  announcement created"
 
@@ -184,6 +199,10 @@ if [ -z "$ACCESS_TOKEN" ]; then
 fi
 echo "  Got access token for school-b"
 
+# Use x-supabase-auth for API requests — Vercel Deployment Protection
+# intercepts the standard Authorization header, so we use a custom header.
+AUTH_HEADER="x-supabase-auth: Bearer ${ACCESS_TOKEN}"
+
 # ── Step 4: Cross-tenant access tests ────────────────────────────────────────
 
 echo ""
@@ -198,13 +217,13 @@ test_endpoint() {
   local BODY="${4:-}"
 
   if [ "$METHOD" = "GET" ]; then
-    RESPONSE=$(curl -s -w "\n%{http_code}" "$URL" \
-      -H "Cookie: sb-access-token=${ACCESS_TOKEN}" \
-      -H "Authorization: Bearer ${ACCESS_TOKEN}")
+    RESPONSE=$(curl -sL -w "\n%{http_code}" "$URL" \
+      ${BYPASS_H:+-H "$BYPASS_H"} \
+      -H "${AUTH_HEADER}")
   else
-    RESPONSE=$(curl -s -w "\n%{http_code}" -X "$METHOD" "$URL" \
-      -H "Cookie: sb-access-token=${ACCESS_TOKEN}" \
-      -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+    RESPONSE=$(curl -sL -w "\n%{http_code}" -X "$METHOD" "$URL" \
+      ${BYPASS_H:+-H "$BYPASS_H"} \
+      -H "${AUTH_HEADER}" \
       -H "Content-Type: application/json" \
       -d "$BODY")
   fi
@@ -212,8 +231,8 @@ test_endpoint() {
   HTTP_CODE=$(echo "$RESPONSE" | tail -1)
   RESP_BODY=$(echo "$RESPONSE" | sed '$d')
 
-  # Pass conditions: 401, 403, or 200 with empty array/object (RLS filtering)
-  if [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "403" ]; then
+  # Pass conditions: 401, 403, 400 (no tenant context), or 200 with empty/filtered data
+  if [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "403" ] || [ "$HTTP_CODE" = "400" ]; then
     pass "$NAME (HTTP ${HTTP_CODE})"
     return
   fi
@@ -316,25 +335,28 @@ test_endpoint "GET /api/public/enroll/[slug] (no tenant)" "GET" \
 echo ""
 echo "▸ Cleaning up test data..."
 
-# Delete test data using service role
-curl -s -X DELETE "${SB_URL}/rest/v1/announcements?tenant_id=eq.${TENANT_A}" \
-  -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
-curl -s -X DELETE "${SB_URL}/rest/v1/bank_accounts?tenant_id=eq.${TENANT_A}" \
-  -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
-curl -s -X DELETE "${SB_URL}/rest/v1/enrollments?tenant_id=eq.${TENANT_A}" \
-  -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
-curl -s -X DELETE "${SB_URL}/rest/v1/classes?tenant_id=eq.${TENANT_A}" \
-  -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
-curl -s -X DELETE "${SB_URL}/rest/v1/intakes?tenant_id=eq.${TENANT_A}" \
-  -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
-curl -s -X DELETE "${SB_URL}/rest/v1/users?tenant_id=eq.${TENANT_A}" \
-  -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
-curl -s -X DELETE "${SB_URL}/rest/v1/users?tenant_id=eq.${TENANT_B}" \
-  -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
-curl -s -X DELETE "${SB_URL}/rest/v1/tenants?id=eq.${TENANT_A}" \
-  -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
-curl -s -X DELETE "${SB_URL}/rest/v1/tenants?id=eq.${TENANT_B}" \
-  -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
+# Delete test data using service role (ignore errors — best effort cleanup)
+# Delete in dependency order (children before parents)
+set +e
+for TID in "${TENANT_A}" "${TENANT_B}"; do
+  curl -s -X DELETE "${SB_URL}/rest/v1/announcements?tenant_id=eq.${TID}" \
+    -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
+  curl -s -X DELETE "${SB_URL}/rest/v1/bank_accounts?tenant_id=eq.${TID}" \
+    -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
+  curl -s -X DELETE "${SB_URL}/rest/v1/enrollments?tenant_id=eq.${TID}" \
+    -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
+  curl -s -X DELETE "${SB_URL}/rest/v1/classes?tenant_id=eq.${TID}" \
+    -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
+  curl -s -X DELETE "${SB_URL}/rest/v1/intake_form_fields?intake_id=in.(select id from intakes where tenant_id=eq.${TID})" \
+    -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
+  curl -s -X DELETE "${SB_URL}/rest/v1/intakes?tenant_id=eq.${TID}" \
+    -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
+  curl -s -X DELETE "${SB_URL}/rest/v1/users?tenant_id=eq.${TID}" \
+    -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
+  curl -s -X DELETE "${SB_URL}/rest/v1/tenants?id=eq.${TID}" \
+    -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
+done
+set -e
 
 echo "  Done."
 

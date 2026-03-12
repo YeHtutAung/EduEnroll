@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useToast } from "@/components/ui/Toast";
+import ConfirmModal from "@/components/ui/ConfirmModal";
+import SettingsTabs from "@/components/admin/SettingsTabs";
 import type { User, UserRole } from "@/types/database";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -45,36 +47,44 @@ function Pulse({ className }: { className: string }) {
 
 // ─── Invite Modal ─────────────────────────────────────────────────────────────
 
-function InviteModal({
+function AddStaffModal({
   onClose,
-  onInvited,
+  onCreated,
 }: {
   onClose: () => void;
-  onInvited: () => void;
+  onCreated: () => void;
 }) {
   const toast = useToast();
-  const [email, setEmail] = useState("");
-  const [sending, setSending] = useState(false);
+  const [form, setForm] = useState({ full_name: "", email: "", password: "" });
+  const [saving, setSaving] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setSending(true);
+    if (form.password.length < 6) {
+      toast.error("Password must be at least 6 characters.");
+      return;
+    }
+    setSaving(true);
     try {
       const res = await fetch("/api/admin/staff", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim() }),
+        body: JSON.stringify({
+          email: form.email.trim(),
+          password: form.password,
+          full_name: form.full_name.trim(),
+        }),
       });
       if (!res.ok) {
         const err = await res.json();
         throw new Error(err.error ?? `${res.status}`);
       }
-      toast.success(`Invite sent to ${email.trim()}`);
-      onInvited();
+      toast.success(`Staff account created for ${form.email.trim()}`);
+      onCreated();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to send invite.");
+      toast.error(err instanceof Error ? err.message : "Failed to create staff account.");
     } finally {
-      setSending(false);
+      setSaving(false);
     }
   }
 
@@ -90,26 +100,52 @@ function InviteModal({
       />
       <div className="relative w-full max-w-md bg-white rounded-2xl shadow-xl p-6">
         <h2 className="text-lg font-bold text-gray-900 mb-1">
-          Invite Staff Member
+          Add Staff Member
         </h2>
         <p className="text-sm text-gray-500 font-myanmar mb-5">
-          ဝန်ထမ်းအသစ် ဖိတ်ကြားရန်
+          ဝန်ထမ်းအသစ် ထည့်သွင်းရန်
         </p>
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              Full Name
+            </label>
+            <input
+              type="text"
+              value={form.full_name}
+              onChange={(e) => setForm((f) => ({ ...f, full_name: e.target.value }))}
+              placeholder="e.g. Aung Aung"
+              className={inputClass}
+            />
+          </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
               Email Address
             </label>
             <input
               type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              value={form.email}
+              onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
               required
               placeholder="staff@example.com"
               className={inputClass}
             />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              Password
+            </label>
+            <input
+              type="text"
+              value={form.password}
+              onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
+              required
+              minLength={6}
+              placeholder="Min 6 characters"
+              className={inputClass}
+            />
             <p className="mt-1.5 text-xs text-gray-400">
-              They will receive an invite link to join as staff.
+              Share this password with the staff member. They can change it later in Settings.
             </p>
           </div>
           <div className="flex gap-3 pt-2">
@@ -122,10 +158,10 @@ function InviteModal({
             </button>
             <button
               type="submit"
-              disabled={sending}
+              disabled={saving}
               className="flex-1 px-4 py-2.5 bg-[#1a3f8a] text-white rounded-xl text-sm font-medium hover:bg-blue-900 disabled:opacity-50 transition-colors"
             >
-              {sending ? "Sending…" : "Send Invite"}
+              {saving ? "Creating…" : "Create Account"}
             </button>
           </div>
         </form>
@@ -141,13 +177,14 @@ export default function StaffPage() {
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [showInvite, setShowInvite] = useState(false);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState<StaffMember | null>(null);
 
   const fetchStaff = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch("/api/admin/staff");
       if (res.status === 403) {
-        // Staff user trying to access — redirect
         window.location.href = "/admin/dashboard";
         return;
       }
@@ -164,12 +201,40 @@ export default function StaffPage() {
     fetchStaff();
   }, [fetchStaff]);
 
+  async function handleRemove(member: StaffMember) {
+    setRemovingId(member.id);
+    try {
+      const res = await fetch(`/api/admin/staff/${member.id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message ?? err.error ?? `${res.status}`);
+      }
+      toast.success(`${member.full_name ?? member.email} has been removed.`);
+      setStaff((prev) => prev.filter((s) => s.id !== member.id));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to remove staff member.");
+    } finally {
+      setRemovingId(null);
+      setConfirmRemove(null);
+    }
+  }
+
   return (
     <div className="min-h-screen bg-[#f0f4ff] px-6 py-8 lg:px-8 space-y-8">
       {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
+        <p className="text-sm font-myanmar text-gray-400 mt-0.5">ဆက်တင်များ</p>
+      </div>
+
+      {/* Tab bar */}
+      <SettingsTabs />
+
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Staff Members</h1>
+          <h2 className="text-lg font-bold text-gray-900">Staff Members</h2>
           <p className="text-sm font-myanmar text-gray-400 mt-0.5">
             ဝန်ထမ်းများ စီမံခန့်ခွဲရန်
           </p>
@@ -191,7 +256,7 @@ export default function StaffPage() {
               d="M12 4.5v15m7.5-7.5h-15"
             />
           </svg>
-          Invite Staff Member
+          Add Staff Member
         </button>
       </div>
 
@@ -239,6 +304,9 @@ export default function StaffPage() {
                   <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                     Joined
                   </th>
+                  <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -263,6 +331,17 @@ export default function StaffPage() {
                     <td className="px-5 py-4 text-gray-500 text-xs">
                       {fmtDate(member.created_at)}
                     </td>
+                    <td className="px-5 py-4">
+                      {member.role === "staff" && (
+                        <button
+                          onClick={() => setConfirmRemove(member)}
+                          disabled={removingId === member.id}
+                          className="px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+                        >
+                          {removingId === member.id ? "Removing…" : "Remove"}
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -271,14 +350,26 @@ export default function StaffPage() {
         )}
       </div>
 
-      {/* Invite modal */}
+      {/* Add staff modal */}
       {showInvite && (
-        <InviteModal
+        <AddStaffModal
           onClose={() => setShowInvite(false)}
-          onInvited={() => {
+          onCreated={() => {
             setShowInvite(false);
             fetchStaff();
           }}
+        />
+      )}
+
+      {/* Confirm remove modal */}
+      {confirmRemove && (
+        <ConfirmModal
+          variant="danger"
+          title="Remove Staff Member?"
+          message={`Are you sure you want to remove ${confirmRemove.full_name ?? confirmRemove.email}? They will lose access to the admin panel immediately.`}
+          confirmLabel="Remove"
+          onConfirm={() => handleRemove(confirmRemove)}
+          onCancel={() => setConfirmRemove(null)}
         />
       )}
     </div>

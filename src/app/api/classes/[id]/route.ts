@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth, badRequest, notFound } from "@/lib/api";
+import { requireOwner, badRequest, notFound } from "@/lib/api";
 import type { Class, ClassMode, ClassStatus } from "@/types/database";
 
 const VALID_CLASS_STATUSES: ClassStatus[] = ["draft", "open", "full", "closed"];
@@ -21,7 +21,7 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: { id: string } },
 ) {
-  const auth = await requireAuth();
+  const auth = await requireOwner();
   if (auth instanceof NextResponse) return auth;
   const { supabase, tenantId } = auth;
 
@@ -53,6 +53,7 @@ export async function PATCH(
     start_time,
     end_time,
     venue,
+    image_url,
   } = body as Record<string, unknown>;
 
   const update: Partial<Omit<Class, "id" | "created_at">> = {};
@@ -137,6 +138,14 @@ export async function PATCH(
       return badRequest("venue must be a string or null.");
     }
     update.venue = (venue as string | null) ?? null;
+  }
+
+  // image_url
+  if ("image_url" in (body as object)) {
+    if (image_url !== null && typeof image_url !== "string") {
+      return badRequest("image_url must be a string or null.");
+    }
+    update.image_url = (image_url as string | null) ?? null;
   }
 
   if (Object.keys(update).length === 0) {

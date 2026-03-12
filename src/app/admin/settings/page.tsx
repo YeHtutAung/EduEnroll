@@ -5,23 +5,63 @@ import { useRouter, useSearchParams } from "next/navigation";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
 import { createClient } from "@/lib/supabase/client";
-import type { BankAccount, MyanmarBank } from "@/types/database";
+import SettingsTabs from "@/components/admin/SettingsTabs";
+import type { BankAccount, MenuButton } from "@/types/database";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const VALID_BANKS: MyanmarBank[] = ["KBZ", "AYA", "CB", "UAB", "Yoma", "Other"];
+const PRESET_BANKS = ["KBZ", "AYA", "CB", "UAB", "Yoma", "Wave Money", "KPay", "OK$"];
 
-const BANK_STYLES: Record<
-  MyanmarBank,
-  { bg: string; text: string; dot: string }
-> = {
-  KBZ:   { bg: "bg-emerald-100", text: "text-emerald-800", dot: "bg-emerald-500" },
-  AYA:   { bg: "bg-blue-100",    text: "text-blue-800",    dot: "bg-blue-500"    },
-  CB:    { bg: "bg-amber-100",   text: "text-amber-800",   dot: "bg-amber-500"   },
-  UAB:   { bg: "bg-purple-100",  text: "text-purple-800",  dot: "bg-purple-500"  },
-  Yoma:  { bg: "bg-teal-100",    text: "text-teal-800",    dot: "bg-teal-500"    },
-  Other: { bg: "bg-gray-100",    text: "text-gray-600",    dot: "bg-gray-400"    },
+const BANK_STYLES: Record<string, { bg: string; text: string; dot: string }> = {
+  KBZ:          { bg: "bg-emerald-100", text: "text-emerald-800", dot: "bg-emerald-500" },
+  AYA:          { bg: "bg-blue-100",    text: "text-blue-800",    dot: "bg-blue-500"    },
+  CB:           { bg: "bg-amber-100",   text: "text-amber-800",   dot: "bg-amber-500"   },
+  UAB:          { bg: "bg-purple-100",  text: "text-purple-800",  dot: "bg-purple-500"  },
+  Yoma:         { bg: "bg-teal-100",    text: "text-teal-800",    dot: "bg-teal-500"    },
+  "Wave Money": { bg: "bg-sky-100",     text: "text-sky-800",     dot: "bg-sky-500"     },
+  KPay:         { bg: "bg-emerald-100", text: "text-emerald-800", dot: "bg-emerald-500" },
+  "OK$":        { bg: "bg-orange-100",  text: "text-orange-800",  dot: "bg-orange-500"  },
 };
+
+const DEFAULT_BANK_STYLE = { bg: "bg-gray-100", text: "text-gray-600", dot: "bg-gray-400" };
+
+function getBankStyle(name: string) {
+  return BANK_STYLES[name] ?? DEFAULT_BANK_STYLE;
+}
+
+const DEFAULT_MENU_BUTTONS: Record<string, MenuButton[]> = {
+  language_school: [
+    { key: "OPEN_INTAKES", title: "📚 Open Intakes", visible: true },
+    { key: "FEES", title: "💰 Fees", visible: true },
+    { key: "HOW_TO_ENROLL", title: "📝 How to Enroll", visible: true },
+    { key: "SCHEDULE", title: "📅 Schedule", visible: true },
+    { key: "PAYMENT", title: "🏦 Payment", visible: true },
+    { key: "CHECK_STATUS", title: "📋 Check Status", visible: true },
+    { key: "LIVE_AGENT", title: "💬 Live Agent", visible: true },
+  ],
+  event: [
+    { key: "OPEN_INTAKES", title: "🎪 Events", visible: true },
+    { key: "FEES", title: "🎫 Tickets", visible: true },
+    { key: "HOW_TO_ENROLL", title: "📝 Register", visible: true },
+    { key: "SCHEDULE", title: "📅 Event Date", visible: true },
+    { key: "PAYMENT", title: "🏦 Payment", visible: true },
+    { key: "CHECK_STATUS", title: "📋 Check Status", visible: true },
+    { key: "LIVE_AGENT", title: "💬 Live Agent", visible: true },
+  ],
+  training_center: [
+    { key: "OPEN_INTAKES", title: "📚 Courses", visible: true },
+    { key: "FEES", title: "💰 Fees", visible: true },
+    { key: "HOW_TO_ENROLL", title: "📝 Enroll", visible: true },
+    { key: "SCHEDULE", title: "📅 Schedule", visible: true },
+    { key: "PAYMENT", title: "🏦 Payment", visible: true },
+    { key: "CHECK_STATUS", title: "📋 Check Status", visible: true },
+    { key: "LIVE_AGENT", title: "💬 Live Agent", visible: true },
+  ],
+};
+
+function getDefaultMenuButtons(orgType: string): MenuButton[] {
+  return DEFAULT_MENU_BUTTONS[orgType] ?? DEFAULT_MENU_BUTTONS.language_school;
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -91,20 +131,53 @@ function AddBankModal({
 }) {
   const toast = useToast();
   const [form, setForm] = useState({
-    bank_name: "KBZ" as MyanmarBank,
+    bank_name: "",
     account_number: "",
     account_holder: "",
   });
+  const [qrFile, setQrFile] = useState<File | null>(null);
+  const [qrPreview, setQrPreview] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  function handleQrChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Only image files are allowed.");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error("File size must be under 2MB.");
+      return;
+    }
+    setQrFile(file);
+    setQrPreview(URL.createObjectURL(file));
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
     try {
+      let qr_code_url: string | null = null;
+
+      // Upload QR code image if provided
+      if (qrFile) {
+        const ext = qrFile.name.split(".").pop() ?? "png";
+        const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+        const { error: uploadErr } = await supabase.storage
+          .from("qr-codes")
+          .upload(path, qrFile);
+        if (uploadErr) throw new Error(uploadErr.message);
+        const { data: urlData } = supabase.storage
+          .from("qr-codes")
+          .getPublicUrl(path);
+        qr_code_url = urlData.publicUrl;
+      }
+
       const res = await fetch("/api/admin/bank-accounts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...form, is_active: true }),
+        body: JSON.stringify({ ...form, qr_code_url, is_active: true }),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -123,6 +196,8 @@ function AddBankModal({
   const inputClass =
     "w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent";
 
+  const style = form.bank_name.trim() ? getBankStyle(form.bank_name.trim()) : null;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div
@@ -130,22 +205,28 @@ function AddBankModal({
         onClick={onClose}
         aria-hidden="true"
       />
-      <div className="relative w-full max-w-md bg-white rounded-2xl shadow-xl p-6">
+      <div className="relative w-full max-w-md bg-white rounded-2xl shadow-xl p-6 max-h-[90vh] overflow-y-auto">
         <h2 className="text-lg font-bold text-gray-900 mb-5">Add Bank Account</h2>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              Bank
+              Bank Name
             </label>
-            <select
+            <input
+              type="text"
+              list="bank-presets"
               value={form.bank_name}
-              onChange={(e) => setForm((f) => ({ ...f, bank_name: e.target.value as MyanmarBank }))}
-              className={`${inputClass} bg-white`}
-            >
-              {VALID_BANKS.map((b) => (
-                <option key={b} value={b}>{b}</option>
+              onChange={(e) => setForm((f) => ({ ...f, bank_name: e.target.value }))}
+              required
+              maxLength={50}
+              placeholder="e.g. KBZ, AYA, or type a custom name"
+              className={inputClass}
+            />
+            <datalist id="bank-presets">
+              {PRESET_BANKS.map((b) => (
+                <option key={b} value={b} />
               ))}
-            </select>
+            </datalist>
           </div>
 
           <div>
@@ -176,14 +257,53 @@ function AddBankModal({
             />
           </div>
 
+          {/* QR Code Upload */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              QR Code Image <span className="font-normal text-gray-400">(optional)</span>
+            </label>
+            <div className="flex items-start gap-4">
+              {qrPreview ? (
+                <div className="relative w-20 h-20 rounded-xl border border-gray-200 overflow-hidden shrink-0 bg-white">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={qrPreview} alt="QR preview" className="w-full h-full object-contain" />
+                  <button
+                    type="button"
+                    onClick={() => { setQrFile(null); setQrPreview(null); }}
+                    className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full text-xs flex items-center justify-center hover:bg-red-600"
+                  >
+                    x
+                  </button>
+                </div>
+              ) : (
+                <label className="flex flex-col items-center justify-center w-20 h-20 rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 cursor-pointer hover:border-[#1a3f8a] hover:bg-blue-50/50 transition-colors shrink-0">
+                  <svg className="w-6 h-6 text-gray-400" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75zM6.75 16.5h.75v.75h-.75v-.75zM16.5 6.75h.75v.75h-.75v-.75zM13.5 13.5h.75v.75h-.75v-.75zM13.5 19.5h.75v.75h-.75v-.75zM19.5 13.5h.75v.75h-.75v-.75zM19.5 19.5h.75v.75h-.75v-.75zM16.5 16.5h3v3h-3v-3z" />
+                  </svg>
+                  <span className="text-[10px] text-gray-400 mt-0.5">Upload</span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleQrChange}
+                    className="sr-only"
+                  />
+                </label>
+              )}
+              <p className="text-xs text-gray-400 pt-1">
+                JPG or PNG, max 2MB. Students see this on the payment page.
+              </p>
+            </div>
+          </div>
+
           {/* Preview badge */}
-          {form.bank_name && (
+          {style && (
             <div className="flex items-center gap-2 text-sm">
               <span
-                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-semibold ${BANK_STYLES[form.bank_name].bg} ${BANK_STYLES[form.bank_name].text}`}
+                className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full font-semibold ${style.bg} ${style.text}`}
               >
-                <span className={`w-2 h-2 rounded-full ${BANK_STYLES[form.bank_name].dot}`} />
-                {form.bank_name}
+                <span className={`w-2 h-2 rounded-full ${style.dot}`} />
+                {form.bank_name.trim()}
               </span>
               <span className="text-gray-400">preview</span>
             </div>
@@ -591,6 +711,8 @@ function SettingsContent() {
   const [messengerSaving, setMessengerSaving] = useState(false);
   const [messengerDisconnecting, setMessengerDisconnecting] = useState(false);
   const [messengerTesting, setMessengerTesting] = useState(false);
+  const [handoffTimeoutMin, setHandoffTimeoutMin] = useState(15);
+  const [menuButtons, setMenuButtons] = useState<MenuButton[]>([]);
 
   const fetchMessenger = useCallback(async () => {
     setMessengerLoading(true);
@@ -603,6 +725,8 @@ function SettingsContent() {
       setMessengerPageId(data.pageId);
       setMessengerGreeting(data.greeting ?? "");
       setMessengerSubdomain(data.subdomain ?? "");
+      setHandoffTimeoutMin(data.handoffTimeoutMin ?? 15);
+      setMenuButtons(data.menuButtons ?? getDefaultMenuButtons(data.orgType ?? "language_school"));
     } catch {
       // non-critical
     } finally {
@@ -628,18 +752,22 @@ function SettingsContent() {
     }
   }
 
-  async function handleMessengerSaveGreeting() {
+  async function handleMessengerSaveAll() {
     setMessengerSaving(true);
     try {
       const res = await fetch("/api/messenger/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ greeting: messengerGreeting }),
+        body: JSON.stringify({
+          greeting: messengerGreeting,
+          handoffTimeoutMin,
+          menuButtons,
+        }),
       });
       if (!res.ok) throw new Error(`${res.status}`);
-      toast.success("Greeting saved.");
+      toast.success("Bot settings saved.");
     } catch {
-      toast.error("Failed to save greeting.");
+      toast.error("Failed to save bot settings.");
     } finally {
       setMessengerSaving(false);
     }
@@ -707,6 +835,9 @@ function SettingsContent() {
         <p className="text-sm font-myanmar text-gray-400 mt-0.5">ဆက်တင်များ</p>
       </div>
 
+      {/* Tab bar */}
+      <SettingsTabs />
+
       {/* ── Section 1: Bank Accounts ─────────────────────────────────── */}
       <SectionCard
         title="Bank Accounts"
@@ -753,12 +884,26 @@ function SettingsContent() {
         ) : (
           <div className="divide-y divide-gray-100">
             {accounts.map((account) => {
-              const style = BANK_STYLES[account.bank_name] ?? BANK_STYLES.Other;
+              const style = getBankStyle(account.bank_name);
               return (
                 <div
                   key={account.id}
                   className="flex items-center gap-4 py-4 first:pt-0 last:pb-0"
                 >
+                  {/* QR thumbnail */}
+                  {account.qr_code_url ? (
+                    <div className="w-10 h-10 rounded-lg border border-gray-200 overflow-hidden shrink-0 bg-white">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={account.qr_code_url} alt={`${account.bank_name} QR`} className="w-full h-full object-contain" />
+                    </div>
+                  ) : (
+                    <div className="w-10 h-10 rounded-lg border border-dashed border-gray-200 flex items-center justify-center shrink-0 bg-gray-50">
+                      <svg className="w-4 h-4 text-gray-300" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z" />
+                      </svg>
+                    </div>
+                  )}
+
                   {/* Bank badge */}
                   <span
                     className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold shrink-0 ${style.bg} ${style.text}`}
@@ -1169,15 +1314,80 @@ function SettingsContent() {
                 rows={3}
                 className="w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent resize-none"
               />
-              <div className="flex items-center gap-3 mt-2">
-                <button
-                  onClick={handleMessengerSaveGreeting}
-                  disabled={messengerSaving}
-                  className="px-4 py-2 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 disabled:opacity-50 transition-colors"
-                >
-                  {messengerSaving ? "Saving…" : "Save Greeting"}
-                </button>
+            </div>
+
+            {/* Live Agent Handoff Timeout */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Live Agent Handoff Timeout{" "}
+                <span className="text-gray-400 font-normal">(minutes)</span>
+              </label>
+              <p className="text-xs text-gray-500 mb-2">
+                When a user requests a live agent, the bot stays silent for this duration.
+              </p>
+              <div className="flex items-center gap-3">
+                <input
+                  type="number"
+                  min={1}
+                  max={120}
+                  value={handoffTimeoutMin}
+                  onChange={(e) => setHandoffTimeoutMin(Math.max(1, Math.min(120, Number(e.target.value) || 1)))}
+                  className="w-24 border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
+                />
+                <span className="text-xs text-gray-400">min</span>
               </div>
+            </div>
+
+            {/* Menu Buttons */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                Menu Buttons
+              </label>
+              <p className="text-xs text-gray-500 mb-3">
+                Customize the quick-reply buttons shown to users in Messenger.
+              </p>
+              <div className="space-y-2">
+                {menuButtons.map((btn, idx) => (
+                  <div key={btn.key} className="flex items-center gap-3">
+                    <input
+                      type="text"
+                      value={btn.title}
+                      onChange={(e) => {
+                        setMenuButtons((prev) =>
+                          prev.map((b, i) =>
+                            i === idx ? { ...b, title: e.target.value } : b,
+                          ),
+                        );
+                      }}
+                      className="flex-1 border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
+                    />
+                    <span className="text-xs text-gray-400 w-20 truncate" title={btn.key}>
+                      {btn.key}
+                    </span>
+                    <Toggle
+                      checked={btn.visible}
+                      onChange={() => {
+                        setMenuButtons((prev) =>
+                          prev.map((b, i) =>
+                            i === idx ? { ...b, visible: !b.visible } : b,
+                          ),
+                        );
+                      }}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Save all bot settings */}
+            <div className="pt-2">
+              <button
+                onClick={handleMessengerSaveAll}
+                disabled={messengerSaving}
+                className="px-6 py-2.5 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 disabled:opacity-50 transition-colors"
+              >
+                {messengerSaving ? "Saving…" : "Save Bot Settings"}
+              </button>
             </div>
 
             {/* Actions */}

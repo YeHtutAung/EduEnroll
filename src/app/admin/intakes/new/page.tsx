@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ui/Toast";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
+import { mm } from "@/lib/mm-labels";
 import type { Intake } from "@/types/database";
 
 const ALL_MONTHS = [
@@ -80,7 +81,7 @@ export default function NewIntakePage() {
       </button>
 
       <h1 className="text-2xl font-bold text-gray-900 mb-0.5">Create New {labels.intake}</h1>
-      <p className="text-sm text-gray-400 font-myanmar mb-8">သင်တန်းအသစ်ဖွင့်မည်</p>
+      <p className="text-sm text-gray-400 font-myanmar mb-8">{mm(labels.orgType, "createIntake")}</p>
 
       <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
         <form onSubmit={handleSubmit} className="space-y-5">

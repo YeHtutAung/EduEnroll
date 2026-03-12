@@ -8,6 +8,8 @@ import ConfirmModal from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
 import { formatMMKSimple } from "@/lib/utils";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
+import { useRole } from "@/components/admin/RoleContext";
+import { createClient } from "@/lib/supabase/client";
 import type { Class, ClassMode, ClassStatus, Intake, IntakeStatus } from "@/types/database";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -35,7 +37,8 @@ const DEFAULT_LEVEL_COLOR = "#6b7280";
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function intakeToSlug(intake: Intake): string {
-  // "April 2026 Intake" → "april-2026"
+  // Use stored slug if available, otherwise derive from name
+  if (intake.slug) return intake.slug;
   const firstWord = intake.name.split(" ")[0].toLowerCase();
   return `${firstWord}-${intake.year}`;
 }
@@ -135,9 +138,27 @@ function EditClassModal({
   const [form, setForm] = useState<EditForm>(() => classToForm(cls));
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(cls.image_url ?? null);
+  const [removeImageFlag, setRemoveImageFlag] = useState(false);
 
   function set(key: keyof EditForm, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null;
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { toast.error("Image must be under 5 MB."); return; }
+    setImageFile(file);
+    setImagePreview(URL.createObjectURL(file));
+    setRemoveImageFlag(false);
+  }
+
+  function removeImage() {
+    setImageFile(null);
+    setImagePreview(null);
+    setRemoveImageFlag(true);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -151,23 +172,44 @@ function EditClassModal({
     savingRef.current = true;
     setSaving(true);
     try {
+      // Upload new image if provided
+      let image_url: string | null | undefined = undefined;
+      if (imageFile) {
+        const supabase = createClient();
+        const ext = imageFile.name.split(".").pop() ?? "png";
+        const path = `${cls.intake_id}/${cls.level.replace(/\s+/g, "-").toLowerCase()}-${Date.now()}.${ext}`;
+        const { error: uploadErr } = await supabase.storage
+          .from("class-images")
+          .upload(path, imageFile, { upsert: true });
+        if (uploadErr) throw new Error("Image upload failed: " + uploadErr.message);
+        const { data: urlData } = supabase.storage
+          .from("class-images")
+          .getPublicUrl(path);
+        image_url = urlData.publicUrl;
+      } else if (removeImageFlag) {
+        image_url = null;
+      }
+
+      const payload: Record<string, unknown> = {
+        fee_mmk: fee,
+        seat_total: seats,
+        status: form.status,
+        mode: form.mode,
+        enrollment_open_at: fromDatetimeLocal(form.enrollment_open_at),
+        enrollment_close_at: fromDatetimeLocal(form.enrollment_close_at),
+        event_date: form.event_date || null,
+        start_time: form.start_time || null,
+        end_time: form.end_time || null,
+        venue: form.venue || null,
+      };
+      if (image_url !== undefined) {
+        payload.image_url = image_url;
+      }
+
       const res = await fetch(`/api/classes/${cls.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          fee_mmk: fee,
-          seat_total: seats,
-          status: form.status,
-          mode: form.mode,
-          // Always include both date keys so the server can clear them
-          enrollment_open_at: fromDatetimeLocal(form.enrollment_open_at),
-          enrollment_close_at: fromDatetimeLocal(form.enrollment_close_at),
-          // Event fields (only meaningful for event org types)
-          event_date: form.event_date || null,
-          start_time: form.start_time || null,
-          end_time: form.end_time || null,
-          venue: form.venue || null,
-        }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const err = await res.json();
@@ -363,6 +405,41 @@ function EditClassModal({
             </>
           )}
 
+          {/* Image upload (optional) */}
+          <div>
+            <label className={labelClass}>Image (optional)</label>
+            {imagePreview ? (
+              <div className="relative inline-block">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={imagePreview}
+                  alt="Preview"
+                  className="h-32 w-auto rounded-lg border border-gray-200 object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={removeImage}
+                  className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-white text-xs hover:bg-red-600 transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <label className="flex cursor-pointer items-center gap-2 rounded-lg border-2 border-dashed border-gray-300 px-4 py-3 text-sm text-gray-500 hover:border-[#1a3f8a] hover:text-[#1a3f8a] transition-colors">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
+                </svg>
+                Upload image (max 5 MB)
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={handleImageChange}
+                  className="hidden"
+                />
+              </label>
+            )}
+          </div>
+
           {/* Actions */}
           <div className="flex gap-3 pt-2">
             <button
@@ -423,9 +500,24 @@ function AddCustomClassModal({
     venue: "",
   });
   const [saving, setSaving] = useState(false);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
 
   function set(key: keyof AddCustomForm, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null;
+    if (!file) { setImageFile(null); setImagePreview(null); return; }
+    if (file.size > 5 * 1024 * 1024) { toast.error("Image must be under 5 MB."); return; }
+    setImageFile(file);
+    setImagePreview(URL.createObjectURL(file));
+  }
+
+  function removeImage() {
+    setImageFile(null);
+    setImagePreview(null);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -439,6 +531,22 @@ function AddCustomClassModal({
 
     setSaving(true);
     try {
+      // Upload image if provided
+      let image_url: string | null = null;
+      if (imageFile) {
+        const supabase = createClient();
+        const ext = imageFile.name.split(".").pop() ?? "png";
+        const path = `${intakeId}/${level.replace(/\s+/g, "-").toLowerCase()}-${Date.now()}.${ext}`;
+        const { error: uploadErr } = await supabase.storage
+          .from("class-images")
+          .upload(path, imageFile, { upsert: true });
+        if (uploadErr) throw new Error("Image upload failed: " + uploadErr.message);
+        const { data: urlData } = supabase.storage
+          .from("class-images")
+          .getPublicUrl(path);
+        image_url = urlData.publicUrl;
+      }
+
       const res = await fetch(`/api/intakes/${intakeId}/classes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -452,6 +560,7 @@ function AddCustomClassModal({
           start_time: form.start_time || null,
           end_time: form.end_time || null,
           venue: form.venue || null,
+          image_url,
         }),
       });
       if (res.status === 409) {
@@ -623,6 +732,41 @@ function AddCustomClassModal({
             </>
           )}
 
+          {/* Image upload (optional) */}
+          <div>
+            <label className={labelClass}>Image (optional)</label>
+            {imagePreview ? (
+              <div className="relative inline-block">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={imagePreview}
+                  alt="Preview"
+                  className="h-32 w-auto rounded-lg border border-gray-200 object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={removeImage}
+                  className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-white text-xs hover:bg-red-600 transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+            ) : (
+              <label className="flex cursor-pointer items-center gap-2 rounded-lg border-2 border-dashed border-gray-300 px-4 py-3 text-sm text-gray-500 hover:border-[#1a3f8a] hover:text-[#1a3f8a] transition-colors">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
+                </svg>
+                Upload image (max 5 MB)
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={handleImageChange}
+                  className="hidden"
+                />
+              </label>
+            )}
+          </div>
+
           <div className="flex gap-3 pt-2">
             <button
               type="button"
@@ -656,6 +800,8 @@ export default function IntakeDetailPage({
 
   const toast = useToast();
   const tl = useTenantLabels();
+  const role = useRole();
+  const isOwner = role === "owner";
   const [intake, setIntake] = useState<Intake | null>(null);
   const [classes, setClasses] = useState<Class[]>([]);
   const [loading, setLoading] = useState(true);
@@ -907,19 +1053,21 @@ export default function IntakeDetailPage({
                   <h1 className="text-xl font-bold text-gray-900 leading-tight">
                     {intake.name}
                   </h1>
-                  <button
-                    onClick={openEditIntake}
-                    title={`Edit ${tl.intake}`}
-                    className="p-1 rounded-md text-gray-400 hover:text-[#1a3f8a] hover:bg-blue-50 transition-colors"
-                  >
-                    <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-                    </svg>
-                  </button>
+                  {isOwner && (
+                    <button
+                      onClick={openEditIntake}
+                      title={`Edit ${tl.intake}`}
+                      className="p-1 rounded-md text-gray-400 hover:text-[#1a3f8a] hover:bg-blue-50 transition-colors"
+                    >
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                      </svg>
+                    </button>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 mt-1">
                   <StatusBadge status={intake.status} />
-                  <select
+                  {isOwner && <select
                     value={intake.status}
                     onChange={(e) => requestStatusChange(e.target.value as IntakeStatus)}
                     disabled={updatingStatus}
@@ -934,7 +1082,7 @@ export default function IntakeDetailPage({
                     <option value="draft">Draft</option>
                     <option value="open">Open</option>
                     <option value="closed">Closed</option>
-                  </select>
+                  </select>}
                   <span className="text-xs text-gray-400">·</span>
                   <span className="text-xs text-gray-500">{intake.year}</span>
                   <span className="text-xs text-gray-400">·</span>
@@ -973,8 +1121,8 @@ export default function IntakeDetailPage({
                 )}
               </button>
 
-              {/* Add Default Classes (N5–N1) — language_school only */}
-              {tl.orgType === "language_school" && !allDefaultsExist && (
+              {/* Add Default Classes (N5–N1) — language_school only, owner only */}
+              {isOwner && tl.orgType === "language_school" && !allDefaultsExist && (
                 <button
                   onClick={() => setConfirmAddAll(true)}
                   disabled={addingClasses}
@@ -999,16 +1147,18 @@ export default function IntakeDetailPage({
                 </button>
               )}
 
-              {/* Add Custom Class */}
-              <button
-                onClick={() => setShowAddCustom(true)}
-                className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:border-[#1a3f8a] hover:text-[#1a3f8a] transition-colors"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-                </svg>
-                + Add Custom {tl.class}
-              </button>
+              {/* Add Custom Class — owner only */}
+              {isOwner && (
+                <button
+                  onClick={() => setShowAddCustom(true)}
+                  className="flex items-center gap-2 px-4 py-2 border border-gray-300 text-gray-700 rounded-xl text-sm font-medium hover:border-[#1a3f8a] hover:text-[#1a3f8a] transition-colors"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                  </svg>
+                  + Add Custom {tl.class}
+                </button>
+              )}
             </div>
           </div>
         ) : null}
@@ -1049,7 +1199,7 @@ export default function IntakeDetailPage({
           <table className="w-full min-w-[700px] text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100 text-left">
-                <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Level</th>
+                <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">{tl.class}</th>
                 {tl.orgType !== "event" && (
                   <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Mode</th>
                 )}
@@ -1142,15 +1292,17 @@ export default function IntakeDetailPage({
                       {/* Actions */}
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-1.5">
-                          <button
-                            onClick={() => setEditingClass(cls)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-600 text-xs font-medium rounded-lg hover:border-[#1a3f8a] hover:text-[#1a3f8a] transition-colors"
-                          >
-                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
-                            </svg>
-                            Edit
-                          </button>
+                          {isOwner && (
+                            <button
+                              onClick={() => setEditingClass(cls)}
+                              className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-600 text-xs font-medium rounded-lg hover:border-[#1a3f8a] hover:text-[#1a3f8a] transition-colors"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
+                              </svg>
+                              Edit
+                            </button>
+                          )}
                           <button
                             onClick={() => handleCopyClassLink(cls.level)}
                             title={`Copy ${cls.level} enrollment link`}

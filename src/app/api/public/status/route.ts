@@ -45,7 +45,7 @@ const PAYMENT_STATUS_LABELS: Record<PaymentStatus, { en: string; mm: string }> =
 
 interface EnrollmentWithClass extends Enrollment {
   classes: Pick<Class, "id" | "level" | "fee_mmk"> & {
-    intakes: Pick<Intake, "name" | "year"> | null;
+    intakes: Pick<Intake, "name" | "year" | "slug"> | null;
   } | null;
 }
 
@@ -96,7 +96,7 @@ export async function GET(request: NextRequest) {
   // ── Fetch enrollment with class info ─────────────────────────────
   const { data: enrollment, error: enrollmentError } = await supabase
     .from("enrollments")
-    .select("*, classes(id, level, fee_mmk, intakes(name, year))")
+    .select("*, classes(id, level, fee_mmk, intakes(name, year, slug))")
     .eq("enrollment_ref", ref)
     .eq("tenant_id", tenantId)
     .single() as EnrollmentResult;
@@ -133,7 +133,7 @@ export async function GET(request: NextRequest) {
   // ── Build intake slug (e.g. "april-2026") ────────────────────────
   const intakeInfo = enrollment.classes?.intakes;
   const intakeSlug = intakeInfo
-    ? `${intakeInfo.name.toLowerCase().replace(/\s+/g, "-")}-${intakeInfo.year}`
+    ? (intakeInfo.slug ?? `${intakeInfo.name.toLowerCase().replace(/\s+/g, "-")}-${intakeInfo.year}`)
     : null;
 
   return NextResponse.json({

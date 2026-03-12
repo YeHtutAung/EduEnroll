@@ -17,6 +17,7 @@ import {
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import { formatMMK } from "@/lib/utils";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
+import { mm } from "@/lib/mm-labels";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 interface AnalyticsData {
@@ -84,14 +85,23 @@ function AnalyticsContent() {
 
   const [data, setData] = useState<AnalyticsData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await fetch(`/api/admin/analytics?range=${range}`);
-      if (res.ok) setData(await res.json());
-    } catch {
-      /* ignore */
+      if (res.ok) {
+        setData(await res.json());
+      } else {
+        const body = await res.json().catch(() => null);
+        console.error("[analytics] API error:", res.status, body);
+        setError(body?.error ?? `HTTP ${res.status}`);
+      }
+    } catch (err) {
+      console.error("[analytics] Fetch error:", err);
+      setError("Network error");
     } finally {
       setLoading(false);
     }
@@ -115,8 +125,15 @@ function AnalyticsContent() {
 
   if (!data) {
     return (
-      <div className="flex items-center justify-center h-96 text-gray-400">
-        Failed to load analytics.
+      <div className="flex flex-col items-center justify-center h-96 text-gray-400 gap-3">
+        <p>Failed to load analytics.</p>
+        {error && <p className="text-xs text-red-400">{error}</p>}
+        <button
+          onClick={fetchData}
+          className="px-4 py-2 text-sm bg-[#1a3f8a] text-white rounded-lg hover:bg-blue-900 transition-colors"
+        >
+          Retry
+        </button>
       </div>
     );
   }
@@ -160,7 +177,7 @@ function AnalyticsContent() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           label="Total Enrolled"
-          labelMm="စာရင်းသွင်းသူ စုစုပေါင်း"
+          labelMm={mm(tl.orgType, "totalEnrolled")}
           value={data.total_enrolled.toLocaleString()}
         />
         <StatCard
@@ -190,7 +207,7 @@ function AnalyticsContent() {
             Enrollment Trend
           </h2>
           <p className="text-xs text-gray-400 font-myanmar mb-4">
-            နေ့စဉ်စာရင်းသွင်းမှု
+            {mm(tl.orgType, "enrollmentTrend")}
           </p>
           <ResponsiveContainer width="100%" height={260}>
             <LineChart data={data.daily_enrollments}>
