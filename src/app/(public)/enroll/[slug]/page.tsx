@@ -23,6 +23,7 @@ interface PublicClass {
   end_time?: string | null;
   venue?: string | null;
   image_url?: string | null;
+  max_tickets_per_person?: number;
 }
 
 interface PublicIntake {
@@ -538,10 +539,12 @@ function EventTicketCard({
   index,
 }: {
   cls: PublicClass;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, quantity: number) => void;
   isHighestTier: boolean;
   index: number;
 }) {
+  const maxTix = cls.max_tickets_per_person ?? 1;
+  const [qty, setQty] = useState(1);
   const isFull = cls.status === "full" || cls.seat_remaining === 0;
   const now = new Date();
   const notYetOpen = cls.enrollment_open_at ? now < new Date(cls.enrollment_open_at) : false;
@@ -568,13 +571,13 @@ function EventTicketCard({
           : "bg-[#111]"
       } ${isDisabled ? "opacity-60 cursor-not-allowed" : "hover:-translate-y-1.5"}`}
       style={{ animationDelay: `${index * 0.1}s` }}
-      onClick={() => !isDisabled && onSelect(cls.id)}
+      onClick={() => { if (!isDisabled && maxTix <= 1) onSelect(cls.id, 1); }}
       role={isDisabled ? undefined : "button"}
       tabIndex={isDisabled ? undefined : 0}
       onKeyDown={(e) => {
-        if (!isDisabled && (e.key === "Enter" || e.key === " ")) {
+        if (!isDisabled && maxTix <= 1 && (e.key === "Enter" || e.key === " ")) {
           e.preventDefault();
-          onSelect(cls.id);
+          onSelect(cls.id, 1);
         }
       }}
     >
@@ -704,15 +707,56 @@ function EventTicketCard({
           </div>
         )}
 
+        {/* Quantity selector (only for multi-ticket) */}
+        {!isDisabled && maxTix > 1 && (
+          <div className="flex items-center justify-between mb-6 px-1">
+            <span className="text-[12px] tracking-[1px] uppercase" style={{ color: "#888880" }}>
+              Qty <span className="font-myanmar tracking-normal">(အရေအတွက်)</span>
+            </span>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setQty((q) => Math.max(1, q - 1)); }}
+                className="w-8 h-8 rounded-sm border border-white/15 text-white/70 hover:border-white/30 hover:text-white flex items-center justify-center transition-colors text-lg"
+              >
+                −
+              </button>
+              <span className="text-xl font-bold min-w-[2ch] text-center" style={{
+                fontFamily: "'Bebas Neue', sans-serif",
+                color: isHighestTier ? GOLD_LIGHT : "#F8F4EE",
+              }}>
+                {qty}
+              </span>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setQty((q) => Math.min(maxTix, cls.seat_remaining, q + 1)); }}
+                className="w-8 h-8 rounded-sm border border-white/15 text-white/70 hover:border-white/30 hover:text-white flex items-center justify-center transition-colors text-lg"
+              >
+                +
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Total price for multi-ticket */}
+        {!isDisabled && maxTix > 1 && qty > 1 && (
+          <div className="mb-6 text-right text-[13px]" style={{ color: "#888880" }}>
+            Total: <span style={{ color: isHighestTier ? GOLD_LIGHT : "#F8F4EE" }} className="font-semibold">{formatMMK(cls.fee_mmk * qty)}</span>
+          </div>
+        )}
+
         {/* Register button */}
         {!isDisabled && (
-          <button className={`group/btn relative w-full flex items-center justify-between px-6 py-4 text-[13px] font-medium tracking-[2px] uppercase rounded-sm border overflow-hidden transition-all duration-300 ${
-            isHighestTier
-              ? "border-[#C9A84C]/40 text-[#E8C97A] hover:border-[#C9A84C] bg-gradient-to-r from-[#C9A84C]/15 to-[#C9A84C]/5 hover:from-[#C9A84C]/25 hover:to-[#C9A84C]/10"
-              : "border-white/12 text-[#F8F4EE] hover:border-white/30"
-          }`}>
+          <button
+            onClick={(e) => { e.stopPropagation(); onSelect(cls.id, qty); }}
+            className={`group/btn relative w-full flex items-center justify-between px-6 py-4 text-[13px] font-medium tracking-[2px] uppercase rounded-sm border overflow-hidden transition-all duration-300 ${
+              isHighestTier
+                ? "border-[#C9A84C]/40 text-[#E8C97A] hover:border-[#C9A84C] bg-gradient-to-r from-[#C9A84C]/15 to-[#C9A84C]/5 hover:from-[#C9A84C]/25 hover:to-[#C9A84C]/10"
+                : "border-white/12 text-[#F8F4EE] hover:border-white/30"
+            }`}
+          >
             <span className="absolute left-0 top-0 bottom-0 w-0 bg-white/5 transition-all duration-500 group-hover/btn:w-full" />
-            <span className="relative">Buy Now</span>
+            <span className="relative">{maxTix > 1 && qty > 1 ? `Buy ${qty} Tickets` : "Buy Now"}</span>
             <svg className="relative w-5 h-5 transition-transform duration-300 group-hover/btn:translate-x-1" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12h15m0 0l-6.75-6.75M19.5 12l-6.75 6.75" />
             </svg>
@@ -1044,8 +1088,9 @@ function IntakeLandingContent() {
     fetchIntake();
   }, [params.slug]);
 
-  function handleSelectClass(classId: string) {
-    router.push(`/enroll/form?class_id=${classId}&slug=${params.slug}`);
+  function handleSelectClass(classId: string, quantity: number = 1) {
+    const qParam = quantity > 1 ? `&quantity=${quantity}` : "";
+    router.push(`/enroll/form?class_id=${classId}&slug=${params.slug}${qParam}`);
   }
 
   if (loading) return <LoadingSkeleton />;

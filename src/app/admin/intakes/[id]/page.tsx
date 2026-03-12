@@ -105,6 +105,7 @@ interface EditForm {
   start_time: string;
   end_time: string;
   venue: string;
+  max_tickets_per_person: string;
 }
 
 function classToForm(cls: Class): EditForm {
@@ -119,6 +120,7 @@ function classToForm(cls: Class): EditForm {
     start_time: cls.start_time ?? "",
     end_time: cls.end_time ?? "",
     venue: cls.venue ?? "",
+    max_tickets_per_person: String(cls.max_tickets_per_person ?? 1),
   };
 }
 
@@ -190,6 +192,7 @@ function EditClassModal({
         image_url = null;
       }
 
+      const maxTix = Number(form.max_tickets_per_person);
       const payload: Record<string, unknown> = {
         fee_mmk: fee,
         seat_total: seats,
@@ -201,6 +204,7 @@ function EditClassModal({
         start_time: form.start_time || null,
         end_time: form.end_time || null,
         venue: form.venue || null,
+        max_tickets_per_person: maxTix >= 1 ? maxTix : 1,
       };
       if (image_url !== undefined) {
         payload.image_url = image_url;
@@ -401,6 +405,18 @@ function EditClassModal({
                   className={inputClass}
                   placeholder="e.g. Room 101, Main Building"
                 />
+              </div>
+              <div>
+                <label className={labelClass}>Max Tickets Per Person</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={form.max_tickets_per_person}
+                  onChange={(e) => set("max_tickets_per_person", e.target.value)}
+                  className={inputClass}
+                  placeholder="1"
+                />
+                <p className="text-xs text-gray-400 mt-1">How many tickets one person can buy at once.</p>
               </div>
             </>
           )}

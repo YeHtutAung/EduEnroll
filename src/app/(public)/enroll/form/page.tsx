@@ -2,6 +2,7 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import { formatMMK } from "@/lib/utils";
 import type { JlptLevel, ClassStatus } from "@/types/database";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -306,6 +307,7 @@ function EnrollmentFormPage() {
   const router = useRouter();
   const classId = searchParams.get("class_id");
   const slug = searchParams.get("slug");
+  const quantity = Math.max(1, Number(searchParams.get("quantity")) || 1);
 
   // Data state
   const [intake, setIntake] = useState<IntakeInfo | null>(null);
@@ -432,6 +434,7 @@ function EnrollmentFormPage() {
           class_id: classInfo.id,
           form_data: dynamicData,
           idempotency_key: idempotencyKeyRef.current,
+          quantity,
         }),
       });
 
@@ -564,7 +567,16 @@ function EnrollmentFormPage() {
             {classInfo.level}
           </span>
           <div>
-            <p className="font-myanmar text-xl font-bold text-gray-900">{classInfo.fee_formatted}</p>
+            <p className="font-myanmar text-xl font-bold text-gray-900">
+              {quantity > 1
+                ? <>{classInfo.fee_formatted} × {quantity} = <span className="text-[#1a6b3c]">{formatMMK(classInfo.fee_mmk * quantity)}</span></>
+                : classInfo.fee_formatted}
+            </p>
+            {quantity > 1 && (
+              <p className="text-sm text-gray-500">
+                {quantity} ticket{quantity > 1 ? "s" : ""}
+              </p>
+            )}
             <p className="text-sm text-gray-500">
               {intake.name}{intakeNameMM && <> / <span className="font-myanmar">{intakeNameMM}</span></>}
             </p>

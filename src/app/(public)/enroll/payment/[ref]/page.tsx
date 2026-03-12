@@ -13,6 +13,7 @@ interface EnrollmentInfo {
   class_level: string | null;
   fee_mmk: number | null;
   fee_formatted: string | null;
+  quantity: number;
   intake_slug: string | null;
   status: string;
   status_label_en: string;
@@ -504,8 +505,10 @@ export default function PaymentInstructionsPage() {
   if (loading) return <LoadingSkeleton />;
   if (error || !enrollment) return <ErrorPage message={error || "Unknown error"} />;
 
-  const feeEn = formatMMKSimple(enrollment.fee_mmk ?? 0);       // "300,000 MMK"
-  const feeMm = formatMMK(enrollment.fee_mmk ?? 0).replace(" MMK", ""); // "၃၀၀,၀၀၀"
+  const qty = enrollment.quantity ?? 1;
+  const totalFee = (enrollment.fee_mmk ?? 0) * qty;
+  const feeEn = formatMMKSimple(totalFee);       // "300,000 MMK"
+  const feeMm = formatMMK(totalFee).replace(" MMK", ""); // "၃၀၀,၀၀၀"
   const showUpload = enrollment.status === "pending_payment";
 
   return (

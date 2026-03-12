@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { class_id, form_data, idempotency_key } = body as Record<string, unknown>;
+  const { class_id, form_data, idempotency_key, quantity } = body as Record<string, unknown>;
 
   // ── Validate class_id ─────────────────────────────────────────
   if (!class_id || typeof class_id !== "string" || !UUID_RE.test(class_id)) {
@@ -50,10 +50,11 @@ export async function POST(request: NextRequest) {
   const supabase = createAdminClient();
 
   const idemKey = typeof idempotency_key === "string" ? idempotency_key : null;
+  const qty = typeof quantity === "number" && quantity >= 1 ? Math.floor(quantity) : 1;
 
   const { data: result, error: rpcError } = await supabase.rpc(
     "submit_enrollment",
-    { p_class_id: class_id, p_idempotency_key: idemKey } as never,
+    { p_class_id: class_id, p_idempotency_key: idemKey, p_quantity: qty } as never,
   );
 
   if (rpcError) {
@@ -89,6 +90,24 @@ export async function POST(request: NextRequest) {
             error:   "Class Full",
             message: "Sorry, this class is now full. Please choose another level.",
             message_mm: "ဝမ်းနည်းပါသည်။ ဤသင်တန်းတွင် နေရာပြည့်သွားပြီဖြစ်သည်။ အခြားအဆင့်ကို ရွေးချယ်ပါ။",
+          },
+          { status: 409 },
+        );
+      case "NOT_ENOUGH_SEATS":
+        return NextResponse.json(
+          {
+            error:   "Not Enough Seats",
+            message: `Only ${payload.seat_remaining} ticket(s) remaining. Please reduce your quantity.`,
+            message_mm: `လက်ကျန်လက်မှတ် ${payload.seat_remaining} ခုသာ ကျန်ပါသည်။ အရေအတွက် လျှော့ပါ။`,
+          },
+          { status: 409 },
+        );
+      case "EXCEEDS_MAX_TICKETS":
+        return NextResponse.json(
+          {
+            error:   "Exceeds Limit",
+            message: `Maximum ${payload.max} ticket(s) per person.`,
+            message_mm: `တစ်ဦးလျှင် အများဆုံး လက်မှတ် ${payload.max} ခုသာ ဝယ်ယူနိုင်ပါသည်။`,
           },
           { status: 409 },
         );
@@ -189,18 +208,23 @@ export async function POST(request: NextRequest) {
     .order("bank_name") as { data: Pick<BankAccount, "bank_name" | "account_number" | "account_holder">[] | null };
 
   // ── Return success response ───────────────────────────────────
+  const enrolledQty = payload.quantity ?? 1;
+  const totalFee = payload.fee_mmk * enrolledQty;
+
   return NextResponse.json(
     {
       enrollment_ref: payload.enrollment_ref,
       class_level:    payload.class_level,
       fee_mmk:        payload.fee_mmk,
-      fee_formatted:  formatMMK(payload.fee_mmk),
+      quantity:        enrolledQty,
+      total_fee_mmk:   totalFee,
+      fee_formatted:  formatMMK(totalFee),
       payment: {
         instructions_en:
-          `Please transfer ${formatMMK(payload.fee_mmk)} to one of the bank accounts below ` +
+          `Please transfer ${formatMMK(totalFee)} to one of the bank accounts below ` +
           `and quote your enrollment reference "${payload.enrollment_ref}" as the payment remark.`,
         instructions_mm:
-          `ကျောင်းလခ ${formatMMK(payload.fee_mmk)} ကို အောက်ပါ ဘဏ်အကောင့်များသို့ လွှဲပြောင်းပေးပြီး ` +
+          `ကျောင်းလခ ${formatMMK(totalFee)} ကို အောက်ပါ ဘဏ်အကောင့်များသို့ လွှဲပြောင်းပေးပြီး ` +
           `"${payload.enrollment_ref}" ကို ငွေလွှဲမှတ်ချက်တွင် ထည့်သွင်းရေးသားပေးပါ။`,
         bank_accounts: bankAccounts ?? [],
       },
