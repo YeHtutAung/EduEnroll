@@ -649,18 +649,25 @@ export default function PaymentInstructionsPage() {
                       {account.bank_name}
                     </span>
                     <p className="text-sm font-medium text-gray-900">{account.account_holder}</p>
-                    <p className="font-mono text-sm text-gray-600">{account.account_number}</p>
+                    {account.account_number && (
+                      <p className="font-mono text-sm text-gray-600">{account.account_number}</p>
+                    )}
                   </div>
-                  <CopyButton text={account.account_number} size="small" />
+                  {!account.qr_code_url && account.account_number && (
+                    <CopyButton text={account.account_number} size="small" />
+                  )}
                 </div>
                 {account.qr_code_url && (
-                  <div className="mt-3 flex justify-center">
+                  <div className="mt-3 flex flex-col items-center gap-2">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={account.qr_code_url}
                       alt={`${account.bank_name} QR Code`}
-                      className="h-40 w-40 rounded-lg border border-gray-100 object-contain bg-white"
+                      className="w-full max-w-xs rounded-lg border border-gray-100 object-contain bg-white"
                     />
+                    {account.account_number && (
+                      <CopyButton text={account.account_number} size="small" />
+                    )}
                   </div>
                 )}
               </div>
