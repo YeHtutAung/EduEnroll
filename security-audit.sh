@@ -335,8 +335,9 @@ test_endpoint "GET /api/public/enroll/[slug] (no tenant)" "GET" \
 echo ""
 echo "▸ Cleaning up test data..."
 
-# Delete test data using service role
+# Delete test data using service role (ignore errors — best effort cleanup)
 # Delete in dependency order (children before parents)
+set +e
 for TID in "${TENANT_A}" "${TENANT_B}"; do
   curl -s -X DELETE "${SB_URL}/rest/v1/announcements?tenant_id=eq.${TID}" \
     -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
@@ -355,6 +356,7 @@ for TID in "${TENANT_A}" "${TENANT_B}"; do
   curl -s -X DELETE "${SB_URL}/rest/v1/tenants?id=eq.${TID}" \
     -H "apikey: ${SB_KEY}" -H "Authorization: Bearer ${SB_KEY}" > /dev/null 2>&1
 done
+set -e
 
 echo "  Done."
 
