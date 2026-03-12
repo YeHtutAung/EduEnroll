@@ -231,8 +231,8 @@ test_endpoint() {
   HTTP_CODE=$(echo "$RESPONSE" | tail -1)
   RESP_BODY=$(echo "$RESPONSE" | sed '$d')
 
-  # Pass conditions: 401, 403, or 200 with empty array/object (RLS filtering)
-  if [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "403" ]; then
+  # Pass conditions: 401, 403, 400 (no tenant context), or 200 with empty/filtered data
+  if [ "$HTTP_CODE" = "401" ] || [ "$HTTP_CODE" = "403" ] || [ "$HTTP_CODE" = "400" ]; then
     pass "$NAME (HTTP ${HTTP_CODE})"
     return
   fi

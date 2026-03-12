@@ -179,8 +179,8 @@ test_intakes() {
 
   if [[ $SKIP_ADMIN -eq 1 ]]; then skip "POST /api/intakes (auth required)"; return; fi
 
-  # Create intake with unique name to avoid slug conflicts
-  local INTAKE_NAME="Test ${TIMESTAMP}"
+  # Create intake with unique name — slug = first_word + "-" + year
+  local INTAKE_NAME="CI${TIMESTAMP}"
   local RESP
   RESP=$(admin_post "/api/intakes" \
     "{\"name\":\"${INTAKE_NAME}\",\"year\":2026,\"status\":\"draft\"}") || RESP=""
