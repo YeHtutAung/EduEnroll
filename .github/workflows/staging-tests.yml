@@ -93,25 +93,22 @@ jobs:
             -H "apikey: ${SUPABASE_ANON_KEY}" \
             -H "Authorization: Bearer $TOKEN" | jq '{id: .id, email: .email}' 2>/dev/null || echo "FAILED"
 
+          # Test: do auth headers reach the API route?
+          echo "--- Health endpoint WITH auth headers ---"
+          curl -s \
+            -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "x-supabase-auth: Bearer $TOKEN" \
+            "$BASE_URL/api/health" | jq . 2>/dev/null || echo "FAILED"
+
           # Test with both headers
-          echo "--- Authorization + x-supabase-auth headers ---"
+          echo "--- Authorization + x-supabase-auth → /api/intakes ---"
           RESP=$(curl -sL -w "\n%{http_code}" \
             -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
             -H "Authorization: Bearer $TOKEN" \
             -H "x-supabase-auth: Bearer $TOKEN" \
             "$BASE_URL/api/intakes")
           echo "$RESP" | tail -5
-
-          # Test a GET that should show different response if new code is deployed
-          echo "--- POST intake with auth ---"
-          RESP2=$(curl -sL -w "\n%{http_code}" \
-            -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
-            -H "Authorization: Bearer $TOKEN" \
-            -H "x-supabase-auth: Bearer $TOKEN" \
-            -H "Content-Type: application/json" \
-            -X POST -d '{"name":"CI Debug Test","year":2026}' \
-            "$BASE_URL/api/intakes")
-          echo "$RESP2" | tail -5
         env:
           BASE_URL: ${{ secrets.STAGING_URL }}
           SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
