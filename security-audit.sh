@@ -223,7 +223,7 @@ test_endpoint() {
   else
     RESPONSE=$(curl -sL -w "\n%{http_code}" -X "$METHOD" "$URL" \
       ${BYPASS_H:+-H "$BYPASS_H"} \
-      -H "${AUTH_HEADER}" -H "${AUTH_HEADER_ALT}" \
+      -H "${AUTH_HEADER}" \
       -H "Content-Type: application/json" \
       -d "$BODY")
   fi
