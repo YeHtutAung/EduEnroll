@@ -94,18 +94,16 @@ jobs:
             -H "Authorization: Bearer $TOKEN" | jq '{id: .id, email: .email}' 2>/dev/null || echo "FAILED"
 
           # Test: do auth headers reach the API route?
-          echo "--- Health endpoint WITH auth headers ---"
+          echo "--- Health endpoint WITH x-supabase-auth ---"
           curl -s \
             -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
-            -H "Authorization: Bearer $TOKEN" \
             -H "x-supabase-auth: Bearer $TOKEN" \
             "$BASE_URL/api/health" | jq . 2>/dev/null || echo "FAILED"
 
-          # Test with both headers
-          echo "--- Authorization + x-supabase-auth → /api/intakes ---"
+          # Test auth on intakes endpoint
+          echo "--- x-supabase-auth → /api/intakes ---"
           RESP=$(curl -sL -w "\n%{http_code}" \
             -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
-            -H "Authorization: Bearer $TOKEN" \
             -H "x-supabase-auth: Bearer $TOKEN" \
             "$BASE_URL/api/intakes")
           echo "$RESP" | tail -5

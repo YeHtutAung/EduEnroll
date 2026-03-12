@@ -199,10 +199,9 @@ if [ -z "$ACCESS_TOKEN" ]; then
 fi
 echo "  Got access token for school-b"
 
-# Use Bearer token auth for API requests
-# Send both headers — Vercel may strip standard Authorization header
-AUTH_HEADER="Authorization: Bearer ${ACCESS_TOKEN}"
-AUTH_HEADER_ALT="x-supabase-auth: Bearer ${ACCESS_TOKEN}"
+# Use x-supabase-auth for API requests — Vercel Deployment Protection
+# intercepts the standard Authorization header, so we use a custom header.
+AUTH_HEADER="x-supabase-auth: Bearer ${ACCESS_TOKEN}"
 
 # ── Step 4: Cross-tenant access tests ────────────────────────────────────────
 
@@ -220,7 +219,7 @@ test_endpoint() {
   if [ "$METHOD" = "GET" ]; then
     RESPONSE=$(curl -sL -w "\n%{http_code}" "$URL" \
       ${BYPASS_H:+-H "$BYPASS_H"} \
-      -H "${AUTH_HEADER}" -H "${AUTH_HEADER_ALT}")
+      -H "${AUTH_HEADER}")
   else
     RESPONSE=$(curl -sL -w "\n%{http_code}" -X "$METHOD" "$URL" \
       ${BYPASS_H:+-H "$BYPASS_H"} \

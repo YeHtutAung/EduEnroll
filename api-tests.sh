@@ -145,7 +145,9 @@ login() {
 
   # Use Bearer token auth for API requests (supported by requireAuth)
   # Send both Authorization and x-supabase-auth (Vercel may strip Authorization)
-  AUTH_H=(-H "Authorization: Bearer ${ACCESS_TOKEN}" -H "x-supabase-auth: Bearer ${ACCESS_TOKEN}")
+  # Use x-supabase-auth instead of Authorization to avoid Vercel Deployment
+  # Protection intercepting the header and returning an HTML challenge page.
+  AUTH_H=(-H "x-supabase-auth: Bearer ${ACCESS_TOKEN}")
 
   echo -e "  ${GREEN}✓${RESET} Logged in as ${TEST_EMAIL} (project: ${PROJECT_REF})"
 

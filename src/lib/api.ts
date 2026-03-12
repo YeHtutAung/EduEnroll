@@ -22,9 +22,11 @@ export interface AuthContext {
  */
 export async function requireAuth(): Promise<AuthContext | NextResponse> {
   const headersList = headers();
-  // Check both standard Authorization header and custom x-supabase-auth
-  // (Vercel's proxy may strip Authorization on certain deployments)
-  const authHeader = headersList.get("authorization") ?? headersList.get("x-supabase-auth");
+  // Prefer x-supabase-auth over Authorization:
+  // Vercel Deployment Protection intercepts the Authorization header and returns
+  // an HTML challenge page, even when x-vercel-protection-bypass is present.
+  // The custom x-supabase-auth header bypasses this issue.
+  const authHeader = headersList.get("x-supabase-auth") ?? headersList.get("authorization");
 
   let supabase: SupabaseClient<Database>;
   let authUser: { id: string } | null = null;
