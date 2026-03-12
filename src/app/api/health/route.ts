@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 
+// Evaluated at build time — used to verify which deployment is serving
 const BUILD_TIME = new Date().toISOString();
 
 export async function GET() {
