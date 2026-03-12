@@ -76,47 +76,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Debug — test auth header passthrough
-        run: |
-          # Get a token
-          TOKEN_RESP=$(curl -sf -X POST \
-            "$SUPABASE_URL/auth/v1/token?grant_type=password" \
-            -H "apikey: $SUPABASE_ANON_KEY" \
-            -H "Content-Type: application/json" \
-            -d "{\"email\":\"$TEST_EMAIL\",\"password\":\"$TEST_PASSWORD\"}")
-          TOKEN=$(echo "$TOKEN_RESP" | jq -r '.access_token // empty')
-          echo "Got token: ${TOKEN:0:20}..."
-
-          # Verify token works directly with Supabase
-          echo "--- Direct Supabase getUser ---"
-          curl -s "${SUPABASE_URL}/auth/v1/user" \
-            -H "apikey: ${SUPABASE_ANON_KEY}" \
-            -H "Authorization: Bearer $TOKEN" | jq '{id: .id, email: .email}' 2>/dev/null || echo "FAILED"
-
-          # Test: do auth headers reach the API route?
-          echo "--- Health endpoint WITH x-supabase-auth ---"
-          HEALTH_RESP=$(curl -sL \
-            -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
-            -H "x-supabase-auth: Bearer $TOKEN" \
-            "$BASE_URL/api/health" || echo "curl_failed")
-          echo "Raw response (first 500 chars): ${HEALTH_RESP:0:500}"
-          echo "$HEALTH_RESP" | jq . 2>/dev/null || echo "(not valid JSON)"
-
-          # Test auth on intakes endpoint
-          echo "--- x-supabase-auth → /api/intakes ---"
-          RESP=$(curl -sL -w "\n%{http_code}" \
-            -H "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
-            -H "x-supabase-auth: Bearer $TOKEN" \
-            "$BASE_URL/api/intakes")
-          echo "$RESP" | tail -5
-        env:
-          BASE_URL: ${{ secrets.STAGING_URL }}
-          SUPABASE_URL: ${{ secrets.STAGING_SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.STAGING_SUPABASE_ANON_KEY }}
-          TEST_EMAIL: ${{ secrets.STAGING_TEST_EMAIL }}
-          TEST_PASSWORD: ${{ secrets.STAGING_TEST_PASSWORD }}
-          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
-
       - name: Run API tests
         run: bash api-tests.sh
         env:
