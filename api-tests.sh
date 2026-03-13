@@ -40,6 +40,7 @@ INTAKE_SLUG=""
 TENANT_SUBDOMAIN=""
 CLASS_N5_ID=""; CLASS_N4_ID=""; CLASS_N3_ID=""; CLASS_N2_ID=""; CLASS_N1_ID=""
 ENROLLMENT_REF=""
+CART_ENROLLMENT_REF=""
 
 # Auth cookie header — populated by login()
 AUTH_H=()
@@ -396,6 +397,140 @@ test_submit_enrollment() {
   fi
 }
 
+# ── 4b. Submit Cart Enrollment (multi-ticket) ─────────────────
+test_submit_cart_enrollment() {
+  header "Submit Cart Enrollment — Ma Aye (N5 ×2, N4 ×1)"
+
+  if [[ -z "$CLASS_N5_ID" || -z "$CLASS_N4_ID" ]]; then
+    skip "POST /api/public/enroll (cart) — no N5/N4 class_id available"
+    return
+  fi
+
+  # Cart body with items array
+  local BODY
+  BODY=$(jq -n \
+    --arg n5_id "$CLASS_N5_ID" \
+    --arg n4_id "$CLASS_N4_ID" \
+    '{items: [{class_id: $n5_id, quantity: 2}, {class_id: $n4_id, quantity: 1}], form_data: {name_en: "Ma Aye", phone: "09987654321", email: "ma.aye@example.com"}}')
+
+  local RESP
+  RESP=$(pub_post "/api/public/enroll" "$BODY" ) || RESP=""
+
+  if echo "$RESP" | jq -e '.enrollment_ref' &>/dev/null; then
+    CART_ENROLLMENT_REF=$(echo "$RESP" | jq -r '.enrollment_ref')
+    local TOTAL_FEE; TOTAL_FEE=$(echo "$RESP" | jq '.total_fee_mmk')
+    local QTY; QTY=$(echo "$RESP" | jq '.quantity')
+    local ITEMS_COUNT; ITEMS_COUNT=$(echo "$RESP" | jq '.items | length')
+    pass "POST /api/public/enroll (cart) — ref=${CART_ENROLLMENT_REF}, total=${TOTAL_FEE}, qty=${QTY}"
+
+    # Verify items breakdown returned
+    if [[ "$ITEMS_COUNT" == "2" ]]; then
+      pass "POST /api/public/enroll (cart) — items array has 2 entries"
+    else
+      fail "POST /api/public/enroll (cart) — expected 2 items, got ${ITEMS_COUNT}"
+    fi
+
+    # Verify total fee = N5*2 + N4*1 = 300000*2 + 350000*1 = 950000
+    if [[ "$TOTAL_FEE" == "950000" ]]; then
+      pass "POST /api/public/enroll (cart) — total fee correct (950,000 MMK)"
+    else
+      fail "POST /api/public/enroll (cart) — expected total 950000, got ${TOTAL_FEE}"
+    fi
+
+    # Verify quantity = 3
+    if [[ "$QTY" == "3" ]]; then
+      pass "POST /api/public/enroll (cart) — total quantity correct (3)"
+    else
+      fail "POST /api/public/enroll (cart) — expected quantity 3, got ${QTY}"
+    fi
+
+    # Payment instructions should be present
+    if echo "$RESP" | jq -e '.payment.instructions_en' &>/dev/null; then
+      pass "POST /api/public/enroll (cart) — payment instructions returned"
+    else
+      fail "POST /api/public/enroll (cart) — missing payment instructions"
+    fi
+  else
+    fail "POST /api/public/enroll (cart) — enrollment failed" "$RESP"
+    return
+  fi
+
+  # Validation: empty items array should 400
+  local CODE
+  CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
+    -d '{"items":[], "form_data":{"name_en":"Test"}}' \
+    "$BASE_URL/api/public/enroll")
+  if [[ "$CODE" == "400" ]]; then
+    pass "POST /api/public/enroll (cart) — 400 on empty items array"
+  else
+    fail "POST /api/public/enroll (cart) — expected 400 for empty items, got ${CODE}"
+  fi
+
+  # Validation: items with invalid class_id should 400
+  CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
+    -d '{"items":[{"class_id":"not-a-uuid","quantity":1}]}' \
+    "$BASE_URL/api/public/enroll")
+  if [[ "$CODE" == "400" ]]; then
+    pass "POST /api/public/enroll (cart) — 400 on invalid item class_id"
+  else
+    fail "POST /api/public/enroll (cart) — expected 400 for invalid item UUID, got ${CODE}"
+  fi
+
+  # Non-existent class in cart should 404
+  CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
+    -d '{"items":[{"class_id":"00000000-0000-0000-0000-000000000000","quantity":1}]}' \
+    "$BASE_URL/api/public/enroll")
+  if [[ "$CODE" == "404" ]]; then
+    pass "POST /api/public/enroll (cart) — 404 on non-existent class in cart"
+  else
+    fail "POST /api/public/enroll (cart) — expected 404, got ${CODE}"
+  fi
+}
+
+# ── 4c. Cart Enrollment Status ─────────────────────────────────
+test_cart_enrollment_status() {
+  header "Cart Enrollment Status Check"
+
+  if [[ -z "$CART_ENROLLMENT_REF" ]]; then
+    skip "GET /api/public/status (cart) — no cart enrollment_ref available"
+    return
+  fi
+
+  local RESP
+  RESP=$(pub_get "/api/public/status?ref=${CART_ENROLLMENT_REF}" ) || RESP=""
+
+  if echo "$RESP" | jq -e '.enrollment_ref' &>/dev/null; then
+    local STATUS; STATUS=$(echo "$RESP" | jq -r '.status')
+    pass "GET /api/public/status (cart) — status: ${STATUS}"
+
+    # Should have items array
+    local ITEMS_COUNT; ITEMS_COUNT=$(echo "$RESP" | jq '.items | length // 0')
+    if [[ "$ITEMS_COUNT" == "2" ]]; then
+      pass "GET /api/public/status (cart) — items array has 2 entries"
+    else
+      fail "GET /api/public/status (cart) — expected 2 items, got ${ITEMS_COUNT}" "$RESP"
+    fi
+
+    # class_level should be comma-separated for cart
+    local CLASS_LEVEL; CLASS_LEVEL=$(echo "$RESP" | jq -r '.class_level // ""')
+    if [[ -n "$CLASS_LEVEL" && "$CLASS_LEVEL" == *","* ]]; then
+      pass "GET /api/public/status (cart) — class_level is multi-value: ${CLASS_LEVEL}"
+    else
+      fail "GET /api/public/status (cart) — expected comma-separated class_level, got: ${CLASS_LEVEL}"
+    fi
+
+    # fee_mmk should be cart total (950000)
+    local FEE; FEE=$(echo "$RESP" | jq '.fee_mmk // 0')
+    if [[ "$FEE" == "950000" ]]; then
+      pass "GET /api/public/status (cart) — fee_mmk is cart total (950,000)"
+    else
+      fail "GET /api/public/status (cart) — expected fee 950000, got ${FEE}"
+    fi
+  else
+    fail "GET /api/public/status (cart) — unexpected response" "$RESP"
+  fi
+}
+
 # ── 5. Enrollment Status ────────────────────────────────────────
 test_enrollment_status() {
   header "Enrollment Status Check"
@@ -697,7 +832,9 @@ main() {
   test_classes
   test_public_intake
   test_submit_enrollment
+  test_submit_cart_enrollment
   test_enrollment_status
+  test_cart_enrollment_status
   test_admin_stats
   test_admin_students
   test_admin_pending_payments
