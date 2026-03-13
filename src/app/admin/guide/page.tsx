@@ -2,12 +2,45 @@
 
 import { useState } from "react";
 
+// ── Video Modal ──────────────────────────────────────────────────────────────
+
+function VideoModal({ videoId, onClose }: { videoId: string; onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full max-w-3xl mx-4"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button
+          onClick={onClose}
+          className="absolute -top-10 right-0 text-white/80 hover:text-white text-sm font-medium transition-colors"
+        >
+          Close
+        </button>
+        <div className="relative w-full pt-[56.25%] rounded-xl overflow-hidden bg-black shadow-2xl">
+          <iframe
+            className="absolute inset-0 w-full h-full"
+            src={`https://www.youtube.com/embed/${videoId}?autoplay=1&rel=0`}
+            title="Video Tutorial"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Guide Topics ─────────────────────────────────────────────────────────────
 
 interface GuideTopic {
   id: string;
   title: string;
   icon: string;
+  videoId: string | null; // YouTube video ID (unlisted), null = coming soon
   content: React.ReactNode;
 }
 
@@ -16,6 +49,7 @@ const GUIDE_TOPICS: GuideTopic[] = [
     id: "create-event",
     title: "Create an Event",
     icon: "🎪",
+    videoId: null, // TODO: add YouTube video ID
     content: (
       <div className="space-y-4">
         <p className="text-gray-600">
@@ -80,6 +114,7 @@ const GUIDE_TOPICS: GuideTopic[] = [
     id: "create-tickets",
     title: "Create Ticket Types",
     icon: "🎫",
+    videoId: null, // TODO: add YouTube video ID
     content: (
       <div className="space-y-4">
         <p className="text-gray-600">
@@ -144,6 +179,7 @@ const GUIDE_TOPICS: GuideTopic[] = [
     id: "setup-tickets",
     title: "Setup Ticket Details",
     icon: "⚙️",
+    videoId: null, // TODO: add YouTube video ID
     content: (
       <div className="space-y-4">
         <p className="text-gray-600">
@@ -193,6 +229,7 @@ const GUIDE_TOPICS: GuideTopic[] = [
     id: "manage-forms",
     title: "Manage Registration Forms",
     icon: "📝",
+    videoId: null, // TODO: add YouTube video ID
     content: (
       <div className="space-y-4">
         <p className="text-gray-600">
@@ -277,6 +314,7 @@ const GUIDE_TOPICS: GuideTopic[] = [
     id: "bank-accounts",
     title: "Setup Payment Accounts",
     icon: "🏦",
+    videoId: null, // TODO: add YouTube video ID
     content: (
       <div className="space-y-4">
         <p className="text-gray-600">
@@ -339,6 +377,7 @@ const GUIDE_TOPICS: GuideTopic[] = [
     id: "open-registration",
     title: "Open Registration",
     icon: "🚀",
+    videoId: null, // TODO: add YouTube video ID
     content: (
       <div className="space-y-4">
         <p className="text-gray-600">
@@ -400,6 +439,7 @@ const GUIDE_TOPICS: GuideTopic[] = [
 
 export default function GuidePage() {
   const [activeTopic, setActiveTopic] = useState(GUIDE_TOPICS[0].id);
+  const [playingVideoId, setPlayingVideoId] = useState<string | null>(null);
 
   const activeContent = GUIDE_TOPICS.find((t) => t.id === activeTopic);
 
@@ -453,15 +493,42 @@ export default function GuidePage() {
         <div className="flex-1 min-w-0">
           {activeContent && (
             <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
-              <div className="flex items-center gap-3 mb-5">
-                <span className="text-2xl">{activeContent.icon}</span>
-                <h2 className="text-lg font-bold text-gray-900">{activeContent.title}</h2>
+              <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center gap-3">
+                  <span className="text-2xl">{activeContent.icon}</span>
+                  <h2 className="text-lg font-bold text-gray-900">{activeContent.title}</h2>
+                </div>
+
+                {/* Video Tutorial Button */}
+                {activeContent.videoId ? (
+                  <button
+                    onClick={() => setPlayingVideoId(activeContent.videoId)}
+                    className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 text-sm font-medium transition-colors shrink-0"
+                  >
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M8 5v14l11-7z" />
+                    </svg>
+                    Watch Video
+                  </button>
+                ) : (
+                  <span className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-gray-50 text-gray-400 border border-gray-200 text-xs font-medium shrink-0 cursor-default">
+                    <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M8 5v14l11-7z" />
+                    </svg>
+                    Video coming soon
+                  </span>
+                )}
               </div>
               {activeContent.content}
             </div>
           )}
         </div>
       </div>
+
+      {/* Video Modal */}
+      {playingVideoId && (
+        <VideoModal videoId={playingVideoId} onClose={() => setPlayingVideoId(null)} />
+      )}
     </div>
   );
 }
