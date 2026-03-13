@@ -8,6 +8,41 @@ import { encryptToken } from "@/lib/messenger/crypto";
 
 const GRAPH_API = "https://graph.facebook.com/v19.0";
 
+function settingsUrl(slug: string) {
+  return `https://${slug}.kuunyi.com/admin/settings`;
+}
+
+async function savePage(
+  slug: string,
+  pageId: string,
+  pageToken: string,
+): Promise<void> {
+  const supabase = createAdminClient();
+  const encryptedToken = encryptToken(pageToken);
+  const verifyToken = crypto.randomUUID();
+
+  const { error } = await supabase
+    .from("tenants")
+    .update({
+      messenger_page_id: pageId,
+      messenger_page_token: encryptedToken,
+      messenger_verify_token: verifyToken,
+      messenger_enabled: true,
+    } as never)
+    .eq("subdomain", slug);
+
+  if (error) throw new Error(`Failed to save: ${(error as Error).message}`);
+
+  // Subscribe page to webhook events
+  const subscribeRes = await fetch(
+    `${GRAPH_API}/${pageId}/subscribed_apps?subscribed_fields=messages,messaging_postbacks&access_token=${pageToken}`,
+    { method: "POST" },
+  );
+  if (!subscribeRes.ok) {
+    console.error("[messenger] Webhook subscription failed:", await subscribeRes.text());
+  }
+}
+
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code");
   const state = request.nextUrl.searchParams.get("state"); // tenant slug
@@ -16,7 +51,7 @@ export async function GET(request: NextRequest) {
   // User denied permissions or error occurred
   if (error || !code || !state) {
     console.error("[messenger] OAuth error or missing params:", { error, hasCode: !!code, state });
-    const redirectUrl = new URL(`https://${state ?? "www"}.kuunyi.com/admin/settings`);
+    const redirectUrl = new URL(settingsUrl(state ?? "www"));
     redirectUrl.searchParams.set("tab", "messenger");
     redirectUrl.searchParams.set("error", error ?? "missing_code");
     return new NextResponse(null, { status: 302, headers: { Location: redirectUrl.toString() } });
@@ -27,7 +62,7 @@ export async function GET(request: NextRequest) {
 
   if (!appId || !appSecret) {
     console.error("[messenger] Missing env vars:", { hasAppId: !!appId, hasAppSecret: !!appSecret });
-    const errorUrl = new URL(`https://${state}.kuunyi.com/admin/settings`);
+    const errorUrl = new URL(settingsUrl(state));
     errorUrl.searchParams.set("tab", "messenger");
     errorUrl.searchParams.set("error", "server_config");
     return new NextResponse(null, { status: 302, headers: { Location: errorUrl.toString() } });
@@ -68,49 +103,42 @@ export async function GET(request: NextRequest) {
       throw new Error("No Facebook Pages found for this account.");
     }
 
-    // Use the first page (most schools have one page)
-    const page = pages[0];
-    const pageId = page.id;
-    const pageToken = page.access_token; // already long-lived for page tokens
+    // ── Step 4: Single page → auto-connect; multiple → page picker ──────
+    if (pages.length === 1) {
+      const page = pages[0];
+      await savePage(state, page.id, page.access_token);
 
-    // ── Step 4: Save encrypted token to tenant ──────────────────────────
-    const supabase = createAdminClient();
-    const encryptedToken = encryptToken(pageToken);
-
-    // Generate a random verify token for webhook verification
-    const verifyToken = crypto.randomUUID();
-
-    const { error: updateError } = await supabase
-      .from("tenants")
-      .update({
-        messenger_page_id: pageId,
-        messenger_page_token: encryptedToken,
-        messenger_verify_token: verifyToken,
-        messenger_enabled: true,
-      } as never)
-      .eq("subdomain", state);
-
-    if (updateError) throw new Error(`Failed to save: ${(updateError as Error).message}`);
-
-    // ── Step 5: Subscribe the page to webhook events ────────────────────
-    const subscribeRes = await fetch(
-      `${GRAPH_API}/${pageId}/subscribed_apps?subscribed_fields=messages,messaging_postbacks&access_token=${pageToken}`,
-      { method: "POST" },
-    );
-    if (!subscribeRes.ok) {
-      console.error("[messenger] Webhook subscription failed:", await subscribeRes.text());
-      // Non-fatal: the connection still works, admin can subscribe manually
+      const successUrl = new URL(settingsUrl(state));
+      successUrl.searchParams.set("tab", "messenger");
+      successUrl.searchParams.set("connected", "true");
+      console.log(`[messenger] Auto-connected page ${page.id} (${page.name}) for ${state}`);
+      return new NextResponse(null, { status: 302, headers: { Location: successUrl.toString() } });
     }
 
-    // ── Step 6: Redirect back to settings ───────────────────────────────
-    const successUrl = new URL(`https://${state}.kuunyi.com/admin/settings`);
-    successUrl.searchParams.set("tab", "messenger");
-    successUrl.searchParams.set("connected", "true");
-    console.log(`[messenger] Successfully connected page ${pageId} for ${state}`);
-    return new NextResponse(null, { status: 302, headers: { Location: successUrl.toString() } });
+    // Multiple pages — store tokens temporarily and redirect to page picker
+    const supabase = createAdminClient();
+    const sessionId = crypto.randomUUID();
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString(); // 10 min
+
+    await supabase.from("messenger_page_sessions").insert(
+      pages.map((p) => ({
+        session_id: sessionId,
+        tenant_slug: state,
+        page_id: p.id,
+        page_name: p.name,
+        page_token_encrypted: encryptToken(p.access_token),
+        expires_at: expiresAt,
+      })) as never,
+    );
+
+    const pickerUrl = new URL(settingsUrl(state));
+    pickerUrl.searchParams.set("tab", "messenger");
+    pickerUrl.searchParams.set("pick_page", sessionId);
+    console.log(`[messenger] ${pages.length} pages found for ${state}, redirecting to picker`);
+    return new NextResponse(null, { status: 302, headers: { Location: pickerUrl.toString() } });
   } catch (err) {
     console.error("[messenger] OAuth callback error:", err);
-    const errorUrl = new URL(`https://${state}.kuunyi.com/admin/settings`);
+    const errorUrl = new URL(settingsUrl(state));
     errorUrl.searchParams.set("tab", "messenger");
     errorUrl.searchParams.set("error", "connection_failed");
     return new NextResponse(null, { status: 302, headers: { Location: errorUrl.toString() } });
