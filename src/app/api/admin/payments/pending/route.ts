@@ -13,12 +13,13 @@ type PendingRow = {
   intake_id: string;
   intake_name: string;
   proof_signed_url: string | null;
+  proof_signed_urls: string[];
 };
 
 // ─── GET /api/admin/payments/pending ──────────────────────────────────────────
 // Returns all enrollments with status='payment_submitted', joined with student
-// info, class level, intake name, amount_mmk, and a 1-hour signed URL for the
-// proof image. Ordered by enrolled_at ascending (oldest first).
+// info, class level, intake name, amount_mmk, and signed URLs for all proof
+// images. Ordered by enrolled_at ascending (oldest first).
 
 export async function GET() {
   const auth = await requireAuth();
@@ -58,17 +59,28 @@ export async function GET() {
     (rows ?? []).map(async (row) => {
       const payment = row.payments[0] ?? null;
       let proof_signed_url: string | null = null;
+      const proof_signed_urls: string[] = [];
 
-      if (payment?.proof_image_url) {
-        // proof_image_url is stored as the storage object path (not a full URL)
-        const { data: signed } = await adminClient.storage
-          .from(PROOF_BUCKET)
-          .createSignedUrl(payment.proof_image_url, SIGNED_URL_EXPIRES_IN);
-        proof_signed_url = signed?.signedUrl ?? null;
+      if (payment) {
+        // Use proof_image_urls array if available, fallback to single URL
+        const paths = payment.proof_image_urls?.length
+          ? payment.proof_image_urls
+          : payment.proof_image_url
+            ? [payment.proof_image_url]
+            : [];
+
+        for (const path of paths) {
+          const { data: signed } = await adminClient.storage
+            .from(PROOF_BUCKET)
+            .createSignedUrl(path, SIGNED_URL_EXPIRES_IN);
+          if (signed?.signedUrl) {
+            proof_signed_urls.push(signed.signedUrl);
+          }
+        }
+        proof_signed_url = proof_signed_urls[0] ?? null;
       }
 
-      // Strip the joined relation arrays before sending; eslint can't see they
-      // are intentionally omitted via destructuring.
+      // Strip the joined relation arrays before sending
       /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
       const { classes, payments: _p, ...enrollment } = row;
 
@@ -79,6 +91,7 @@ export async function GET() {
         intake_id: classes?.intake_id ?? "",
         intake_name: classes?.intakes?.name ?? "",
         proof_signed_url,
+        proof_signed_urls,
       };
     }),
   );

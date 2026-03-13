@@ -18,6 +18,12 @@ interface EnrollmentInfo {
   status: string;
   status_label_en: string;
   status_label_mm: string;
+  payment?: {
+    admin_note?: string | null;
+    received_amount_mmk?: number | null;
+    total_amount_mmk?: number | null;
+    remaining_amount_mmk?: number | null;
+  } | null;
 }
 
 interface AvailableClass {
@@ -35,10 +41,6 @@ interface BankAccountInfo {
   account_holder: string;
   qr_code_url: string | null;
 }
-
-// ─── Myanmar numerals ────────────────────────────────────────────────────────
-
-// Myanmar numerals not needed on this page — fees come pre-formatted from API
 
 // ─── Bank badge colors ───────────────────────────────────────────────────────
 
@@ -70,7 +72,6 @@ function CopyButton({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      // Fallback for older browsers
       const input = document.createElement("input");
       input.value = text;
       document.body.appendChild(input);
@@ -160,14 +161,16 @@ function ErrorPage({ message }: { message: string }) {
   );
 }
 
-// ─── Upload section ──────────────────────────────────────────────────────────
+// ─── Upload section (multi-file) ─────────────────────────────────────────────
 
 function UploadSection({
   enrollmentRef,
   onUploadSuccess,
+  isPartialReUpload,
 }: {
   enrollmentRef: string;
   onUploadSuccess: () => void;
+  isPartialReUpload?: boolean;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadingRef = useRef(false);
@@ -175,39 +178,62 @@ function UploadSection({
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<{ en: string; mm: string } | null>(null);
   const [uploadDone, setUploadDone] = useState(false);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [previews, setPreviews] = useState<string[]>([]);
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const newFiles = Array.from(e.target.files ?? []);
+    if (newFiles.length === 0) return;
     setUploadError(null);
 
-    // Validate file is an image
-    if (!file.type.startsWith("image/")) {
+    const allFiles = [...selectedFiles, ...newFiles];
+
+    // Validate total count
+    if (allFiles.length > 5) {
       setUploadError({
-        en: "Please select an image file.",
-        mm: "ဓာတ်ပုံဖိုင် ရွေးချယ်ပါ။",
-      });
-      return;
-    }
-    // Validate size
-    if (file.size > 5 * 1024 * 1024) {
-      setUploadError({
-        en: "File too large. Please use a smaller image (max 5 MB).",
-        mm: "ဖိုင်အရွယ်အစား ကြီးလွန်းသည်။ ပိုသေးသော ဓာတ်ပုံ သုံးပါ (အများဆုံး ၅ MB)။",
+        en: "Maximum 5 images allowed.",
+        mm: "အများဆုံး ဓာတ်ပုံ ၅ ခုသာ တင်နိုင်ပါသည်။",
       });
       return;
     }
 
-    setSelectedFile(file);
-    // Revoke previous preview URL to avoid memory leaks
-    if (preview) URL.revokeObjectURL(preview);
-    setPreview(URL.createObjectURL(file));
+    // Validate each new file
+    for (const file of newFiles) {
+      if (!file.type.startsWith("image/")) {
+        setUploadError({
+          en: "Please select image files only.",
+          mm: "ဓာတ်ပုံဖိုင်များသာ ရွေးချယ်ပါ။",
+        });
+        return;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        setUploadError({
+          en: "Each file must be smaller than 5 MB.",
+          mm: "ဖိုင်တစ်ခုစီ ၅ MB ထက် မကြီးရပါ။",
+        });
+        return;
+      }
+    }
+
+    setSelectedFiles(allFiles);
+
+    // Create preview URLs
+    previews.forEach((p) => URL.revokeObjectURL(p));
+    setPreviews(allFiles.map((f) => URL.createObjectURL(f)));
+
+    // Reset file input so the same file can be selected again
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function removeFile(index: number) {
+    const newFiles = selectedFiles.filter((_, i) => i !== index);
+    setSelectedFiles(newFiles);
+    URL.revokeObjectURL(previews[index]);
+    setPreviews(newFiles.map((f) => URL.createObjectURL(f)));
   }
 
   async function handleUpload() {
-    if (!selectedFile || uploadingRef.current) return;
+    if (selectedFiles.length === 0 || uploadingRef.current) return;
     uploadingRef.current = true;
     setUploading(true);
     setUploadProgress(0);
@@ -216,9 +242,10 @@ function UploadSection({
     try {
       const formData = new FormData();
       formData.append("enrollment_ref", enrollmentRef);
-      formData.append("proof_image", selectedFile);
+      for (const file of selectedFiles) {
+        formData.append("proof_image", file);
+      }
 
-      // Use XMLHttpRequest for upload progress tracking
       const result = await new Promise<{ ok: boolean; body: Record<string, string> }>(
         (resolve, reject) => {
           const xhr = new XMLHttpRequest();
@@ -280,7 +307,9 @@ function UploadSection({
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
           </svg>
         </div>
-        <h3 className="text-xl font-bold text-green-800">Payment submitted for review!</h3>
+        <h3 className="text-xl font-bold text-green-800">
+          {isPartialReUpload ? "Additional receipts submitted!" : "Payment submitted for review!"}
+        </h3>
         <p className="font-myanmar mt-1 text-green-700">
           စစ်ဆေးရန် တင်ပြပြီးပါပြီ
         </p>
@@ -304,53 +333,75 @@ function UploadSection({
   return (
     <div id="upload-section">
       <h3 className="mb-2 text-lg font-semibold text-gray-900">
-        Upload Transfer Screenshot
+        {isPartialReUpload ? "Upload Additional Receipt" : "Upload Transfer Screenshot"}
       </h3>
       <p className="font-myanmar mb-5 text-sm text-gray-500">
-        ငွေလွှဲပြေစာ တင်သွင်းပါ
+        {isPartialReUpload ? "နောက်ထပ် ငွေလွှဲပြေစာ တင်သွင်းပါ" : "ငွေလွှဲပြေစာ တင်သွင်းပါ"}
       </p>
 
+      {/* Selected file previews */}
+      {previews.length > 0 && (
+        <div className="mb-4 grid grid-cols-3 gap-2">
+          {previews.map((src, i) => (
+            <div key={i} className="relative group">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={src} alt={`Receipt ${i + 1}`} className="w-full h-24 object-cover rounded-lg border border-gray-200" />
+              <button
+                onClick={() => removeFile(i)}
+                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white text-xs flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                aria-label="Remove"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* File picker area */}
-      <div
-        onClick={() => fileInputRef.current?.click()}
-        className={`cursor-pointer rounded-xl border-2 border-dashed p-8 text-center transition-colors ${
-          preview ? "border-[#1a6b3c] bg-green-50/50" : "border-gray-300 hover:border-gray-400 hover:bg-gray-50"
-        }`}
-      >
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          onChange={handleFileSelect}
-          className="hidden"
-        />
-        {preview ? (
+      {selectedFiles.length < 5 && (
+        <div
+          onClick={() => fileInputRef.current?.click()}
+          className={`cursor-pointer rounded-xl border-2 border-dashed p-6 text-center transition-colors ${
+            selectedFiles.length > 0 ? "border-[#1a6b3c] bg-green-50/50" : "border-gray-300 hover:border-gray-400 hover:bg-gray-50"
+          }`}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleFileSelect}
+            className="hidden"
+          />
           <div>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={preview} alt="Payment screenshot preview" className="mx-auto mb-3 max-h-56 rounded-lg shadow-sm" />
-            <p className="text-sm text-gray-500">Tap to change image</p>
-            <p className="font-myanmar text-xs text-gray-400">ဓာတ်ပုံ ပြောင်းရန် နှိပ်ပါ</p>
-          </div>
-        ) : (
-          <div>
-            {/* Camera icon */}
-            <svg className="mx-auto mb-4 h-14 w-14 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="mx-auto mb-3 h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.2}
                 d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.2}
                 d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
-            <p className="text-base font-medium text-gray-600">
-              Tap to select screenshot
+            <p className="text-sm font-medium text-gray-600">
+              {selectedFiles.length > 0 ? "Add more screenshots" : "Tap to select screenshots"}
             </p>
-            <p className="font-myanmar mt-1 text-sm text-gray-400">
-              ဓာတ်ပုံ ရွေးချယ်ရန် နှိပ်ပါ
+            <p className="font-myanmar mt-1 text-xs text-gray-400">
+              {selectedFiles.length > 0 ? "နောက်ထပ် ဓာတ်ပုံ ထည့်ပါ" : "ဓာတ်ပုံ ရွေးချယ်ရန် နှိပ်ပါ"}
             </p>
-            <p className="mt-3 text-xs text-gray-400">
-              Supports all image formats (max 5 MB)
+            <p className="mt-2 text-xs text-gray-400">
+              Up to 5 images, max 5 MB each ({selectedFiles.length}/5 selected)
             </p>
           </div>
-        )}
+        </div>
+      )}
+
+      {/* Bank transfer limit notice */}
+      <div className="mt-4 rounded-lg bg-amber-50 border border-amber-200 px-4 py-3">
+        <p className="text-xs font-medium text-amber-800">
+          Bank transfer limit is 1,000,000 MMK per transaction. If your total exceeds this, you may need to transfer in multiple transactions. Upload all receipt screenshots here.
+        </p>
+        <p className="font-myanmar mt-1 text-xs text-amber-700">
+          ဘဏ်ငွေလွှဲ ကန့်သတ်ချက် ၁,၀၀၀,၀၀၀ ကျပ်။ စုစုပေါင်း ပိုများပါက ငွေလွှဲမှု အကြိမ်ကြိမ် လုပ်ပြီး ပြေစာ အားလုံး ဒီမှာ တင်ပါ။
+        </p>
       </div>
 
       {/* Error message */}
@@ -373,7 +424,7 @@ function UploadSection({
       {uploading && (
         <div className="mt-4">
           <div className="mb-1.5 flex items-center justify-between text-xs text-gray-500">
-            <span>Uploading...</span>
+            <span>Uploading {selectedFiles.length} image{selectedFiles.length > 1 ? "s" : ""}...</span>
             <span>{uploadProgress}%</span>
           </div>
           <div className="h-2.5 overflow-hidden rounded-full bg-gray-200">
@@ -388,9 +439,9 @@ function UploadSection({
       {/* Submit button */}
       <button
         onClick={handleUpload}
-        disabled={!selectedFile || uploading}
+        disabled={selectedFiles.length === 0 || uploading}
         className={`mt-5 w-full rounded-lg py-3.5 text-sm font-semibold transition-colors ${
-          selectedFile && !uploading
+          selectedFiles.length > 0 && !uploading
             ? "bg-[#1a6b3c] text-white hover:bg-[#155d33]"
             : "cursor-not-allowed bg-gray-200 text-gray-400"
         }`}
@@ -405,10 +456,61 @@ function UploadSection({
           </span>
         ) : (
           <>
-            Submit Payment Proof / <span className="font-myanmar">တင်သွင်းမည်</span>
+            Submit {selectedFiles.length > 1 ? `${selectedFiles.length} Receipts` : "Payment Proof"} / <span className="font-myanmar">တင်သွင်းမည်</span>
           </>
         )}
       </button>
+    </div>
+  );
+}
+
+// ─── Partial payment banner ──────────────────────────────────────────────────
+
+function PartialPaymentBanner({ enrollment }: { enrollment: EnrollmentInfo }) {
+  const payment = enrollment.payment;
+  if (!payment) return null;
+
+  const received = payment.received_amount_mmk;
+  const remaining = payment.remaining_amount_mmk;
+  const adminNote = payment.admin_note;
+
+  return (
+    <div className="mb-8 rounded-xl border border-amber-300 bg-amber-50 p-5">
+      <div className="flex items-center gap-2 mb-3">
+        <div className="w-8 h-8 rounded-full bg-amber-200 flex items-center justify-center shrink-0">
+          <svg className="w-4 h-4 text-amber-700" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126z" />
+          </svg>
+        </div>
+        <h3 className="text-base font-bold text-amber-900">Partial Payment Received</h3>
+      </div>
+      <p className="font-myanmar text-sm text-amber-800 mb-3">
+        ငွေတစ်စိတ်တစ်ပိုင်း လက်ခံရရှိပြီး — ကျန်ငွေ ပေးချေပါ
+      </p>
+
+      {(received != null || remaining != null) && (
+        <div className="rounded-lg bg-white/70 p-3 mb-3 space-y-1.5">
+          {received != null && (
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-600">Received / <span className="font-myanmar">လက်ခံရရှိ</span></span>
+              <span className="font-semibold text-green-700">{formatMMKSimple(received)}</span>
+            </div>
+          )}
+          {remaining != null && remaining > 0 && (
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-600">Remaining / <span className="font-myanmar">ကျန်ငွေ</span></span>
+              <span className="font-bold text-red-600">{formatMMKSimple(remaining)}</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {adminNote && (
+        <div className="rounded-lg bg-white/60 border border-amber-200 p-3">
+          <p className="text-xs font-medium text-gray-500 mb-1">Message from admin</p>
+          <p className="text-sm text-gray-800">{adminNote}</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -432,12 +534,11 @@ export default function PaymentInstructionsPage() {
       const data = await res.json();
       if (data.labels?.orgType) setOrgType(data.labels.orgType);
       const classes = (data.classes ?? []) as AvailableClass[];
-      // Filter out current class and full classes
       setAvailableClasses(
         classes.filter((c) => c.id !== currentClassId && c.status === "open" && c.seat_remaining > 0),
       );
     } catch {
-      // Non-critical — silently ignore
+      // Non-critical
     }
   }
 
@@ -470,7 +571,7 @@ export default function PaymentInstructionsPage() {
             if (intakeRes.ok) {
               const intakeData = await intakeRes.json();
               if (intakeData.labels?.orgType) setOrgType(intakeData.labels.orgType);
-              if (statusData.status !== "pending_payment") {
+              if (statusData.status !== "pending_payment" && statusData.status !== "partial_payment") {
                 const classes = (intakeData.classes ?? []) as AvailableClass[];
                 setAvailableClasses(
                   classes.filter((c) => c.id !== statusData.class_id && c.status === "open" && c.seat_remaining > 0),
@@ -489,12 +590,10 @@ export default function PaymentInstructionsPage() {
   }, [params.ref]);
 
   function handleUploadSuccess() {
-    // Re-fetch enrollment to update status
     fetch(`/api/public/status?ref=${encodeURIComponent(params.ref)}`)
       .then((res) => res.json())
       .then((data: EnrollmentInfo) => {
         setEnrollment(data);
-        // Fetch available classes after upload
         if (data.intake_slug) {
           fetchAvailableClasses(data.intake_slug, data.class_id);
         }
@@ -507,9 +606,10 @@ export default function PaymentInstructionsPage() {
 
   const qty = enrollment.quantity ?? 1;
   const totalFee = (enrollment.fee_mmk ?? 0) * qty;
-  const feeEn = formatMMKSimple(totalFee);       // "300,000 MMK"
-  const feeMm = formatMMK(totalFee).replace(" MMK", ""); // "၃၀၀,၀၀၀"
-  const showUpload = enrollment.status === "pending_payment";
+  const feeEn = formatMMKSimple(totalFee);
+  const feeMm = formatMMK(totalFee).replace(" MMK", "");
+  const showUpload = enrollment.status === "pending_payment" || enrollment.status === "partial_payment";
+  const isPartialReUpload = enrollment.status === "partial_payment";
 
   return (
     <div className="mx-auto max-w-lg">
@@ -529,6 +629,9 @@ export default function PaymentInstructionsPage() {
           </p>
         )}
       </div>
+
+      {/* ── Partial payment banner ──────────────────────────────── */}
+      {isPartialReUpload && <PartialPaymentBanner enrollment={enrollment} />}
 
       {/* ── Enrollment reference box ───────────────────────────── */}
       <div className="mb-8 rounded-xl bg-[#1a6b3c]/10 p-5">
@@ -551,87 +654,96 @@ export default function PaymentInstructionsPage() {
       </div>
 
       {/* ── Payment instructions ───────────────────────────────── */}
-      <div className="mb-8">
-        <h2 className="mb-5 text-lg font-semibold text-gray-900">
-          {orgType === "event"
-            ? "How to Pay"
-            : <>How to Pay / <span className="font-myanmar">ငွေပေးချေနည်း</span></>}
-        </h2>
+      {showUpload && (
+        <div className="mb-8">
+          <h2 className="mb-5 text-lg font-semibold text-gray-900">
+            {orgType === "event"
+              ? "How to Pay"
+              : <>How to Pay / <span className="font-myanmar">ငွေပေးချေနည်း</span></>}
+          </h2>
 
-        <ol className="space-y-4">
-          <li className="flex gap-3">
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1a6b3c] text-sm font-bold text-white">
-              1
-            </span>
-            <div className="text-sm text-gray-700">
-              <p>
-                Transfer <span className="font-semibold text-gray-900">{feeEn}</span> to
-                one of the accounts below
-              </p>
-              {orgType !== "event" && (
-                <p className="font-myanmar mt-1 text-gray-500">
-                  အောက်ပါ အကောင့်များသို့{" "}
-                  <span className="font-semibold text-gray-700">
-                    {feeMm} ကျပ်
+          <ol className="space-y-4">
+            <li className="flex gap-3">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1a6b3c] text-sm font-bold text-white">
+                1
+              </span>
+              <div className="text-sm text-gray-700">
+                <p>
+                  Transfer{" "}
+                  <span className="font-semibold text-gray-900">
+                    {isPartialReUpload && enrollment.payment?.remaining_amount_mmk
+                      ? formatMMKSimple(enrollment.payment.remaining_amount_mmk)
+                      : feeEn}
                   </span>{" "}
-                  လွှဲပါ
+                  to one of the accounts below
                 </p>
-              )}
-            </div>
-          </li>
+                {orgType !== "event" && (
+                  <p className="font-myanmar mt-1 text-gray-500">
+                    အောက်ပါ အကောင့်များသို့{" "}
+                    <span className="font-semibold text-gray-700">
+                      {isPartialReUpload && enrollment.payment?.remaining_amount_mmk
+                        ? formatMMK(enrollment.payment.remaining_amount_mmk).replace(" MMK", "") + " ကျပ်"
+                        : feeMm + " ကျပ်"}
+                    </span>{" "}
+                    လွှဲပါ
+                  </p>
+                )}
+              </div>
+            </li>
 
-          <li className="flex gap-3">
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1a6b3c] text-sm font-bold text-white">
-              2
-            </span>
-            <div className="text-sm text-gray-700">
-              <p>
-                Use your enrollment ref{" "}
-                <span className="font-mono font-bold text-red-600">{enrollment.enrollment_ref}</span>{" "}
-                as the transfer note
-              </p>
-              {orgType !== "event" && (
-                <p className="font-myanmar mt-1 text-gray-500">
-                  ငွေလွှဲမှတ်ချက်တွင်{" "}
+            <li className="flex gap-3">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1a6b3c] text-sm font-bold text-white">
+                2
+              </span>
+              <div className="text-sm text-gray-700">
+                <p>
+                  Use your enrollment ref{" "}
                   <span className="font-mono font-bold text-red-600">{enrollment.enrollment_ref}</span>{" "}
-                  ကို ထည့်ပါ
+                  as the transfer note
                 </p>
-              )}
-            </div>
-          </li>
+                {orgType !== "event" && (
+                  <p className="font-myanmar mt-1 text-gray-500">
+                    ငွေလွှဲမှတ်ချက်တွင်{" "}
+                    <span className="font-mono font-bold text-red-600">{enrollment.enrollment_ref}</span>{" "}
+                    ကို ထည့်ပါ
+                  </p>
+                )}
+              </div>
+            </li>
 
-          <li className="flex gap-3">
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1a6b3c] text-sm font-bold text-white">
-              3
-            </span>
-            <div className="text-sm text-gray-700">
-              <p>Take a screenshot of the transfer confirmation</p>
-              {orgType !== "event" && (
-                <p className="font-myanmar mt-1 text-gray-500">
-                  ငွေလွှဲပြီးကြောင်း ဓာတ်ပုံ ရိုက်ပါ
-                </p>
-              )}
-            </div>
-          </li>
+            <li className="flex gap-3">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1a6b3c] text-sm font-bold text-white">
+                3
+              </span>
+              <div className="text-sm text-gray-700">
+                <p>Take a screenshot of the transfer confirmation</p>
+                {orgType !== "event" && (
+                  <p className="font-myanmar mt-1 text-gray-500">
+                    ငွေလွှဲပြီးကြောင်း ဓာတ်ပုံ ရိုက်ပါ
+                  </p>
+                )}
+              </div>
+            </li>
 
-          <li className="flex gap-3">
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1a6b3c] text-sm font-bold text-white">
-              4
-            </span>
-            <div className="text-sm text-gray-700">
-              <p>Upload the screenshot below</p>
-              {orgType !== "event" && (
-                <p className="font-myanmar mt-1 text-gray-500">
-                  အောက်တွင် ဓာတ်ပုံ တင်သွင်းပါ
-                </p>
-              )}
-            </div>
-          </li>
-        </ol>
-      </div>
+            <li className="flex gap-3">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1a6b3c] text-sm font-bold text-white">
+                4
+              </span>
+              <div className="text-sm text-gray-700">
+                <p>Upload the screenshot(s) below</p>
+                {orgType !== "event" && (
+                  <p className="font-myanmar mt-1 text-gray-500">
+                    အောက်တွင် ဓာတ်ပုံ တင်သွင်းပါ
+                  </p>
+                )}
+              </div>
+            </li>
+          </ol>
+        </div>
+      )}
 
       {/* ── Bank accounts ──────────────────────────────────────── */}
-      {bankAccounts.length > 0 && (
+      {showUpload && bankAccounts.length > 0 && (
         <div className="mb-8">
           <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">
             Bank Accounts{orgType !== "event" && <> / <span className="font-myanmar normal-case">ဘဏ်အကောင့်များ</span></>}
@@ -679,7 +791,7 @@ export default function PaymentInstructionsPage() {
         </div>
       )}
 
-      {/* ── Upload payment screenshot button / section ─────────── */}
+      {/* ── Upload payment screenshot section ──────────────────── */}
       {showUpload ? (
         <>
           <a
@@ -690,15 +802,18 @@ export default function PaymentInstructionsPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
                 d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
-            {orgType === "event"
-            ? "Upload Payment Screenshot"
-            : <>Upload Payment Screenshot / <span className="font-myanmar">ငွေလွှဲပြေစာ တင်သွင်းမည်</span></>}
+            {isPartialReUpload
+              ? "Upload Additional Receipt"
+              : orgType === "event"
+                ? "Upload Payment Screenshot"
+                : <>Upload Payment Screenshot / <span className="font-myanmar">ငွေလွှဲပြေစာ တင်သွင်းမည်</span></>}
           </a>
 
           <div className="border-t border-gray-200 pt-8">
             <UploadSection
               enrollmentRef={enrollment.enrollment_ref}
               onUploadSuccess={handleUploadSuccess}
+              isPartialReUpload={isPartialReUpload}
             />
           </div>
         </>

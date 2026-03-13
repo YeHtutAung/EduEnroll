@@ -16,6 +16,10 @@ const ENROLLMENT_STATUS_LABELS: Record<EnrollmentStatus, { en: string; mm: strin
     en: "Payment Under Review",
     mm: "ငွေပေးချေမှု စစ်ဆေးနေဆဲ",
   },
+  partial_payment: {
+    en: "Partial Payment — Please Complete",
+    mm: "ငွေတစ်စိတ်တစ်ပိုင်း — ကျန်ငွေ ပေးချေပါ",
+  },
   confirmed: {
     en: "Enrollment Confirmed",
     mm: "စာရင်းသွင်းမှု အတည်ပြုပြီး",
@@ -50,7 +54,7 @@ interface EnrollmentWithClass extends Enrollment {
 }
 
 type EnrollmentResult = { data: EnrollmentWithClass | null; error: unknown };
-type PaymentResult    = { data: Pick<Payment, "id" | "status" | "created_at"> | null; error: unknown };
+type PaymentResult    = { data: Pick<Payment, "id" | "status" | "created_at" | "admin_note" | "received_amount_mmk" | "amount_mmk"> | null; error: unknown };
 
 // ─── GET /api/public/status?ref=NM-2026-XXXXX ─────────────────────────────────
 // Public — no authentication required.
@@ -111,7 +115,7 @@ export async function GET(request: NextRequest) {
   // ── Fetch most recent payment (if any) ───────────────────────────
   const { data: payment } = await supabase
     .from("payments")
-    .select("id, status, created_at")
+    .select("id, status, created_at, admin_note, received_amount_mmk, amount_mmk")
     .eq("enrollment_id", enrollment.id)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -122,11 +126,17 @@ export async function GET(request: NextRequest) {
 
   const paymentBlock = payment
     ? {
-        id:              payment.id,
-        status:          payment.status,
-        status_label_en: PAYMENT_STATUS_LABELS[payment.status].en,
-        status_label_mm: PAYMENT_STATUS_LABELS[payment.status].mm,
-        submitted_at:    payment.created_at,
+        id:                  payment.id,
+        status:              payment.status,
+        status_label_en:     PAYMENT_STATUS_LABELS[payment.status].en,
+        status_label_mm:     PAYMENT_STATUS_LABELS[payment.status].mm,
+        submitted_at:        payment.created_at,
+        admin_note:          payment.admin_note ?? null,
+        received_amount_mmk: payment.received_amount_mmk ?? null,
+        total_amount_mmk:    payment.amount_mmk,
+        remaining_amount_mmk: payment.received_amount_mmk != null
+          ? payment.amount_mmk - payment.received_amount_mmk
+          : null,
       }
     : null;
 

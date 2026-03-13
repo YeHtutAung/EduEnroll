@@ -1,4 +1,4 @@
-type EnrollmentStatus = "pending_payment" | "payment_submitted" | "confirmed" | "rejected";
+type EnrollmentStatus = "pending_payment" | "payment_submitted" | "partial_payment" | "confirmed" | "rejected";
 type ClassStatus = "open" | "full" | "closed" | "draft";
 type BadgeStatus = EnrollmentStatus | ClassStatus;
 
@@ -17,6 +17,13 @@ const STATUS_CONFIG: Record<
     bg: "bg-sky-50",
     text: "text-sky-800",
     border: "border-sky-300",
+  },
+  partial_payment: {
+    label: "Partial Payment",
+    bg: "bg-amber-50",
+    text: "text-amber-700",
+    border: "border-amber-400",
+    dot: "bg-amber-500",
   },
   confirmed: {
     label: "Confirmed",

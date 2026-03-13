@@ -194,6 +194,93 @@ export function enrollmentApprovedEmail(params: {
   };
 }
 
+// ── Partial payment email ────────────────────────────────────────────────────
+
+export function partialPaymentEmail(params: {
+  studentName: string;
+  enrollmentRef: string;
+  classLevel: string;
+  totalAmount: number;
+  receivedAmount: number | null;
+  remainingAmount: number | null;
+  adminNote: string;
+  paymentUrl: string;
+  statusUrl: string;
+}): { subject: string; html: string } {
+  const { studentName, enrollmentRef, classLevel, totalAmount, receivedAmount, remainingAmount, adminNote, paymentUrl, statusUrl } = params;
+
+  const fmtMmk = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+  const receivedLine = receivedAmount != null
+    ? `<div class="info-row">
+        <span class="info-label">Received</span>
+        <span class="info-value" style="color: #1a6b3c;">${fmtMmk(receivedAmount)} MMK</span>
+      </div>`
+    : "";
+
+  const remainingLine = remainingAmount != null && remainingAmount > 0
+    ? `<div class="info-row" style="border-bottom: none;">
+        <span class="info-label">Remaining</span>
+        <span class="info-value" style="color: #c0392b; font-weight: 700;">${fmtMmk(remainingAmount)} MMK</span>
+      </div>`
+    : "";
+
+  return {
+    subject: `Action Required: Complete Payment — ${enrollmentRef}`,
+    html: baseLayout(`
+      <div class="header">
+        <div style="width: 56px; height: 56px; border-radius: 50%; background: #fef3c7; margin: 0 auto 12px; display: flex; align-items: center; justify-content: center;">
+          <span style="font-size: 28px;">💰</span>
+        </div>
+        <h1 style="margin: 0; font-size: 22px; color: #92400e;">Partial Payment Received</h1>
+        <p class="myanmar" style="margin: 4px 0 0; color: #6b7280;">ငွေတစ်စိတ်တစ်ပိုင်း လက်ခံရရှိပြီး</p>
+      </div>
+
+      <div class="alert-box" style="background: #fffbeb; border: 1px solid #fde68a;">
+        <p style="margin: 0; font-size: 14px; color: #92400e;">
+          <strong>${studentName}</strong>, we have received a partial payment for your ${classLevel} enrollment. Please complete the remaining payment to confirm your spot.
+        </p>
+        <p class="myanmar" style="margin: 8px 0 0; font-size: 13px; color: #a16207;">
+          ${classLevel} စာရင်းသွင်းမှုအတွက် ငွေတစ်စိတ်တစ်ပိုင်း လက်ခံရရှိပြီးပါပြီ။ သင့်နေရာ အတည်ပြုရန် ကျန်ငွေကို ပေးချေပါ။
+        </p>
+      </div>
+
+      <div style="margin: 20px 0;">
+        <div class="info-row">
+          <span class="info-label">Reference</span>
+          <span class="info-value" style="font-family: monospace;">${enrollmentRef}</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">Total Amount</span>
+          <span class="info-value">${fmtMmk(totalAmount)} MMK</span>
+        </div>
+        ${receivedLine}
+        ${remainingLine}
+      </div>
+
+      ${adminNote ? `
+      <div style="background: #f9fafb; border-radius: 8px; padding: 12px 16px; margin: 16px 0;">
+        <p style="margin: 0 0 4px; font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px;">Message from admin</p>
+        <p style="margin: 0; font-size: 14px; color: #374151;">${adminNote}</p>
+      </div>` : ""}
+
+      <div style="text-align: center; margin: 28px 0 16px;">
+        <a href="${paymentUrl}" class="btn" style="background: #b07d2a;">Upload Remaining Payment Proof</a>
+      </div>
+      <div style="text-align: center;">
+        <a href="${statusUrl}" class="btn-outline">Check Status</a>
+      </div>
+
+      <p style="margin-top: 24px; font-size: 13px; color: #6b7280; text-align: center;">
+        Please transfer the remaining amount and upload the receipt screenshot.
+      </p>
+      <p class="myanmar" style="font-size: 13px; color: #9ca3af; text-align: center;">
+        ကျန်ငွေကို လွှဲပေးပြီး ငွေလွှဲပြေစာကို တင်သွင်းပါ။
+      </p>
+    `),
+  };
+}
+
 // ── Enrollment rejected email ───────────────────────────────────────────────
 
 export function enrollmentRejectedEmail(params: {

@@ -14,6 +14,7 @@ export type ClassStatus = "draft" | "open" | "full" | "closed";
 export type EnrollmentStatus =
   | "pending_payment"
   | "payment_submitted"
+  | "partial_payment"
   | "confirmed"
   | "rejected";
 
@@ -156,7 +157,10 @@ export interface Payment {
   tenant_id: string;
   amount_mmk: number;
   proof_image_url: string | null;
+  proof_image_urls: string[];
   bank_reference: string | null;
+  admin_note: string | null;
+  received_amount_mmk: number | null;
   status: PaymentStatus;
   verified_by: string | null;   // references users.id
   verified_at: string | null;
