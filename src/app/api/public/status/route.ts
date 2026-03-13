@@ -121,6 +121,30 @@ export async function GET(request: NextRequest) {
     .limit(1)
     .single() as PaymentResult;
 
+  // ── Fetch enrollment items for cart enrollments ──────────────────
+  let cartItems: { class_level: string; quantity: number; fee_mmk: number; subtotal_mmk: number }[] | null = null;
+  let cartTotalFee: number | null = null;
+
+  if (enrollment.class_id === null) {
+    const { data: items } = await supabase
+      .from("enrollment_items")
+      .select("quantity, fee_mmk, classes(level)")
+      .eq("enrollment_id", enrollment.id) as {
+      data: { quantity: number; fee_mmk: number; classes: { level: string } | null }[] | null;
+      error: unknown;
+    };
+
+    if (items && items.length > 0) {
+      cartItems = items.map((i) => ({
+        class_level: i.classes?.level ?? "Unknown",
+        quantity: i.quantity,
+        fee_mmk: i.fee_mmk,
+        subtotal_mmk: i.fee_mmk * i.quantity,
+      }));
+      cartTotalFee = cartItems.reduce((sum, i) => sum + i.subtotal_mmk, 0);
+    }
+  }
+
   // ── Build response ────────────────────────────────────────────────
   const enrollmentLabel = ENROLLMENT_STATUS_LABELS[enrollment.status];
 
@@ -146,21 +170,27 @@ export async function GET(request: NextRequest) {
     ? (intakeInfo.slug ?? `${intakeInfo.name.toLowerCase().replace(/\s+/g, "-")}-${intakeInfo.year}`)
     : null;
 
+  // For cart enrollments, use cart total; for single, use class fee * qty
+  const displayFee = cartTotalFee ?? (enrollment.classes?.fee_mmk != null
+    ? enrollment.classes.fee_mmk * (enrollment.quantity ?? 1)
+    : null);
+
   return NextResponse.json({
     enrollment_ref:   enrollment.enrollment_ref,
     student_name_en:  enrollment.student_name_en,
     student_name_mm:  enrollment.student_name_mm ?? null,
     class_id:         enrollment.classes?.id ?? null,
-    class_level:      enrollment.classes?.level ?? null,
-    fee_mmk:          enrollment.classes?.fee_mmk ?? null,
-    fee_formatted:    enrollment.classes?.fee_mmk != null
-                        ? formatMMK(enrollment.classes.fee_mmk)
-                        : null,
+    class_level:      cartItems
+                        ? cartItems.map((i) => i.class_level).join(", ")
+                        : (enrollment.classes?.level ?? null),
+    fee_mmk:          displayFee,
+    fee_formatted:    displayFee != null ? formatMMK(displayFee) : null,
     quantity:          enrollment.quantity ?? 1,
     intake_slug:      intakeSlug,
     status:           enrollment.status,
     status_label_en:  enrollmentLabel.en,
     status_label_mm:  enrollmentLabel.mm,
     payment:          paymentBlock,
+    items:            cartItems,
   });
 }

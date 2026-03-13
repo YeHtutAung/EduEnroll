@@ -82,20 +82,75 @@ export async function PATCH(
   const now = new Date().toISOString();
   const admin = createAdminClient(); // bypasses RLS for class seat update
 
+  // ── Is this a cart enrollment? ───────────────────────────────────────────────
+  const isCart = enrollment.class_id === null;
+
   // ── Helper: get class level + build URLs ────────────────────────────────────
   async function getClassAndUrls() {
-    const { data: cls } = await admin
-      .from("classes")
-      .select("level")
-      .eq("id", enrollment!.class_id)
-      .single() as { data: { level: string } | null; error: unknown };
+    let classLevel = "";
+
+    if (isCart) {
+      // Cart enrollment: get levels from enrollment_items
+      const { data: items } = await admin
+        .from("enrollment_items")
+        .select("quantity, classes(level)")
+        .eq("enrollment_id", enrollment!.id) as {
+        data: { quantity: number; classes: { level: string } | null }[] | null;
+        error: unknown;
+      };
+      if (items && items.length > 0) {
+        classLevel = items.map((i) => `${i.classes?.level ?? "?"} x${i.quantity}`).join(", ");
+      }
+    } else {
+      const { data: cls } = await admin
+        .from("classes")
+        .select("level")
+        .eq("id", enrollment!.class_id!)
+        .single() as { data: { level: string } | null; error: unknown };
+      classLevel = cls?.level ?? "";
+    }
 
     const host = request.headers.get("host") ?? "localhost:3005";
     const proto = host.startsWith("localhost") ? "http" : "https";
     const statusUrl = `${proto}://${host}/status?ref=${enrollment!.enrollment_ref}`;
     const paymentUrl = `${proto}://${host}/enroll/payment/${enrollment!.enrollment_ref}`;
 
-    return { classLevel: cls?.level ?? "", statusUrl, paymentUrl };
+    return { classLevel, statusUrl, paymentUrl };
+  }
+
+  // ── Helper: restore seats (works for both cart and single-class) ─────────────
+  async function restoreSeats() {
+    const itemsToRestore: { class_id: string; quantity: number }[] = [];
+
+    if (isCart) {
+      const { data: items } = await admin
+        .from("enrollment_items")
+        .select("class_id, quantity")
+        .eq("enrollment_id", enrollment!.id) as {
+        data: { class_id: string; quantity: number }[] | null;
+        error: unknown;
+      };
+      if (items) itemsToRestore.push(...items);
+    } else if (enrollment!.class_id) {
+      itemsToRestore.push({ class_id: enrollment!.class_id, quantity: enrollment!.quantity ?? 1 });
+    }
+
+    for (const item of itemsToRestore) {
+      const { data: cls } = await admin
+        .from("classes")
+        .select("seat_remaining")
+        .eq("id", item.class_id)
+        .single() as { data: { seat_remaining: number } | null; error: unknown };
+      if (cls) {
+        await admin
+          .from("classes")
+          .update({
+            seat_remaining: cls.seat_remaining + item.quantity,
+            status: "open",
+          } as never)
+          .eq("id", item.class_id);
+      }
+    }
   }
 
   // ── Approve ──────────────────────────────────────────────────────────────────
@@ -230,6 +285,9 @@ export async function PATCH(
     .single() as EnrollmentResult;
 
   if (ee) return NextResponse.json({ error: (ee as Error).message }, { status: 500 });
+
+  // Restore seats (best-effort)
+  await restoreSeats();
 
   // Send rejection email (best-effort, non-blocking)
   if (enrollment.email) {

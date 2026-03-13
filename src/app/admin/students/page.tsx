@@ -23,6 +23,8 @@ interface StudentRow {
   class_level: JlptLevel;
   intake_name: string;
   fee_mmk: number;
+  quantity: number;
+  items?: { class_level: string; quantity: number; fee_mmk: number; subtotal_mmk: number }[] | null;
 }
 
 interface FormFieldDef {
@@ -77,6 +79,7 @@ interface Filters {
 const ENROLLMENT_STATUSES: { value: EnrollmentStatus; label: string }[] = [
   { value: "pending_payment",   label: "Pending Payment"   },
   { value: "payment_submitted", label: "Payment Submitted" },
+  { value: "partial_payment",   label: "Partial Payment"   },
   { value: "confirmed",         label: "Confirmed"         },
   { value: "rejected",          label: "Rejected"          },
 ];
@@ -584,6 +587,7 @@ export default function StudentsPage() {
         ...dynamicLabels,
         "Enrollment Ref",
         tl.class,
+        "Qty",
         tl.intake,
         "Status",
         `${tl.fee} (MMK)`,
@@ -597,11 +601,17 @@ export default function StudentsPage() {
             ? formFields.map((f) => s.form_data?.[f.field_key] ?? "")
             : [s.student_name_en, s.student_name_mm ?? "", s.phone];
 
+          // For cart enrollments, show item breakdown in class level column
+          const levelDisplay = s.items && s.items.length > 0
+            ? s.items.map((ci) => `${ci.class_level} ×${ci.quantity}`).join(", ")
+            : s.class_level;
+
           return [
             i + 1,
             ...dynamicCols,
             s.enrollment_ref,
-            s.class_level,
+            levelDisplay,
+            s.quantity,
             s.intake_name,
             s.status,
             s.fee_mmk,
@@ -617,7 +627,8 @@ export default function StudentsPage() {
         { wch: 5 },  // No
         ...dynamicLabels.map(() => ({ wch: 22 })),
         { wch: 16 }, // Ref
-        { wch: 8 },  // Level
+        { wch: 20 }, // Level
+        { wch: 5 },  // Qty
         { wch: 22 }, // Intake
         { wch: 20 }, // Status
         { wch: 14 }, // Fee
@@ -845,7 +856,7 @@ export default function StudentsPage() {
           const dynamicHeaders = hasDynamic
             ? formFields.map((f) => f.field_label)
             : [`${tl.student} Name`, "Phone"];
-          const fixedTailHeaders = ["Enrollment Ref", tl.class, tl.intake, `${tl.fee} (MMK)`, "Status", "Enrolled"];
+          const fixedTailHeaders = ["Enrollment Ref", tl.class, "Qty", tl.intake, `${tl.fee} (MMK)`, "Status", "Enrolled"];
           const allHeaders = ["No.", ...dynamicHeaders, ...fixedTailHeaders];
 
           return (
@@ -917,15 +928,34 @@ export default function StudentsPage() {
 
                           {/* Level */}
                           <td className="px-4 py-3.5">
-                            <span
-                              className="inline-flex items-center justify-center w-9 h-7 rounded-lg text-xs font-bold text-white"
-                              style={{
-                                backgroundColor:
-                                  LEVEL_COLORS[student.class_level] ?? "#1a3f8a",
-                              }}
-                            >
-                              {student.class_level}
-                            </span>
+                            {student.items && student.items.length > 0 ? (
+                              <div className="flex items-center gap-1 flex-wrap">
+                                {student.items.map((ci, i) => (
+                                  <span
+                                    key={i}
+                                    className="inline-flex items-center justify-center px-1.5 h-6 rounded text-[10px] font-bold text-white"
+                                    style={{ backgroundColor: LEVEL_COLORS[ci.class_level] ?? "#1a3f8a" }}
+                                  >
+                                    {ci.class_level}&times;{ci.quantity}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span
+                                className="inline-flex items-center justify-center w-9 h-7 rounded-lg text-xs font-bold text-white"
+                                style={{
+                                  backgroundColor:
+                                    LEVEL_COLORS[student.class_level] ?? "#1a3f8a",
+                                }}
+                              >
+                                {student.class_level}
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Quantity */}
+                          <td className="px-4 py-3.5 text-gray-700 tabular-nums text-xs text-center">
+                            {student.quantity}
                           </td>
 
                           {/* Intake */}

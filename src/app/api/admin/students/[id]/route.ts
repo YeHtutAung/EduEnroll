@@ -66,12 +66,13 @@ export async function GET(
   }
 
   // Fetch form field definitions for this enrollment's intake
-  const intakeId = row.class_id
+  const classId = row.class_id;
+  const intakeId = classId
     ? await (async () => {
         const { data: cls } = await supabase
           .from("classes")
           .select("intake_id")
-          .eq("id", row.class_id)
+          .eq("id", classId)
           .single() as { data: { intake_id: string } | null; error: unknown };
         return cls?.intake_id ?? null;
       })()
