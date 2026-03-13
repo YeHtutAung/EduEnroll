@@ -628,7 +628,20 @@ function EventTicketCard({
         </div>
       )}
 
-      <div className="relative z-10 px-8 py-10 sm:px-10 sm:py-12">
+      {/* Ticket image — hero position */}
+      {cls.image_url && (
+        <div className="relative z-10 overflow-hidden">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={cls.image_url}
+            alt={cls.level}
+            className="w-full h-auto object-cover max-h-52 sm:max-h-64"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#111] via-transparent to-transparent" />
+        </div>
+      )}
+
+      <div className={`relative z-10 px-8 ${cls.image_url ? "pt-6 pb-10" : "py-10"} sm:px-10 ${cls.image_url ? "sm:pt-8 sm:pb-12" : "sm:py-12"}`}>
         {/* Tier + Seats */}
         <div className="flex items-start justify-between mb-8">
           <span className={`text-[11px] font-medium tracking-[3px] uppercase px-3 py-1.5 rounded-sm border ${
@@ -698,18 +711,6 @@ function EventTicketCard({
             </div>
           )}
         </div>
-
-        {/* Ticket image */}
-        {cls.image_url && (
-          <div className="-mx-8 sm:-mx-10 mb-8 overflow-hidden flex items-center justify-center max-h-48 sm:max-h-72">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={cls.image_url}
-              alt={cls.level}
-              className="w-full h-full object-contain"
-            />
-          </div>
-        )}
 
         {/* Quantity selector (only for multi-ticket) */}
         {!isDisabled && maxTix > 1 && (
