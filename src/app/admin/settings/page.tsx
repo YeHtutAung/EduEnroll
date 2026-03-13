@@ -1297,7 +1297,13 @@ function SettingsContent() {
         ) : !messengerConnected ? (
           /* ── Not connected / Page picker ─────────────────────── */
           <div className="text-center py-8">
-            {pagePickerSession && pagePickerPages.length > 0 ? (
+            {pagePickerLoading ? (
+              <div className="space-y-3">
+                <Pulse className="h-6 w-48 mx-auto" />
+                <Pulse className="h-12 w-full max-w-sm mx-auto rounded-xl" />
+                <Pulse className="h-12 w-full max-w-sm mx-auto rounded-xl" />
+              </div>
+            ) : pagePickerSession && pagePickerPages.length > 0 ? (
               /* ── Page picker: multiple FB pages found ───────── */
               <>
                 <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-blue-50 mb-4">
