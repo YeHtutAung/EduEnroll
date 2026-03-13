@@ -271,7 +271,7 @@ async function handleCartEnrollment(
 
   const { data: result, error: rpcError } = await supabase.rpc(
     "submit_cart_enrollment",
-    { p_items: JSON.stringify(validatedItems) } as never,
+    { p_items: validatedItems } as never,
   );
 
   if (rpcError) {
