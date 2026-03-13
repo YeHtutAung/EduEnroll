@@ -701,9 +701,13 @@ function EventTicketCard({
 
         {/* Ticket image */}
         {cls.image_url && (
-          <div className="mb-8 overflow-hidden rounded">
+          <div className="-mx-8 sm:-mx-10 mb-8 overflow-hidden">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={cls.image_url} alt={cls.level} className="w-full h-40 object-cover" />
+            <img
+              src={cls.image_url}
+              alt={cls.level}
+              className="w-full h-auto object-contain"
+            />
           </div>
         )}
 
