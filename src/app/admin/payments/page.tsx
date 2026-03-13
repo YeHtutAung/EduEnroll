@@ -58,6 +58,19 @@ const LEVEL_COLORS: Record<string, string> = {
   N1: "#c0392b",
 };
 
+// Deterministic color for arbitrary ticket type names (events)
+const TICKET_PALETTE = [
+  "#1a6b3c", "#0891b2", "#1a3f8a", "#b07d2a", "#c0392b",
+  "#7c3aed", "#0d9488", "#be185d", "#ea580c", "#4f46e5",
+];
+
+function ticketColor(level: string): string {
+  if (LEVEL_COLORS[level]) return LEVEL_COLORS[level];
+  let hash = 0;
+  for (let i = 0; i < level.length; i++) hash = ((hash << 5) - hash + level.charCodeAt(i)) | 0;
+  return TICKET_PALETTE[Math.abs(hash) % TICKET_PALETTE.length];
+}
+
 // ── Skeleton card ─────────────────────────────────────────────────────────────
 
 function CardSkeleton() {
@@ -146,7 +159,7 @@ function PaymentCard({
                 <span
                   key={i}
                   className="inline-flex items-center justify-center px-1.5 h-6 rounded text-[10px] font-bold text-white"
-                  style={{ backgroundColor: LEVEL_COLORS[ci.class_level] ?? "#1a3f8a" }}
+                  style={{ backgroundColor: ticketColor(ci.class_level) }}
                 >
                   {ci.class_level}&times;{ci.quantity}
                 </span>
@@ -154,8 +167,8 @@ function PaymentCard({
             </div>
           ) : (
             <span
-              className="inline-flex items-center justify-center w-9 h-7 rounded-lg text-xs font-bold text-white"
-              style={{ backgroundColor: LEVEL_COLORS[class_level] ?? "#1a3f8a" }}
+              className="inline-flex items-center justify-center px-2 h-7 rounded-lg text-xs font-bold text-white whitespace-nowrap"
+              style={{ backgroundColor: ticketColor(class_level) }}
             >
               {class_level}
             </span>
@@ -607,12 +620,26 @@ function ReviewModal({
           {/* Header */}
           <div className="px-6 pt-6 pb-4 border-b border-white/10">
             <div className="flex items-center gap-3">
-              <span
-                className="inline-flex items-center justify-center w-10 h-10 rounded-xl text-white text-sm font-bold shrink-0"
-                style={{ backgroundColor: LEVEL_COLORS[class_level] ?? "#1a3f8a" }}
-              >
-                {class_level}
-              </span>
+              {isCart && items ? (
+                <div className="flex items-center gap-1 flex-wrap shrink-0">
+                  {items.map((ci, i) => (
+                    <span
+                      key={i}
+                      className="inline-flex items-center justify-center px-2 h-8 rounded-lg text-xs font-bold text-white"
+                      style={{ backgroundColor: ticketColor(ci.class_level) }}
+                    >
+                      {ci.class_level}&times;{ci.quantity}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <span
+                  className="inline-flex items-center justify-center px-3 h-10 rounded-xl text-white text-sm font-bold shrink-0 whitespace-nowrap"
+                  style={{ backgroundColor: ticketColor(class_level) }}
+                >
+                  {class_level}
+                </span>
+              )}
               <div className="min-w-0">
                 <p className="text-white font-bold truncate">{enrollment.student_name_en}</p>
                 {enrollment.student_name_mm && (
@@ -666,11 +693,11 @@ function ReviewModal({
                   <p className="text-xs text-white/35 mb-2">Ticket Breakdown</p>
                   <div className="rounded-lg bg-white/5 border border-white/10 p-3 space-y-1.5">
                     {items.map((ci, i) => (
-                      <div key={i} className="flex justify-between text-sm">
-                        <span className="text-white/70">
+                      <div key={i} className="flex items-center justify-between text-sm">
+                        <span className="flex items-center gap-1.5 text-white/70">
                           <span
-                            className="inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[10px] font-bold text-white mr-1.5"
-                            style={{ backgroundColor: LEVEL_COLORS[ci.class_level] ?? "#1a3f8a" }}
+                            className="inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[10px] font-bold text-white"
+                            style={{ backgroundColor: ticketColor(ci.class_level) }}
                           >
                             {ci.class_level}
                           </span>
@@ -680,7 +707,9 @@ function ReviewModal({
                       </div>
                     ))}
                     <div className="border-t border-white/10 pt-1.5 flex justify-between text-sm font-semibold">
-                      <span className="text-white/50">Total</span>
+                      <span className="text-white/50">
+                        Total ({items.reduce((s, i) => s + i.quantity, 0)} tickets)
+                      </span>
                       <span style={{ color: "#b07d2a" }}>{formatMMKSimple(total_fee_mmk)}</span>
                     </div>
                   </div>
@@ -688,8 +717,8 @@ function ReviewModal({
               ) : (
                 <InfoRow label="Class Level">
                   <span
-                    className="inline-flex items-center justify-center w-9 h-7 rounded-lg text-xs font-bold text-white"
-                    style={{ backgroundColor: LEVEL_COLORS[class_level] ?? "#1a3f8a" }}
+                    className="inline-flex items-center justify-center px-2 h-7 rounded-lg text-xs font-bold text-white whitespace-nowrap"
+                    style={{ backgroundColor: ticketColor(class_level) }}
                   >
                     {class_level}
                   </span>
