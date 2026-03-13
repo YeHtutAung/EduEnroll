@@ -54,6 +54,7 @@ function getActiveStep(status: EnrollmentStatus, paymentStatus: PaymentStatus | 
 const STATUS_CONFIG: Record<EnrollmentStatus, { bg: string; text: string; border: string }> = {
   pending_payment:   { bg: "bg-amber-50",   text: "text-amber-800",   border: "border-amber-200" },
   payment_submitted: { bg: "bg-blue-50",    text: "text-blue-800",    border: "border-blue-200" },
+  partial_payment:   { bg: "bg-amber-50",   text: "text-amber-700",   border: "border-amber-400" },
   confirmed:         { bg: "bg-green-50",   text: "text-green-800",   border: "border-green-200" },
   rejected:          { bg: "bg-red-50",     text: "text-red-800",     border: "border-red-200" },
 };
