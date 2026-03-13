@@ -582,6 +582,130 @@ test_enrollment_status() {
   fi
 }
 
+# ── 5b. Receipt Upload (single enrollment) ────────────────────
+test_receipt_upload() {
+  header "Receipt Upload — Single Enrollment"
+
+  if [[ -z "$ENROLLMENT_REF" ]]; then
+    skip "POST /api/public/payments/upload (single) — no enrollment_ref available"
+    return
+  fi
+
+  # Create a tiny valid PNG (1x1 pixel) for testing
+  local TMPIMG
+  TMPIMG=$(mktemp /tmp/test_receipt_XXXXXX.png)
+  printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82' > "$TMPIMG"
+
+  # Test: successful upload for single enrollment
+  local RESP STATUS
+  RESP=$(curl -sL -w "\n%{http_code}" "${BYPASS_H[@]}" "${TENANT_H[@]}" \
+    -X POST "$BASE_URL/api/public/payments/upload" \
+    -F "enrollment_ref=${ENROLLMENT_REF}" \
+    -F "proof_image=@${TMPIMG};type=image/png")
+  STATUS=$(echo "$RESP" | tail -1)
+  BODY=$(echo "$RESP" | sed '$d')
+
+  if [[ "$STATUS" == "201" ]]; then
+    pass "POST /api/public/payments/upload (single) — 201 created"
+
+    if echo "$BODY" | jq -e '.amount_mmk' &>/dev/null; then
+      local AMT; AMT=$(echo "$BODY" | jq '.amount_mmk')
+      pass "POST /api/public/payments/upload (single) — amount_mmk=${AMT}"
+    else
+      fail "POST /api/public/payments/upload (single) — missing amount_mmk" "$BODY"
+    fi
+
+    if echo "$BODY" | jq -e '.payment_id' &>/dev/null; then
+      pass "POST /api/public/payments/upload (single) — payment_id returned"
+    else
+      fail "POST /api/public/payments/upload (single) — missing payment_id" "$BODY"
+    fi
+  else
+    fail "POST /api/public/payments/upload (single) — expected 201, got ${STATUS}" "$BODY"
+  fi
+
+  # Test: missing enrollment_ref should 400
+  local CODE
+  CODE=$(curl -sL "${BYPASS_H[@]}" "${TENANT_H[@]}" -o /dev/null -w "%{http_code}" \
+    -X POST "$BASE_URL/api/public/payments/upload" \
+    -F "proof_image=@${TMPIMG};type=image/png")
+  if [[ "$CODE" == "400" ]]; then
+    pass "POST /api/public/payments/upload — 400 on missing enrollment_ref"
+  else
+    fail "POST /api/public/payments/upload — expected 400 for missing ref, got ${CODE}"
+  fi
+
+  # Test: unknown ref should 404
+  CODE=$(curl -sL "${BYPASS_H[@]}" "${TENANT_H[@]}" -o /dev/null -w "%{http_code}" \
+    -X POST "$BASE_URL/api/public/payments/upload" \
+    -F "enrollment_ref=NM-9999-99999" \
+    -F "proof_image=@${TMPIMG};type=image/png")
+  if [[ "$CODE" == "404" ]]; then
+    pass "POST /api/public/payments/upload — 404 on unknown enrollment_ref"
+  else
+    fail "POST /api/public/payments/upload — expected 404, got ${CODE}"
+  fi
+
+  # Test: re-upload for already submitted should 409
+  CODE=$(curl -sL "${BYPASS_H[@]}" "${TENANT_H[@]}" -o /dev/null -w "%{http_code}" \
+    -X POST "$BASE_URL/api/public/payments/upload" \
+    -F "enrollment_ref=${ENROLLMENT_REF}" \
+    -F "proof_image=@${TMPIMG};type=image/png")
+  if [[ "$CODE" == "409" ]]; then
+    pass "POST /api/public/payments/upload — 409 on duplicate upload (already submitted)"
+  else
+    fail "POST /api/public/payments/upload — expected 409 for duplicate, got ${CODE}"
+  fi
+
+  rm -f "$TMPIMG"
+}
+
+# ── 5c. Receipt Upload (cart enrollment) ──────────────────────
+test_cart_receipt_upload() {
+  header "Receipt Upload — Cart Enrollment"
+
+  if [[ -z "$CART_ENROLLMENT_REF" ]]; then
+    skip "POST /api/public/payments/upload (cart) — no cart enrollment_ref available"
+    return
+  fi
+
+  # Create a tiny valid PNG for testing
+  local TMPIMG
+  TMPIMG=$(mktemp /tmp/test_receipt_XXXXXX.png)
+  printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82' > "$TMPIMG"
+
+  # Test: successful upload for cart enrollment (class_id=NULL)
+  local RESP STATUS
+  RESP=$(curl -sL -w "\n%{http_code}" "${BYPASS_H[@]}" "${TENANT_H[@]}" \
+    -X POST "$BASE_URL/api/public/payments/upload" \
+    -F "enrollment_ref=${CART_ENROLLMENT_REF}" \
+    -F "proof_image=@${TMPIMG};type=image/png")
+  STATUS=$(echo "$RESP" | tail -1)
+  BODY=$(echo "$RESP" | sed '$d')
+
+  if [[ "$STATUS" == "201" ]]; then
+    pass "POST /api/public/payments/upload (cart) — 201 created"
+
+    # Cart total should be 950000 (N5×2 + N4×1 = 600000 + 350000)
+    local AMT; AMT=$(echo "$BODY" | jq '.amount_mmk')
+    if [[ "$AMT" == "950000" ]]; then
+      pass "POST /api/public/payments/upload (cart) — amount_mmk=950000 (correct cart total)"
+    else
+      fail "POST /api/public/payments/upload (cart) — expected 950000, got ${AMT}"
+    fi
+
+    if echo "$BODY" | jq -e '.payment_id' &>/dev/null; then
+      pass "POST /api/public/payments/upload (cart) — payment_id returned"
+    else
+      fail "POST /api/public/payments/upload (cart) — missing payment_id" "$BODY"
+    fi
+  else
+    fail "POST /api/public/payments/upload (cart) — expected 201, got ${STATUS}" "$BODY"
+  fi
+
+  rm -f "$TMPIMG"
+}
+
 # ── 6. Admin Stats ──────────────────────────────────────────────
 test_admin_stats() {
   header "Admin Stats"
@@ -835,6 +959,8 @@ main() {
   test_submit_cart_enrollment
   test_enrollment_status
   test_cart_enrollment_status
+  test_receipt_upload
+  test_cart_receipt_upload
   test_admin_stats
   test_admin_students
   test_admin_pending_payments

@@ -23,8 +23,15 @@ const UPLOADABLE_STATUSES = ["pending_payment", "partial_payment"] as const;
 
 // ─── Joined row type for the enrollment + class lookup ────────────────────────
 
+interface EnrollmentItem {
+  class_id: string;
+  quantity: number;
+  fee_mmk: number;
+}
+
 interface EnrollmentWithClass extends Enrollment {
   classes: Pick<Class, "id" | "fee_mmk"> | null;
+  enrollment_items: EnrollmentItem[] | null;
 }
 
 type EnrollmentResult = { data: EnrollmentWithClass | null; error: unknown };
@@ -105,7 +112,7 @@ export async function POST(request: NextRequest) {
   // ── 3. Look up enrollment with class fee ──────────────────────
   const { data: enrollment, error: enrollmentError } = await supabase
     .from("enrollments")
-    .select("*, classes(id, fee_mmk)")
+    .select("*, classes(id, fee_mmk), enrollment_items(class_id, quantity, fee_mmk)")
     .eq("enrollment_ref", enrollmentRef.trim())
     .eq("tenant_id", tenantId)
     .single() as EnrollmentResult;
@@ -143,7 +150,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (!enrollment.classes) {
+  // Calculate total fee: from enrollment_items for cart, or from class for single
+  const isCart = !enrollment.class_id && enrollment.enrollment_items && enrollment.enrollment_items.length > 0;
+  let totalFee: number;
+
+  if (isCart) {
+    totalFee = enrollment.enrollment_items!.reduce((sum, item) => sum + item.fee_mmk * item.quantity, 0);
+  } else if (enrollment.classes) {
+    totalFee = enrollment.classes.fee_mmk * (enrollment.quantity ?? 1);
+  } else {
     return NextResponse.json(
       { error: "Internal Server Error", message: "Class data not found." },
       { status: 500 },
@@ -248,7 +263,7 @@ export async function POST(request: NextRequest) {
     .insert({
       enrollment_id:    enrollment.id,
       tenant_id:        enrollment.tenant_id,
-      amount_mmk:       enrollment.classes.fee_mmk,
+      amount_mmk:       totalFee,
       proof_image_url:  uploadedPaths[0],   // legacy field — first image
       proof_image_urls: uploadedPaths,       // all images
       status:           "pending",
@@ -271,8 +286,8 @@ export async function POST(request: NextRequest) {
     {
       payment_id:       payment.id,
       enrollment_ref:   enrollmentRef.trim(),
-      amount_mmk:       enrollment.classes.fee_mmk,
-      amount_formatted: formatMMK(enrollment.classes.fee_mmk),
+      amount_mmk:       totalFee,
+      amount_formatted: formatMMK(totalFee),
       proof_count:      uploadedPaths.length,
       status:           "pending",
       message_en:       "Payment proof submitted. Our team will verify it within 1 business day.",
