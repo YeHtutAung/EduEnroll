@@ -27,9 +27,9 @@ export default async function LoginPage() {
   const supabase = createAdminClient();
   const { data: tenant } = (await supabase
     .from("tenants")
-    .select("name, logo_url")
+    .select("name, logo_url, org_type")
     .eq("subdomain", slug)
-    .maybeSingle()) as { data: { name: string; logo_url: string | null } | null; error: unknown };
+    .maybeSingle()) as { data: { name: string; logo_url: string | null; org_type: string | null } | null; error: unknown };
 
   if (tenant?.name) {
     schoolName = tenant.name;
@@ -38,5 +38,5 @@ export default async function LoginPage() {
     logoUrl = tenant.logo_url;
   }
 
-  return <LoginForm schoolName={schoolName} schoolNameMm={schoolNameMm} tenantSlug={slug} logoUrl={logoUrl} />;
+  return <LoginForm schoolName={schoolName} schoolNameMm={schoolNameMm} tenantSlug={slug} logoUrl={logoUrl} orgType={tenant?.org_type ?? "language_school"} />;
 }
