@@ -5,6 +5,7 @@ import type { EnrollmentStatus, JlptLevel } from "@/types/database";
 const VALID_STATUSES: EnrollmentStatus[] = [
   "pending_payment",
   "payment_submitted",
+  "partial_payment",
   "confirmed",
   "rejected",
 ];
@@ -25,6 +26,8 @@ export interface StudentRow {
   class_level:     JlptLevel;
   intake_name:     string;
   fee_mmk:         number;
+  quantity:        number;
+  items?:          { class_level: string; quantity: number; fee_mmk: number; subtotal_mmk: number }[] | null;
 }
 
 // ─── GET /api/admin/students ──────────────────────────────────────────────────
@@ -63,6 +66,7 @@ export async function GET(request: NextRequest) {
   }
 
   // Build query — join to classes (for level + fee) and intakes (for name)
+  // Use left join so cart enrollments (class_id=NULL) are included
   let query = supabase
     .from("enrollments")
     .select(
@@ -75,12 +79,15 @@ export async function GET(request: NextRequest) {
       form_data,
       status,
       enrolled_at,
-      classes!inner (
+      quantity,
+      class_id,
+      classes (
         level,
         fee_mmk,
         intake_id,
-        intakes!inner ( name )
-      )
+        intakes ( name )
+      ),
+      enrollment_items ( quantity, fee_mmk, classes ( level, intake_id, intakes ( name ) ) )
     `,
       { count: "exact" },
     )
@@ -113,12 +120,19 @@ export async function GET(request: NextRequest) {
       form_data:       Record<string, string> | null;
       status:          EnrollmentStatus;
       enrolled_at:     string;
+      quantity:        number | null;
+      class_id:        string | null;
       classes: {
         level:     JlptLevel;
         fee_mmk:   number;
         intake_id: string;
         intakes:   { name: string } | null;
       } | null;
+      enrollment_items: {
+        quantity: number;
+        fee_mmk: number;
+        classes: { level: string; intake_id: string; intakes: { name: string } | null } | null;
+      }[];
     }[]
     | null;
     error:   unknown;
@@ -129,19 +143,46 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: (error as Error).message }, { status: 500 });
   }
 
-  const students: StudentRow[] = (data ?? []).map((row) => ({
-    enrollment_id:   row.id,
-    enrollment_ref:  row.enrollment_ref,
-    student_name_en: row.student_name_en,
-    student_name_mm: row.student_name_mm,
-    phone:           row.phone,
-    form_data:       row.form_data,
-    status:          row.status,
-    enrolled_at:     row.enrolled_at,
-    class_level:     row.classes?.level ?? ("" as JlptLevel),
-    intake_name:     row.classes?.intakes?.name ?? "",
-    fee_mmk:         row.classes?.fee_mmk ?? 0,
-  }));
+  const students: StudentRow[] = (data ?? []).map((row) => {
+    const isCart = row.class_id === null && row.enrollment_items?.length > 0;
+
+    // For cart enrollments, derive level/fee/intake from enrollment_items
+    const cartLevels = isCart
+      ? row.enrollment_items.map((ei) => ei.classes?.level ?? "").join(", ")
+      : null;
+    const cartFee = isCart
+      ? row.enrollment_items.reduce((sum, ei) => sum + ei.fee_mmk * ei.quantity, 0)
+      : null;
+    const cartIntake = isCart
+      ? row.enrollment_items[0]?.classes?.intakes?.name ?? ""
+      : null;
+    const cartItems = isCart
+      ? row.enrollment_items.map((ei) => ({
+          class_level: ei.classes?.level ?? "",
+          quantity: ei.quantity,
+          fee_mmk: ei.fee_mmk,
+          subtotal_mmk: ei.fee_mmk * ei.quantity,
+        }))
+      : null;
+
+    return {
+      enrollment_id:   row.id,
+      enrollment_ref:  row.enrollment_ref,
+      student_name_en: row.student_name_en,
+      student_name_mm: row.student_name_mm,
+      phone:           row.phone,
+      form_data:       row.form_data,
+      status:          row.status,
+      enrolled_at:     row.enrolled_at,
+      class_level:     (cartLevels ?? row.classes?.level ?? "") as JlptLevel,
+      intake_name:     cartIntake ?? row.classes?.intakes?.name ?? "",
+      fee_mmk:         cartFee ?? (row.classes?.fee_mmk ?? 0) * (row.quantity ?? 1),
+      quantity:        isCart
+        ? cartItems!.reduce((sum, ci) => sum + ci.quantity, 0)
+        : (row.quantity ?? 1),
+      items:           cartItems,
+    };
+  });
 
   const total      = count ?? 0;
   const total_pages = Math.ceil(total / page_size);

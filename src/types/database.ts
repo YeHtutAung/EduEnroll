@@ -25,6 +25,33 @@ export type MyanmarBank = string;
 
 // ─── RPC return shapes ────────────────────────────────────────────────────────
 
+export type SubmitCartEnrollmentResult =
+  | {
+      success: true;
+      enrollment_ref: string;
+      enrollment_id: string;
+      tenant_id: string;
+      total_fee_mmk: number;
+      quantity: number;
+      items: Array<{
+        class_id: string;
+        class_level: string;
+        quantity: number;
+        fee_mmk: number;
+        subtotal_mmk: number;
+      }>;
+    }
+  | {
+      success: false;
+      error: string;
+      class_id?: string;
+      class_level?: string;
+      seat_remaining?: number;
+      max?: number;
+      opens_at?: string;
+      detail?: string;
+    };
+
 export type SubmitEnrollmentResult =
   | {
       success: true;
@@ -138,7 +165,7 @@ export interface Class {
 export interface Enrollment {
   id: string;
   enrollment_ref: string;       // e.g. "NM-2026-00042" (auto-generated)
-  class_id: string;
+  class_id: string | null;       // null for cart enrollments (uses enrollment_items)
   tenant_id: string;
   student_name_en: string;      // name in English
   student_name_mm: string | null; // name in Myanmar script
@@ -164,6 +191,16 @@ export interface Payment {
   status: PaymentStatus;
   verified_by: string | null;   // references users.id
   verified_at: string | null;
+  created_at: string;
+}
+
+export interface EnrollmentItem {
+  id: string;
+  enrollment_id: string;
+  class_id: string;
+  tenant_id: string;
+  quantity: number;
+  fee_mmk: number;
   created_at: string;
 }
 
@@ -229,6 +266,11 @@ export interface Database {
         Insert: Omit<BankAccount, "id" | "created_at">;
         Update: Partial<Omit<BankAccount, "id" | "created_at">>;
       };
+      enrollment_items: {
+        Row: EnrollmentItem;
+        Insert: Omit<EnrollmentItem, "id" | "created_at">;
+        Update: Partial<Omit<EnrollmentItem, "id" | "created_at">>;
+      };
       staff_invites: {
         Row: StaffInvite;
         Insert: Omit<StaffInvite, "id" | "token" | "accepted_at" | "expires_at" | "created_at">;
@@ -244,6 +286,10 @@ export interface Database {
       seed_default_classes: {
         Args: { p_intake_id: string; p_tenant_id: string; p_seat_total?: number };
         Returns: void;
+      };
+      submit_cart_enrollment: {
+        Args: { p_items: string; p_tenant_id?: string | null };
+        Returns: SubmitCartEnrollmentResult;
       };
       submit_enrollment: {
         Args: {

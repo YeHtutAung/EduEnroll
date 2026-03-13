@@ -10,6 +10,13 @@ import type { Enrollment, Payment } from "@/types/database";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+interface CartItem {
+  class_level: string;
+  quantity: number;
+  fee_mmk: number;
+  subtotal_mmk: number;
+}
+
 interface PendingItem {
   enrollment: Enrollment;
   payment: Payment | null;
@@ -18,6 +25,8 @@ interface PendingItem {
   intake_name: string;
   proof_signed_url: string | null;
   proof_signed_urls: string[];
+  items: CartItem[] | null;
+  total_fee_mmk: number;
 }
 
 interface FormFieldDef {
@@ -77,9 +86,11 @@ function PaymentCard({
   item: PendingItem;
   onClick: () => void;
 }) {
-  const { enrollment, payment, class_level, proof_signed_url, proof_signed_urls } = item;
+  const { enrollment, payment, class_level, proof_signed_url, proof_signed_urls, items } = item;
   const submitted = payment?.created_at ?? enrollment.enrolled_at;
   const imageCount = proof_signed_urls?.length ?? (proof_signed_url ? 1 : 0);
+  const isCart = items != null && items.length > 0;
+  const totalTickets = isCart ? items.reduce((sum, i) => sum + i.quantity, 0) : null;
 
   return (
     <button
@@ -112,6 +123,12 @@ function PaymentCard({
             {imageCount}
           </span>
         )}
+        {/* Cart ticket count badge */}
+        {isCart && totalTickets && totalTickets > 1 && (
+          <span className="absolute bottom-3 left-3 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#1a3f8a]/80 text-white text-xs font-medium">
+            {totalTickets} tickets
+          </span>
+        )}
         {/* Pulsing "new" indicator */}
         <div className="absolute top-3 right-3 flex h-2.5 w-2.5">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#b07d2a] opacity-75" />
@@ -123,12 +140,26 @@ function PaymentCard({
       <div className="p-4 space-y-2">
         {/* Level + time */}
         <div className="flex items-center justify-between">
-          <span
-            className="inline-flex items-center justify-center w-9 h-7 rounded-lg text-xs font-bold text-white"
-            style={{ backgroundColor: LEVEL_COLORS[class_level] ?? "#1a3f8a" }}
-          >
-            {class_level}
-          </span>
+          {isCart ? (
+            <div className="flex items-center gap-1 flex-wrap">
+              {items.map((ci, i) => (
+                <span
+                  key={i}
+                  className="inline-flex items-center justify-center px-1.5 h-6 rounded text-[10px] font-bold text-white"
+                  style={{ backgroundColor: LEVEL_COLORS[ci.class_level] ?? "#1a3f8a" }}
+                >
+                  {ci.class_level}&times;{ci.quantity}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <span
+              className="inline-flex items-center justify-center w-9 h-7 rounded-lg text-xs font-bold text-white"
+              style={{ backgroundColor: LEVEL_COLORS[class_level] ?? "#1a3f8a" }}
+            >
+              {class_level}
+            </span>
+          )}
           <span className="text-xs text-gray-400">{timeAgo(submitted)}</span>
         </div>
 
@@ -517,7 +548,8 @@ function ReviewModal({
 }) {
   const [fullscreenImgIndex, setFullscreenImgIndex] = useState<number | null>(null);
   const [formFields, setFormFields] = useState<FormFieldDef[]>([]);
-  const { enrollment, payment, class_level, intake_name, proof_signed_urls } = item;
+  const { enrollment, payment, class_level, intake_name, proof_signed_urls, items, total_fee_mmk } = item;
+  const isCart = items != null && items.length > 0;
   const submitted = payment?.created_at ?? enrollment.enrolled_at;
   const imageUrls = proof_signed_urls?.length ? proof_signed_urls : item.proof_signed_url ? [item.proof_signed_url] : [];
 
@@ -629,14 +661,40 @@ function ReviewModal({
             )}
 
             <div className="border-t border-white/10 pt-4 space-y-4">
-              <InfoRow label="Class Level">
-                <span
-                  className="inline-flex items-center justify-center w-9 h-7 rounded-lg text-xs font-bold text-white"
-                  style={{ backgroundColor: LEVEL_COLORS[class_level] ?? "#1a3f8a" }}
-                >
-                  {class_level}
-                </span>
-              </InfoRow>
+              {isCart && items ? (
+                <div>
+                  <p className="text-xs text-white/35 mb-2">Ticket Breakdown</p>
+                  <div className="rounded-lg bg-white/5 border border-white/10 p-3 space-y-1.5">
+                    {items.map((ci, i) => (
+                      <div key={i} className="flex justify-between text-sm">
+                        <span className="text-white/70">
+                          <span
+                            className="inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[10px] font-bold text-white mr-1.5"
+                            style={{ backgroundColor: LEVEL_COLORS[ci.class_level] ?? "#1a3f8a" }}
+                          >
+                            {ci.class_level}
+                          </span>
+                          &times; {ci.quantity}
+                        </span>
+                        <span className="text-white font-medium">{formatMMKSimple(ci.subtotal_mmk)}</span>
+                      </div>
+                    ))}
+                    <div className="border-t border-white/10 pt-1.5 flex justify-between text-sm font-semibold">
+                      <span className="text-white/50">Total</span>
+                      <span style={{ color: "#b07d2a" }}>{formatMMKSimple(total_fee_mmk)}</span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <InfoRow label="Class Level">
+                  <span
+                    className="inline-flex items-center justify-center w-9 h-7 rounded-lg text-xs font-bold text-white"
+                    style={{ backgroundColor: LEVEL_COLORS[class_level] ?? "#1a3f8a" }}
+                  >
+                    {class_level}
+                  </span>
+                </InfoRow>
+              )}
               <InfoRow label="Intake">{intake_name || "—"}</InfoRow>
               <InfoRow label="Enrollment Status">
                 <StatusBadge status={enrollment.status} />

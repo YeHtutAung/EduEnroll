@@ -6,6 +6,13 @@ import type { Enrollment, Payment, Class, Intake } from "@/types/database";
 const SIGNED_URL_EXPIRES_IN = 3600; // 1 hour
 const PROOF_BUCKET = "payment-proofs";
 
+type CartItem = {
+  class_level: string;
+  quantity: number;
+  fee_mmk: number;
+  subtotal_mmk: number;
+};
+
 type PendingRow = {
   enrollment: Enrollment;
   payment: Payment;
@@ -14,6 +21,8 @@ type PendingRow = {
   intake_name: string;
   proof_signed_url: string | null;
   proof_signed_urls: string[];
+  items: CartItem[] | null;
+  total_fee_mmk: number;
 };
 
 // ─── GET /api/admin/payments/pending ──────────────────────────────────────────
@@ -33,7 +42,8 @@ export async function GET() {
       `
       *,
       payments ( * ),
-      classes ( level, intake_id, intakes ( name ) )
+      classes ( level, intake_id, fee_mmk, intakes ( name ) ),
+      enrollment_items ( quantity, fee_mmk, classes ( level, intake_id, intakes ( name ) ) )
     `,
     )
     .eq("tenant_id", tenantId)
@@ -42,7 +52,8 @@ export async function GET() {
     data:
       | (Enrollment & {
           payments: Payment[];
-          classes: (Pick<Class, "level" | "intake_id"> & { intakes: Pick<Intake, "name"> | null }) | null;
+          classes: (Pick<Class, "level" | "intake_id" | "fee_mmk"> & { intakes: Pick<Intake, "name"> | null }) | null;
+          enrollment_items: { quantity: number; fee_mmk: number; classes: { level: string; intake_id: string; intakes: { name: string } | null } | null }[];
         })[]
       | null;
     error: unknown;
@@ -82,16 +93,42 @@ export async function GET() {
 
       // Strip the joined relation arrays before sending
       /* eslint-disable-next-line @typescript-eslint/no-unused-vars */
-      const { classes, payments: _p, ...enrollment } = row;
+      const { classes, payments: _p, enrollment_items: _ei, ...enrollment } = row;
+
+      // Build cart items for cart enrollments (class_id is null)
+      const isCart = enrollment.class_id === null && row.enrollment_items?.length > 0;
+      const cartItems: CartItem[] | null = isCart
+        ? row.enrollment_items.map((ei) => ({
+            class_level: ei.classes?.level ?? "",
+            quantity: ei.quantity,
+            fee_mmk: ei.fee_mmk,
+            subtotal_mmk: ei.fee_mmk * ei.quantity,
+          }))
+        : null;
+
+      // Resolve intake info: from direct class join or from first enrollment_item
+      const firstItemClass = row.enrollment_items?.[0]?.classes;
+      const resolvedIntakeId = classes?.intake_id ?? firstItemClass?.intake_id ?? "";
+      const resolvedIntakeName = classes?.intakes?.name ?? firstItemClass?.intakes?.name ?? "";
+      const resolvedClassLevel = isCart
+        ? (cartItems ?? []).map((i) => i.class_level).join(", ")
+        : (classes?.level ?? "");
+
+      // Total fee: from cart items or single class
+      const totalFee = isCart
+        ? (cartItems ?? []).reduce((sum, i) => sum + i.subtotal_mmk, 0)
+        : (classes?.fee_mmk ?? 0) * (enrollment.quantity ?? 1);
 
       return {
         enrollment,
         payment,
-        class_level: classes?.level ?? "",
-        intake_id: classes?.intake_id ?? "",
-        intake_name: classes?.intakes?.name ?? "",
+        class_level: resolvedClassLevel,
+        intake_id: resolvedIntakeId,
+        intake_name: resolvedIntakeName,
         proof_signed_url,
         proof_signed_urls,
+        items: cartItems,
+        total_fee_mmk: totalFee,
       };
     }),
   );

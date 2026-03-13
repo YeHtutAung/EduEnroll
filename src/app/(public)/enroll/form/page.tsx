@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { formatMMK } from "@/lib/utils";
+import { formatMMK, formatMMKSimple } from "@/lib/utils";
 import type { JlptLevel, ClassStatus } from "@/types/database";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -308,6 +308,12 @@ function EnrollmentFormPage() {
   const classId = searchParams.get("class_id");
   const slug = searchParams.get("slug");
   const quantity = Math.max(1, Number(searchParams.get("quantity")) || 1);
+  const cartKey = searchParams.get("cart_key");
+
+  // Cart state
+  const [cartItems, setCartItems] = useState<
+    { class_id: string; level: string; quantity: number; fee_mmk: number; image_url: string | null }[] | null
+  >(null);
 
   // Data state
   const [intake, setIntake] = useState<IntakeInfo | null>(null);
@@ -326,9 +332,33 @@ function EnrollmentFormPage() {
   const idempotencyKeyRef = useRef(crypto.randomUUID());
   const [submitError, setSubmitError] = useState<{ en: string; mm: string } | null>(null);
 
+  // ── Read cart from sessionStorage ──────────────────────────────
+  useEffect(() => {
+    if (cartKey) {
+      const stored = sessionStorage.getItem(cartKey);
+      if (stored) {
+        try {
+          setCartItems(JSON.parse(stored));
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+  }, [cartKey]);
+
+  // Cart mode detection
+  const isCartMode = cartItems !== null && cartItems.length > 0;
+  const cartTotalFee = isCartMode
+    ? cartItems.reduce((sum, item) => sum + item.fee_mmk * item.quantity, 0)
+    : 0;
+  const cartTotalQty = isCartMode
+    ? cartItems.reduce((sum, item) => sum + item.quantity, 0)
+    : 0;
+
   // ── Fetch intake + class + form fields ────────────────────────
   useEffect(() => {
-    if (!classId || !slug) {
+    // For cart mode, we need slug but not classId
+    if (!slug || (!classId && !cartKey)) {
       setPageError("Missing class or intake information. Please go back and select a class.");
       setPageLoading(false);
       return;
@@ -345,12 +375,15 @@ function EnrollmentFormPage() {
         setIntake(json.intake);
         if (json.labels) setLabels(json.labels);
 
-        const found = (json.classes as ClassInfo[]).find((c) => c.id === classId);
-        if (!found) {
-          setPageError("Class not found or no longer available.");
-          return;
+        // For single-class mode, find the selected class
+        if (classId && !cartKey) {
+          const found = (json.classes as ClassInfo[]).find((c) => c.id === classId);
+          if (!found) {
+            setPageError("Class not found or no longer available.");
+            return;
+          }
+          setClassInfo(found);
         }
-        setClassInfo(found);
 
         // Fetch form fields for this intake
         const fieldsRes = await fetch(`/api/public/form-fields?intake_id=${json.intake.id}`);
@@ -371,7 +404,7 @@ function EnrollmentFormPage() {
       }
     }
     fetchData();
-  }, [classId, slug]);
+  }, [classId, slug, cartKey]);
 
   // ── Validation ───────────────────────────────────────────────
   function validateStep1(): boolean {
@@ -414,7 +447,7 @@ function EnrollmentFormPage() {
 
   // ── Submit enrollment ────────────────────────────────────────
   async function handleSubmit() {
-    if (!classInfo || submittingRef.current) return;
+    if ((!classInfo && !isCartMode) || submittingRef.current) return;
     submittingRef.current = true;
     setSubmitting(true);
     setSubmitError(null);
@@ -426,16 +459,25 @@ function EnrollmentFormPage() {
       if (val) dynamicData[field.field_key] = val;
     }
 
+    // Build payload based on mode
+    const payload = isCartMode
+      ? {
+          items: cartItems.map((item) => ({ class_id: item.class_id, quantity: item.quantity })),
+          form_data: dynamicData,
+          idempotency_key: idempotencyKeyRef.current,
+        }
+      : {
+          class_id: classInfo!.id,
+          form_data: dynamicData,
+          idempotency_key: idempotencyKeyRef.current,
+          quantity,
+        };
+
     try {
       const res = await fetch("/api/public/enroll", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          class_id: classInfo.id,
-          form_data: dynamicData,
-          idempotency_key: idempotencyKeyRef.current,
-          quantity,
-        }),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
@@ -461,6 +503,12 @@ function EnrollmentFormPage() {
       }
 
       const data = await res.json();
+
+      // Clean up sessionStorage after successful submission
+      if (cartKey) {
+        sessionStorage.removeItem(cartKey);
+      }
+
       router.push(`/enroll/payment/${data.enrollment_ref}`);
     } catch {
       setSubmitError({
@@ -497,7 +545,7 @@ function EnrollmentFormPage() {
     );
   }
 
-  if (!intake || !classInfo) return null;
+  if (!intake || (!classInfo && !isCartMode)) return null;
 
   const isEvent = labels?.orgType === "event";
   const intakeNameMM = isEvent ? null : getIntakeNameMM(intake.name, intake.year);
@@ -508,20 +556,42 @@ function EnrollmentFormPage() {
       <div className="mx-auto max-w-md">
         <StepIndicator step={1} />
 
-        {/* Selected class summary */}
-        <div className="mb-8 rounded-xl border border-gray-200 bg-gray-50 p-4">
-          <div className="flex items-center gap-3">
-            <span className={`rounded-full px-3 py-1 text-sm font-bold ${LEVEL_COLORS[classInfo.level] ?? DEFAULT_LEVEL_CLASS}`}>
-              {classInfo.level}
-            </span>
-            <div>
-              <p className="font-myanmar text-lg font-semibold text-gray-900">
-                {classInfo.fee_formatted}
-              </p>
-              <p className="text-xs text-gray-500">{intake.name}</p>
+        {/* Selected class/cart summary */}
+        {isCartMode ? (
+          <div className="mb-8 rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <div className="space-y-2">
+              {cartItems.map((item, i) => (
+                <div key={i} className="flex items-center justify-between text-sm">
+                  <div className="flex items-center gap-2">
+                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${LEVEL_COLORS[item.level] ?? DEFAULT_LEVEL_CLASS}`}>
+                      {item.level}
+                    </span>
+                    <span className="text-gray-600">x{item.quantity}</span>
+                  </div>
+                  <span className="font-medium text-gray-900">{formatMMKSimple(item.fee_mmk * item.quantity)}</span>
+                </div>
+              ))}
+              <div className="border-t pt-2 flex justify-between font-semibold text-gray-900">
+                <span>Total ({cartTotalQty} tickets)</span>
+                <span>{formatMMKSimple(cartTotalFee)}</span>
+              </div>
             </div>
           </div>
-        </div>
+        ) : classInfo ? (
+          <div className="mb-8 rounded-xl border border-gray-200 bg-gray-50 p-4">
+            <div className="flex items-center gap-3">
+              <span className={`rounded-full px-3 py-1 text-sm font-bold ${LEVEL_COLORS[classInfo.level] ?? DEFAULT_LEVEL_CLASS}`}>
+                {classInfo.level}
+              </span>
+              <div>
+                <p className="font-myanmar text-lg font-semibold text-gray-900">
+                  {classInfo.fee_formatted}
+                </p>
+                <p className="text-xs text-gray-500">{intake.name}</p>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         {/* Form fields */}
         <h2 className="mb-6 text-lg font-semibold text-gray-900">
@@ -557,32 +627,50 @@ function EnrollmentFormPage() {
         Review & Confirm / <span className="font-myanmar">ပြန်လည်စစ်ဆေးပြီး အတည်ပြုပါ</span>
       </h2>
 
-      {/* Class summary */}
-      <div className="mb-6 rounded-xl border border-gray-200 bg-gray-50 p-5">
-        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-          {isEvent ? "Selected Ticket" : "Selected Class"}
-        </h3>
-        <div className="flex items-center gap-3">
-          <span className={`rounded-full px-3 py-1 text-sm font-bold ${LEVEL_COLORS[classInfo.level] ?? DEFAULT_LEVEL_CLASS}`}>
-            {classInfo.level}
-          </span>
-          <div>
-            <p className="font-myanmar text-xl font-bold text-gray-900">
-              {quantity > 1
-                ? <>{classInfo.fee_formatted} × {quantity} = <span className="text-[#1a6b3c]">{formatMMK(classInfo.fee_mmk * quantity)}</span></>
-                : classInfo.fee_formatted}
-            </p>
-            {quantity > 1 && (
-              <p className="text-sm text-gray-500">
-                {quantity} ticket{quantity > 1 ? "s" : ""}
-              </p>
-            )}
-            <p className="text-sm text-gray-500">
-              {intake.name}{intakeNameMM && <> / <span className="font-myanmar">{intakeNameMM}</span></>}
-            </p>
+      {/* Class/cart summary */}
+      {isCartMode ? (
+        <div className="mb-6 rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <h3 className="font-semibold text-gray-900 mb-3">Order Summary</h3>
+          <div className="space-y-2">
+            {cartItems.map((item, i) => (
+              <div key={i} className="flex justify-between text-sm">
+                <span>{item.level} &times; {item.quantity}</span>
+                <span className="font-medium">{formatMMKSimple(item.fee_mmk * item.quantity)}</span>
+              </div>
+            ))}
+            <div className="border-t pt-2 mt-2 flex justify-between font-semibold">
+              <span>Total ({cartTotalQty} tickets)</span>
+              <span>{formatMMKSimple(cartTotalFee)}</span>
+            </div>
           </div>
         </div>
-      </div>
+      ) : classInfo ? (
+        <div className="mb-6 rounded-xl border border-gray-200 bg-gray-50 p-5">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            {isEvent ? "Selected Ticket" : "Selected Class"}
+          </h3>
+          <div className="flex items-center gap-3">
+            <span className={`rounded-full px-3 py-1 text-sm font-bold ${LEVEL_COLORS[classInfo.level] ?? DEFAULT_LEVEL_CLASS}`}>
+              {classInfo.level}
+            </span>
+            <div>
+              <p className="font-myanmar text-xl font-bold text-gray-900">
+                {quantity > 1
+                  ? <>{classInfo.fee_formatted} &times; {quantity} = <span className="text-[#1a6b3c]">{formatMMK(classInfo.fee_mmk * quantity)}</span></>
+                  : classInfo.fee_formatted}
+              </p>
+              {quantity > 1 && (
+                <p className="text-sm text-gray-500">
+                  {quantity} ticket{quantity > 1 ? "s" : ""}
+                </p>
+              )}
+              <p className="text-sm text-gray-500">
+                {intake.name}{intakeNameMM && <> / <span className="font-myanmar">{intakeNameMM}</span></>}
+              </p>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* Student details summary */}
       <div className="mb-6 rounded-xl border border-gray-200 bg-white p-5">

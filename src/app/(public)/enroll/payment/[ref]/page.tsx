@@ -5,6 +5,13 @@ import { useParams } from "next/navigation";
 import { formatMMK, formatMMKSimple } from "@/lib/utils";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+interface CartItem {
+  class_level: string;
+  quantity: number;
+  fee_mmk: number;
+  subtotal_mmk: number;
+}
+
 interface EnrollmentInfo {
   enrollment_ref: string;
   student_name_en: string;
@@ -18,6 +25,7 @@ interface EnrollmentInfo {
   status: string;
   status_label_en: string;
   status_label_mm: string;
+  items?: CartItem[] | null;
   payment?: {
     admin_note?: string | null;
     received_amount_mmk?: number | null;
@@ -605,7 +613,10 @@ export default function PaymentInstructionsPage() {
   if (error || !enrollment) return <ErrorPage message={error || "Unknown error"} />;
 
   const qty = enrollment.quantity ?? 1;
-  const totalFee = (enrollment.fee_mmk ?? 0) * qty;
+  const isCart = enrollment.items != null && enrollment.items.length > 0;
+  const totalFee = isCart
+    ? enrollment.items!.reduce((sum, i) => sum + i.subtotal_mmk, 0)
+    : (enrollment.fee_mmk ?? 0) * qty;
   const feeEn = formatMMKSimple(totalFee);
   const feeMm = formatMMK(totalFee).replace(" MMK", "");
   const showUpload = enrollment.status === "pending_payment" || enrollment.status === "partial_payment";
@@ -652,6 +663,31 @@ export default function PaymentInstructionsPage() {
           <CopyButton text={enrollment.enrollment_ref} />
         </div>
       </div>
+
+      {/* ── Ticket breakdown (cart) ──────────────────────────────── */}
+      {isCart && enrollment.items && (
+        <div className="mb-8 rounded-xl border border-gray-200 bg-white p-5">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            Order Summary
+          </h3>
+          <div className="space-y-2">
+            {enrollment.items.map((item, i) => (
+              <div key={i} className="flex justify-between text-sm">
+                <span className="text-gray-700">
+                  {item.class_level} &times; {item.quantity}
+                </span>
+                <span className="font-medium text-gray-900">
+                  {formatMMKSimple(item.subtotal_mmk)}
+                </span>
+              </div>
+            ))}
+            <div className="border-t pt-2 mt-2 flex justify-between font-semibold text-gray-900">
+              <span>Total</span>
+              <span>{formatMMKSimple(totalFee)}</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Payment instructions ───────────────────────────────── */}
       {showUpload && (
