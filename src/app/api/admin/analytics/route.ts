@@ -117,7 +117,22 @@ export async function GET(request: NextRequest) {
         error: unknown;
       };
       const classIds = new Set((intakeClasses ?? []).map((c) => c.id));
-      enrollments = enrollments.filter((e) => classIds.has(e.class_id));
+      // For cart enrollments (class_id null), check enrollment_items
+      const { data: intakeEnrollmentItems } = (await supabase
+        .from("enrollment_items")
+        .select("enrollment_id, class_id")
+        .eq("tenant_id", tenantId)) as {
+        data: { enrollment_id: string; class_id: string }[] | null;
+        error: unknown;
+      };
+      const cartEnrollmentIdsInIntake = new Set(
+        (intakeEnrollmentItems ?? [])
+          .filter((i) => classIds.has(i.class_id))
+          .map((i) => i.enrollment_id),
+      );
+      enrollments = enrollments.filter(
+        (e) => classIds.has(e.class_id) || cartEnrollmentIdsInIntake.has(e.id),
+      );
     }
   } else if (dateFrom) {
     enrollments = enrollments.filter((e) => e.enrolled_at >= dateFrom);
@@ -149,14 +164,44 @@ export async function GET(request: NextRequest) {
   }));
 
   // ─── 2. Enrollments by level ──────────────────────────────────────────
-  const levelCounts: Record<string, number> = {};
-  for (const e of enrollments) {
-    const cls = classMap.get(e.class_id);
-    if (cls) {
-      levelCounts[cls.level] = (levelCounts[cls.level] ?? 0) + 1;
+  // Also fetch enrollment_items for cart enrollments (class_id is null)
+  const cartEnrollmentIds = enrollments.filter((e) => !e.class_id).map((e) => e.id);
+  const enrollmentItemsMap = new Map<string, { class_id: string; quantity: number }[]>();
+  if (cartEnrollmentIds.length > 0) {
+    const { data: items } = await supabase
+      .from("enrollment_items")
+      .select("enrollment_id, class_id, quantity")
+      .in("enrollment_id", cartEnrollmentIds) as {
+      data: { enrollment_id: string; class_id: string; quantity: number }[] | null;
+      error: unknown;
+    };
+    for (const item of items ?? []) {
+      const existing = enrollmentItemsMap.get(item.enrollment_id) ?? [];
+      existing.push({ class_id: item.class_id, quantity: item.quantity });
+      enrollmentItemsMap.set(item.enrollment_id, existing);
     }
   }
-  const levels = ["N5", "N4", "N3", "N2", "N1"];
+
+  const levelCounts: Record<string, number> = {};
+  for (const e of enrollments) {
+    if (e.class_id) {
+      const cls = classMap.get(e.class_id);
+      if (cls) {
+        levelCounts[cls.level] = (levelCounts[cls.level] ?? 0) + 1;
+      }
+    } else {
+      // Cart enrollment — count each item
+      const items = enrollmentItemsMap.get(e.id) ?? [];
+      for (const item of items) {
+        const cls = classMap.get(item.class_id);
+        if (cls) {
+          levelCounts[cls.level] = (levelCounts[cls.level] ?? 0) + item.quantity;
+        }
+      }
+    }
+  }
+  // Use actual levels from data instead of hardcoded N5-N1
+  const levels = Object.keys(levelCounts).sort();
   const enrollments_by_level = levels.map((level) => ({
     level,
     count: levelCounts[level] ?? 0,
@@ -173,9 +218,24 @@ export async function GET(request: NextRequest) {
   const revenueByLevel: Record<string, number> = {};
   for (const p of filteredPayments) {
     const classId = enrollmentClassMap.get(p.enrollment_id);
-    const cls = classId ? classMap.get(classId) : null;
-    if (cls) {
-      revenueByLevel[cls.level] = (revenueByLevel[cls.level] ?? 0) + p.amount_mmk;
+    if (classId) {
+      const cls = classMap.get(classId);
+      if (cls) {
+        revenueByLevel[cls.level] = (revenueByLevel[cls.level] ?? 0) + p.amount_mmk;
+      }
+    } else {
+      // Cart enrollment — split revenue proportionally by items
+      const items = enrollmentItemsMap.get(p.enrollment_id) ?? [];
+      if (items.length > 0) {
+        const totalQty = items.reduce((s, i) => s + i.quantity, 0);
+        for (const item of items) {
+          const cls = classMap.get(item.class_id);
+          if (cls) {
+            const share = Math.round((p.amount_mmk * item.quantity) / totalQty);
+            revenueByLevel[cls.level] = (revenueByLevel[cls.level] ?? 0) + share;
+          }
+        }
+      }
     }
   }
   const revenue_by_level = levels.map((level) => ({
