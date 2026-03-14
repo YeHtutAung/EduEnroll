@@ -333,6 +333,16 @@ function UploadSection({
         <p className="font-myanmar mt-1 text-sm text-gray-500">
           သင့်ငွေပေးချေမှုကို စစ်ဆေးပြီး စာရင်းသွင်းမှုကို မကြာမီ အတည်ပြုပေးပါမည်။
         </p>
+
+        <div className="mt-4 flex items-center justify-center gap-2 text-xs text-gray-500">
+          <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span>Verification usually takes 1–2 hours during business hours.</span>
+        </div>
+        <p className="font-myanmar mt-0.5 text-xs text-gray-400">
+          ရုံးချိန်အတွင်း ၁-၂ နာရီ ကြာမြင့်ပါသည်။
+        </p>
       </div>
     );
   }
@@ -857,6 +867,25 @@ export default function PaymentInstructionsPage() {
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-5 text-center">
           <p className="font-semibold text-blue-800">{enrollment.status_label_en}</p>
           <p className="font-myanmar mt-1 text-sm text-blue-700">{enrollment.status_label_mm}</p>
+          {enrollment.status === "under_review" && (
+            <div className="mt-4 pt-3 border-t border-blue-200">
+              <div className="flex items-center justify-center gap-2 text-sm text-blue-700">
+                <svg className="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span>Payment verification usually takes 1–2 hours during business hours.</span>
+              </div>
+              <p className="font-myanmar mt-1 text-xs text-blue-600">
+                ငွေပေးချေမှု အတည်ပြုခြင်းသည် ရုံးချိန်အတွင်း ၁-၂ နာရီ ကြာမြင့်ပါသည်။
+              </p>
+              <p className="mt-2 text-xs text-blue-500">
+                You will receive a confirmation once your payment is verified. Thank you for your patience!
+              </p>
+              <p className="font-myanmar mt-0.5 text-xs text-blue-500">
+                ငွေပေးချေမှု အတည်ပြုပြီးပါက အကြောင်းကြားပေးပါမည်။ စိတ်ရှည်ပေးပါ!
+              </p>
+            </div>
+          )}
         </div>
       )}
 

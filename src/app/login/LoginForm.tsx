@@ -21,7 +21,7 @@ const ERRORS: Record<string, { en: string; mm: string }> = {
 
 const ORG_SUBTITLE: Record<string, string> = {
   language_school: "Language School",
-  event: "Event Management",
+  event: "Thingyan Music Festival 2026",
   training_center: "Training Center",
 };
 
