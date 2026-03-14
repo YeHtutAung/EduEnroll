@@ -309,6 +309,7 @@ function EnrollmentFormPage() {
   const slug = searchParams.get("slug");
   const quantity = Math.max(1, Number(searchParams.get("quantity")) || 1);
   const cartKey = searchParams.get("cart_key");
+  const messengerPsid = searchParams.get("psid");
 
   // Cart state
   const [cartItems, setCartItems] = useState<
@@ -465,12 +466,14 @@ function EnrollmentFormPage() {
           items: cartItems.map((item) => ({ class_id: item.class_id, quantity: item.quantity })),
           form_data: dynamicData,
           idempotency_key: idempotencyKeyRef.current,
+          ...(messengerPsid ? { messenger_psid: messengerPsid } : {}),
         }
       : {
           class_id: classInfo!.id,
           form_data: dynamicData,
           idempotency_key: idempotencyKeyRef.current,
           quantity,
+          ...(messengerPsid ? { messenger_psid: messengerPsid } : {}),
         };
 
     try {
@@ -592,6 +595,23 @@ function EnrollmentFormPage() {
             </div>
           </div>
         ) : null}
+
+        {/* Email/phone accuracy warning */}
+        <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+          <div className="flex gap-2">
+            <svg className="h-5 w-5 shrink-0 text-amber-600 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div>
+              <p className="text-xs font-medium text-amber-800">
+                Please double-check your email address and phone number. We&apos;ll send payment status and ticket updates to this email. If incorrect, you won&apos;t receive any updates.
+              </p>
+              <p className="font-myanmar mt-1 text-xs text-amber-700">
+                သင့်အီးမေးလ်နှင့် ဖုန်းနံပါတ် မှန်ကန်ကြောင်း စစ်ဆေးပါ။ ငွေပေးချေမှုနှင့် လက်မှတ်သတင်းများကို ဤအီးမေးလ်သို့ ပို့ပေးပါမည်။
+              </p>
+            </div>
+          </div>
+        </div>
 
         {/* Form fields */}
         <h2 className="mb-6 text-lg font-semibold text-gray-900">

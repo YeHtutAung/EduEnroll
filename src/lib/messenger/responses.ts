@@ -379,7 +379,7 @@ export async function sendEnrollLink(
   }
 
   const slug = intakeToSlug(intake.slug, intake.name, intake.year);
-  const url = `https://${tenant.subdomain}.kuunyi.com/enroll/${slug}`;
+  const url = `https://${tenant.subdomain}.kuunyi.com/enroll/${slug}?psid=${senderPsid}`;
 
   await sendTextMessage(
     pageToken,

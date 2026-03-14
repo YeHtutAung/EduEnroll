@@ -176,6 +176,7 @@ export interface Enrollment {
   quantity: number;
   status: EnrollmentStatus;
   enrolled_at: string;
+  messenger_psid: string | null;
 }
 
 export interface Payment {
