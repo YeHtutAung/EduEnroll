@@ -188,6 +188,7 @@ function UploadSection({
   const [uploadDone, setUploadDone] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
+  const [agreedNoRefund, setAgreedNoRefund] = useState(false);
 
   function handleFileSelect(e: React.ChangeEvent<HTMLInputElement>) {
     const newFiles = Array.from(e.target.files ?? []);
@@ -422,6 +423,34 @@ function UploadSection({
         </p>
       </div>
 
+      {/* Non-refundable T&C checkbox */}
+      <label
+        className={`mt-4 flex items-start gap-3 rounded-lg border px-4 py-3 cursor-pointer transition-colors ${
+          agreedNoRefund
+            ? "border-[#1a6b3c] bg-[#1a6b3c]/5"
+            : "border-gray-300 bg-white"
+        }`}
+      >
+        <input
+          type="checkbox"
+          checked={agreedNoRefund}
+          onChange={(e) => setAgreedNoRefund(e.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-300 text-[#1a6b3c] focus:ring-[#1a6b3c] accent-[#1a6b3c]"
+        />
+        <div className="text-xs leading-relaxed">
+          <p className="text-gray-700">
+            I understand that my partial payment (deposit) is{" "}
+            <span className="font-bold text-red-600">non-refundable</span>{" "}
+            under any circumstances, including change of mind or schedule conflict.
+          </p>
+          <p className="font-myanmar mt-1 text-gray-600">
+            တစ်စိတ်တစ်ပိုင်း ငွေပေးချေမှု (စရံငွေ) သည်{" "}
+            <span className="font-bold text-red-600">မည်သည့်အကြောင်းကြောင့်မျှ ပြန်မအမ်း</span>
+            ကြောင်း နားလည်သဘောတူပါသည်။
+          </p>
+        </div>
+      </label>
+
       {/* Error message */}
       {uploadError && (
         <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3">
@@ -457,9 +486,9 @@ function UploadSection({
       {/* Submit button */}
       <button
         onClick={handleUpload}
-        disabled={selectedFiles.length === 0 || uploading}
+        disabled={selectedFiles.length === 0 || uploading || !agreedNoRefund}
         className={`mt-5 w-full rounded-lg py-3.5 text-sm font-semibold transition-colors ${
-          selectedFiles.length > 0 && !uploading
+          selectedFiles.length > 0 && !uploading && agreedNoRefund
             ? "bg-[#1a6b3c] text-white hover:bg-[#155d33]"
             : "cursor-not-allowed bg-gray-200 text-gray-400"
         }`}
