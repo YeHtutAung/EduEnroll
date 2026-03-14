@@ -46,9 +46,10 @@ interface StudentDetail {
   form_fields: FormFieldDef[];
   status: EnrollmentStatus;
   enrolled_at: string;
-  class_level: JlptLevel | null;
+  class_level: string | null;
   intake_name: string | null;
   fee_mmk: number | null;
+  items?: { class_level: string; quantity: number; fee_mmk: number; subtotal_mmk: number }[] | null;
   payment: {
     id: string;
     status: PaymentStatus;
@@ -194,6 +195,9 @@ function StudentDetailModal({
   }, [onClose, fullscreenImg]);
 
   const level = row.class_level;
+  const isCartRow = row.items != null && row.items.length > 0;
+  const firstLevel = isCartRow ? (row.items![0]?.class_level ?? null) : level;
+  const headerColor = firstLevel ? (LEVEL_COLORS[firstLevel] ?? DEFAULT_LEVEL_COLOR) : DEFAULT_LEVEL_COLOR;
 
   return (
     <>
@@ -208,13 +212,13 @@ function StudentDetailModal({
           {/* Modal header */}
           <div
             className="px-6 py-4 flex items-center gap-3 border-b border-gray-100"
-            style={{ borderTop: `4px solid ${level ? (LEVEL_COLORS[level] ?? DEFAULT_LEVEL_COLOR) : DEFAULT_LEVEL_COLOR}` }}
+            style={{ borderTop: `4px solid ${headerColor}` }}
           >
             <div
               className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm shrink-0"
-              style={{ backgroundColor: level ? (LEVEL_COLORS[level] ?? DEFAULT_LEVEL_COLOR) : DEFAULT_LEVEL_COLOR }}
+              style={{ backgroundColor: headerColor }}
             >
-              {level || "?"}
+              {isCartRow ? "🎫" : (level || "?")}
             </div>
             <div className="min-w-0">
               <p className="font-bold text-gray-900 truncate">{row.student_name_en}</p>
@@ -277,19 +281,19 @@ function StudentDetailModal({
                     })
                   ) : (
                     <>
-                      {/* Fallback to legacy columns */}
+                      {/* Fallback to legacy columns — hide empty optional fields */}
                       <DetailRow label="Name (English)" value={detail.student_name_en} />
-                      <DetailRow
-                        label="Name (Myanmar)"
-                        value={
-                          detail.student_name_mm ? (
-                            <span className="font-myanmar">{detail.student_name_mm}</span>
-                          ) : "—"
-                        }
-                      />
-                      <DetailRow label="NRC Number" value={detail.nrc_number ?? "—"} />
+                      {detail.student_name_mm && (
+                        <DetailRow
+                          label="Name (Myanmar)"
+                          value={<span className="font-myanmar">{detail.student_name_mm}</span>}
+                        />
+                      )}
+                      {detail.nrc_number && (
+                        <DetailRow label="NRC Number" value={detail.nrc_number} />
+                      )}
                       <DetailRow label="Phone" value={<code className="text-sm">{detail.phone}</code>} />
-                      <DetailRow label="Email" value={detail.email ?? "—"} />
+                      {detail.email && <DetailRow label="Email" value={detail.email} />}
                     </>
                   )}
                   <DetailRow
@@ -306,22 +310,44 @@ function StudentDetailModal({
                 {/* ── Right: Class + Payment ────────────────── */}
                 <div className="space-y-4">
                   <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">
-                    Class &amp; Payment
+                    {tl.class} &amp; Payment
                   </h3>
 
-                  <DetailRow
-                    label={tl.class}
-                    value={
-                      detail.class_level ? (
-                        <span
-                          className="inline-flex items-center justify-center w-10 h-7 rounded-lg text-xs font-bold text-white"
-                          style={{ backgroundColor: LEVEL_COLORS[detail.class_level ?? ""] ?? DEFAULT_LEVEL_COLOR }}
-                        >
-                          {detail.class_level}
-                        </span>
-                      ) : "—"
-                    }
-                  />
+                  {/* Ticket/class display — cart vs single */}
+                  {detail.items && detail.items.length > 0 ? (
+                    <DetailRow
+                      label={tl.class}
+                      value={
+                        <div className="space-y-1">
+                          {detail.items.map((item, i) => (
+                            <div key={i} className="flex items-center gap-2 text-sm">
+                              <span
+                                className="inline-block w-2 h-2 rounded-full shrink-0"
+                                style={{ backgroundColor: LEVEL_COLORS[item.class_level] ?? DEFAULT_LEVEL_COLOR }}
+                              />
+                              <span className="text-gray-800">{item.class_level}</span>
+                              <span className="text-gray-400">×{item.quantity}</span>
+                              <span className="ml-auto text-gray-600">{formatMMKSimple(item.subtotal_mmk)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      }
+                    />
+                  ) : (
+                    <DetailRow
+                      label={tl.class}
+                      value={
+                        detail.class_level ? (
+                          <span
+                            className="inline-flex items-center justify-center px-2 h-7 rounded-lg text-xs font-bold text-white"
+                            style={{ backgroundColor: LEVEL_COLORS[detail.class_level ?? ""] ?? DEFAULT_LEVEL_COLOR }}
+                          >
+                            {detail.class_level}
+                          </span>
+                        ) : "—"
+                      }
+                    />
+                  )}
                   <DetailRow label={tl.intake} value={detail.intake_name ?? "—"} />
                   <DetailRow
                     label={tl.fee}

@@ -65,6 +65,34 @@ export async function GET(
     proof_signed_url = signed?.signedUrl ?? null;
   }
 
+  // ── Cart enrollment: fetch items + intake from enrollment_items ──
+  let cartItems: { class_level: string; quantity: number; fee_mmk: number; subtotal_mmk: number }[] | null = null;
+  let cartIntakeName: string | null = null;
+  let cartIntakeId: string | null = null;
+  let cartTotalFee: number | null = null;
+
+  if (row.class_id === null) {
+    const { data: items } = await supabase
+      .from("enrollment_items")
+      .select("quantity, fee_mmk, classes(level, intake_id, intakes(name))")
+      .eq("enrollment_id", row.id) as {
+      data: { quantity: number; fee_mmk: number; classes: { level: string; intake_id: string; intakes: { name: string } | null } | null }[] | null;
+      error: unknown;
+    };
+
+    if (items && items.length > 0) {
+      cartItems = items.map((i) => ({
+        class_level: i.classes?.level ?? "Unknown",
+        quantity: i.quantity,
+        fee_mmk: i.fee_mmk,
+        subtotal_mmk: i.fee_mmk * i.quantity,
+      }));
+      cartTotalFee = cartItems.reduce((sum, i) => sum + i.subtotal_mmk, 0);
+      cartIntakeName = items[0]?.classes?.intakes?.name ?? null;
+      cartIntakeId = items[0]?.classes?.intake_id ?? null;
+    }
+  }
+
   // Fetch form field definitions for this enrollment's intake
   const classId = row.class_id;
   const intakeId = classId
@@ -76,7 +104,7 @@ export async function GET(
           .single() as { data: { intake_id: string } | null; error: unknown };
         return cls?.intake_id ?? null;
       })()
-    : null;
+    : cartIntakeId;
 
   let formFieldDefs: { field_key: string; field_label: string; field_type: string }[] = [];
   if (intakeId) {
@@ -91,6 +119,17 @@ export async function GET(
     formFieldDefs = fields ?? [];
   }
 
+  // For cart: join class levels; for single: use class join
+  const classLevel = cartItems
+    ? cartItems.map((i) => i.class_level).join(", ")
+    : (row.classes?.level ?? null);
+
+  const intakeName = row.classes?.intakes?.name ?? cartIntakeName;
+
+  const feeMmk = cartTotalFee ?? (row.classes?.fee_mmk != null
+    ? row.classes.fee_mmk * (row.quantity ?? 1)
+    : null);
+
   return NextResponse.json({
     enrollment_id:   row.id,
     enrollment_ref:  row.enrollment_ref,
@@ -103,9 +142,10 @@ export async function GET(
     form_fields:     formFieldDefs,
     status:          row.status,
     enrolled_at:     row.enrolled_at,
-    class_level:     row.classes?.level ?? null,
-    intake_name:     row.classes?.intakes?.name ?? null,
-    fee_mmk:         row.classes?.fee_mmk ?? null,
+    class_level:     classLevel,
+    intake_name:     intakeName,
+    fee_mmk:         feeMmk,
+    items:           cartItems,
     payment: payment
       ? {
           id:               payment.id,
