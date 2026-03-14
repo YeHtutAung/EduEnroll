@@ -574,7 +574,7 @@ export default function PaymentInstructionsPage() {
   const [error, setError] = useState<string | null>(null);
 
   // Fetch other available classes from the same intake
-  async function fetchAvailableClasses(intakeSlug: string, currentClassId: string | null) {
+  async function fetchAvailableClasses(intakeSlug: string) {
     try {
       const res = await fetch(`/api/public/enroll/${encodeURIComponent(intakeSlug)}`);
       if (!res.ok) return;
@@ -582,7 +582,7 @@ export default function PaymentInstructionsPage() {
       if (data.labels?.orgType) setOrgType(data.labels.orgType);
       const classes = (data.classes ?? []) as AvailableClass[];
       setAvailableClasses(
-        classes.filter((c) => c.id !== currentClassId && c.status === "open" && c.seat_remaining > 0),
+        classes.filter((c) => c.status === "open" && c.seat_remaining > 0),
       );
     } catch {
       // Non-critical
@@ -619,17 +619,8 @@ export default function PaymentInstructionsPage() {
               const intakeData = await intakeRes.json();
               if (intakeData.labels?.orgType) setOrgType(intakeData.labels.orgType);
               const classes = (intakeData.classes ?? []) as AvailableClass[];
-              // For cart enrollments, exclude all classes already in the cart
-              const cartClassIds = new Set(
-                (statusData.items ?? []).map((item: CartItem) => item.class_level),
-              );
               setAvailableClasses(
-                classes.filter((c) =>
-                  c.id !== statusData.class_id &&
-                  !cartClassIds.has(c.level) &&
-                  c.status === "open" &&
-                  c.seat_remaining > 0,
-                ),
+                classes.filter((c) => c.status === "open" && c.seat_remaining > 0),
               );
             }
           } catch { /* non-critical */ }
@@ -649,7 +640,7 @@ export default function PaymentInstructionsPage() {
       .then((data: EnrollmentInfo) => {
         setEnrollment(data);
         if (data.intake_slug) {
-          fetchAvailableClasses(data.intake_slug, data.class_id);
+          fetchAvailableClasses(data.intake_slug);
         }
       })
       .catch(() => {});
