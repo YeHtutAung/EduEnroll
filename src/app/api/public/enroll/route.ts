@@ -197,9 +197,9 @@ export async function POST(request: NextRequest) {
     // Fetch tenant info for email branding
     const { data: tenantInfo } = await supabase
       .from("tenants")
-      .select("name, org_type")
+      .select("name, org_type, logo_url")
       .eq("id", payload.tenant_id)
-      .single() as { data: { name: string; org_type: string } | null; error: unknown };
+      .single() as { data: { name: string; org_type: string; logo_url: string | null } | null; error: unknown };
 
     const emailData = enrollmentConfirmationEmail({
       studentName: fd.name_en?.trim() || "Student",
@@ -211,6 +211,7 @@ export async function POST(request: NextRequest) {
       statusUrl: `${baseUrl}/status?ref=${payload.enrollment_ref}`,
       orgType: tenantInfo?.org_type,
       tenantName: tenantInfo?.name,
+      logoUrl: tenantInfo?.logo_url ?? undefined,
     });
 
     sendEmail({ to: fd.email.trim(), ...emailData }).catch((err) => {
@@ -407,9 +408,9 @@ async function handleCartEnrollment(
     // Fetch tenant info for email branding
     const { data: tenantInfo } = await supabase
       .from("tenants")
-      .select("name, org_type")
+      .select("name, org_type, logo_url")
       .eq("id", payload.tenant_id)
-      .single() as { data: { name: string; org_type: string } | null; error: unknown };
+      .single() as { data: { name: string; org_type: string; logo_url: string | null } | null; error: unknown };
 
     const itemsSummary = payload.items
       .map((i) => i.quantity > 1 ? `${i.class_level} x${i.quantity}` : i.class_level)
@@ -424,6 +425,7 @@ async function handleCartEnrollment(
       statusUrl: `${baseUrl}/status?ref=${payload.enrollment_ref}`,
       orgType: tenantInfo?.org_type,
       tenantName: tenantInfo?.name,
+      logoUrl: tenantInfo?.logo_url ?? undefined,
     });
 
     sendEmail({ to: fd.email.trim(), ...emailData }).catch((err) => {

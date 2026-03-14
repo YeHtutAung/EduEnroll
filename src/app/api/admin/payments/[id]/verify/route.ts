@@ -86,12 +86,13 @@ export async function PATCH(
   // ── Fetch tenant info for email branding ───────────────────────────────────
   const { data: tenantInfo } = await admin
     .from("tenants")
-    .select("name, org_type")
+    .select("name, org_type, logo_url")
     .eq("id", tenantId)
-    .single() as { data: { name: string; org_type: string } | null; error: unknown };
+    .single() as { data: { name: string; org_type: string; logo_url: string | null } | null; error: unknown };
 
   const orgType = tenantInfo?.org_type;
   const tenantName = tenantInfo?.name;
+  const logoUrl = tenantInfo?.logo_url ?? undefined;
 
   // ── Is this a cart enrollment? ───────────────────────────────────────────────
   const isCart = enrollment.class_id === null;
@@ -223,6 +224,7 @@ export async function PATCH(
         feeFormatted,
         orgType,
         tenantName,
+        logoUrl,
       });
       sendEmail({ to: enrollment.email, ...emailData }).catch((err) => {
         console.error("[verify] Approval email failed:", err);
@@ -311,6 +313,7 @@ export async function PATCH(
         statusUrl,
         orgType,
         tenantName,
+        logoUrl,
       });
       sendEmail({ to: enrollment.email, ...emailData }).catch((err) => {
         console.error("[verify] Partial payment email failed:", err);
@@ -388,6 +391,7 @@ export async function PATCH(
       statusUrl: rejStatusUrl,
       orgType,
       tenantName,
+      logoUrl,
     });
     sendEmail({ to: enrollment.email, ...emailData }).catch((err) => {
       console.error("[verify] Rejection email failed:", err);

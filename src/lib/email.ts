@@ -146,10 +146,13 @@ function cleanClassLevel(level: string): string {
 
 // ─── Email templates ────────────────────────────────────────────────────────
 
-function baseLayout(content: string, tenantName?: string): string {
-  const brandHeader = tenantName
-    ? `<p style="text-align: center; font-size: 13px; font-weight: 600; color: #6b7280; letter-spacing: 0.5px; margin: 0 0 20px; text-transform: uppercase;">${tenantName}</p>`
-    : "";
+function baseLayout(content: string, tenantName?: string, logoUrl?: string): string {
+  let brandHeader = "";
+  if (logoUrl) {
+    brandHeader = `<div style="text-align: center; margin: 0 0 20px;"><img src="${logoUrl}" alt="${tenantName || ""}" style="max-height: 48px; max-width: 180px;" /></div>`;
+  } else if (tenantName) {
+    brandHeader = `<p style="text-align: center; font-size: 13px; font-weight: 600; color: #6b7280; letter-spacing: 0.5px; margin: 0 0 20px; text-transform: uppercase;">${tenantName}</p>`;
+  }
 
   return `
 <!DOCTYPE html>
@@ -202,61 +205,70 @@ export function enrollmentConfirmationEmail(params: {
   statusUrl: string;
   orgType?: string;
   tenantName?: string;
+  logoUrl?: string;
 }): { subject: string; html: string } {
-  const { studentName, enrollmentRef, classLevel, feeMmk, feeFormatted, paymentUrl, statusUrl, orgType, tenantName } = params;
+  const { studentName, enrollmentRef, classLevel, feeMmk, feeFormatted, paymentUrl, statusUrl, orgType, tenantName, logoUrl } = params;
   const l = getLabels(orgType);
-  const displayLevel = cleanClassLevel(classLevel);
   const feeMm = toMmFee(feeMmk);
+
+  // Build ticket rows: split comma-separated items into individual rows
+  const ticketItems = classLevel.split(",").map((s) => cleanClassLevel(s.trim())).filter(Boolean);
+  const ticketRows = ticketItems
+    .map(
+      (item, i) =>
+        `<div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f3f4f6; font-size: 14px;">
+          <span style="color: #6b7280; min-width: 100px;">${i === 0 ? l.itemLabel : ""}</span>
+          <span style="font-weight: 600; color: #1f2937; text-align: right;">${item}</span>
+        </div>`,
+    )
+    .join("\n        ");
 
   return {
     subject: `${l.subjectPrefix} Confirmed — ${enrollmentRef}`,
     html: baseLayout(`
-      <div class="header">
+      <div style="text-align: center; margin-bottom: 24px;">
         <div style="width: 56px; height: 56px; border-radius: 50%; background: #dcfce7; margin: 0 auto 12px; display: flex; align-items: center; justify-content: center;">
           <span style="font-size: 28px;">✓</span>
         </div>
         <h1 style="margin: 0; font-size: 22px; color: #1a1a1a;">${l.confirmedTitle}</h1>
-        <p class="myanmar" style="margin: 4px 0 0; color: #6b7280;">${l.confirmedTitleMm}</p>
+        <p style="margin: 4px 0 0; color: #6b7280; font-family: 'Noto Sans Myanmar', sans-serif;">${l.confirmedTitleMm}</p>
       </div>
 
       <p style="font-size: 14px; color: #374151;">
         Hi <strong>${studentName}</strong>, your ${l.enrollLabel.toLowerCase()} has been registered successfully.
       </p>
 
-      <div class="ref-box">
+      <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px; text-align: center; margin: 20px 0;">
         <p style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #1a6b3c; margin: 0 0 8px;">${l.refLabel}</p>
-        <p class="ref-code" style="margin: 0;">${enrollmentRef}</p>
+        <p style="font-family: 'JetBrains Mono', monospace; font-size: 24px; font-weight: 700; color: #1a6b3c; letter-spacing: 1px; margin: 0;">${enrollmentRef}</p>
       </div>
 
       <div style="margin: 20px 0;">
-        <div class="info-row">
-          <span class="info-label">${l.itemLabel}</span>
-          <span class="info-value">${displayLevel}</span>
+        ${ticketRows}
+        <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f3f4f6; font-size: 14px;">
+          <span style="color: #6b7280; min-width: 100px;">${l.feeLabel}</span>
+          <span style="font-weight: 600; color: #1f2937; text-align: right;">${feeFormatted}</span>
         </div>
-        <div class="info-row">
-          <span class="info-label">${l.feeLabel}</span>
-          <span class="info-value">${feeFormatted}</span>
-        </div>
-        <div class="info-row" style="border-bottom: none;">
-          <span class="info-label myanmar">${l.feeLabelMm}</span>
-          <span class="info-value myanmar">${feeMm} ကျပ်</span>
+        <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px;">
+          <span style="color: #6b7280; min-width: 100px; font-family: 'Noto Sans Myanmar', sans-serif;">${l.feeLabelMm}</span>
+          <span style="font-weight: 600; color: #1f2937; text-align: right; font-family: 'Noto Sans Myanmar', sans-serif;">${feeMm} ကျပ်</span>
         </div>
       </div>
 
       <div style="text-align: center; margin: 28px 0 16px;">
-        <a href="${paymentUrl}" class="btn">Upload Payment Proof</a>
+        <a href="${paymentUrl}" style="display: inline-block; padding: 12px 28px; background: #1a6b3c; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px;">Upload Payment Proof</a>
       </div>
       <div style="text-align: center;">
-        <a href="${statusUrl}" class="btn-outline">Check Status</a>
+        <a href="${statusUrl}" style="display: inline-block; padding: 10px 24px; border: 1px solid #d1d5db; color: #374151; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px;">Check Status</a>
       </div>
 
       <p style="margin-top: 24px; font-size: 13px; color: #6b7280; text-align: center;">
         Please make your payment and upload the transfer screenshot to complete your ${l.enrollLabel.toLowerCase()}.
       </p>
-      <p class="myanmar" style="font-size: 13px; color: #9ca3af; text-align: center;">
+      <p style="font-size: 13px; color: #9ca3af; text-align: center; font-family: 'Noto Sans Myanmar', sans-serif;">
         ငွေပေးချေပြီး ငွေလွှဲပြေစာကို တင်သွင်းပေးပါ။
       </p>
-    `, tenantName),
+    `, tenantName, logoUrl),
   };
 }
 
@@ -270,15 +282,36 @@ export function enrollmentApprovedEmail(params: {
   feeFormatted?: string;
   orgType?: string;
   tenantName?: string;
+  logoUrl?: string;
 }): { subject: string; html: string } {
-  const { studentName, enrollmentRef, classLevel, statusUrl, feeFormatted, orgType, tenantName } = params;
+  const { studentName, enrollmentRef, classLevel, statusUrl, feeFormatted, orgType, tenantName, logoUrl } = params;
   const l = getLabels(orgType);
-  const displayLevel = cleanClassLevel(classLevel);
+
+  // Build ticket items as numbered list for alert box + individual rows for info section
+  const ticketItems = classLevel.split(",").map((s) => cleanClassLevel(s.trim())).filter(Boolean);
+  const isMultiTicket = ticketItems.length > 1;
+
+  // Numbered list for alert box (clean display)
+  const ticketListHtml = isMultiTicket
+    ? `<ol style="margin: 8px 0 0; padding-left: 20px; font-size: 14px; color: #166534;">${ticketItems.map((t) => `<li style="margin: 2px 0;">${t}</li>`).join("")}</ol>`
+    : "";
+  const singleTicketBold = !isMultiTicket ? ` for <strong>${ticketItems[0] || classLevel}</strong>` : ":";
+
+  // Info section: one row per ticket
+  const ticketRows = ticketItems
+    .map(
+      (item, i) =>
+        `<div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f3f4f6; font-size: 14px;">
+          <span style="color: #6b7280; min-width: 100px;">${i === 0 ? l.itemLabel : ""}</span>
+          <span style="font-weight: 600; color: #1f2937; text-align: right;">${item}</span>
+        </div>`,
+    )
+    .join("\n        ");
 
   const feeRow = feeFormatted
-    ? `<div class="info-row" style="border-bottom: none;">
-        <span class="info-label">${l.feeLabel}</span>
-        <span class="info-value">${feeFormatted}</span>
+    ? `<div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px;">
+        <span style="color: #6b7280; min-width: 100px;">${l.feeLabel}</span>
+        <span style="font-weight: 600; color: #1f2937; text-align: right;">${feeFormatted}</span>
       </div>`
     : "";
 
@@ -293,31 +326,29 @@ export function enrollmentApprovedEmail(params: {
         <p class="myanmar" style="margin: 4px 0 0; color: #6b7280;">${l.approvedTitleMm}</p>
       </div>
 
-      <div class="alert-box alert-green">
+      <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px; margin: 20px 0;">
         <p style="margin: 0; font-size: 14px; color: #166534;">
-          <strong>${studentName}</strong>, your payment has been verified and your ${l.enrollLabel.toLowerCase()} for <strong>${displayLevel}</strong> is now confirmed.
+          <strong>${studentName}</strong>, your payment has been verified and your ${l.enrollLabel.toLowerCase()}${singleTicketBold} is now confirmed.
         </p>
+        ${ticketListHtml}
         <p class="myanmar" style="margin: 8px 0 0; font-size: 13px; color: #15803d;">
-          သင့်ငွေပေးချေမှု အတည်ပြုပြီးဖြစ်ပြီး ${displayLevel} ${l.enrollLabelMm} အတည်ပြုပြီးပါပြီ။
+          သင့်ငွေပေးချေမှု အတည်ပြုပြီးဖြစ်ပြီး ${l.enrollLabelMm} အတည်ပြုပြီးပါပြီ။
         </p>
       </div>
 
       <div style="margin: 20px 0;">
-        <div class="info-row">
-          <span class="info-label">Reference</span>
-          <span class="info-value" style="font-family: monospace;">${enrollmentRef}</span>
+        <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f3f4f6; font-size: 14px;">
+          <span style="color: #6b7280; min-width: 100px;">Reference</span>
+          <span style="font-weight: 600; color: #1f2937; text-align: right; font-family: monospace;">${enrollmentRef}</span>
         </div>
-        <div class="info-row">
-          <span class="info-label">${l.itemLabel}</span>
-          <span class="info-value">${displayLevel}</span>
-        </div>
+        ${ticketRows}
         ${feeRow}
       </div>
 
       <div style="text-align: center; margin: 24px 0;">
-        <a href="${statusUrl}" class="btn">View ${l.enrollLabel} Details</a>
+        <a href="${statusUrl}" style="display: inline-block; padding: 12px 28px; background: #1a6b3c; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px;">View ${l.enrollLabel} Details</a>
       </div>
-    `, tenantName),
+    `, tenantName, logoUrl),
   };
 }
 
@@ -335,55 +366,56 @@ export function partialPaymentEmail(params: {
   statusUrl: string;
   orgType?: string;
   tenantName?: string;
+  logoUrl?: string;
 }): { subject: string; html: string } {
-  const { studentName, enrollmentRef, classLevel, totalAmount, receivedAmount, remainingAmount, adminNote, paymentUrl, statusUrl, orgType, tenantName } = params;
+  const { studentName, enrollmentRef, classLevel, totalAmount, receivedAmount, remainingAmount, adminNote, paymentUrl, statusUrl, orgType, tenantName, logoUrl } = params;
   const l = getLabels(orgType);
   const displayLevel = cleanClassLevel(classLevel);
 
   const fmtMmk = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
   const receivedLine = receivedAmount != null
-    ? `<div class="info-row">
-        <span class="info-label">Received</span>
-        <span class="info-value" style="color: #1a6b3c;">${fmtMmk(receivedAmount)} MMK</span>
+    ? `<div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f3f4f6; font-size: 14px;">
+        <span style="color: #6b7280; min-width: 100px;">Received</span>
+        <span style="font-weight: 600; color: #1a6b3c; text-align: right;">${fmtMmk(receivedAmount)} MMK</span>
       </div>`
     : "";
 
   const remainingLine = remainingAmount != null && remainingAmount > 0
-    ? `<div class="info-row" style="border-bottom: none;">
-        <span class="info-label">Remaining</span>
-        <span class="info-value" style="color: #c0392b; font-weight: 700;">${fmtMmk(remainingAmount)} MMK</span>
+    ? `<div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px;">
+        <span style="color: #6b7280; min-width: 100px;">Remaining</span>
+        <span style="font-weight: 700; color: #c0392b; text-align: right;">${fmtMmk(remainingAmount)} MMK</span>
       </div>`
     : "";
 
   return {
     subject: `Action Required: Complete Payment — ${enrollmentRef}`,
     html: baseLayout(`
-      <div class="header">
+      <div style="text-align: center; margin-bottom: 24px;">
         <div style="width: 56px; height: 56px; border-radius: 50%; background: #fef3c7; margin: 0 auto 12px; display: flex; align-items: center; justify-content: center;">
           <span style="font-size: 28px;">💰</span>
         </div>
         <h1 style="margin: 0; font-size: 22px; color: #92400e;">Partial Payment Received</h1>
-        <p class="myanmar" style="margin: 4px 0 0; color: #6b7280;">ငွေတစ်စိတ်တစ်ပိုင်း လက်ခံရရှိပြီး</p>
+        <p style="margin: 4px 0 0; color: #6b7280; font-family: 'Noto Sans Myanmar', sans-serif;">ငွေတစ်စိတ်တစ်ပိုင်း လက်ခံရရှိပြီး</p>
       </div>
 
-      <div class="alert-box" style="background: #fffbeb; border: 1px solid #fde68a;">
+      <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 16px; margin: 20px 0;">
         <p style="margin: 0; font-size: 14px; color: #92400e;">
           <strong>${studentName}</strong>, we have received a partial payment for your ${displayLevel} ${l.enrollLabel.toLowerCase()}. Please complete the remaining payment to confirm your spot.
         </p>
-        <p class="myanmar" style="margin: 8px 0 0; font-size: 13px; color: #a16207;">
+        <p style="margin: 8px 0 0; font-size: 13px; color: #a16207; font-family: 'Noto Sans Myanmar', sans-serif;">
           ${displayLevel} ${l.enrollLabelMm}အတွက် ငွေတစ်စိတ်တစ်ပိုင်း လက်ခံရရှိပြီးပါပြီ။ သင့်နေရာ အတည်ပြုရန် ကျန်ငွေကို ပေးချေပါ။
         </p>
       </div>
 
       <div style="margin: 20px 0;">
-        <div class="info-row">
-          <span class="info-label">Reference</span>
-          <span class="info-value" style="font-family: monospace;">${enrollmentRef}</span>
+        <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f3f4f6; font-size: 14px;">
+          <span style="color: #6b7280; min-width: 100px;">Reference</span>
+          <span style="font-weight: 600; color: #1f2937; text-align: right; font-family: monospace;">${enrollmentRef}</span>
         </div>
-        <div class="info-row">
-          <span class="info-label">Total Amount</span>
-          <span class="info-value">${fmtMmk(totalAmount)} MMK</span>
+        <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f3f4f6; font-size: 14px;">
+          <span style="color: #6b7280; min-width: 100px;">Total Amount</span>
+          <span style="font-weight: 600; color: #1f2937; text-align: right;">${fmtMmk(totalAmount)} MMK</span>
         </div>
         ${receivedLine}
         ${remainingLine}
@@ -396,10 +428,10 @@ export function partialPaymentEmail(params: {
       </div>` : ""}
 
       <div style="text-align: center; margin: 28px 0 16px;">
-        <a href="${paymentUrl}" class="btn" style="background: #b07d2a;">Upload Remaining Payment Proof</a>
+        <a href="${paymentUrl}" style="display: inline-block; padding: 12px 28px; background: #b07d2a; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px;">Upload Remaining Payment Proof</a>
       </div>
       <div style="text-align: center;">
-        <a href="${statusUrl}" class="btn-outline">Check Status</a>
+        <a href="${statusUrl}" style="display: inline-block; padding: 10px 24px; border: 1px solid #d1d5db; color: #374151; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px;">Check Status</a>
       </div>
 
       <p style="margin-top: 24px; font-size: 13px; color: #6b7280; text-align: center;">
@@ -408,7 +440,7 @@ export function partialPaymentEmail(params: {
       <p class="myanmar" style="font-size: 13px; color: #9ca3af; text-align: center;">
         ကျန်ငွေကို လွှဲပေးပြီး ငွေလွှဲပြေစာကို တင်သွင်းပါ။
       </p>
-    `, tenantName),
+    `, tenantName, logoUrl),
   };
 }
 
@@ -422,23 +454,24 @@ export function enrollmentRejectedEmail(params: {
   statusUrl: string;
   orgType?: string;
   tenantName?: string;
+  logoUrl?: string;
 }): { subject: string; html: string } {
-  const { studentName, enrollmentRef, classLevel, reason, statusUrl, orgType, tenantName } = params;
+  const { studentName, enrollmentRef, classLevel, reason, statusUrl, orgType, tenantName, logoUrl } = params;
   const l = getLabels(orgType);
   const displayLevel = cleanClassLevel(classLevel);
 
   return {
     subject: `${l.subjectPrefix} Update — ${enrollmentRef}`,
     html: baseLayout(`
-      <div class="header">
+      <div style="text-align: center; margin-bottom: 24px;">
         <div style="width: 56px; height: 56px; border-radius: 50%; background: #fee2e2; margin: 0 auto 12px; display: flex; align-items: center; justify-content: center;">
           <span style="font-size: 28px;">⚠️</span>
         </div>
         <h1 style="margin: 0; font-size: 22px; color: #991b1b;">${l.rejectedTitle}</h1>
-        <p class="myanmar" style="margin: 4px 0 0; color: #6b7280;">${l.rejectedTitleMm}</p>
+        <p style="margin: 4px 0 0; color: #6b7280; font-family: 'Noto Sans Myanmar', sans-serif;">${l.rejectedTitleMm}</p>
       </div>
 
-      <div class="alert-box alert-red">
+      <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 16px; margin: 20px 0;">
         <p style="margin: 0; font-size: 14px; color: #991b1b;">
           <strong>${studentName}</strong>, your ${l.enrollLabel.toLowerCase()} for <strong>${displayLevel}</strong> (${enrollmentRef}) was not approved.
         </p>
@@ -446,7 +479,7 @@ export function enrollmentRejectedEmail(params: {
         <p style="margin: 12px 0 0; font-size: 13px; color: #7f1d1d;">
           <strong>Reason:</strong> ${reason}
         </p>` : ""}
-        <p class="myanmar" style="margin: 8px 0 0; font-size: 13px; color: #b91c1c;">
+        <p style="margin: 8px 0 0; font-size: 13px; color: #b91c1c; font-family: 'Noto Sans Myanmar', sans-serif;">
           သင့် ${displayLevel} ${l.enrollLabelMm}ကို အတည်မပြုပါ။
         </p>
       </div>
@@ -454,13 +487,13 @@ export function enrollmentRejectedEmail(params: {
       <p style="font-size: 14px; color: #374151;">
         ${l.contactLine}
       </p>
-      <p class="myanmar" style="font-size: 13px; color: #6b7280;">
+      <p style="font-size: 13px; color: #6b7280; font-family: 'Noto Sans Myanmar', sans-serif;">
         ${l.contactLineMm}
       </p>
 
       <div style="text-align: center; margin: 24px 0;">
-        <a href="${statusUrl}" class="btn-outline">View Details</a>
+        <a href="${statusUrl}" style="display: inline-block; padding: 10px 24px; border: 1px solid #d1d5db; color: #374151; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px;">View Details</a>
       </div>
-    `, tenantName),
+    `, tenantName, logoUrl),
   };
 }
