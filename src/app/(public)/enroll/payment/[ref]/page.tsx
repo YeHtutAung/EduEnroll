@@ -618,12 +618,19 @@ export default function PaymentInstructionsPage() {
             if (intakeRes.ok) {
               const intakeData = await intakeRes.json();
               if (intakeData.labels?.orgType) setOrgType(intakeData.labels.orgType);
-              if (statusData.status !== "pending_payment" && statusData.status !== "partial_payment") {
-                const classes = (intakeData.classes ?? []) as AvailableClass[];
-                setAvailableClasses(
-                  classes.filter((c) => c.id !== statusData.class_id && c.status === "open" && c.seat_remaining > 0),
-                );
-              }
+              const classes = (intakeData.classes ?? []) as AvailableClass[];
+              // For cart enrollments, exclude all classes already in the cart
+              const cartClassIds = new Set(
+                (statusData.items ?? []).map((item: CartItem) => item.class_level),
+              );
+              setAvailableClasses(
+                classes.filter((c) =>
+                  c.id !== statusData.class_id &&
+                  !cartClassIds.has(c.level) &&
+                  c.status === "open" &&
+                  c.seat_remaining > 0,
+                ),
+              );
             }
           } catch { /* non-critical */ }
         }
@@ -724,6 +731,42 @@ export default function PaymentInstructionsPage() {
               <span>Total</span>
               <span>{formatMMKSimple(totalFee)}</span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Other available tickets (promotion) ────────────────── */}
+      {showUpload && availableClasses.length > 0 && enrollment.intake_slug && (
+        <div className="mb-8 rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50 p-5">
+          <h3 className="mb-1 text-sm font-bold text-blue-900">
+            {orgType === "event" ? "Other Tickets Available" : "Other Classes Available"}
+          </h3>
+          <p className="mb-4 text-xs text-blue-600">
+            {orgType === "event"
+              ? "Want to add more? Start a new order for these tickets!"
+              : "Interested in other classes? Enroll separately!"}
+          </p>
+          <div className="space-y-2">
+            {availableClasses.map((cls) => (
+              <a
+                key={cls.id}
+                href={`/enroll/${enrollment.intake_slug}`}
+                className="flex items-center justify-between rounded-lg border border-blue-100 bg-white px-4 py-3 transition-colors hover:border-blue-300 hover:shadow-sm"
+              >
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">{cls.level}</p>
+                  <p className="text-xs text-gray-500">{cls.fee_formatted}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
+                    {cls.seat_remaining} left
+                  </span>
+                  <svg className="h-4 w-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </div>
+              </a>
+            ))}
           </div>
         </div>
       )}
