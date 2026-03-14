@@ -194,6 +194,13 @@ export async function POST(request: NextRequest) {
     const proto = host.startsWith("localhost") ? "http" : "https";
     const baseUrl = `${proto}://${host}`;
 
+    // Fetch tenant info for email branding
+    const { data: tenantInfo } = await supabase
+      .from("tenants")
+      .select("name, org_type")
+      .eq("id", payload.tenant_id)
+      .single() as { data: { name: string; org_type: string } | null; error: unknown };
+
     const emailData = enrollmentConfirmationEmail({
       studentName: fd.name_en?.trim() || "Student",
       enrollmentRef: payload.enrollment_ref,
@@ -202,6 +209,8 @@ export async function POST(request: NextRequest) {
       feeFormatted: formatMMKSimple(payload.fee_mmk),
       paymentUrl: `${baseUrl}/enroll/payment/${payload.enrollment_ref}`,
       statusUrl: `${baseUrl}/status?ref=${payload.enrollment_ref}`,
+      orgType: tenantInfo?.org_type,
+      tenantName: tenantInfo?.name,
     });
 
     sendEmail({ to: fd.email.trim(), ...emailData }).catch((err) => {
@@ -395,7 +404,16 @@ async function handleCartEnrollment(
     const proto = host.startsWith("localhost") ? "http" : "https";
     const baseUrl = `${proto}://${host}`;
 
-    const itemsSummary = payload.items.map((i) => `${i.class_level} x${i.quantity}`).join(", ");
+    // Fetch tenant info for email branding
+    const { data: tenantInfo } = await supabase
+      .from("tenants")
+      .select("name, org_type")
+      .eq("id", payload.tenant_id)
+      .single() as { data: { name: string; org_type: string } | null; error: unknown };
+
+    const itemsSummary = payload.items
+      .map((i) => i.quantity > 1 ? `${i.class_level} x${i.quantity}` : i.class_level)
+      .join(", ");
     const emailData = enrollmentConfirmationEmail({
       studentName: fd.name_en?.trim() || "Student",
       enrollmentRef: payload.enrollment_ref,
@@ -404,6 +422,8 @@ async function handleCartEnrollment(
       feeFormatted: formatMMKSimple(payload.total_fee_mmk),
       paymentUrl: `${baseUrl}/enroll/payment/${payload.enrollment_ref}`,
       statusUrl: `${baseUrl}/status?ref=${payload.enrollment_ref}`,
+      orgType: tenantInfo?.org_type,
+      tenantName: tenantInfo?.name,
     });
 
     sendEmail({ to: fd.email.trim(), ...emailData }).catch((err) => {
