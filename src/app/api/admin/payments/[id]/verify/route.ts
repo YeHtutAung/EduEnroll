@@ -7,6 +7,7 @@ import {
   enrollmentRejectedEmail,
   partialPaymentEmail,
 } from "@/lib/email";
+import { sendStatusNotification } from "@/lib/messenger/notify";
 import type { Enrollment, Payment, PaymentStatus, EnrollmentStatus } from "@/types/database";
 
 type EnrollmentResult = { data: Enrollment | null; error: unknown };
@@ -174,9 +175,27 @@ export async function PATCH(
 
     if (ee) return NextResponse.json({ error: (ee as Error).message }, { status: 500 });
 
-    // Send approval email (best-effort, non-blocking)
+    // Send notifications (best-effort, non-blocking)
+    const { classLevel, statusUrl, paymentUrl } = await getClassAndUrls();
+
+    // Messenger notification first (if enrolled via chatbot)
+    if (enrollment.messenger_psid) {
+      sendStatusNotification({
+        tenantId,
+        messengerPsid: enrollment.messenger_psid,
+        action: "approve",
+        studentName: enrollment.student_name_en || "Student",
+        enrollmentRef: enrollment.enrollment_ref,
+        classLevel,
+        statusUrl,
+        paymentUrl,
+      }).catch((err) => {
+        console.error("[verify] Messenger approval notification failed:", err);
+      });
+    }
+
+    // Email notification
     if (enrollment.email) {
-      const { classLevel, statusUrl } = await getClassAndUrls();
       const emailData = enrollmentApprovedEmail({
         studentName: enrollment.student_name_en || "Student",
         enrollmentRef: enrollment.enrollment_ref,
@@ -186,6 +205,9 @@ export async function PATCH(
       sendEmail({ to: enrollment.email, ...emailData }).catch((err) => {
         console.error("[verify] Approval email failed:", err);
       });
+    }
+
+    if (enrollment.messenger_psid || enrollment.email) {
       await admin
         .from("enrollments")
         .update({ status_notified_at: now } as never)
@@ -228,13 +250,33 @@ export async function PATCH(
 
     if (ee) return NextResponse.json({ error: (ee as Error).message }, { status: 500 });
 
-    // Send partial payment email (best-effort, non-blocking)
-    if (enrollment.email) {
-      const { classLevel, paymentUrl, statusUrl } = await getClassAndUrls();
-      const remainingAmount = typeof received_amount === "number"
-        ? payment.amount_mmk - received_amount
-        : null;
+    // Send notifications (best-effort, non-blocking)
+    const { classLevel, paymentUrl, statusUrl } = await getClassAndUrls();
+    const remainingAmount = typeof received_amount === "number"
+      ? payment.amount_mmk - received_amount
+      : null;
 
+    // Messenger notification first (if enrolled via chatbot)
+    if (enrollment.messenger_psid) {
+      sendStatusNotification({
+        tenantId,
+        messengerPsid: enrollment.messenger_psid,
+        action: "request_remaining",
+        studentName: enrollment.student_name_en || "Student",
+        enrollmentRef: enrollment.enrollment_ref,
+        classLevel,
+        statusUrl,
+        paymentUrl,
+        adminNote: (admin_note as string).trim(),
+        receivedAmount: typeof received_amount === "number" ? received_amount : null,
+        remainingAmount,
+      }).catch((err) => {
+        console.error("[verify] Messenger partial notification failed:", err);
+      });
+    }
+
+    // Email notification
+    if (enrollment.email) {
       const emailData = partialPaymentEmail({
         studentName: enrollment.student_name_en || "Student",
         enrollmentRef: enrollment.enrollment_ref,
@@ -249,6 +291,9 @@ export async function PATCH(
       sendEmail({ to: enrollment.email, ...emailData }).catch((err) => {
         console.error("[verify] Partial payment email failed:", err);
       });
+    }
+
+    if (enrollment.messenger_psid || enrollment.email) {
       await admin
         .from("enrollments")
         .update({ status_notified_at: now } as never)
@@ -289,19 +334,41 @@ export async function PATCH(
   // Restore seats (best-effort)
   await restoreSeats();
 
-  // Send rejection email (best-effort, non-blocking)
+  // Send notifications (best-effort, non-blocking)
+  const { classLevel: rejClassLevel, statusUrl: rejStatusUrl, paymentUrl: rejPaymentUrl } = await getClassAndUrls();
+
+  // Messenger notification first (if enrolled via chatbot)
+  if (enrollment.messenger_psid) {
+    sendStatusNotification({
+      tenantId,
+      messengerPsid: enrollment.messenger_psid,
+      action: "reject",
+      studentName: enrollment.student_name_en || "Student",
+      enrollmentRef: enrollment.enrollment_ref,
+      classLevel: rejClassLevel,
+      statusUrl: rejStatusUrl,
+      paymentUrl: rejPaymentUrl,
+      rejectionReason: typeof rejection_reason === "string" ? rejection_reason : null,
+    }).catch((err) => {
+      console.error("[verify] Messenger rejection notification failed:", err);
+    });
+  }
+
+  // Email notification
   if (enrollment.email) {
-    const { classLevel, statusUrl } = await getClassAndUrls();
     const emailData = enrollmentRejectedEmail({
       studentName: enrollment.student_name_en || "Student",
       enrollmentRef: enrollment.enrollment_ref,
-      classLevel,
+      classLevel: rejClassLevel,
       reason: typeof rejection_reason === "string" ? rejection_reason : null,
-      statusUrl,
+      statusUrl: rejStatusUrl,
     });
     sendEmail({ to: enrollment.email, ...emailData }).catch((err) => {
       console.error("[verify] Rejection email failed:", err);
     });
+  }
+
+  if (enrollment.messenger_psid || enrollment.email) {
     await admin
       .from("enrollments")
       .update({ status_notified_at: now } as never)

@@ -36,11 +36,11 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { class_id, form_data, idempotency_key, quantity, items } = body as Record<string, unknown>;
+  const { class_id, form_data, idempotency_key, quantity, items, messenger_psid } = body as Record<string, unknown>;
 
   // ── Cart checkout (multiple ticket types) ───────────────────────
   if (Array.isArray(items)) {
-    return handleCartEnrollment(request, tenantId, items, form_data);
+    return handleCartEnrollment(request, tenantId, items, form_data, messenger_psid);
   }
 
   // ── Validate class_id ─────────────────────────────────────────
@@ -176,6 +176,11 @@ export async function POST(request: NextRequest) {
     if (fd.nrc && fieldTypeMap.get("nrc") === "text")
       updatePayload.nrc_number = fd.nrc.trim();
 
+    // Store messenger PSID if enrollment came from chatbot
+    if (typeof messenger_psid === "string" && messenger_psid.trim()) {
+      updatePayload.messenger_psid = messenger_psid.trim();
+    }
+
     await supabase
       .from("enrollments")
       .update(updatePayload as never)
@@ -245,6 +250,7 @@ async function handleCartEnrollment(
   tenantId: string,
   items: unknown[],
   form_data: unknown,
+  messenger_psid: unknown,
 ) {
   // Validate items array
   const validatedItems: { class_id: string; quantity: number }[] = [];
@@ -374,6 +380,11 @@ async function handleCartEnrollment(
       updatePayload.email = fd.email.trim();
     if (fd.nrc && fieldTypeMap.get("nrc") === "text")
       updatePayload.nrc_number = fd.nrc.trim();
+
+    // Store messenger PSID if enrollment came from chatbot
+    if (typeof messenger_psid === "string" && messenger_psid.trim()) {
+      updatePayload.messenger_psid = messenger_psid.trim();
+    }
 
     await supabase.from("enrollments").update(updatePayload as never).eq("id", payload.enrollment_id);
   }

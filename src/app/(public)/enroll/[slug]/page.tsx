@@ -1236,15 +1236,19 @@ function IntakeLandingContent() {
     fetchIntake();
   }, [params.slug]);
 
+  const psid = searchParams.get("psid");
+
   function handleSelectClass(classId: string, quantity: number = 1) {
     const qParam = quantity > 1 ? `&quantity=${quantity}` : "";
-    router.push(`/enroll/form?class_id=${classId}&slug=${params.slug}${qParam}`);
+    const psidParam = psid ? `&psid=${psid}` : "";
+    router.push(`/enroll/form?class_id=${classId}&slug=${params.slug}${qParam}${psidParam}`);
   }
 
   function handleCartCheckout(cartItems: { class_id: string; level: string; quantity: number; fee_mmk: number; image_url: string | null }[]) {
     const cartKey = `cart_${Date.now()}`;
     sessionStorage.setItem(cartKey, JSON.stringify(cartItems));
-    router.push(`/enroll/form?slug=${params.slug}&cart_key=${cartKey}`);
+    const psidParam = psid ? `&psid=${psid}` : "";
+    router.push(`/enroll/form?slug=${params.slug}&cart_key=${cartKey}${psidParam}`);
   }
 
   if (loading) return <LoadingSkeleton />;
