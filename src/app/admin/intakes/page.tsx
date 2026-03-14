@@ -491,8 +491,10 @@ export default function IntakesPage() {
         <ConfirmModal
           variant="success"
           title={`Open "${confirmOpen.intakeName}"?`}
-          message="This will make the enrollment portal live. Students can start enrolling immediately."
-          confirmLabel="Open Enrollment"
+          message={labels.orgType === "event"
+            ? "This will make ticket sales live. Customers can start purchasing immediately."
+            : "This will make the enrollment portal live. Students can start enrolling immediately."}
+          confirmLabel={labels.orgType === "event" ? "Open Sales" : "Open Enrollment"}
           onConfirm={() => {
             handleStatusChange(confirmOpen.intakeId, "open");
             setConfirmOpen(null);

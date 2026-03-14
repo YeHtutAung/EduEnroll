@@ -175,6 +175,13 @@ export async function GET(request: NextRequest) {
     ? enrollment.classes.fee_mmk * (enrollment.quantity ?? 1)
     : null);
 
+  // ── Fetch tenant org_type ─────────────────────────────────────
+  const { data: tenantInfo } = await supabase
+    .from("tenants")
+    .select("org_type")
+    .eq("id", tenantId)
+    .single() as { data: { org_type: string } | null; error: unknown };
+
   return NextResponse.json({
     enrollment_ref:   enrollment.enrollment_ref,
     student_name_en:  enrollment.student_name_en,
@@ -192,5 +199,6 @@ export async function GET(request: NextRequest) {
     status_label_mm:  enrollmentLabel.mm,
     payment:          paymentBlock,
     items:            cartItems,
+    org_type:         tenantInfo?.org_type ?? "language_school",
   });
 }

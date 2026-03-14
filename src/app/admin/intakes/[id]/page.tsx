@@ -1457,8 +1457,10 @@ export default function IntakeDetailPage({
         <ConfirmModal
           variant="success"
           title={`Open "${intake?.name}"?`}
-          message="This will make the enrollment portal live. Students can start enrolling immediately."
-          confirmLabel="Open Enrollment"
+          message={tl.orgType === "event"
+            ? "This will make ticket sales live. Customers can start purchasing immediately."
+            : "This will make the enrollment portal live. Students can start enrolling immediately."}
+          confirmLabel={tl.orgType === "event" ? "Open Sales" : "Open Enrollment"}
           onConfirm={() => handleStatusChange("open")}
           onCancel={() => setConfirmOpen(false)}
         />

@@ -944,15 +944,15 @@ export default function StudentsPage() {
                           {/* Ticket Type */}
                           <td className="px-4 py-3.5">
                             {student.items && student.items.length > 0 ? (
-                              <div className="flex items-center gap-1 flex-wrap">
+                              <div className="space-y-0.5">
                                 {student.items.map((ci, i) => (
-                                  <span
-                                    key={i}
-                                    className="inline-flex items-center justify-center px-1.5 h-6 rounded text-[10px] font-bold text-white whitespace-nowrap"
-                                    style={{ backgroundColor: LEVEL_COLORS[ci.class_level] ?? "#1a3f8a" }}
-                                  >
-                                    {ci.class_level}&times;{ci.quantity}
-                                  </span>
+                                  <div key={i} className="flex items-center gap-1.5 whitespace-nowrap text-xs">
+                                    <span
+                                      className="inline-block w-1.5 h-1.5 rounded-full shrink-0"
+                                      style={{ backgroundColor: LEVEL_COLORS[ci.class_level] ?? "#1a3f8a" }}
+                                    />
+                                    <span className="text-gray-700">{ci.class_level}</span>
+                                  </div>
                                 ))}
                               </div>
                             ) : (
@@ -969,13 +969,32 @@ export default function StudentsPage() {
                           </td>
 
                           {/* Quantity */}
-                          <td className="px-4 py-3.5 text-gray-700 tabular-nums text-xs text-center">
-                            {student.quantity}
+                          <td className="px-4 py-3.5 tabular-nums text-xs text-center">
+                            {student.items && student.items.length > 0 ? (
+                              <div className="space-y-0.5">
+                                {student.items.map((ci, i) => (
+                                  <div key={i} className="text-gray-700">{ci.quantity}</div>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-gray-700">{student.quantity}</span>
+                            )}
                           </td>
 
                           {/* Fee */}
-                          <td className="px-4 py-3.5 text-gray-700 tabular-nums text-xs whitespace-nowrap">
-                            {formatMMKSimple(student.fee_mmk)}
+                          <td className="px-4 py-3.5 tabular-nums text-xs whitespace-nowrap">
+                            {student.items && student.items.length > 0 ? (
+                              <div className="space-y-0.5">
+                                {student.items.map((ci, i) => (
+                                  <div key={i} className="text-gray-600">{formatMMKSimple(ci.subtotal_mmk)}</div>
+                                ))}
+                                <div className="border-t border-gray-200 pt-0.5 font-semibold text-gray-800">
+                                  {formatMMKSimple(student.fee_mmk)}
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-gray-700">{formatMMKSimple(student.fee_mmk)}</span>
+                            )}
                           </td>
 
                           {/* Intake/Event */}

@@ -1120,7 +1120,7 @@ function SettingsContent() {
       </SectionCard>
 
       {/* ── Section 4: School Profile ────────────────────────────────── */}
-      <SectionCard title="School Profile" subtitle="Update your school name displayed to students.">
+      <SectionCard title={orgType === "event" ? "Organization Profile" : "School Profile"} subtitle={orgType === "event" ? "Update your organization name displayed to customers." : "Update your school name displayed to students."}>
 
         {loadingProfile ? (
           <div className="space-y-4">
@@ -1155,7 +1155,7 @@ function SettingsContent() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    School Name (English)
+                    {orgType === "event" ? "Organization Name (English)" : "School Name (English)"}
                   </label>
                   <input
                     type="text"
@@ -1167,7 +1167,7 @@ function SettingsContent() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    School Name (Myanmar)
+                    {orgType === "event" ? "Organization Name (Myanmar)" : "School Name (Myanmar)"}
                   </label>
                   <input
                     type="text"
@@ -1288,7 +1288,7 @@ function SettingsContent() {
       </SectionCard>
 
       {/* ── Section 4: Messenger Bot ──────────────────────────────────── */}
-      <SectionCard title="Facebook Messenger Bot" subtitle="Auto-reply bot for your school's Facebook Page.">
+      <SectionCard title="Facebook Messenger Bot" subtitle={orgType === "event" ? "Auto-reply bot for your organization's Facebook Page." : "Auto-reply bot for your school's Facebook Page."}>
         {messengerLoading ? (
           <div className="space-y-3">
             <Pulse className="h-6 w-48" />

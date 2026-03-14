@@ -6,6 +6,13 @@ import Link from "next/link";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+interface CartItem {
+  class_level: string;
+  quantity: number;
+  fee_mmk: number;
+  subtotal_mmk: number;
+}
+
 interface StatusResponse {
   enrollment_ref: string;
   student_name_en: string;
@@ -16,6 +23,8 @@ interface StatusResponse {
   status: string;
   status_label_en: string;
   status_label_mm: string;
+  items?: CartItem[] | null;
+  org_type?: string;
   payment: {
     id: string;
     status: string;
@@ -100,6 +109,8 @@ function PaymentSubmittedCard({ data }: { data: StatusResponse }) {
 }
 
 function ConfirmedCard({ data }: { data: StatusResponse }) {
+  const isEvent = data.org_type === "event";
+
   return (
     <div className="rounded-xl border-2 border-green-300 bg-green-50 p-6">
       <div className="mb-4 flex justify-center">
@@ -111,27 +122,35 @@ function ConfirmedCard({ data }: { data: StatusResponse }) {
       </div>
 
       <h2 className="text-center text-2xl font-bold text-green-800">
-        Enrollment Confirmed!
+        {isEvent ? "Order Confirmed!" : "Enrollment Confirmed!"}
       </h2>
-      <p className="font-myanmar mt-1 text-center text-lg text-green-700">
-        စာရင်းသွင်းမှု အတည်ပြုပြီး
-      </p>
+      {!isEvent && (
+        <p className="font-myanmar mt-1 text-center text-lg text-green-700">
+          စာရင်းသွင်းမှု အတည်ပြုပြီး
+        </p>
+      )}
 
       <EnrollmentDetails data={data} />
 
       <div className="mt-5 rounded-lg bg-green-100/60 p-4 text-center">
         <p className="text-sm font-medium text-green-800">
-          Congratulations! Welcome to the Japanese Language Course.
+          {isEvent
+            ? "Your tickets are confirmed. See you at the event!"
+            : "Congratulations! Your enrollment is confirmed."}
         </p>
-        <p className="font-myanmar mt-1 text-green-700">
-          ဂျပန်ဘာသာ သင်တန်းသို့ ကြိုဆိုပါသည်
-        </p>
+        {!isEvent && (
+          <p className="font-myanmar mt-1 text-green-700">
+            ဂုဏ်ယူပါသည်! သင့်စာရင်းသွင်းမှု အတည်ပြုပြီးပါပြီ။
+          </p>
+        )}
       </div>
     </div>
   );
 }
 
 function RejectedCard({ data }: { data: StatusResponse }) {
+  const isEvent = data.org_type === "event";
+
   return (
     <div className="rounded-xl border-2 border-red-300 bg-red-50 p-6">
       <div className="mb-4 flex justify-center">
@@ -143,23 +162,26 @@ function RejectedCard({ data }: { data: StatusResponse }) {
         </div>
       </div>
 
-      <h2 className="text-center text-xl font-bold text-red-800">Enrollment Rejected</h2>
-      <p className="font-myanmar mt-1 text-center text-red-700">
-        စာရင်းသွင်းမှု ငြင်းပယ်ခံရသည်
-      </p>
+      <h2 className="text-center text-xl font-bold text-red-800">
+        {isEvent ? "Order Rejected" : "Enrollment Rejected"}
+      </h2>
+      {!isEvent && (
+        <p className="font-myanmar mt-1 text-center text-red-700">
+          စာရင်းသွင်းမှု ငြင်းပယ်ခံရသည်
+        </p>
+      )}
 
       <EnrollmentDetails data={data} />
 
       <div className="mt-5 rounded-lg bg-red-100/60 p-4">
         <p className="text-sm text-red-800">
-          If you believe this is an error, please contact the school:
+          If you believe this is an error, please contact us directly.
         </p>
-        <p className="font-myanmar mt-0.5 text-sm text-red-700">
-          အမှားဖြစ်နေသည်ဟု ယူဆပါက ကျောင်းသို့ ဆက်သွယ်ပါ -
-        </p>
-        <p className="mt-2 text-sm font-semibold text-red-900">
-          Please contact the school directly.
-        </p>
+        {!isEvent && (
+          <p className="font-myanmar mt-0.5 text-sm text-red-700">
+            အမှားဖြစ်နေသည်ဟု ယူဆပါက တိုက်ရိုက်ဆက်သွယ်ပါ။
+          </p>
+        )}
       </div>
     </div>
   );
@@ -168,6 +190,10 @@ function RejectedCard({ data }: { data: StatusResponse }) {
 // ─── Shared enrollment details ───────────────────────────────────────────────
 
 function EnrollmentDetails({ data }: { data: StatusResponse }) {
+  const isEvent = data.org_type === "event";
+  const hasCart = data.items && data.items.length > 0;
+  const itemLabel = isEvent ? "Ticket" : "Class";
+
   return (
     <div className="mt-5 space-y-2.5 rounded-lg bg-white/70 p-4 text-sm">
       {/* Reference */}
@@ -187,10 +213,22 @@ function EnrollmentDetails({ data }: { data: StatusResponse }) {
         </span>
       </div>
 
-      {/* Class level */}
-      {data.class_level && (
+      {/* Cart items (line-by-line) */}
+      {hasCart ? (
+        <div>
+          <span className="text-gray-500">{itemLabel}</span>
+          <div className="mt-1.5 space-y-1.5">
+            {data.items!.map((item, i) => (
+              <div key={i} className="flex items-center justify-between rounded-md bg-gray-50 px-3 py-1.5">
+                <span className="text-gray-700">{item.class_level}</span>
+                <span className="text-xs font-semibold text-gray-500">&times;{item.quantity}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : data.class_level ? (
         <div className="flex items-center justify-between">
-          <span className="text-gray-500">Class</span>
+          <span className="text-gray-500">{itemLabel}</span>
           <span
             className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
               LEVEL_COLORS[data.class_level] ?? "bg-gray-100 text-gray-700"
@@ -199,12 +237,12 @@ function EnrollmentDetails({ data }: { data: StatusResponse }) {
             {data.class_level}
           </span>
         </div>
-      )}
+      ) : null}
 
       {/* Fee */}
       {data.fee_formatted && (
         <div className="flex items-center justify-between">
-          <span className="text-gray-500">Fee</span>
+          <span className="text-gray-500">{isEvent ? "Price" : "Fee"}</span>
           <span className="font-myanmar font-semibold text-gray-900">{data.fee_formatted}</span>
         </div>
       )}

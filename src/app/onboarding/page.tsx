@@ -256,15 +256,15 @@ export default function OnboardingPage() {
           {/* ── Step 1: School Profile ──────────────────────────────── */}
           {step === 1 && (
             <div>
-              <h2 className="text-lg font-bold text-gray-900 mb-1">School Profile</h2>
+              <h2 className="text-lg font-bold text-gray-900 mb-1">Organization Profile</h2>
               <p className="text-sm text-gray-500 mb-6">
-                Confirm your school details.
+                Confirm your organization details.
               </p>
 
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    School Name (English)
+                    Organization Name (English)
                   </label>
                   <input
                     type="text"
@@ -276,7 +276,7 @@ export default function OnboardingPage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                    School Name (Myanmar)
+                    Organization Name (Myanmar)
                     <span className="text-gray-400 font-normal"> — optional</span>
                   </label>
                   <input
@@ -493,10 +493,10 @@ export default function OnboardingPage() {
                 You&apos;re Ready!
               </h2>
               <p className="text-sm text-gray-500 mb-2">
-                Your school is set up and ready to accept enrollments.
+                Your organization is set up and ready to go!
               </p>
               <p className="text-sm text-gray-400 font-myanmar mb-6">
-                သင့်ကျောင်းသည် စာရင်းသွင်းမှုများ လက်ခံရန် အဆင်သင့်ဖြစ်ပါပြီ။
+                သင့်အဖွဲ့အစည်းသည် အသင့်ဖြစ်ပါပြီ။
               </p>
 
               {/* Enrollment link */}
