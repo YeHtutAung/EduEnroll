@@ -10,8 +10,8 @@ const ERRORS: Record<string, { en: string; mm: string }> = {
     mm: "အီးမေးလ် သို့မဟုတ် စကားဝှက် မှားယွင်းနေသည်။",
   },
   wrong_tenant: {
-    en: "Your account does not belong to this school.",
-    mm: "သင့်အကောင့်သည် ဤကျောင်းနှင့် သက်ဆိုင်မှုမရှိပါ။",
+    en: "Your account does not belong to this organization.",
+    mm: "သင့်အကောင့်သည် ဤအဖွဲ့အစည်းနှင့် သက်ဆိုင်မှုမရှိပါ။",
   },
   default: {
     en: "Something went wrong. Please try again.",
