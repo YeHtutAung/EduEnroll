@@ -14,6 +14,7 @@ export type ClassStatus = "draft" | "open" | "full" | "closed";
 export type EnrollmentStatus =
   | "pending_payment"
   | "payment_submitted"
+  | "partial_payment"
   | "confirmed"
   | "rejected";
 
@@ -24,6 +25,33 @@ export type MyanmarBank = string;
 
 // ─── RPC return shapes ────────────────────────────────────────────────────────
 
+export type SubmitCartEnrollmentResult =
+  | {
+      success: true;
+      enrollment_ref: string;
+      enrollment_id: string;
+      tenant_id: string;
+      total_fee_mmk: number;
+      quantity: number;
+      items: Array<{
+        class_id: string;
+        class_level: string;
+        quantity: number;
+        fee_mmk: number;
+        subtotal_mmk: number;
+      }>;
+    }
+  | {
+      success: false;
+      error: string;
+      class_id?: string;
+      class_level?: string;
+      seat_remaining?: number;
+      max?: number;
+      opens_at?: string;
+      detail?: string;
+    };
+
 export type SubmitEnrollmentResult =
   | {
       success: true;
@@ -33,14 +61,17 @@ export type SubmitEnrollmentResult =
       fee_mmk: number;
       tenant_id: string;
       seat_remaining: number;
+      quantity: number;
     }
   | {
       success: false;
-      error: "CLASS_NOT_FOUND" | "CLASS_NOT_OPEN" | "CLASS_FULL" | "ENROLLMENT_NOT_OPEN" | "ENROLLMENT_CLOSED" | "INTERNAL_ERROR";
+      error: "CLASS_NOT_FOUND" | "CLASS_NOT_OPEN" | "CLASS_FULL" | "NOT_ENOUGH_SEATS" | "EXCEEDS_MAX_TICKETS" | "ENROLLMENT_NOT_OPEN" | "ENROLLMENT_CLOSED" | "INTERNAL_ERROR";
       class_status?: ClassStatus;
       opens_at?: string;
       closed_at?: string;
       detail?: string;
+      max?: number;
+      seat_remaining?: number;
     };
 
 // ─── Default class fees (MMK) ─────────────────────────────────────────────────
@@ -127,13 +158,14 @@ export interface Class {
   end_time: string | null;
   venue: string | null;
   image_url: string | null;
+  max_tickets_per_person: number;
   created_at: string;
 }
 
 export interface Enrollment {
   id: string;
   enrollment_ref: string;       // e.g. "NM-2026-00042" (auto-generated)
-  class_id: string;
+  class_id: string | null;       // null for cart enrollments (uses enrollment_items)
   tenant_id: string;
   student_name_en: string;      // name in English
   student_name_mm: string | null; // name in Myanmar script
@@ -141,6 +173,7 @@ export interface Enrollment {
   phone: string;
   email: string | null;
   form_data: Record<string, string> | null;
+  quantity: number;
   status: EnrollmentStatus;
   enrolled_at: string;
 }
@@ -151,10 +184,23 @@ export interface Payment {
   tenant_id: string;
   amount_mmk: number;
   proof_image_url: string | null;
+  proof_image_urls: string[];
   bank_reference: string | null;
+  admin_note: string | null;
+  received_amount_mmk: number | null;
   status: PaymentStatus;
   verified_by: string | null;   // references users.id
   verified_at: string | null;
+  created_at: string;
+}
+
+export interface EnrollmentItem {
+  id: string;
+  enrollment_id: string;
+  class_id: string;
+  tenant_id: string;
+  quantity: number;
+  fee_mmk: number;
   created_at: string;
 }
 
@@ -220,6 +266,11 @@ export interface Database {
         Insert: Omit<BankAccount, "id" | "created_at">;
         Update: Partial<Omit<BankAccount, "id" | "created_at">>;
       };
+      enrollment_items: {
+        Row: EnrollmentItem;
+        Insert: Omit<EnrollmentItem, "id" | "created_at">;
+        Update: Partial<Omit<EnrollmentItem, "id" | "created_at">>;
+      };
       staff_invites: {
         Row: StaffInvite;
         Insert: Omit<StaffInvite, "id" | "token" | "accepted_at" | "expires_at" | "created_at">;
@@ -235,6 +286,10 @@ export interface Database {
       seed_default_classes: {
         Args: { p_intake_id: string; p_tenant_id: string; p_seat_total?: number };
         Returns: void;
+      };
+      submit_cart_enrollment: {
+        Args: { p_items: string; p_tenant_id?: string | null };
+        Returns: SubmitCartEnrollmentResult;
       };
       submit_enrollment: {
         Args: {

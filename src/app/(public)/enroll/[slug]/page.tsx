@@ -23,6 +23,7 @@ interface PublicClass {
   end_time?: string | null;
   venue?: string | null;
   image_url?: string | null;
+  max_tickets_per_person?: number;
 }
 
 interface PublicIntake {
@@ -536,12 +537,21 @@ function EventTicketCard({
   onSelect,
   isHighestTier,
   index,
+  cartMode,
+  cartQty,
+  onCartChange,
 }: {
   cls: PublicClass;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, quantity: number) => void;
   isHighestTier: boolean;
   index: number;
+  cartMode?: boolean;
+  cartQty?: number;
+  onCartChange?: (classId: string, level: string, qty: number, fee: number, imageUrl: string | null) => void;
 }) {
+  const maxTix = cls.max_tickets_per_person ?? 1;
+  const [qty, setQty] = useState(1);
+  const effectiveQty = cartMode ? (cartQty ?? 0) : qty;
   const isFull = cls.status === "full" || cls.seat_remaining === 0;
   const now = new Date();
   const notYetOpen = cls.enrollment_open_at ? now < new Date(cls.enrollment_open_at) : false;
@@ -568,13 +578,13 @@ function EventTicketCard({
           : "bg-[#111]"
       } ${isDisabled ? "opacity-60 cursor-not-allowed" : "hover:-translate-y-1.5"}`}
       style={{ animationDelay: `${index * 0.1}s` }}
-      onClick={() => !isDisabled && onSelect(cls.id)}
-      role={isDisabled ? undefined : "button"}
-      tabIndex={isDisabled ? undefined : 0}
+      onClick={() => { if (!isDisabled && !cartMode && maxTix <= 1) onSelect(cls.id, 1); }}
+      role={isDisabled || cartMode ? undefined : "button"}
+      tabIndex={isDisabled || cartMode ? undefined : 0}
       onKeyDown={(e) => {
-        if (!isDisabled && (e.key === "Enter" || e.key === " ")) {
+        if (!isDisabled && !cartMode && maxTix <= 1 && (e.key === "Enter" || e.key === " ")) {
           e.preventDefault();
-          onSelect(cls.id);
+          onSelect(cls.id, 1);
         }
       }}
     >
@@ -625,7 +635,20 @@ function EventTicketCard({
         </div>
       )}
 
-      <div className="relative z-10 px-8 py-10 sm:px-10 sm:py-12">
+      {/* Ticket image — hero position */}
+      {cls.image_url && (
+        <div className="relative z-10 overflow-hidden">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={cls.image_url}
+            alt={cls.level}
+            className="w-full h-auto object-cover max-h-52 sm:max-h-64"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#111] via-transparent to-transparent" />
+        </div>
+      )}
+
+      <div className={`relative z-10 px-8 ${cls.image_url ? "pt-6 pb-10" : "py-10"} sm:px-10 ${cls.image_url ? "sm:pt-8 sm:pb-12" : "sm:py-12"}`}>
         {/* Tier + Seats */}
         <div className="flex items-start justify-between mb-8">
           <span className={`text-[11px] font-medium tracking-[3px] uppercase px-3 py-1.5 rounded-sm border ${
@@ -696,23 +719,120 @@ function EventTicketCard({
           )}
         </div>
 
-        {/* Ticket image */}
-        {cls.image_url && (
-          <div className="mb-8 overflow-hidden rounded">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={cls.image_url} alt={cls.level} className="w-full h-40 object-cover" />
+        {/* Quantity selector — cart mode: always show; non-cart: only for multi-ticket */}
+        {!isDisabled && cartMode && (
+          <div className="flex items-center justify-between mb-6 px-1">
+            <span className="text-[12px] tracking-[1px] uppercase" style={{ color: "#888880" }}>
+              Qty <span className="font-myanmar tracking-normal">(အရေအတွက်)</span>
+            </span>
+            {effectiveQty === 0 ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onCartChange?.(cls.id, cls.level, 1, cls.fee_mmk, cls.image_url ?? null);
+                }}
+                className={`px-4 py-2 rounded-sm text-[11px] font-medium tracking-[1.5px] uppercase border transition-all duration-300 ${
+                  isHighestTier
+                    ? "border-[#C9A84C]/40 text-[#E8C97A] hover:border-[#C9A84C] bg-gradient-to-r from-[#C9A84C]/15 to-[#C9A84C]/5"
+                    : "border-white/12 text-[#F8F4EE] hover:border-white/30"
+                }`}
+              >
+                Add to Cart
+              </button>
+            ) : (
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCartChange?.(cls.id, cls.level, effectiveQty - 1, cls.fee_mmk, cls.image_url ?? null);
+                  }}
+                  className="w-8 h-8 rounded-sm border border-white/15 text-white/70 hover:border-white/30 hover:text-white flex items-center justify-center transition-colors text-lg"
+                >
+                  −
+                </button>
+                <span className="text-xl font-bold min-w-[2ch] text-center" style={{
+                  fontFamily: "'Bebas Neue', sans-serif",
+                  color: isHighestTier ? GOLD_LIGHT : "#F8F4EE",
+                }}>
+                  {effectiveQty}
+                </span>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const max = Math.min(maxTix, cls.seat_remaining);
+                    if (effectiveQty < max) {
+                      onCartChange?.(cls.id, cls.level, effectiveQty + 1, cls.fee_mmk, cls.image_url ?? null);
+                    }
+                  }}
+                  className="w-8 h-8 rounded-sm border border-white/15 text-white/70 hover:border-white/30 hover:text-white flex items-center justify-center transition-colors text-lg"
+                >
+                  +
+                </button>
+              </div>
+            )}
           </div>
         )}
 
-        {/* Register button */}
-        {!isDisabled && (
-          <button className={`group/btn relative w-full flex items-center justify-between px-6 py-4 text-[13px] font-medium tracking-[2px] uppercase rounded-sm border overflow-hidden transition-all duration-300 ${
-            isHighestTier
-              ? "border-[#C9A84C]/40 text-[#E8C97A] hover:border-[#C9A84C] bg-gradient-to-r from-[#C9A84C]/15 to-[#C9A84C]/5 hover:from-[#C9A84C]/25 hover:to-[#C9A84C]/10"
-              : "border-white/12 text-[#F8F4EE] hover:border-white/30"
-          }`}>
+        {/* Quantity selector — non-cart mode (original behavior) */}
+        {!isDisabled && !cartMode && maxTix > 1 && (
+          <div className="flex items-center justify-between mb-6 px-1">
+            <span className="text-[12px] tracking-[1px] uppercase" style={{ color: "#888880" }}>
+              Qty <span className="font-myanmar tracking-normal">(အရေအတွက်)</span>
+            </span>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setQty((q) => Math.max(1, q - 1)); }}
+                className="w-8 h-8 rounded-sm border border-white/15 text-white/70 hover:border-white/30 hover:text-white flex items-center justify-center transition-colors text-lg"
+              >
+                −
+              </button>
+              <span className="text-xl font-bold min-w-[2ch] text-center" style={{
+                fontFamily: "'Bebas Neue', sans-serif",
+                color: isHighestTier ? GOLD_LIGHT : "#F8F4EE",
+              }}>
+                {qty}
+              </span>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setQty((q) => Math.min(maxTix, cls.seat_remaining, q + 1)); }}
+                className="w-8 h-8 rounded-sm border border-white/15 text-white/70 hover:border-white/30 hover:text-white flex items-center justify-center transition-colors text-lg"
+              >
+                +
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Total price for cart mode */}
+        {!isDisabled && cartMode && effectiveQty > 1 && (
+          <div className="mb-6 text-right text-[13px]" style={{ color: "#888880" }}>
+            Total: <span style={{ color: isHighestTier ? GOLD_LIGHT : "#F8F4EE" }} className="font-semibold">{formatMMK(cls.fee_mmk * effectiveQty)}</span>
+          </div>
+        )}
+
+        {/* Total price for non-cart multi-ticket */}
+        {!isDisabled && !cartMode && maxTix > 1 && qty > 1 && (
+          <div className="mb-6 text-right text-[13px]" style={{ color: "#888880" }}>
+            Total: <span style={{ color: isHighestTier ? GOLD_LIGHT : "#F8F4EE" }} className="font-semibold">{formatMMK(cls.fee_mmk * qty)}</span>
+          </div>
+        )}
+
+        {/* Register button — only in non-cart mode */}
+        {!isDisabled && !cartMode && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onSelect(cls.id, qty); }}
+            className={`group/btn relative w-full flex items-center justify-between px-6 py-4 text-[13px] font-medium tracking-[2px] uppercase rounded-sm border overflow-hidden transition-all duration-300 ${
+              isHighestTier
+                ? "border-[#C9A84C]/40 text-[#E8C97A] hover:border-[#C9A84C] bg-gradient-to-r from-[#C9A84C]/15 to-[#C9A84C]/5 hover:from-[#C9A84C]/25 hover:to-[#C9A84C]/10"
+                : "border-white/12 text-[#F8F4EE] hover:border-white/30"
+            }`}
+          >
             <span className="absolute left-0 top-0 bottom-0 w-0 bg-white/5 transition-all duration-500 group-hover/btn:w-full" />
-            <span className="relative">Buy Now</span>
+            <span className="relative">{maxTix > 1 && qty > 1 ? `Buy ${qty} Tickets` : "Buy Now"}</span>
             <svg className="relative w-5 h-5 transition-transform duration-300 group-hover/btn:translate-x-1" fill="none" stroke="currentColor" strokeWidth={1.5} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12h15m0 0l-6.75-6.75M19.5 12l-6.75 6.75" />
             </svg>
@@ -728,12 +848,45 @@ function EventEnrollmentPage({
   classes,
   slug,
   onSelect,
+  onCartCheckout,
 }: {
   intake: PublicIntake;
   classes: PublicClass[];
   slug: string;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, quantity: number) => void;
+  onCartCheckout: (cartItems: { class_id: string; level: string; quantity: number; fee_mmk: number; image_url: string | null }[]) => void;
 }) {
+  // Cart state
+  const [cart, setCart] = useState<Map<string, { classId: string; level: string; qty: number; fee: number; imageUrl: string | null }>>(new Map());
+
+  const cartTotal = Array.from(cart.values()).reduce((sum, item) => sum + item.fee * item.qty, 0);
+  const cartItemCount = Array.from(cart.values()).reduce((sum, item) => sum + item.qty, 0);
+
+  const hasMultipleTickets = classes.filter((c) => c.seat_remaining > 0 && c.status === "open").length > 1;
+
+  function handleAddToCart(classId: string, level: string, qty: number, fee: number, imageUrl: string | null) {
+    setCart((prev) => {
+      const next = new Map(prev);
+      if (qty <= 0) {
+        next.delete(classId);
+      } else {
+        next.set(classId, { classId, level, qty, fee, imageUrl });
+      }
+      return next;
+    });
+  }
+
+  function handleCartCheckout() {
+    const items = Array.from(cart.values()).map((item) => ({
+      class_id: item.classId,
+      level: item.level,
+      quantity: item.qty,
+      fee_mmk: item.fee,
+      image_url: item.imageUrl,
+    }));
+    onCartCheckout(items);
+  }
+
   // Extract event info from first class that has it
   const firstWithEvent = classes.find((c) => c.event_date || c.venue);
   const fmtOpts: Intl.DateTimeFormatOptions = { day: "numeric", month: "long", year: "numeric" };
@@ -951,6 +1104,9 @@ function EventEnrollmentPage({
                   onSelect={onSelect}
                   isHighestTier={cls.fee_mmk === maxFee && classes.length > 1}
                   index={i}
+                  cartMode={hasMultipleTickets}
+                  cartQty={cart.get(cls.id)?.qty ?? 0}
+                  onCartChange={handleAddToCart}
                 />
               ))}
             </div>
@@ -973,8 +1129,26 @@ function EventEnrollmentPage({
         </div>
       </footer>
 
-      {/* Sticky mobile CTA */}
-      {classes.some((c) => c.seat_remaining > 0 && c.status === "open") && (
+      {/* Sticky CTA bar */}
+      {hasMultipleTickets && cartItemCount > 0 ? (
+        <div className="fixed bottom-0 left-0 right-0 z-50"
+          style={{ background: "linear-gradient(to top, rgba(8,8,8,0.98), rgba(8,8,8,0.9))", backdropFilter: "blur(12px)" }}>
+          <div className="px-4 py-3 sm:px-8 flex items-center justify-between max-w-[1200px] mx-auto">
+            <div>
+              <div className="text-[11px] tracking-[2px] uppercase" style={{ color: GOLD }}>
+                {cartItemCount} ticket{cartItemCount !== 1 ? "s" : ""} in cart
+              </div>
+              <div className="text-[15px] font-semibold" style={{ color: "#F8F4EE" }}>
+                {formatMMK(cartTotal)}
+              </div>
+            </div>
+            <button onClick={handleCartCheckout} className="px-6 py-2.5 rounded-sm text-[12px] font-semibold tracking-[1.5px] uppercase transition-all"
+              style={{ background: `linear-gradient(135deg, ${GOLD}, ${GOLD_LIGHT})`, color: "#080808" }}>
+              Checkout
+            </button>
+          </div>
+        </div>
+      ) : hasMultipleTickets && cartItemCount === 0 && classes.some((c) => c.seat_remaining > 0 && c.status === "open") ? (
         <div className="fixed bottom-0 left-0 right-0 z-50 sm:hidden"
           style={{ background: "linear-gradient(to top, rgba(8,8,8,0.98), rgba(8,8,8,0.9))", backdropFilter: "blur(12px)" }}>
           <div className="px-4 py-3 flex items-center justify-between">
@@ -992,7 +1166,25 @@ function EventEnrollmentPage({
             </a>
           </div>
         </div>
-      )}
+      ) : !hasMultipleTickets && classes.some((c) => c.seat_remaining > 0 && c.status === "open") ? (
+        <div className="fixed bottom-0 left-0 right-0 z-50 sm:hidden"
+          style={{ background: "linear-gradient(to top, rgba(8,8,8,0.98), rgba(8,8,8,0.9))", backdropFilter: "blur(12px)" }}>
+          <div className="px-4 py-3 flex items-center justify-between">
+            <div>
+              <div className="text-[11px] tracking-[2px] uppercase" style={{ color: GOLD }}>
+                {classes.filter((c) => c.seat_remaining > 0).length} ticket{classes.filter((c) => c.seat_remaining > 0).length !== 1 ? "s" : ""} available
+              </div>
+              <div className="text-[13px] text-white/60">
+                From {formatMMK(Math.min(...classes.filter((c) => c.seat_remaining > 0).map((c) => c.fee_mmk)))}
+              </div>
+            </div>
+            <a href="#tickets" className="px-5 py-2.5 rounded-sm text-[12px] font-semibold tracking-[1.5px] uppercase transition-all"
+              style={{ background: `linear-gradient(135deg, ${GOLD}, ${GOLD_LIGHT})`, color: "#080808" }}>
+              Buy Tickets
+            </a>
+          </div>
+        </div>
+      ) : null}
 
       {/* Keyframes */}
       <style>{`
@@ -1044,8 +1236,15 @@ function IntakeLandingContent() {
     fetchIntake();
   }, [params.slug]);
 
-  function handleSelectClass(classId: string) {
-    router.push(`/enroll/form?class_id=${classId}&slug=${params.slug}`);
+  function handleSelectClass(classId: string, quantity: number = 1) {
+    const qParam = quantity > 1 ? `&quantity=${quantity}` : "";
+    router.push(`/enroll/form?class_id=${classId}&slug=${params.slug}${qParam}`);
+  }
+
+  function handleCartCheckout(cartItems: { class_id: string; level: string; quantity: number; fee_mmk: number; image_url: string | null }[]) {
+    const cartKey = `cart_${Date.now()}`;
+    sessionStorage.setItem(cartKey, JSON.stringify(cartItems));
+    router.push(`/enroll/form?slug=${params.slug}&cart_key=${cartKey}`);
   }
 
   if (loading) return <LoadingSkeleton />;
@@ -1085,6 +1284,7 @@ function IntakeLandingContent() {
         classes={classes}
         slug={params.slug}
         onSelect={handleSelectClass}
+        onCartCheckout={handleCartCheckout}
       />
     );
   }

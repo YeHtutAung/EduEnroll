@@ -32,8 +32,8 @@ async function resolveTenantByPageId(pageId: string): Promise<TenantMessenger | 
     .select("id, messenger_page_token")
     .eq("messenger_page_id", pageId)
     .eq("messenger_enabled", true)
-    .single()) as { data: TenantMessenger | null; error: unknown };
-  return data;
+    .limit(1)) as { data: TenantMessenger[] | null; error: unknown };
+  return data?.[0] ?? null;
 }
 
 // ─── GET /api/messenger/webhook ─────────────────────────────────────────────

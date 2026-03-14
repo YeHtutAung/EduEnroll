@@ -90,6 +90,12 @@ export default function Sidebar({ displayName, displayEmail, displayRole, school
       emoji: "📢",
     },
     {
+      href: "/admin/guide",
+      labelEn: "User Guide",
+      labelMm: "လမ်းညွှန်",
+      emoji: "📖",
+    },
+    {
       href: "/admin/settings",
       labelEn: "Settings",
       labelMm: "ဆက်တင်",

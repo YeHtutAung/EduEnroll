@@ -23,6 +23,8 @@ interface StudentRow {
   class_level: JlptLevel;
   intake_name: string;
   fee_mmk: number;
+  quantity: number;
+  items?: { class_level: string; quantity: number; fee_mmk: number; subtotal_mmk: number }[] | null;
 }
 
 interface FormFieldDef {
@@ -77,6 +79,7 @@ interface Filters {
 const ENROLLMENT_STATUSES: { value: EnrollmentStatus; label: string }[] = [
   { value: "pending_payment",   label: "Pending Payment"   },
   { value: "payment_submitted", label: "Payment Submitted" },
+  { value: "partial_payment",   label: "Partial Payment"   },
   { value: "confirmed",         label: "Confirmed"         },
   { value: "rejected",          label: "Rejected"          },
 ];
@@ -466,8 +469,8 @@ export default function StudentsPage() {
   // Intakes for filter dropdown
   const [intakes, setIntakes] = useState<Intake[]>([]);
 
-  // Dynamic form field columns
-  const [formFields, setFormFields] = useState<FormFieldDef[]>([]);
+  // Dynamic form field columns (used by detail modal fetch)
+  const [, setFormFields] = useState<FormFieldDef[]>([]);
 
   // Available class levels (derived from loaded students)
   const [classLevels, setClassLevels] = useState<string[]>([]);
@@ -574,53 +577,87 @@ export default function StudentsPage() {
 
       const XLSX = await import("xlsx");
 
-      const hasDynamic = formFields.length > 0;
-      const dynamicLabels = hasDynamic
-        ? formFields.map((f) => f.field_label)
-        : ["Name (English)", "Name (Myanmar)", "Phone"];
-
       const headers = [
         "No",
-        ...dynamicLabels,
+        "Name",
+        "Phone Number",
+        "Email Address",
         "Enrollment Ref",
-        tl.class,
+        "Ticket Type",
+        "Qty",
+        `${tl.fee} (MMK)`,
         tl.intake,
         "Status",
-        `${tl.fee} (MMK)`,
         "Enrolled Date",
       ];
 
-      const wsData = [
-        headers,
-        ...rows.map((s, i) => {
-          const dynamicCols = hasDynamic
-            ? formFields.map((f) => s.form_data?.[f.field_key] ?? "")
-            : [s.student_name_en, s.student_name_mm ?? "", s.phone];
+      const wsData: (string | number | null)[][] = [headers];
+      let rowNum = 0;
 
-          return [
-            i + 1,
-            ...dynamicCols,
+      for (const s of rows) {
+        rowNum++;
+        const email = s.form_data?.email || s.form_data?.email_address || "";
+        const phone = s.form_data?.phone || s.form_data?.phone_number || s.phone;
+
+        if (s.items && s.items.length > 0) {
+          // Cart enrollment: first item row has all fields, subsequent rows only ticket/qty/fee
+          s.items.forEach((ci, itemIdx) => {
+            if (itemIdx === 0) {
+              wsData.push([
+                rowNum,
+                s.student_name_en,
+                phone,
+                email,
+                s.enrollment_ref,
+                ci.class_level,
+                ci.quantity,
+                ci.subtotal_mmk,
+                s.intake_name,
+                s.status,
+                fmtDate(s.enrolled_at),
+              ]);
+            } else {
+              wsData.push([
+                null, null, null, null, null,
+                ci.class_level,
+                ci.quantity,
+                ci.subtotal_mmk,
+                null, null, null,
+              ]);
+            }
+          });
+        } else {
+          // Single enrollment: one row
+          wsData.push([
+            rowNum,
+            s.student_name_en,
+            phone,
+            email,
             s.enrollment_ref,
             s.class_level,
+            s.quantity,
+            s.fee_mmk,
             s.intake_name,
             s.status,
-            s.fee_mmk,
             fmtDate(s.enrolled_at),
-          ];
-        }),
-      ];
+          ]);
+        }
+      }
 
       const ws = XLSX.utils.aoa_to_sheet(wsData);
 
       // Column widths
       ws["!cols"] = [
         { wch: 5 },  // No
-        ...dynamicLabels.map(() => ({ wch: 22 })),
-        { wch: 16 }, // Ref
-        { wch: 8 },  // Level
-        { wch: 22 }, // Intake
-        { wch: 20 }, // Status
+        { wch: 22 }, // Name
+        { wch: 16 }, // Phone
+        { wch: 26 }, // Email
+        { wch: 18 }, // Ref
+        { wch: 24 }, // Ticket Type
+        { wch: 5 },  // Qty
         { wch: 14 }, // Fee
+        { wch: 16 }, // Intake
+        { wch: 20 }, // Status
         { wch: 14 }, // Date
       ];
 
@@ -841,12 +878,7 @@ export default function StudentsPage() {
         {/* Table */}
         {(loading || students.length > 0) && (() => {
           // Build dynamic headers: No. + form fields + fixed tail columns
-          const hasDynamic = formFields.length > 0;
-          const dynamicHeaders = hasDynamic
-            ? formFields.map((f) => f.field_label)
-            : [`${tl.student} Name`, "Phone"];
-          const fixedTailHeaders = ["Enrollment Ref", tl.class, tl.intake, `${tl.fee} (MMK)`, "Status", "Enrolled"];
-          const allHeaders = ["No.", ...dynamicHeaders, ...fixedTailHeaders];
+          const allHeaders = ["No.", "Name", "Phone Number", "Email Address", "Enrollment Ref", tl.class, "Qty", `${tl.fee} (MMK)`, tl.intake, "Status", "Enrolled"];
 
           return (
             <div className="overflow-x-auto">
@@ -866,7 +898,10 @@ export default function StudentsPage() {
                 <tbody className="divide-y divide-gray-100">
                   {loading
                     ? Array.from({ length: 8 }).map((_, i) => <RowSkeleton key={i} cols={allHeaders.length} />)
-                    : students.map((student, idx) => (
+                    : students.map((student, idx) => {
+                        const email = student.form_data?.email || student.form_data?.email_address || "";
+                        const phone = student.form_data?.phone || student.form_data?.phone_number || student.phone;
+                        return (
                         <tr
                           key={student.enrollment_id}
                           onClick={() => setSelectedStudent(student)}
@@ -877,36 +912,27 @@ export default function StudentsPage() {
                             {offset + idx + 1}
                           </td>
 
-                          {/* Dynamic form fields OR legacy fallback */}
-                          {hasDynamic ? (
-                            formFields.map((f) => {
-                              const val = student.form_data?.[f.field_key] ?? "";
-                              const isMyanmar = f.field_label.toLowerCase().includes("myanmar");
-                              return (
-                                <td key={f.field_key} className="px-4 py-3.5 text-gray-700 text-xs whitespace-nowrap max-w-[180px]">
-                                  <span className={`truncate block ${isMyanmar ? "font-myanmar" : ""} ${f.field_type === "phone" ? "tabular-nums" : ""}`}>
-                                    {val || "—"}
-                                  </span>
-                                </td>
-                              );
-                            })
-                          ) : (
-                            <>
-                              <td className="px-4 py-3.5">
-                                <p className="font-medium text-gray-800 whitespace-nowrap">
-                                  {student.student_name_en}
-                                </p>
-                                {student.student_name_mm && (
-                                  <p className="text-xs font-myanmar text-gray-400 mt-0.5">
-                                    {student.student_name_mm}
-                                  </p>
-                                )}
-                              </td>
-                              <td className="px-4 py-3.5 text-gray-600 whitespace-nowrap tabular-nums text-xs">
-                                {student.phone}
-                              </td>
-                            </>
-                          )}
+                          {/* Name */}
+                          <td className="px-4 py-3.5">
+                            <p className="font-medium text-gray-800 whitespace-nowrap">
+                              {student.student_name_en}
+                            </p>
+                            {student.student_name_mm && (
+                              <p className="text-xs font-myanmar text-gray-400 mt-0.5">
+                                {student.student_name_mm}
+                              </p>
+                            )}
+                          </td>
+
+                          {/* Phone */}
+                          <td className="px-4 py-3.5 text-gray-600 whitespace-nowrap tabular-nums text-xs">
+                            {phone || "—"}
+                          </td>
+
+                          {/* Email */}
+                          <td className="px-4 py-3.5 text-gray-600 text-xs whitespace-nowrap max-w-[180px]">
+                            <span className="truncate block">{email || "—"}</span>
+                          </td>
 
                           {/* Enrollment Ref */}
                           <td className="px-4 py-3.5">
@@ -915,27 +941,46 @@ export default function StudentsPage() {
                             </code>
                           </td>
 
-                          {/* Level */}
+                          {/* Ticket Type */}
                           <td className="px-4 py-3.5">
-                            <span
-                              className="inline-flex items-center justify-center w-9 h-7 rounded-lg text-xs font-bold text-white"
-                              style={{
-                                backgroundColor:
-                                  LEVEL_COLORS[student.class_level] ?? "#1a3f8a",
-                              }}
-                            >
-                              {student.class_level}
-                            </span>
+                            {student.items && student.items.length > 0 ? (
+                              <div className="flex items-center gap-1 flex-wrap">
+                                {student.items.map((ci, i) => (
+                                  <span
+                                    key={i}
+                                    className="inline-flex items-center justify-center px-1.5 h-6 rounded text-[10px] font-bold text-white whitespace-nowrap"
+                                    style={{ backgroundColor: LEVEL_COLORS[ci.class_level] ?? "#1a3f8a" }}
+                                  >
+                                    {ci.class_level}&times;{ci.quantity}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span
+                                className="inline-flex items-center justify-center px-2 h-7 rounded-lg text-xs font-bold text-white whitespace-nowrap"
+                                style={{
+                                  backgroundColor:
+                                    LEVEL_COLORS[student.class_level] ?? "#1a3f8a",
+                                }}
+                              >
+                                {student.class_level}
+                              </span>
+                            )}
                           </td>
 
-                          {/* Intake */}
-                          <td className="px-4 py-3.5 text-gray-600 text-xs whitespace-nowrap max-w-[140px]">
-                            <span className="truncate block">{student.intake_name}</span>
+                          {/* Quantity */}
+                          <td className="px-4 py-3.5 text-gray-700 tabular-nums text-xs text-center">
+                            {student.quantity}
                           </td>
 
                           {/* Fee */}
                           <td className="px-4 py-3.5 text-gray-700 tabular-nums text-xs whitespace-nowrap">
                             {formatMMKSimple(student.fee_mmk)}
+                          </td>
+
+                          {/* Intake/Event */}
+                          <td className="px-4 py-3.5 text-gray-600 text-xs whitespace-nowrap max-w-[140px]">
+                            <span className="truncate block">{student.intake_name}</span>
                           </td>
 
                           {/* Status */}
@@ -948,7 +993,8 @@ export default function StudentsPage() {
                             {fmtDate(student.enrolled_at)}
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                 </tbody>
               </table>
             </div>

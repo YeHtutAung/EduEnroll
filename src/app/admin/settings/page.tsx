@@ -713,6 +713,10 @@ function SettingsContent() {
   const [messengerTesting, setMessengerTesting] = useState(false);
   const [handoffTimeoutMin, setHandoffTimeoutMin] = useState(15);
   const [menuButtons, setMenuButtons] = useState<MenuButton[]>([]);
+  const [pagePickerSession, setPagePickerSession] = useState<string | null>(null);
+  const [pagePickerPages, setPagePickerPages] = useState<{ page_id: string; page_name: string }[]>([]);
+  const [pagePickerLoading, setPagePickerLoading] = useState(false);
+  const [pagePickerSelecting, setPagePickerSelecting] = useState(false);
 
   const fetchMessenger = useCallback(async () => {
     setMessengerLoading(true);
@@ -806,6 +810,43 @@ function SettingsContent() {
     }
   }
 
+  async function fetchPagePickerPages(sessionId: string) {
+    setPagePickerLoading(true);
+    try {
+      const res = await fetch(`/api/messenger/select-page?session=${sessionId}`);
+      if (!res.ok) throw new Error(`${res.status}`);
+      const data = await res.json();
+      setPagePickerPages(data.pages ?? []);
+      setPagePickerSession(sessionId);
+    } catch {
+      toast.error("Page selection session expired. Please reconnect.");
+      setPagePickerSession(null);
+    } finally {
+      setPagePickerLoading(false);
+    }
+  }
+
+  async function handlePageSelect(pageId: string) {
+    if (!pagePickerSession) return;
+    setPagePickerSelecting(true);
+    try {
+      const res = await fetch("/api/messenger/select-page", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ session_id: pagePickerSession, page_id: pageId }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      toast.success("Facebook Page connected successfully!");
+      setPagePickerSession(null);
+      setPagePickerPages([]);
+      await fetchMessenger();
+    } catch {
+      toast.error("Failed to connect page. Please try again.");
+    } finally {
+      setPagePickerSelecting(false);
+    }
+  }
+
   // ── Init ───────────────────────────────────────────────────────────────────
   useEffect(() => {
     fetchAccounts();
@@ -818,6 +859,11 @@ function SettingsContent() {
     }
     if (searchParams.get("error")) {
       toast.error("Failed to connect Facebook Page. Please try again.");
+    }
+    // Page picker from OAuth with multiple pages
+    const pickPage = searchParams.get("pick_page");
+    if (pickPage) {
+      fetchPagePickerPages(pickPage);
     }
   }, [fetchAccounts, fetchProfile, fetchMessenger]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1249,28 +1295,78 @@ function SettingsContent() {
             <Pulse className="h-10 w-full rounded-xl" />
           </div>
         ) : !messengerConnected ? (
-          /* ── Not connected ──────────────────────────────────── */
+          /* ── Not connected / Page picker ─────────────────────── */
           <div className="text-center py-8">
-            <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-blue-50 mb-4">
-              <svg className="w-7 h-7 text-blue-600" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2C6.477 2 2 6.145 2 11.243c0 2.907 1.434 5.503 3.678 7.199V22l3.38-1.856c.9.25 1.855.384 2.842.384h.1c5.523 0 10-4.145 10-9.243S17.523 2 12 2zm1.07 12.449L10.6 11.8l-4.5 2.7 4.94-5.25 2.47 2.65 4.5-2.7-4.94 5.25z" />
-              </svg>
-            </div>
-            <p className="text-sm text-gray-600 mb-1">
-              Connect your Facebook Page to enable the auto-reply bot.
-            </p>
-            <p className="text-xs text-gray-400 font-myanmar mb-5">
-              သင့် Facebook Page ကို ချိတ်ဆက်ပြီး auto-reply bot ကို ဖွင့်ပါ။
-            </p>
-            <a
-              href={`/api/messenger/connect/${messengerSubdomain || "default"}`}
-              className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#1877F2] text-white text-sm font-semibold rounded-xl hover:bg-[#166FE5] transition-colors"
-            >
-              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 2C6.477 2 2 6.145 2 11.243c0 2.907 1.434 5.503 3.678 7.199V22l3.38-1.856c.9.25 1.855.384 2.842.384h.1c5.523 0 10-4.145 10-9.243S17.523 2 12 2z" />
-              </svg>
-              Connect Facebook Page
-            </a>
+            {pagePickerLoading ? (
+              <div className="space-y-3">
+                <Pulse className="h-6 w-48 mx-auto" />
+                <Pulse className="h-12 w-full max-w-sm mx-auto rounded-xl" />
+                <Pulse className="h-12 w-full max-w-sm mx-auto rounded-xl" />
+              </div>
+            ) : pagePickerSession && pagePickerPages.length > 0 ? (
+              /* ── Page picker: multiple FB pages found ───────── */
+              <>
+                <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-blue-50 mb-4">
+                  <svg className="w-7 h-7 text-blue-600" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.477 2 2 6.145 2 11.243c0 2.907 1.434 5.503 3.678 7.199V22l3.38-1.856c.9.25 1.855.384 2.842.384h.1c5.523 0 10-4.145 10-9.243S17.523 2 12 2zm1.07 12.449L10.6 11.8l-4.5 2.7 4.94-5.25 2.47 2.65 4.5-2.7-4.94 5.25z" />
+                  </svg>
+                </div>
+                <p className="text-sm font-semibold text-gray-800 mb-1">
+                  Select your Facebook Page
+                </p>
+                <p className="text-xs text-gray-400 font-myanmar mb-5">
+                  ချိတ်ဆက်မည့် Facebook Page ကို ရွေးပါ
+                </p>
+                <div className="max-w-sm mx-auto space-y-2">
+                  {pagePickerPages.map((p) => (
+                    <button
+                      key={p.page_id}
+                      onClick={() => handlePageSelect(p.page_id)}
+                      disabled={pagePickerSelecting}
+                      className="w-full flex items-center gap-3 px-4 py-3 border border-gray-200 rounded-xl hover:border-blue-400 hover:bg-blue-50 transition-colors disabled:opacity-50 text-left"
+                    >
+                      <div className="w-9 h-9 rounded-full bg-[#1877F2] flex items-center justify-center flex-shrink-0">
+                        <span className="text-white text-sm font-bold">{p.page_name.charAt(0)}</span>
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-gray-800">{p.page_name}</p>
+                        <p className="text-xs text-gray-400">ID: {p.page_id}</p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => { setPagePickerSession(null); setPagePickerPages([]); }}
+                  className="mt-4 text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              /* ── Default: connect button ────────────────────── */
+              <>
+                <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-blue-50 mb-4">
+                  <svg className="w-7 h-7 text-blue-600" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.477 2 2 6.145 2 11.243c0 2.907 1.434 5.503 3.678 7.199V22l3.38-1.856c.9.25 1.855.384 2.842.384h.1c5.523 0 10-4.145 10-9.243S17.523 2 12 2zm1.07 12.449L10.6 11.8l-4.5 2.7 4.94-5.25 2.47 2.65 4.5-2.7-4.94 5.25z" />
+                  </svg>
+                </div>
+                <p className="text-sm text-gray-600 mb-1">
+                  Connect your Facebook Page to enable the auto-reply bot.
+                </p>
+                <p className="text-xs text-gray-400 font-myanmar mb-5">
+                  သင့် Facebook Page ကို ချိတ်ဆက်ပြီး auto-reply bot ကို ဖွင့်ပါ။
+                </p>
+                <a
+                  href={`/api/messenger/connect/${messengerSubdomain || "default"}`}
+                  className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#1877F2] text-white text-sm font-semibold rounded-xl hover:bg-[#166FE5] transition-colors"
+                >
+                  <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2C6.477 2 2 6.145 2 11.243c0 2.907 1.434 5.503 3.678 7.199V22l3.38-1.856c.9.25 1.855.384 2.842.384h.1c5.523 0 10-4.145 10-9.243S17.523 2 12 2z" />
+                  </svg>
+                  Connect Facebook Page
+                </a>
+              </>
+            )}
           </div>
         ) : (
           /* ── Connected ──────────────────────────────────────── */

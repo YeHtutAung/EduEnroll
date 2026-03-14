@@ -10,6 +10,13 @@ import type { Enrollment, Payment } from "@/types/database";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+interface CartItem {
+  class_level: string;
+  quantity: number;
+  fee_mmk: number;
+  subtotal_mmk: number;
+}
+
 interface PendingItem {
   enrollment: Enrollment;
   payment: Payment | null;
@@ -17,6 +24,9 @@ interface PendingItem {
   intake_id: string;
   intake_name: string;
   proof_signed_url: string | null;
+  proof_signed_urls: string[];
+  items: CartItem[] | null;
+  total_fee_mmk: number;
 }
 
 interface FormFieldDef {
@@ -48,6 +58,19 @@ const LEVEL_COLORS: Record<string, string> = {
   N1: "#c0392b",
 };
 
+// Deterministic color for arbitrary ticket type names (events)
+const TICKET_PALETTE = [
+  "#1a6b3c", "#0891b2", "#1a3f8a", "#b07d2a", "#c0392b",
+  "#7c3aed", "#0d9488", "#be185d", "#ea580c", "#4f46e5",
+];
+
+function ticketColor(level: string): string {
+  if (LEVEL_COLORS[level]) return LEVEL_COLORS[level];
+  let hash = 0;
+  for (let i = 0; i < level.length; i++) hash = ((hash << 5) - hash + level.charCodeAt(i)) | 0;
+  return TICKET_PALETTE[Math.abs(hash) % TICKET_PALETTE.length];
+}
+
 // ── Skeleton card ─────────────────────────────────────────────────────────────
 
 function CardSkeleton() {
@@ -76,8 +99,11 @@ function PaymentCard({
   item: PendingItem;
   onClick: () => void;
 }) {
-  const { enrollment, payment, class_level, proof_signed_url } = item;
+  const { enrollment, payment, class_level, proof_signed_url, proof_signed_urls, items } = item;
   const submitted = payment?.created_at ?? enrollment.enrolled_at;
+  const imageCount = proof_signed_urls?.length ?? (proof_signed_url ? 1 : 0);
+  const isCart = items != null && items.length > 0;
+  const totalTickets = isCart ? items.reduce((sum, i) => sum + i.quantity, 0) : null;
 
   return (
     <button
@@ -101,6 +127,21 @@ function PaymentCard({
             <span className="text-xs">No proof uploaded</span>
           </div>
         )}
+        {/* Image count badge */}
+        {imageCount > 1 && (
+          <span className="absolute top-3 left-3 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-black/60 text-white text-xs font-medium">
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+            </svg>
+            {imageCount}
+          </span>
+        )}
+        {/* Cart ticket count badge */}
+        {isCart && totalTickets && totalTickets > 1 && (
+          <span className="absolute bottom-3 left-3 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#1a3f8a]/80 text-white text-xs font-medium">
+            {totalTickets} tickets
+          </span>
+        )}
         {/* Pulsing "new" indicator */}
         <div className="absolute top-3 right-3 flex h-2.5 w-2.5">
           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#b07d2a] opacity-75" />
@@ -112,12 +153,26 @@ function PaymentCard({
       <div className="p-4 space-y-2">
         {/* Level + time */}
         <div className="flex items-center justify-between">
-          <span
-            className="inline-flex items-center justify-center w-9 h-7 rounded-lg text-xs font-bold text-white"
-            style={{ backgroundColor: LEVEL_COLORS[class_level] ?? "#1a3f8a" }}
-          >
-            {class_level}
-          </span>
+          {isCart ? (
+            <div className="flex items-center gap-1 flex-wrap">
+              {items.map((ci, i) => (
+                <span
+                  key={i}
+                  className="inline-flex items-center justify-center px-1.5 h-6 rounded text-[10px] font-bold text-white"
+                  style={{ backgroundColor: ticketColor(ci.class_level) }}
+                >
+                  {ci.class_level}&times;{ci.quantity}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <span
+              className="inline-flex items-center justify-center px-2 h-7 rounded-lg text-xs font-bold text-white whitespace-nowrap"
+              style={{ backgroundColor: ticketColor(class_level) }}
+            >
+              {class_level}
+            </span>
+          )}
           <span className="text-xs text-gray-400">{timeAgo(submitted)}</span>
         </div>
 
@@ -212,7 +267,6 @@ function RejectModal({
         aria-hidden="true"
       />
       <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl p-6">
-        {/* Icon */}
         <div className="w-11 h-11 rounded-full bg-red-100 flex items-center justify-center mb-4">
           <svg className="w-5 h-5 text-[#c0392b]" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
@@ -265,6 +319,231 @@ function RejectModal({
   );
 }
 
+// ── Request Remaining modal ─────────────────────────────────────────────────
+
+function RequestRemainingModal({
+  item,
+  onClose,
+  onDone,
+}: {
+  item: PendingItem;
+  onClose: () => void;
+  onDone: (id: string) => void;
+}) {
+  const toast = useToast();
+  const [note, setNote] = useState("");
+  const [receivedAmount, setReceivedAmount] = useState("");
+  const [processing, setProcessing] = useState(false);
+  const savingRef = useRef(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  useEffect(() => {
+    textareaRef.current?.focus();
+  }, []);
+
+  const totalAmount = item.payment?.amount_mmk ?? 0;
+  const parsedReceived = parseInt(receivedAmount.replace(/,/g, ""), 10);
+  const remainingAmount = !isNaN(parsedReceived) ? totalAmount - parsedReceived : null;
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (savingRef.current) return;
+    if (!item.payment) return;
+    if (!note.trim()) return;
+    savingRef.current = true;
+    setProcessing(true);
+    try {
+      const body: Record<string, unknown> = {
+        action: "request_remaining",
+        admin_note: note.trim(),
+      };
+      if (!isNaN(parsedReceived) && parsedReceived > 0) {
+        body.received_amount = parsedReceived;
+      }
+
+      const res = await fetch(`/api/admin/payments/${item.payment.id}/verify`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message ?? err.error ?? `${res.status}`);
+      }
+      toast.success(`Remaining payment requested for ${item.enrollment.student_name_en}.`);
+      onDone(item.enrollment.id);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Request failed.");
+    } finally {
+      savingRef.current = false;
+      setProcessing(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl p-6">
+        <div className="w-11 h-11 rounded-full bg-amber-100 flex items-center justify-center mb-4">
+          <svg className="w-5 h-5 text-[#b07d2a]" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        </div>
+
+        <h2 className="text-lg font-bold text-gray-900 mb-0.5">Request Remaining Payment</h2>
+        <p className="text-sm text-gray-500 mb-5">
+          The student will be notified to upload additional payment receipts for{" "}
+          <span className="font-semibold text-gray-800">
+            {item.enrollment.student_name_en}
+          </span>.
+        </p>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Total amount display */}
+          <div className="rounded-xl bg-gray-50 border border-gray-200 p-3">
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">Total amount</span>
+              <span className="font-semibold text-gray-900">{formatMMKSimple(totalAmount)}</span>
+            </div>
+          </div>
+
+          {/* Received amount */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              Amount Received (MMK)
+            </label>
+            <input
+              type="text"
+              inputMode="numeric"
+              value={receivedAmount}
+              onChange={(e) => setReceivedAmount(e.target.value.replace(/[^0-9,]/g, ""))}
+              placeholder="e.g. 1,000,000"
+              className="w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#b07d2a] focus:border-transparent"
+            />
+            {remainingAmount != null && remainingAmount > 0 && (
+              <p className="mt-1 text-xs text-[#c0392b] font-medium">
+                Remaining: {formatMMKSimple(remainingAmount)}
+              </p>
+            )}
+          </div>
+
+          {/* Admin note */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              Message to Student <span className="text-[#c0392b]">*</span>
+            </label>
+            <textarea
+              ref={textareaRef}
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              required
+              rows={3}
+              placeholder="e.g. We received 1,000,000 MMK. Please transfer the remaining 500,000 MMK and upload the receipt."
+              className="w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[#b07d2a] focus:border-transparent"
+            />
+          </div>
+
+          <div className="flex gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 px-4 py-2.5 border border-gray-300 rounded-xl text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={processing || !note.trim()}
+              className="flex-1 px-4 py-2.5 bg-[#b07d2a] text-white rounded-xl text-sm font-medium hover:bg-amber-700 disabled:opacity-50 transition-colors"
+            >
+              {processing ? "Sending…" : "Request Remaining"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── Image Gallery (prev/next navigation) ────────────────────────────────────
+
+function ImageGallery({
+  urls,
+  onClickFullscreen,
+}: {
+  urls: string[];
+  onClickFullscreen: (index: number) => void;
+}) {
+  const [current, setCurrent] = useState(0);
+
+  if (urls.length === 0) {
+    return (
+      <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-white/30">
+        <svg className="w-16 h-16" fill="none" viewBox="0 0 24 24" strokeWidth={0.75} stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+        </svg>
+        <p className="text-sm">No proof image uploaded</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative w-full h-full flex items-center justify-center">
+      <button
+        onClick={() => onClickFullscreen(current)}
+        className="w-full h-full flex items-center justify-center p-4 cursor-zoom-in"
+        aria-label="View proof fullscreen"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={urls[current]}
+          alt={`Payment proof ${current + 1}`}
+          className="max-w-full max-h-full object-contain"
+          style={{ maxHeight: "calc(100vh - 3rem)" }}
+        />
+      </button>
+
+      {/* Image counter */}
+      {urls.length > 1 && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-3 bg-black/60 backdrop-blur-sm rounded-full px-4 py-2">
+          <button
+            onClick={() => setCurrent((c) => Math.max(0, c - 1))}
+            disabled={current === 0}
+            className="text-white disabled:text-white/30 hover:text-white/80 transition-colors"
+            aria-label="Previous image"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+            </svg>
+          </button>
+          <span className="text-white text-xs font-medium tabular-nums">
+            {current + 1} / {urls.length}
+          </span>
+          <button
+            onClick={() => setCurrent((c) => Math.min(urls.length - 1, c + 1))}
+            disabled={current === urls.length - 1}
+            className="text-white disabled:text-white/30 hover:text-white/80 transition-colors"
+            aria-label="Next image"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+            </svg>
+          </button>
+        </div>
+      )}
+
+      {/* Click hint */}
+      <p className="absolute top-4 left-0 right-0 text-center text-xs text-white/30 pointer-events-none">
+        Click image to view fullscreen
+      </p>
+    </div>
+  );
+}
+
 // ── Review modal (fullscreen) ─────────────────────────────────────────────────
 
 function ReviewModal({
@@ -272,16 +551,20 @@ function ReviewModal({
   onClose,
   onApprove,
   onReject,
+  onRequestRemaining,
 }: {
   item: PendingItem;
   onClose: () => void;
   onApprove: () => void;
   onReject: () => void;
+  onRequestRemaining: () => void;
 }) {
-  const [fullscreenImg, setFullscreenImg] = useState(false);
+  const [fullscreenImgIndex, setFullscreenImgIndex] = useState<number | null>(null);
   const [formFields, setFormFields] = useState<FormFieldDef[]>([]);
-  const { enrollment, payment, class_level, intake_name, proof_signed_url } = item;
+  const { enrollment, payment, class_level, intake_name, proof_signed_urls, items, total_fee_mmk } = item;
+  const isCart = items != null && items.length > 0;
   const submitted = payment?.created_at ?? enrollment.enrolled_at;
+  const imageUrls = proof_signed_urls?.length ? proof_signed_urls : item.proof_signed_url ? [item.proof_signed_url] : [];
 
   // Fetch form field definitions for dynamic labels
   useEffect(() => {
@@ -295,13 +578,18 @@ function ReviewModal({
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
-        if (fullscreenImg) { setFullscreenImg(false); return; }
+        if (fullscreenImgIndex !== null) { setFullscreenImgIndex(null); return; }
         onClose();
+      }
+      // Arrow key navigation for gallery in fullscreen
+      if (fullscreenImgIndex !== null && imageUrls.length > 1) {
+        if (e.key === "ArrowLeft") setFullscreenImgIndex((i) => Math.max(0, (i ?? 0) - 1));
+        if (e.key === "ArrowRight") setFullscreenImgIndex((i) => Math.min(imageUrls.length - 1, (i ?? 0) + 1));
       }
     }
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, [onClose, fullscreenImg]);
+  }, [onClose, fullscreenImgIndex, imageUrls.length]);
 
   return (
     <>
@@ -318,35 +606,12 @@ function ReviewModal({
           </svg>
         </button>
 
-        {/* ── LEFT: Proof image panel ──────────────────────── */}
+        {/* ── LEFT: Proof image panel with gallery ──────────── */}
         <div className="flex-1 flex flex-col items-center justify-center bg-[#080d1a] relative min-h-[40vh] lg:min-h-full overflow-hidden">
-          {proof_signed_url ? (
-            <>
-              <button
-                onClick={() => setFullscreenImg(true)}
-                className="w-full h-full flex items-center justify-center p-4 cursor-zoom-in"
-                aria-label="View proof fullscreen"
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={proof_signed_url}
-                  alt="Payment proof"
-                  className="max-w-full max-h-full object-contain"
-                  style={{ maxHeight: "calc(100vh - 3rem)" }}
-                />
-              </button>
-              <p className="absolute bottom-4 left-0 right-0 text-center text-xs text-white/30 pointer-events-none">
-                Click image to view fullscreen
-              </p>
-            </>
-          ) : (
-            <div className="flex flex-col items-center gap-3 text-white/30">
-              <svg className="w-16 h-16" fill="none" viewBox="0 0 24 24" strokeWidth={0.75} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
-              </svg>
-              <p className="text-sm">No proof image uploaded</p>
-            </div>
-          )}
+          <ImageGallery
+            urls={imageUrls}
+            onClickFullscreen={(index) => setFullscreenImgIndex(index)}
+          />
         </div>
 
         {/* ── RIGHT: Student info + actions ─────────────────── */}
@@ -355,12 +620,26 @@ function ReviewModal({
           {/* Header */}
           <div className="px-6 pt-6 pb-4 border-b border-white/10">
             <div className="flex items-center gap-3">
-              <span
-                className="inline-flex items-center justify-center w-10 h-10 rounded-xl text-white text-sm font-bold shrink-0"
-                style={{ backgroundColor: LEVEL_COLORS[class_level] ?? "#1a3f8a" }}
-              >
-                {class_level}
-              </span>
+              {isCart && items ? (
+                <div className="flex items-center gap-1 flex-wrap shrink-0">
+                  {items.map((ci, i) => (
+                    <span
+                      key={i}
+                      className="inline-flex items-center justify-center px-2 h-8 rounded-lg text-xs font-bold text-white"
+                      style={{ backgroundColor: ticketColor(ci.class_level) }}
+                    >
+                      {ci.class_level}&times;{ci.quantity}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <span
+                  className="inline-flex items-center justify-center px-3 h-10 rounded-xl text-white text-sm font-bold shrink-0 whitespace-nowrap"
+                  style={{ backgroundColor: ticketColor(class_level) }}
+                >
+                  {class_level}
+                </span>
+              )}
               <div className="min-w-0">
                 <p className="text-white font-bold truncate">{enrollment.student_name_en}</p>
                 {enrollment.student_name_mm && (
@@ -409,17 +688,48 @@ function ReviewModal({
             )}
 
             <div className="border-t border-white/10 pt-4 space-y-4">
-              <InfoRow label="Class Level">
-                <span
-                  className="inline-flex items-center justify-center w-9 h-7 rounded-lg text-xs font-bold text-white"
-                  style={{ backgroundColor: LEVEL_COLORS[class_level] ?? "#1a3f8a" }}
-                >
-                  {class_level}
-                </span>
-              </InfoRow>
+              {isCart && items ? (
+                <div>
+                  <p className="text-xs text-white/35 mb-2">Ticket Breakdown</p>
+                  <div className="rounded-lg bg-white/5 border border-white/10 p-3 space-y-1.5">
+                    {items.map((ci, i) => (
+                      <div key={i} className="flex items-center justify-between text-sm">
+                        <span className="flex items-center gap-1.5 text-white/70">
+                          <span
+                            className="inline-flex items-center justify-center px-1.5 py-0.5 rounded text-[10px] font-bold text-white"
+                            style={{ backgroundColor: ticketColor(ci.class_level) }}
+                          >
+                            {ci.class_level}
+                          </span>
+                          &times; {ci.quantity}
+                        </span>
+                        <span className="text-white font-medium">{formatMMKSimple(ci.subtotal_mmk)}</span>
+                      </div>
+                    ))}
+                    <div className="border-t border-white/10 pt-1.5 flex justify-between text-sm font-semibold">
+                      <span className="text-white/50">
+                        Total ({items.reduce((s, i) => s + i.quantity, 0)} tickets)
+                      </span>
+                      <span style={{ color: "#b07d2a" }}>{formatMMKSimple(total_fee_mmk)}</span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <InfoRow label="Class Level">
+                  <span
+                    className="inline-flex items-center justify-center px-2 h-7 rounded-lg text-xs font-bold text-white whitespace-nowrap"
+                    style={{ backgroundColor: ticketColor(class_level) }}
+                  >
+                    {class_level}
+                  </span>
+                </InfoRow>
+              )}
               <InfoRow label="Intake">{intake_name || "—"}</InfoRow>
               <InfoRow label="Enrollment Status">
                 <StatusBadge status={enrollment.status} />
+              </InfoRow>
+              <InfoRow label="Receipts Uploaded">
+                <span className="text-white/70">{imageUrls.length} image{imageUrls.length !== 1 ? "s" : ""}</span>
               </InfoRow>
             </div>
 
@@ -455,6 +765,17 @@ function ReviewModal({
               Approve Payment
             </button>
 
+            {/* Request Remaining */}
+            <button
+              onClick={onRequestRemaining}
+              className="flex items-center justify-center gap-2.5 w-full py-3.5 bg-white/5 hover:bg-[#b07d2a] text-[#b07d2a] hover:text-white text-base font-bold rounded-2xl border border-[#b07d2a]/40 hover:border-[#b07d2a] transition-all"
+            >
+              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              Request Remaining
+            </button>
+
             {/* Reject */}
             <button
               onClick={onReject}
@@ -469,21 +790,53 @@ function ReviewModal({
         </div>
       </div>
 
-      {/* Fullscreen image overlay */}
-      {fullscreenImg && proof_signed_url && (
+      {/* Fullscreen image overlay with gallery navigation */}
+      {fullscreenImgIndex !== null && imageUrls[fullscreenImgIndex] && (
         <div
-          className="fixed inset-0 z-[60] bg-black flex items-center justify-center cursor-zoom-out"
-          onClick={() => setFullscreenImg(false)}
+          className="fixed inset-0 z-[60] bg-black flex items-center justify-center"
+          onClick={() => setFullscreenImgIndex(null)}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={proof_signed_url}
-            alt="Payment proof fullscreen"
-            className="max-w-full max-h-full object-contain"
+            src={imageUrls[fullscreenImgIndex]}
+            alt={`Payment proof ${fullscreenImgIndex + 1} fullscreen`}
+            className="max-w-full max-h-full object-contain cursor-zoom-out"
             onClick={(e) => e.stopPropagation()}
           />
+
+          {/* Navigation arrows */}
+          {imageUrls.length > 1 && (
+            <>
+              {fullscreenImgIndex > 0 && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setFullscreenImgIndex(fullscreenImgIndex - 1); }}
+                  className="absolute left-4 top-1/2 -translate-y-1/2 p-3 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors"
+                  aria-label="Previous image"
+                >
+                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" />
+                  </svg>
+                </button>
+              )}
+              {fullscreenImgIndex < imageUrls.length - 1 && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setFullscreenImgIndex(fullscreenImgIndex + 1); }}
+                  className="absolute right-4 top-1/2 -translate-y-1/2 p-3 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors"
+                  aria-label="Next image"
+                >
+                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+                  </svg>
+                </button>
+              )}
+              <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-sm rounded-full px-4 py-2 text-white text-sm font-medium tabular-nums">
+                {fullscreenImgIndex + 1} / {imageUrls.length}
+              </div>
+            </>
+          )}
+
           <button
-            onClick={() => setFullscreenImg(false)}
+            onClick={() => setFullscreenImgIndex(null)}
             className="absolute top-4 right-4 p-2 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors"
           >
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -517,6 +870,7 @@ export default function PaymentsPage() {
   const [reviewItem, setReviewItem] = useState<PendingItem | null>(null);
   const [approvingItem, setApprovingItem] = useState<PendingItem | null>(null);
   const [rejectingItem, setRejectingItem] = useState<PendingItem | null>(null);
+  const [requestRemainingItem, setRequestRemainingItem] = useState<PendingItem | null>(null);
   const [approving, setApproving] = useState(false);
   const approvingRef = useRef(false);
 
@@ -539,12 +893,13 @@ export default function PaymentsPage() {
     fetchQueue();
   }, [fetchQueue]);
 
-  // ── Remove item from queue (after approve/reject) ─────────────────────────
+  // ── Remove item from queue (after approve/reject/request_remaining) ────
   function removeFromQueue(enrollmentId: string) {
     setQueue((prev) => prev.filter((p) => p.enrollment.id !== enrollmentId));
     setReviewItem(null);
     setApprovingItem(null);
     setRejectingItem(null);
+    setRequestRemainingItem(null);
   }
 
   // ── Approve ───────────────────────────────────────────────────────────────
@@ -670,6 +1025,7 @@ export default function PaymentsPage() {
           onClose={() => setReviewItem(null)}
           onApprove={() => setApprovingItem(reviewItem)}
           onReject={() => setRejectingItem(reviewItem)}
+          onRequestRemaining={() => setRequestRemainingItem(reviewItem)}
         />
       )}
 
@@ -691,6 +1047,17 @@ export default function PaymentsPage() {
           item={rejectingItem}
           onClose={() => setRejectingItem(null)}
           onRejected={(enrollmentId) => {
+            removeFromQueue(enrollmentId);
+          }}
+        />
+      )}
+
+      {/* ── Request Remaining modal ──────────────────────────────── */}
+      {requestRemainingItem && (
+        <RequestRemainingModal
+          item={requestRemainingItem}
+          onClose={() => setRequestRemainingItem(null)}
+          onDone={(enrollmentId) => {
             removeFromQueue(enrollmentId);
           }}
         />
