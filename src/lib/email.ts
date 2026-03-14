@@ -42,9 +42,115 @@ export async function sendEmail({ to, subject, html }: SendEmailParams): Promise
   }
 }
 
+// ─── Org-aware labels ───────────────────────────────────────────────────────
+
+type OrgType = "language_school" | "event" | "training_center";
+
+interface OrgLabels {
+  itemLabel: string;
+  itemLabelMm: string;
+  feeLabel: string;
+  feeLabelMm: string;
+  enrollLabel: string;
+  enrollLabelMm: string;
+  confirmedTitle: string;
+  confirmedTitleMm: string;
+  approvedTitle: string;
+  approvedTitleMm: string;
+  rejectedTitle: string;
+  rejectedTitleMm: string;
+  subjectPrefix: string;
+  refLabel: string;
+  contactLine: string;
+  contactLineMm: string;
+}
+
+const ORG_LABELS: Record<OrgType, OrgLabels> = {
+  language_school: {
+    itemLabel: "Class Level",
+    itemLabelMm: "အဆင့်",
+    feeLabel: "Fee",
+    feeLabelMm: "ကျောင်းလခ",
+    enrollLabel: "Enrollment",
+    enrollLabelMm: "စာရင်းသွင်းမှု",
+    confirmedTitle: "Enrollment Successful!",
+    confirmedTitleMm: "စာရင်းသွင်းမှု အောင်မြင်ပါသည်",
+    approvedTitle: "Your Enrollment is Confirmed!",
+    approvedTitleMm: "သင့်စာရင်းသွင်းမှု အတည်ပြုပြီးပါပြီ",
+    rejectedTitle: "Enrollment Not Approved",
+    rejectedTitleMm: "စာရင်းသွင်းမှု အတည်မပြုပါ",
+    subjectPrefix: "Enrollment",
+    refLabel: "Enrollment Reference",
+    contactLine: "If you believe this is a mistake, please contact the school directly.",
+    contactLineMm: "အမှားဖြစ်ပါက ကျောင်းသို့ တိုက်ရိုက်ဆက်သွယ်ပါ။",
+  },
+  event: {
+    itemLabel: "Ticket",
+    itemLabelMm: "လက်မှတ်",
+    feeLabel: "Price",
+    feeLabelMm: "စျေးနှုန်း",
+    enrollLabel: "Order",
+    enrollLabelMm: "အော်ဒါ",
+    confirmedTitle: "Purchase Successful!",
+    confirmedTitleMm: "ဝယ်ယူမှု အောင်မြင်ပါသည်",
+    approvedTitle: "Your Order is Confirmed!",
+    approvedTitleMm: "သင့်အော်ဒါ အတည်ပြုပြီးပါပြီ",
+    rejectedTitle: "Order Not Approved",
+    rejectedTitleMm: "အော်ဒါ အတည်မပြုပါ",
+    subjectPrefix: "Order",
+    refLabel: "Order Reference",
+    contactLine: "If you believe this is a mistake, please contact us directly.",
+    contactLineMm: "အမှားဖြစ်ပါက တိုက်ရိုက်ဆက်သွယ်ပါ။",
+  },
+  training_center: {
+    itemLabel: "Course",
+    itemLabelMm: "သင်တန်း",
+    feeLabel: "Fee",
+    feeLabelMm: "သင်တန်းကြေး",
+    enrollLabel: "Enrollment",
+    enrollLabelMm: "စာရင်းသွင်းမှု",
+    confirmedTitle: "Enrollment Successful!",
+    confirmedTitleMm: "စာရင်းသွင်းမှု အောင်မြင်ပါသည်",
+    approvedTitle: "Your Enrollment is Confirmed!",
+    approvedTitleMm: "သင့်စာရင်းသွင်းမှု အတည်ပြုပြီးပါပြီ",
+    rejectedTitle: "Enrollment Not Approved",
+    rejectedTitleMm: "စာရင်းသွင်းမှု အတည်မပြုပါ",
+    subjectPrefix: "Enrollment",
+    refLabel: "Enrollment Reference",
+    contactLine: "If you believe this is a mistake, please contact us directly.",
+    contactLineMm: "အမှားဖြစ်ပါက တိုက်ရိုက်ဆက်သွယ်ပါ။",
+  },
+};
+
+function getLabels(orgType?: string): OrgLabels {
+  return ORG_LABELS[(orgType as OrgType)] ?? ORG_LABELS.language_school;
+}
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+const mmDigits: Record<string, string> = {
+  "0": "၀", "1": "၁", "2": "၂", "3": "၃", "4": "၄",
+  "5": "၅", "6": "၆", "7": "၇", "8": "၈", "9": "၉",
+};
+
+function toMmFee(amount: number): string {
+  return String(amount)
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+    .replace(/[0-9]/g, (d) => mmDigits[d]);
+}
+
+/** Clean class level display: "Madness Zone - Day 4 x1" → "Madness Zone - Day 4" */
+function cleanClassLevel(level: string): string {
+  return level.replace(/\s*x1$/i, "").trim();
+}
+
 // ─── Email templates ────────────────────────────────────────────────────────
 
-function baseLayout(content: string): string {
+function baseLayout(content: string, tenantName?: string): string {
+  const brandHeader = tenantName
+    ? `<p style="text-align: center; font-size: 13px; font-weight: 600; color: #6b7280; letter-spacing: 0.5px; margin: 0 0 20px; text-transform: uppercase;">${tenantName}</p>`
+    : "";
+
   return `
 <!DOCTYPE html>
 <html>
@@ -59,8 +165,8 @@ function baseLayout(content: string): string {
     .ref-box { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px; text-align: center; margin: 20px 0; }
     .ref-code { font-family: 'JetBrains Mono', monospace; font-size: 24px; font-weight: 700; color: #1a6b3c; letter-spacing: 1px; }
     .info-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f3f4f6; font-size: 14px; }
-    .info-label { color: #6b7280; }
-    .info-value { font-weight: 600; color: #1f2937; }
+    .info-label { color: #6b7280; min-width: 100px; }
+    .info-value { font-weight: 600; color: #1f2937; text-align: right; }
     .btn { display: inline-block; padding: 12px 28px; background: #1a6b3c; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; }
     .btn-outline { display: inline-block; padding: 10px 24px; border: 1px solid #d1d5db; color: #374151; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px; }
     .footer { text-align: center; margin-top: 24px; font-size: 12px; color: #9ca3af; }
@@ -73,10 +179,11 @@ function baseLayout(content: string): string {
 <body>
   <div class="container">
     <div class="card">
+      ${brandHeader}
       ${content}
     </div>
     <div class="footer">
-      <p>&copy; ${new Date().getFullYear()} Powered by <a href="${EMAIL_FOOTER_URL}" style="color: #1a3f8a;">EduEnroll</a></p>
+      <p>&copy; ${new Date().getFullYear()} Powered by <a href="${EMAIL_FOOTER_URL}" style="color: #1a3f8a;">KuuNyi</a></p>
     </div>
   </div>
 </body>
@@ -93,44 +200,45 @@ export function enrollmentConfirmationEmail(params: {
   feeFormatted: string;
   paymentUrl: string;
   statusUrl: string;
+  orgType?: string;
+  tenantName?: string;
 }): { subject: string; html: string } {
-  const { studentName, enrollmentRef, classLevel, feeMmk, feeFormatted, paymentUrl, statusUrl } = params;
-
-  // Myanmar numerals for fee
-  const mmDigits: Record<string, string> = { "0": "၀", "1": "၁", "2": "၂", "3": "၃", "4": "၄", "5": "၅", "6": "၆", "7": "၇", "8": "၈", "9": "၉" };
-  const feeMm = String(feeMmk).replace(/\B(?=(\d{3})+(?!\d))/g, ",").replace(/[0-9]/g, d => mmDigits[d]);
+  const { studentName, enrollmentRef, classLevel, feeMmk, feeFormatted, paymentUrl, statusUrl, orgType, tenantName } = params;
+  const l = getLabels(orgType);
+  const displayLevel = cleanClassLevel(classLevel);
+  const feeMm = toMmFee(feeMmk);
 
   return {
-    subject: `Enrollment Confirmed — ${enrollmentRef}`,
+    subject: `${l.subjectPrefix} Confirmed — ${enrollmentRef}`,
     html: baseLayout(`
       <div class="header">
         <div style="width: 56px; height: 56px; border-radius: 50%; background: #dcfce7; margin: 0 auto 12px; display: flex; align-items: center; justify-content: center;">
           <span style="font-size: 28px;">✓</span>
         </div>
-        <h1 style="margin: 0; font-size: 22px; color: #1a1a1a;">Enrollment Successful!</h1>
-        <p class="myanmar" style="margin: 4px 0 0; color: #6b7280;">စာရင်းသွင်းမှု အောင်မြင်ပါသည်</p>
+        <h1 style="margin: 0; font-size: 22px; color: #1a1a1a;">${l.confirmedTitle}</h1>
+        <p class="myanmar" style="margin: 4px 0 0; color: #6b7280;">${l.confirmedTitleMm}</p>
       </div>
 
       <p style="font-size: 14px; color: #374151;">
-        Hi <strong>${studentName}</strong>, your enrollment has been registered successfully.
+        Hi <strong>${studentName}</strong>, your ${l.enrollLabel.toLowerCase()} has been registered successfully.
       </p>
 
       <div class="ref-box">
-        <p style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #1a6b3c; margin: 0 0 8px;">Enrollment Reference</p>
+        <p style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #1a6b3c; margin: 0 0 8px;">${l.refLabel}</p>
         <p class="ref-code" style="margin: 0;">${enrollmentRef}</p>
       </div>
 
       <div style="margin: 20px 0;">
         <div class="info-row">
-          <span class="info-label">Class Level</span>
-          <span class="info-value">${classLevel}</span>
+          <span class="info-label">${l.itemLabel}</span>
+          <span class="info-value">${displayLevel}</span>
         </div>
         <div class="info-row">
-          <span class="info-label">Fee</span>
+          <span class="info-label">${l.feeLabel}</span>
           <span class="info-value">${feeFormatted}</span>
         </div>
         <div class="info-row" style="border-bottom: none;">
-          <span class="info-label myanmar">ကျောင်းလခ</span>
+          <span class="info-label myanmar">${l.feeLabelMm}</span>
           <span class="info-value myanmar">${feeMm} ကျပ်</span>
         </div>
       </div>
@@ -143,12 +251,12 @@ export function enrollmentConfirmationEmail(params: {
       </div>
 
       <p style="margin-top: 24px; font-size: 13px; color: #6b7280; text-align: center;">
-        Please make your payment and upload the transfer screenshot to complete your enrollment.
+        Please make your payment and upload the transfer screenshot to complete your ${l.enrollLabel.toLowerCase()}.
       </p>
       <p class="myanmar" style="font-size: 13px; color: #9ca3af; text-align: center;">
         ငွေပေးချေပြီး ငွေလွှဲပြေစာကို တင်သွင်းပေးပါ။
       </p>
-    `),
+    `, tenantName),
   };
 }
 
@@ -159,38 +267,57 @@ export function enrollmentApprovedEmail(params: {
   enrollmentRef: string;
   classLevel: string;
   statusUrl: string;
+  feeFormatted?: string;
+  orgType?: string;
+  tenantName?: string;
 }): { subject: string; html: string } {
-  const { studentName, enrollmentRef, classLevel, statusUrl } = params;
+  const { studentName, enrollmentRef, classLevel, statusUrl, feeFormatted, orgType, tenantName } = params;
+  const l = getLabels(orgType);
+  const displayLevel = cleanClassLevel(classLevel);
+
+  const feeRow = feeFormatted
+    ? `<div class="info-row" style="border-bottom: none;">
+        <span class="info-label">${l.feeLabel}</span>
+        <span class="info-value">${feeFormatted}</span>
+      </div>`
+    : "";
 
   return {
-    subject: `Enrollment Approved — ${enrollmentRef}`,
+    subject: `${l.subjectPrefix} Approved — ${enrollmentRef}`,
     html: baseLayout(`
       <div class="header">
         <div style="width: 56px; height: 56px; border-radius: 50%; background: #dcfce7; margin: 0 auto 12px; display: flex; align-items: center; justify-content: center;">
           <span style="font-size: 28px;">🎉</span>
         </div>
-        <h1 style="margin: 0; font-size: 22px; color: #1a6b3c;">Your Enrollment is Confirmed!</h1>
-        <p class="myanmar" style="margin: 4px 0 0; color: #6b7280;">သင့်စာရင်းသွင်းမှု အတည်ပြုပြီးပါပြီ</p>
+        <h1 style="margin: 0; font-size: 22px; color: #1a6b3c;">${l.approvedTitle}</h1>
+        <p class="myanmar" style="margin: 4px 0 0; color: #6b7280;">${l.approvedTitleMm}</p>
       </div>
 
       <div class="alert-box alert-green">
         <p style="margin: 0; font-size: 14px; color: #166534;">
-          <strong>${studentName}</strong>, your payment has been verified and your enrollment for <strong>${classLevel}</strong> is now confirmed.
+          <strong>${studentName}</strong>, your payment has been verified and your ${l.enrollLabel.toLowerCase()} for <strong>${displayLevel}</strong> is now confirmed.
         </p>
         <p class="myanmar" style="margin: 8px 0 0; font-size: 13px; color: #15803d;">
-          သင့်ငွေပေးချေမှု အတည်ပြုပြီးဖြစ်ပြီး ${classLevel} စာရင်းသွင်းမှု အတည်ပြုပြီးပါပြီ။
+          သင့်ငွေပေးချေမှု အတည်ပြုပြီးဖြစ်ပြီး ${displayLevel} ${l.enrollLabelMm} အတည်ပြုပြီးပါပြီ။
         </p>
       </div>
 
-      <div class="ref-box">
-        <p style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #1a6b3c; margin: 0 0 4px;">Reference</p>
-        <p class="ref-code" style="margin: 0; font-size: 20px;">${enrollmentRef}</p>
+      <div style="margin: 20px 0;">
+        <div class="info-row">
+          <span class="info-label">Reference</span>
+          <span class="info-value" style="font-family: monospace;">${enrollmentRef}</span>
+        </div>
+        <div class="info-row">
+          <span class="info-label">${l.itemLabel}</span>
+          <span class="info-value">${displayLevel}</span>
+        </div>
+        ${feeRow}
       </div>
 
       <div style="text-align: center; margin: 24px 0;">
-        <a href="${statusUrl}" class="btn">View Enrollment Details</a>
+        <a href="${statusUrl}" class="btn">View ${l.enrollLabel} Details</a>
       </div>
-    `),
+    `, tenantName),
   };
 }
 
@@ -206,8 +333,12 @@ export function partialPaymentEmail(params: {
   adminNote: string;
   paymentUrl: string;
   statusUrl: string;
+  orgType?: string;
+  tenantName?: string;
 }): { subject: string; html: string } {
-  const { studentName, enrollmentRef, classLevel, totalAmount, receivedAmount, remainingAmount, adminNote, paymentUrl, statusUrl } = params;
+  const { studentName, enrollmentRef, classLevel, totalAmount, receivedAmount, remainingAmount, adminNote, paymentUrl, statusUrl, orgType, tenantName } = params;
+  const l = getLabels(orgType);
+  const displayLevel = cleanClassLevel(classLevel);
 
   const fmtMmk = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 
@@ -238,10 +369,10 @@ export function partialPaymentEmail(params: {
 
       <div class="alert-box" style="background: #fffbeb; border: 1px solid #fde68a;">
         <p style="margin: 0; font-size: 14px; color: #92400e;">
-          <strong>${studentName}</strong>, we have received a partial payment for your ${classLevel} enrollment. Please complete the remaining payment to confirm your spot.
+          <strong>${studentName}</strong>, we have received a partial payment for your ${displayLevel} ${l.enrollLabel.toLowerCase()}. Please complete the remaining payment to confirm your spot.
         </p>
         <p class="myanmar" style="margin: 8px 0 0; font-size: 13px; color: #a16207;">
-          ${classLevel} စာရင်းသွင်းမှုအတွက် ငွေတစ်စိတ်တစ်ပိုင်း လက်ခံရရှိပြီးပါပြီ။ သင့်နေရာ အတည်ပြုရန် ကျန်ငွေကို ပေးချေပါ။
+          ${displayLevel} ${l.enrollLabelMm}အတွက် ငွေတစ်စိတ်တစ်ပိုင်း လက်ခံရရှိပြီးပါပြီ။ သင့်နေရာ အတည်ပြုရန် ကျန်ငွေကို ပေးချေပါ။
         </p>
       </div>
 
@@ -277,7 +408,7 @@ export function partialPaymentEmail(params: {
       <p class="myanmar" style="font-size: 13px; color: #9ca3af; text-align: center;">
         ကျန်ငွေကို လွှဲပေးပြီး ငွေလွှဲပြေစာကို တင်သွင်းပါ။
       </p>
-    `),
+    `, tenantName),
   };
 }
 
@@ -289,43 +420,47 @@ export function enrollmentRejectedEmail(params: {
   classLevel: string;
   reason?: string | null;
   statusUrl: string;
+  orgType?: string;
+  tenantName?: string;
 }): { subject: string; html: string } {
-  const { studentName, enrollmentRef, classLevel, reason, statusUrl } = params;
+  const { studentName, enrollmentRef, classLevel, reason, statusUrl, orgType, tenantName } = params;
+  const l = getLabels(orgType);
+  const displayLevel = cleanClassLevel(classLevel);
 
   return {
-    subject: `Enrollment Update — ${enrollmentRef}`,
+    subject: `${l.subjectPrefix} Update — ${enrollmentRef}`,
     html: baseLayout(`
       <div class="header">
         <div style="width: 56px; height: 56px; border-radius: 50%; background: #fee2e2; margin: 0 auto 12px; display: flex; align-items: center; justify-content: center;">
           <span style="font-size: 28px;">⚠️</span>
         </div>
-        <h1 style="margin: 0; font-size: 22px; color: #991b1b;">Enrollment Not Approved</h1>
-        <p class="myanmar" style="margin: 4px 0 0; color: #6b7280;">စာရင်းသွင်းမှု အတည်မပြုပါ</p>
+        <h1 style="margin: 0; font-size: 22px; color: #991b1b;">${l.rejectedTitle}</h1>
+        <p class="myanmar" style="margin: 4px 0 0; color: #6b7280;">${l.rejectedTitleMm}</p>
       </div>
 
       <div class="alert-box alert-red">
         <p style="margin: 0; font-size: 14px; color: #991b1b;">
-          <strong>${studentName}</strong>, your enrollment for <strong>${classLevel}</strong> (${enrollmentRef}) was not approved.
+          <strong>${studentName}</strong>, your ${l.enrollLabel.toLowerCase()} for <strong>${displayLevel}</strong> (${enrollmentRef}) was not approved.
         </p>
         ${reason ? `
         <p style="margin: 12px 0 0; font-size: 13px; color: #7f1d1d;">
           <strong>Reason:</strong> ${reason}
         </p>` : ""}
         <p class="myanmar" style="margin: 8px 0 0; font-size: 13px; color: #b91c1c;">
-          သင့်${classLevel} စာရင်းသွင်းမှုကို အတည်မပြုပါ။
+          သင့် ${displayLevel} ${l.enrollLabelMm}ကို အတည်မပြုပါ။
         </p>
       </div>
 
       <p style="font-size: 14px; color: #374151;">
-        If you believe this is a mistake, please contact the school directly.
+        ${l.contactLine}
       </p>
       <p class="myanmar" style="font-size: 13px; color: #6b7280;">
-        အမှားဖြစ်ပါက ကျောင်းသို့ တိုက်ရိုက်ဆက်သွယ်ပါ။
+        ${l.contactLineMm}
       </p>
 
       <div style="text-align: center; margin: 24px 0;">
         <a href="${statusUrl}" class="btn-outline">View Details</a>
       </div>
-    `),
+    `, tenantName),
   };
 }

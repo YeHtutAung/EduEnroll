@@ -83,32 +83,47 @@ export async function PATCH(
   const now = new Date().toISOString();
   const admin = createAdminClient(); // bypasses RLS for class seat update
 
+  // ── Fetch tenant info for email branding ───────────────────────────────────
+  const { data: tenantInfo } = await admin
+    .from("tenants")
+    .select("name, org_type")
+    .eq("id", tenantId)
+    .single() as { data: { name: string; org_type: string } | null; error: unknown };
+
+  const orgType = tenantInfo?.org_type;
+  const tenantName = tenantInfo?.name;
+
   // ── Is this a cart enrollment? ───────────────────────────────────────────────
   const isCart = enrollment.class_id === null;
 
   // ── Helper: get class level + build URLs ────────────────────────────────────
   async function getClassAndUrls() {
     let classLevel = "";
+    let totalFee = 0;
 
     if (isCart) {
       // Cart enrollment: get levels from enrollment_items
       const { data: items } = await admin
         .from("enrollment_items")
-        .select("quantity, classes(level)")
+        .select("quantity, fee_mmk, classes(level)")
         .eq("enrollment_id", enrollment!.id) as {
-        data: { quantity: number; classes: { level: string } | null }[] | null;
+        data: { quantity: number; fee_mmk: number; classes: { level: string } | null }[] | null;
         error: unknown;
       };
       if (items && items.length > 0) {
-        classLevel = items.map((i) => `${i.classes?.level ?? "?"} x${i.quantity}`).join(", ");
+        classLevel = items
+          .map((i) => i.quantity > 1 ? `${i.classes?.level ?? "?"} x${i.quantity}` : (i.classes?.level ?? "?"))
+          .join(", ");
+        totalFee = items.reduce((sum, i) => sum + i.fee_mmk * i.quantity, 0);
       }
     } else {
       const { data: cls } = await admin
         .from("classes")
-        .select("level")
+        .select("level, fee_mmk")
         .eq("id", enrollment!.class_id!)
-        .single() as { data: { level: string } | null; error: unknown };
+        .single() as { data: { level: string; fee_mmk: number } | null; error: unknown };
       classLevel = cls?.level ?? "";
+      totalFee = (cls?.fee_mmk ?? 0) * (enrollment!.quantity ?? 1);
     }
 
     const host = request.headers.get("host") ?? "localhost:3005";
@@ -116,7 +131,11 @@ export async function PATCH(
     const statusUrl = `${proto}://${host}/status?ref=${enrollment!.enrollment_ref}`;
     const paymentUrl = `${proto}://${host}/enroll/payment/${enrollment!.enrollment_ref}`;
 
-    return { classLevel, statusUrl, paymentUrl };
+    const feeFormatted = totalFee > 0
+      ? `${String(totalFee).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} MMK`
+      : undefined;
+
+    return { classLevel, statusUrl, paymentUrl, feeFormatted };
   }
 
   // ── Helper: restore seats (works for both cart and single-class) ─────────────
@@ -176,7 +195,7 @@ export async function PATCH(
     if (ee) return NextResponse.json({ error: (ee as Error).message }, { status: 500 });
 
     // Send notifications (best-effort, non-blocking)
-    const { classLevel, statusUrl, paymentUrl } = await getClassAndUrls();
+    const { classLevel, statusUrl, paymentUrl, feeFormatted } = await getClassAndUrls();
 
     // Messenger notification first (if enrolled via chatbot)
     if (enrollment.messenger_psid) {
@@ -201,6 +220,9 @@ export async function PATCH(
         enrollmentRef: enrollment.enrollment_ref,
         classLevel,
         statusUrl,
+        feeFormatted,
+        orgType,
+        tenantName,
       });
       sendEmail({ to: enrollment.email, ...emailData }).catch((err) => {
         console.error("[verify] Approval email failed:", err);
@@ -287,6 +309,8 @@ export async function PATCH(
         adminNote: (admin_note as string).trim(),
         paymentUrl,
         statusUrl,
+        orgType,
+        tenantName,
       });
       sendEmail({ to: enrollment.email, ...emailData }).catch((err) => {
         console.error("[verify] Partial payment email failed:", err);
@@ -362,6 +386,8 @@ export async function PATCH(
       classLevel: rejClassLevel,
       reason: typeof rejection_reason === "string" ? rejection_reason : null,
       statusUrl: rejStatusUrl,
+      orgType,
+      tenantName,
     });
     sendEmail({ to: enrollment.email, ...emailData }).catch((err) => {
       console.error("[verify] Rejection email failed:", err);
