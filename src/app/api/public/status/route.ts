@@ -124,13 +124,14 @@ export async function GET(request: NextRequest) {
   // ── Fetch enrollment items for cart enrollments ──────────────────
   let cartItems: { class_level: string; quantity: number; fee_mmk: number; subtotal_mmk: number }[] | null = null;
   let cartTotalFee: number | null = null;
+  let cartIntakeInfo: Pick<Intake, "name" | "year" | "slug"> | null = null;
 
   if (enrollment.class_id === null) {
     const { data: items } = await supabase
       .from("enrollment_items")
-      .select("quantity, fee_mmk, classes(level)")
+      .select("quantity, fee_mmk, classes(level, intakes(name, year, slug))")
       .eq("enrollment_id", enrollment.id) as {
-      data: { quantity: number; fee_mmk: number; classes: { level: string } | null }[] | null;
+      data: { quantity: number; fee_mmk: number; classes: { level: string; intakes: Pick<Intake, "name" | "year" | "slug"> | null } | null }[] | null;
       error: unknown;
     };
 
@@ -142,6 +143,12 @@ export async function GET(request: NextRequest) {
         subtotal_mmk: i.fee_mmk * i.quantity,
       }));
       cartTotalFee = cartItems.reduce((sum, i) => sum + i.subtotal_mmk, 0);
+
+      // Get intake info from first cart item (all items share the same intake)
+      const firstIntake = items[0]?.classes?.intakes;
+      if (firstIntake && !enrollment.classes?.intakes) {
+        cartIntakeInfo = firstIntake;
+      }
     }
   }
 
@@ -165,7 +172,7 @@ export async function GET(request: NextRequest) {
     : null;
 
   // ── Build intake slug (e.g. "april-2026") ────────────────────────
-  const intakeInfo = enrollment.classes?.intakes;
+  const intakeInfo = enrollment.classes?.intakes ?? cartIntakeInfo;
   const intakeSlug = intakeInfo
     ? (intakeInfo.slug ?? `${intakeInfo.name.toLowerCase().replace(/\s+/g, "-")}-${intakeInfo.year}`)
     : null;
