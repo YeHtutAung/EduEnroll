@@ -34,6 +34,16 @@ interface EnrollmentInfo {
   } | null;
 }
 
+interface AvailableClass {
+  id: string;
+  level: string;
+  fee_mmk: number;
+  fee_formatted: string;
+  seat_remaining: number;
+  status: string;
+  image_url: string | null;
+}
+
 interface BankAccountInfo {
   bank_name: string;
   account_number: string;
@@ -560,6 +570,7 @@ export default function PaymentInstructionsPage() {
   const [enrollment, setEnrollment] = useState<EnrollmentInfo | null>(null);
   const [bankAccounts, setBankAccounts] = useState<BankAccountInfo[]>([]);
   const [orgType, setOrgType] = useState<string>("language_school");
+  const [availableClasses, setAvailableClasses] = useState<AvailableClass[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -586,12 +597,26 @@ export default function PaymentInstructionsPage() {
           setBankAccounts(banksData);
         }
 
-        // Fetch intake data (for orgType labels + available classes)
+        // Fetch intake data (for orgType labels + available classes for promotion)
         if (statusData.intake_slug) {
           try {
             const intakeRes = await fetch(`/api/public/enroll/${encodeURIComponent(statusData.intake_slug)}`);
             const intakeData = await intakeRes.json();
             if (intakeData.labels?.orgType) setOrgType(intakeData.labels.orgType);
+
+            // Build set of already-purchased class levels
+            const purchasedLevels = new Set<string>();
+            if (statusData.items) {
+              statusData.items.forEach((item: CartItem) => purchasedLevels.add(item.class_level));
+            } else if (statusData.class_level) {
+              purchasedLevels.add(statusData.class_level);
+            }
+
+            // Filter to open classes not already purchased
+            const classes: AvailableClass[] = (intakeData.classes ?? []).filter(
+              (c: AvailableClass) => c.status === "open" && c.seat_remaining > 0 && !purchasedLevels.has(c.level),
+            );
+            setAvailableClasses(classes);
           } catch { /* non-critical */ }
         }
       } catch {
@@ -879,6 +904,36 @@ export default function PaymentInstructionsPage() {
               </p>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Other tickets promotion (only on submitted/status view) ── */}
+      {!showUpload && availableClasses.length > 0 && enrollment.intake_slug && (
+        <div className="mt-8 rounded-xl border border-gray-200 bg-white p-5">
+          <h3 className="mb-1 text-sm font-semibold text-gray-900">
+            {orgType === "event" ? "Other Tickets Available" : "Other Classes Available"}
+          </h3>
+          <p className="mb-4 text-xs text-gray-500">
+            {orgType === "event"
+              ? "Check out more ticket types for this event!"
+              : "Explore other classes you can enroll in."}
+          </p>
+          <div className="space-y-2">
+            {availableClasses.map((cls) => (
+              <div key={cls.id} className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium text-gray-900">{cls.level}</p>
+                  <p className="text-xs text-gray-500">{cls.fee_formatted} &middot; {cls.seat_remaining} left</p>
+                </div>
+                <a
+                  href={`/enroll/${encodeURIComponent(enrollment.intake_slug!)}`}
+                  className="rounded-lg bg-[#1a6b3c] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#155d33] transition-colors"
+                >
+                  {orgType === "event" ? "Get Tickets" : "Enroll"}
+                </a>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
