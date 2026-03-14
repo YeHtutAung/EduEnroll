@@ -34,15 +34,6 @@ interface EnrollmentInfo {
   } | null;
 }
 
-interface AvailableClass {
-  id: string;
-  level: string;
-  fee_mmk: number;
-  fee_formatted: string;
-  seat_remaining: number;
-  status: string;
-}
-
 interface BankAccountInfo {
   bank_name: string;
   account_number: string;
@@ -568,26 +559,10 @@ export default function PaymentInstructionsPage() {
   const params = useParams<{ ref: string }>();
   const [enrollment, setEnrollment] = useState<EnrollmentInfo | null>(null);
   const [bankAccounts, setBankAccounts] = useState<BankAccountInfo[]>([]);
-  const [availableClasses, setAvailableClasses] = useState<AvailableClass[]>([]);
   const [orgType, setOrgType] = useState<string>("language_school");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch other available classes from the same intake
-  async function fetchAvailableClasses(intakeSlug: string) {
-    try {
-      const res = await fetch(`/api/public/enroll/${encodeURIComponent(intakeSlug)}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data.labels?.orgType) setOrgType(data.labels.orgType);
-      const classes = (data.classes ?? []) as AvailableClass[];
-      setAvailableClasses(
-        classes.filter((c) => c.status === "open" && c.seat_remaining > 0),
-      );
-    } catch {
-      // Non-critical
-    }
-  }
 
   useEffect(() => {
     async function fetchData() {
@@ -615,14 +590,8 @@ export default function PaymentInstructionsPage() {
         if (statusData.intake_slug) {
           try {
             const intakeRes = await fetch(`/api/public/enroll/${encodeURIComponent(statusData.intake_slug)}`);
-            if (intakeRes.ok) {
-              const intakeData = await intakeRes.json();
-              if (intakeData.labels?.orgType) setOrgType(intakeData.labels.orgType);
-              const classes = (intakeData.classes ?? []) as AvailableClass[];
-              setAvailableClasses(
-                classes.filter((c) => c.status === "open" && c.seat_remaining > 0),
-              );
-            }
+            const intakeData = await intakeRes.json();
+            if (intakeData.labels?.orgType) setOrgType(intakeData.labels.orgType);
           } catch { /* non-critical */ }
         }
       } catch {
@@ -639,9 +608,6 @@ export default function PaymentInstructionsPage() {
       .then((res) => res.json())
       .then((data: EnrollmentInfo) => {
         setEnrollment(data);
-        if (data.intake_slug) {
-          fetchAvailableClasses(data.intake_slug);
-        }
       })
       .catch(() => {});
   }
@@ -722,42 +688,6 @@ export default function PaymentInstructionsPage() {
               <span>Total</span>
               <span>{formatMMKSimple(totalFee)}</span>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Other available tickets (promotion) ────────────────── */}
-      {showUpload && availableClasses.length > 0 && enrollment.intake_slug && (
-        <div className="mb-8 rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50 p-5">
-          <h3 className="mb-1 text-sm font-bold text-blue-900">
-            {orgType === "event" ? "Other Tickets Available" : "Other Classes Available"}
-          </h3>
-          <p className="mb-4 text-xs text-blue-600">
-            {orgType === "event"
-              ? "Want to add more? Start a new order for these tickets!"
-              : "Interested in other classes? Enroll separately!"}
-          </p>
-          <div className="space-y-2">
-            {availableClasses.map((cls) => (
-              <a
-                key={cls.id}
-                href={`/enroll/${enrollment.intake_slug}`}
-                className="flex items-center justify-between rounded-lg border border-blue-100 bg-white px-4 py-3 transition-colors hover:border-blue-300 hover:shadow-sm"
-              >
-                <div>
-                  <p className="text-sm font-semibold text-gray-900">{cls.level}</p>
-                  <p className="text-xs text-gray-500">{cls.fee_formatted}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
-                    {cls.seat_remaining} left
-                  </span>
-                  <svg className="h-4 w-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </div>
-              </a>
-            ))}
           </div>
         </div>
       )}
@@ -952,41 +882,6 @@ export default function PaymentInstructionsPage() {
         </div>
       )}
 
-      {/* ── Other available classes ────────────────────────────────── */}
-      {!showUpload && availableClasses.length > 0 && enrollment.intake_slug && (
-        <div className="mt-10 border-t border-gray-200 pt-8">
-          <h3 className="mb-2 text-center text-lg font-semibold text-gray-900">
-            {orgType === "event" ? "Buy Another Ticket" : "Enroll in Another Class"}
-          </h3>
-          {orgType !== "event" && (
-            <p className="font-myanmar mb-6 text-center text-sm text-gray-500">
-              အခြားသင်တန်းတစ်ခု ထပ်မံစာရင်းသွင်းမည်
-            </p>
-          )}
-          <div className="space-y-3">
-            {availableClasses.map((cls) => (
-              <a
-                key={cls.id}
-                href={`/enroll/${enrollment.intake_slug}`}
-                className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-4 transition-colors hover:border-[#1a3f8a] hover:bg-blue-50/50"
-              >
-                <div>
-                  <p className="text-base font-semibold text-gray-900">{cls.level}</p>
-                  <p className="text-sm text-gray-500">{cls.fee_formatted}</p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-gray-400">
-                    {cls.seat_remaining} {orgType === "event" ? "left" : "seats left"}
-                  </span>
-                  <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </div>
-              </a>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
