@@ -124,7 +124,7 @@ export async function POST(request: NextRequest) {
 
   // ── 6. Generate orderId and call MyanMyanPay ───────────────
   const orderId = `KNY-${tenantId.slice(0, 8)}-${enrollment.id.slice(0, 8)}-${Date.now()}`;
-  const callbackUrl = `${process.env.NEXT_PUBLIC_APP_URL}/api/public/payments/mmqr/webhook`;
+  const callbackUrl = "https://kuunyi.com/api/sandbox/payments/webhook";
 
   try {
     const result = await mmpay.sandboxPay({
