@@ -185,9 +185,9 @@ export async function GET(request: NextRequest) {
   // ── Fetch tenant org_type ─────────────────────────────────────
   const { data: tenantInfo } = await supabase
     .from("tenants")
-    .select("org_type")
+    .select("org_type, auto_cancel_hours")
     .eq("id", tenantId)
-    .single() as { data: { org_type: string } | null; error: unknown };
+    .single() as { data: { org_type: string; auto_cancel_hours: number } | null; error: unknown };
 
   return NextResponse.json({
     enrollment_ref:   enrollment.enrollment_ref,
@@ -207,5 +207,7 @@ export async function GET(request: NextRequest) {
     payment:          paymentBlock,
     items:            cartItems,
     org_type:         tenantInfo?.org_type ?? "language_school",
+    enrolled_at:      enrollment.enrolled_at,
+    auto_cancel_hours: tenantInfo?.auto_cancel_hours ?? 72,
   });
 }
