@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
 
 // ── Org type presets ──────────────────────────────────────────────────────────
 
@@ -199,9 +200,7 @@ export default function RegisterPage() {
       <header className="border-b border-slate-200 bg-white/80 backdrop-blur-sm sticky top-0 z-30">
         <div className="max-w-5xl mx-auto flex items-center justify-between px-4 sm:px-6 h-14">
           <Link href="/" className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-[#6d28d9] flex items-center justify-center shrink-0">
-              <span className="text-white font-bold text-sm select-none">K</span>
-            </div>
+            <Image src="/kuunyi-logo.jpeg" alt="KuuNyi" width={32} height={32} className="rounded-lg shrink-0" />
             <span className="text-base font-bold text-slate-900">KuuNyi</span>
           </Link>
           <Link
@@ -216,18 +215,18 @@ export default function RegisterPage() {
       {/* ── Form card ──────────────────────────────────────── */}
       <main className="max-w-lg mx-auto px-4 py-12 sm:py-16">
         <div className="text-center mb-8">
-          <h1 className="text-2xl font-bold text-slate-900">Register Your School</h1>
+          <h1 className="text-2xl font-bold text-slate-900">Register Your Organization</h1>
           <p className="text-sm font-myanmar text-slate-500 mt-1">
-            သင်တန်းကျောင်း မှတ်ပုံတင်ပါ
+            သင့်အဖွဲ့အစည်းကို မှတ်ပုံတင်ပါ
           </p>
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8">
           <form onSubmit={handleSubmit} noValidate className="space-y-5">
-            {/* School Name English */}
+            {/* Organization Name English */}
             <div>
               <label htmlFor="schoolNameEn" className="block text-sm font-medium text-slate-700">
-                School Name (English) <span className="text-red-500">*</span>
+                Organization Name (English) <span className="text-red-500">*</span>
               </label>
               <input
                 id="schoolNameEn"
@@ -240,11 +239,11 @@ export default function RegisterPage() {
               />
             </div>
 
-            {/* School Name Myanmar */}
+            {/* Organization Name Myanmar */}
             <div>
               <label htmlFor="schoolNameMm" className="block text-sm font-medium text-slate-700">
-                School Name (Myanmar){" "}
-                <span className="font-myanmar font-normal text-slate-400">/ ကျောင်းအမည်</span>{" "}
+                Organization Name (Myanmar){" "}
+                <span className="font-myanmar font-normal text-slate-400">/ အဖွဲ့အစည်းအမည်</span>{" "}
                 <span className="text-red-500">*</span>
               </label>
               <input
@@ -320,7 +319,7 @@ export default function RegisterPage() {
                   value={subdomain}
                   onChange={(e) => handleSubdomainChange(e.target.value)}
                   className="flex-1 rounded-l-lg border border-r-0 border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#6d28d9] focus:border-transparent transition"
-                  placeholder="your-school"
+                  placeholder="your-org"
                 />
                 <span className="inline-flex items-center px-3 rounded-r-lg border border-l-0 border-slate-300 bg-slate-50 text-sm text-slate-500">
                   .kuunyi.com
@@ -346,7 +345,7 @@ export default function RegisterPage() {
                 value={adminEmail}
                 onChange={(e) => setAdminEmail(e.target.value)}
                 className="mt-1.5 w-full rounded-lg border border-slate-300 px-3.5 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#6d28d9] focus:border-transparent transition"
-                placeholder="admin@your-school.com"
+                placeholder="admin@your-org.com"
               />
             </div>
 
