@@ -146,27 +146,11 @@ export async function POST(request: NextRequest) {
       status: "pending",
     } as never);
 
-    const r = result as Record<string, unknown>;
-
-    // SDK returns Axios error objects instead of throwing
-    if (r.isAxiosError) {
-      console.error("[mmqr] SDK error:", r.message, "code:", r.code);
-      // Remove the orphaned payment record
-      await supabase.from("payments").delete().eq("payment_ref", orderId);
-      return NextResponse.json(
-        {
-          error: "Payment Gateway Error",
-          message: `MyanMyanPay API unreachable: ${r.message}`,
-        },
-        { status: 502 },
-      );
-    }
-
     return NextResponse.json({
-      qr: r.qr ?? r.qrCode ?? r.qr_code ?? r.qrUrl ?? r.qr_url ?? null,
+      qr: result.qr ?? null,
       orderId,
       amount: totalFee,
-      transactionRefId: r.transactionRefId ?? r.transaction_ref_id ?? null,
+      transactionRefId: result.transactionRefId ?? null,
     });
   } catch (err) {
     console.error("[mmqr] MyanMyanPay SDK error:", err);
