@@ -510,6 +510,10 @@ function SettingsContent() {
   });
   const [savingOrg, setSavingOrg] = useState(false);
 
+  // ── Enrollment policy ──────────────────────────────────────────────────────
+  const [autoCancelHours, setAutoCancelHours] = useState(72);
+  const [savingPolicy, setSavingPolicy] = useState(false);
+
   const fetchProfile = useCallback(async () => {
     setLoadingProfile(true);
     try {
@@ -532,7 +536,7 @@ function SettingsContent() {
       // Fetch tenant name + logo + org labels
       const { data: tenant } = await supabase
         .from("tenants")
-        .select("name, logo_url, org_type, label_intake, label_class, label_student, label_seat, label_fee")
+        .select("name, logo_url, org_type, label_intake, label_class, label_student, label_seat, label_fee, auto_cancel_hours")
         .eq("id", profile.tenant_id)
         .single() as {
         data: {
@@ -544,6 +548,7 @@ function SettingsContent() {
           label_student: string;
           label_seat: string;
           label_fee: string;
+          auto_cancel_hours: number;
         } | null;
         error: unknown;
       };
@@ -558,6 +563,7 @@ function SettingsContent() {
           seat: tenant.label_seat ?? "Seat",
           fee: tenant.label_fee ?? "Fee",
         });
+        setAutoCancelHours(tenant.auto_cancel_hours ?? 72);
       }
     } catch {
       // non-critical; keep defaults
@@ -697,6 +703,27 @@ function SettingsContent() {
       toast.error(err instanceof Error ? err.message : "Failed to save organization settings.");
     } finally {
       setSavingOrg(false);
+    }
+  }
+
+  // ── Enrollment policy save ──────────────────────────────────────────────
+  async function handleSavePolicy(e: React.FormEvent) {
+    e.preventDefault();
+    if (!tenantId) return;
+    setSavingPolicy(true);
+    try {
+      const val = Math.max(0, Math.min(720, Math.round(autoCancelHours)));
+      const { error } = await supabase
+        .from("tenants")
+        .update({ auto_cancel_hours: val } as never)
+        .eq("id", tenantId);
+      if (error) throw new Error((error as Error).message);
+      setAutoCancelHours(val);
+      toast.success(val === 0 ? "Auto-cancel disabled." : `Auto-cancel set to ${val} hours.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save enrollment policy.");
+    } finally {
+      setSavingPolicy(false);
     }
   }
 
@@ -1119,7 +1146,94 @@ function SettingsContent() {
         )}
       </SectionCard>
 
-      {/* ── Section 4: School Profile ────────────────────────────────── */}
+      {/* ── Section 4: Enrollment Policy ──────────────────────────────── */}
+      <SectionCard title="Enrollment Policy" subtitle="Configure automatic cancellation for unpaid enrollments.">
+        <form onSubmit={handleSavePolicy} className="space-y-5">
+          {/* Description */}
+          <p className="text-sm text-gray-600">
+            Enrollments in <span className="font-medium text-gray-800">Pending Payment</span> status will be
+            automatically cancelled after this duration, and seats will be released.
+          </p>
+          <p className="font-myanmar text-xs text-gray-400">
+            ငွေပေးချေမှု စောင့်ဆိုင်းနေသော စာရင်းသွင်းမှုများကို သတ်မှတ်ထားသော အချိန်ကာလပြီးနောက် အလိုအလျောက် ပယ်ဖျက်ပါမည်။
+          </p>
+
+          {/* Preset buttons */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Quick presets</label>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { label: "24h", value: 24 },
+                { label: "48h", value: 48 },
+                { label: "72h", value: 72 },
+                { label: "7 days", value: 168 },
+                { label: "Never", value: 0 },
+              ].map((preset) => (
+                <button
+                  key={preset.value}
+                  type="button"
+                  onClick={() => setAutoCancelHours(preset.value)}
+                  className={`px-4 py-2 text-sm font-medium rounded-lg border transition-colors ${
+                    autoCancelHours === preset.value
+                      ? "bg-[#1a3f8a] text-white border-[#1a3f8a]"
+                      : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Custom input */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">
+              Custom duration (hours)
+            </label>
+            <div className="flex items-center gap-3">
+              <input
+                type="number"
+                min={0}
+                max={720}
+                value={autoCancelHours}
+                onChange={(e) => setAutoCancelHours(Number(e.target.value) || 0)}
+                className="w-32 border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
+              />
+              <span className="text-sm text-gray-500">
+                {autoCancelHours === 0
+                  ? "Auto-cancel disabled"
+                  : autoCancelHours < 24
+                    ? `${autoCancelHours} hour${autoCancelHours !== 1 ? "s" : ""}`
+                    : `${(autoCancelHours / 24).toFixed(1).replace(/\.0$/, "")} day${autoCancelHours >= 48 ? "s" : ""} (${autoCancelHours}h)`}
+              </span>
+            </div>
+          </div>
+
+          {/* Warning for 0 */}
+          {autoCancelHours === 0 && (
+            <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3">
+              <p className="text-sm text-amber-800">
+                Auto-cancel is disabled. Unpaid enrollments will remain in Pending Payment status indefinitely and seats will not be released automatically.
+              </p>
+              <p className="font-myanmar text-xs text-amber-700 mt-1">
+                အလိုအလျောက် ပယ်ဖျက်ခြင်း ပိတ်ထားသည်။ ငွေမပေးရသေးသော စာရင်းသွင်းမှုများ ဆက်လက်ရှိနေမည်။
+              </p>
+            </div>
+          )}
+
+          <div className="flex justify-end pt-2">
+            <button
+              type="submit"
+              disabled={savingPolicy}
+              className="px-6 py-2.5 bg-[#1a3f8a] text-white text-sm font-medium rounded-xl hover:bg-blue-900 disabled:opacity-50 transition-colors"
+            >
+              {savingPolicy ? "Saving…" : "Save Policy"}
+            </button>
+          </div>
+        </form>
+      </SectionCard>
+
+      {/* ── Section 5: School Profile ────────────────────────────────── */}
       <SectionCard title={orgType === "event" ? "Organization Profile" : "School Profile"} subtitle={orgType === "event" ? "Update your organization name displayed to customers." : "Update your school name displayed to students."}>
 
         {loadingProfile ? (

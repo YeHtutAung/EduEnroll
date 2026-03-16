@@ -115,6 +115,7 @@ export interface Tenant {
   messenger_greeting: string | null;
   handoff_timeout_min: number;
   menu_buttons: MenuButton[] | null;
+  auto_cancel_hours: number;        // default 72, 0 = disabled
   created_at: string;
 }
 
