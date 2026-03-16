@@ -128,10 +128,11 @@ export async function POST(request: NextRequest) {
   // Derive callback URL from the incoming request host
   const host = request.headers.get("host") ?? "kuunyi.com";
   const protocol = host.includes("localhost") ? "http" : "https";
-  const callbackUrl = `${protocol}://${host}/api/public/payments/mmqr/webhook`;
 
   // Use sandbox or production based on env var (default: sandbox)
   const useProd = process.env.MMPAY_MODE === "production";
+  const callbackPath = useProd ? "/api/payments/webhook" : "/api/sandbox/payments/webhook";
+  const callbackUrl = `${protocol}://${host}${callbackPath}`;
 
   try {
     const pay = useProd ? mmpay.pay : mmpay.sandboxPay;
