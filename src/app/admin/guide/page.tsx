@@ -415,7 +415,7 @@ function buildGuideTopics(L: OrgLabels): GuideTopic[] {
       id: "messenger-bot",
       title: "Facebook Messenger Bot",
       icon: "💬",
-      videoId: null,
+      videoId: "A684gbpPE3k",
       content: (
         <div className="space-y-4">
           <p className="text-gray-600">
