@@ -411,6 +411,76 @@ function buildGuideTopics(L: OrgLabels): GuideTopic[] {
         </div>
       ),
     },
+    {
+      id: "messenger-bot",
+      title: "Facebook Messenger Bot",
+      icon: "💬",
+      videoId: null,
+      content: (
+        <div className="space-y-4">
+          <p className="text-gray-600">
+            Connect your Facebook Page to enable an auto-reply bot that helps {studentLower}s check
+            enrollment status, view registration links, and get answers to common questions — all through
+            Messenger.
+          </p>
+          <h3 className="text-sm font-semibold text-gray-900">Connecting Your Facebook Page</h3>
+          <ol className="space-y-3 text-sm text-gray-700">
+            <StepItem n={1} title="Go to Settings">
+              Click &quot;Settings&quot; in the sidebar (owner-only). Scroll down to the &quot;Facebook
+              Messenger Bot&quot; section.
+            </StepItem>
+            <StepItem n={2} title='Click "Connect Facebook Page"'>
+              You&apos;ll be redirected to Facebook to authorize the connection. Make sure you&apos;re
+              logged into the Facebook account that manages your Page.
+            </StepItem>
+            <StepItem n={3} title="Select your Page">
+              If you manage multiple Facebook Pages, you&apos;ll see a list to choose from. Select the
+              Page you want to connect.
+            </StepItem>
+            <StepItem n={4} title="Enable the bot">
+              After connecting, toggle the bot switch to &quot;On&quot;. The bot will start responding to
+              messages on your Page automatically.
+            </StepItem>
+          </ol>
+          <h3 className="text-sm font-semibold text-gray-900 pt-2">Customizing the Bot</h3>
+          <ul className="space-y-2 text-sm text-gray-700">
+            <BulletItem>
+              <strong>Custom Greeting:</strong> Set a welcome message that {studentLower}s see when they
+              first message your Page (e.g. &quot;Welcome! How can we help you?&quot;).
+            </BulletItem>
+            <BulletItem>
+              <strong>Menu Buttons:</strong> Customize the quick-reply buttons shown to users. You can
+              rename buttons, show or hide them using the toggle switches.
+            </BulletItem>
+            <BulletItem>
+              <strong>Live Agent Handoff:</strong> When a {studentLower} requests to speak with a human,
+              the bot pauses for a configurable duration (default 15 minutes) so your team can respond
+              directly.
+            </BulletItem>
+          </ul>
+          <h3 className="text-sm font-semibold text-gray-900 pt-2">Managing the Connection</h3>
+          <ul className="space-y-2 text-sm text-gray-700">
+            <BulletItem>
+              <strong>Enable / Disable:</strong> Toggle the bot on or off anytime without disconnecting
+              the Page. When disabled, the bot won&apos;t respond to messages.
+            </BulletItem>
+            <BulletItem>
+              <strong>Disconnect:</strong> To fully remove the connection, click &quot;Disconnect
+              Page&quot;. You can reconnect anytime.
+            </BulletItem>
+          </ul>
+          <TipBox color="blue">
+            <strong>Tip:</strong> After connecting, click &quot;Save Bot Settings&quot; to apply your
+            custom greeting, menu buttons, and handoff timeout changes.
+          </TipBox>
+          <TipBox color="amber">
+            <strong>Note:</strong> The bot uses your organization&apos;s registration link and data to
+            answer {studentLower} queries. Make sure your {intakeLower}s and {classLower}s are set up
+            before enabling the bot.
+          </TipBox>
+        </div>
+      ),
+    },
   ];
 }
 
