@@ -299,6 +299,118 @@ function buildGuideTopics(L: OrgLabels): GuideTopic[] {
         </div>
       ),
     },
+    {
+      id: "student-enrollment",
+      title: `${L.student} Enrollment & Payment`,
+      icon: "👤",
+      videoId: null,
+      content: (
+        <div className="space-y-4">
+          <p className="text-gray-600">
+            This is what your {studentLower}s see when they register and pay. Share this flow with your
+            team so everyone understands the {studentLower} experience.
+          </p>
+          <h3 className="text-sm font-semibold text-gray-900">Registration Flow</h3>
+          <ol className="space-y-3 text-sm text-gray-700">
+            <StepItem n={1} title="Open the registration link">
+              {L.student}s open the public registration URL you shared. They see available{" "}
+              {classLower}s with {L.fee.toLowerCase()}s and {L.seat.toLowerCase()} availability.
+            </StepItem>
+            <StepItem n={2} title={`Select ${classLower} and quantity`}>
+              They choose which {classLower}(s) to register for and set the quantity if multiple{" "}
+              {L.seat.toLowerCase()}s are needed.
+            </StepItem>
+            <StepItem n={3} title="Fill in the registration form">
+              They enter their name, phone number, and any custom fields you configured in the form
+              builder.
+            </StepItem>
+            <StepItem n={4} title="Review and submit">
+              They review their order summary and submit the registration. A reference number is generated
+              (e.g. &quot;NM-2026-00042&quot;).
+            </StepItem>
+          </ol>
+          <h3 className="text-sm font-semibold text-gray-900 pt-2">Payment Flow</h3>
+          <ol className="space-y-3 text-sm text-gray-700">
+            <StepItem n={1} title="View payment instructions">
+              After registering, {studentLower}s are taken to the payment page showing your bank
+              accounts, QR codes, and the total amount due.
+            </StepItem>
+            <StepItem n={2} title="Make the transfer">
+              They transfer the {L.fee.toLowerCase()} to one of your bank accounts using mobile banking,
+              KPay, Wave, etc.
+            </StepItem>
+            <StepItem n={3} title="Upload payment screenshot">
+              They upload a screenshot of the transfer confirmation as proof of payment.
+            </StepItem>
+            <StepItem n={4} title="Wait for verification">
+              The enrollment status changes to &quot;Payment Under Review&quot;. They can check their
+              status anytime using the reference number.
+            </StepItem>
+          </ol>
+          <TipBox color="amber">
+            <strong>Auto-cancel:</strong> If a {studentLower} doesn&apos;t submit payment within the
+            configured deadline (set in Settings → Enrollment Policy), their enrollment is automatically
+            cancelled and {L.seat.toLowerCase()}s are released.
+          </TipBox>
+        </div>
+      ),
+    },
+    {
+      id: "payment-management",
+      title: "Approve / Reject Payments",
+      icon: "✅",
+      videoId: null,
+      content: (
+        <div className="space-y-4">
+          <p className="text-gray-600">
+            When {studentLower}s submit payment screenshots, you need to verify them. You can approve,
+            reject, or record partial payments.
+          </p>
+          <h3 className="text-sm font-semibold text-gray-900">Reviewing Payments</h3>
+          <ol className="space-y-3 text-sm text-gray-700">
+            <StepItem n={1} title="Go to Payments">
+              Click &quot;Payments&quot; in the sidebar. You&apos;ll see all pending payments that need
+              review.
+            </StepItem>
+            <StepItem n={2} title="View payment details">
+              Click on a payment to see the {studentLower}&apos;s information, the uploaded screenshot,
+              and the amount due.
+            </StepItem>
+            <StepItem n={3} title="Verify the screenshot">
+              Compare the uploaded screenshot with your bank/wallet transaction history to confirm the
+              transfer was received.
+            </StepItem>
+          </ol>
+          <h3 className="text-sm font-semibold text-gray-900 pt-2">Payment Actions</h3>
+          <ul className="space-y-2 text-sm text-gray-700">
+            <BulletItem>
+              <strong>Approve (Full Payment):</strong> Click &quot;Approve&quot; when the full amount has
+              been received. The enrollment status changes to &quot;Confirmed&quot; and the{" "}
+              {studentLower} is notified.
+            </BulletItem>
+            <BulletItem>
+              <strong>Partial Payment:</strong> If the {studentLower} paid less than the full amount,
+              enter the received amount. The enrollment status changes to &quot;Partial Payment&quot; and
+              the {studentLower} can see the remaining balance on their status page.
+            </BulletItem>
+            <BulletItem>
+              <strong>Reject:</strong> If the screenshot is invalid or payment wasn&apos;t received, reject
+              it with a note explaining why. The {studentLower} can submit a new payment.
+            </BulletItem>
+          </ul>
+          <TipBox color="blue">
+            <strong>Tip:</strong> You can add an admin note when approving or rejecting a payment. This
+            note is visible to the {studentLower} on their status page, so use it to communicate any
+            important information (e.g. &quot;Partial payment received — please pay the remaining
+            balance&quot;).
+          </TipBox>
+          <TipBox color="green">
+            <strong>Notification badge:</strong> The sidebar shows a badge count of pending payments that
+            need your attention. This updates automatically every 30 seconds.
+          </TipBox>
+        </div>
+      ),
+    },
   ];
 }
 
