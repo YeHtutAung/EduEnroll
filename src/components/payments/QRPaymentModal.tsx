@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
-import { createClient } from "@/lib/supabase/client";
 import { formatMMKSimple } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -50,25 +49,25 @@ export default function QRPaymentModal({
   // ── Start polling for payment status ───────────────────────
   const startPolling = useCallback(
     (paymentRef: string) => {
-      const supabase = createClient();
-
       pollRef.current = setInterval(async () => {
-        const { data } = (await supabase
-          .from("payments")
-          .select("mmqr_status")
-          .eq("payment_ref", paymentRef)
-          .single()) as { data: { mmqr_status: string } | null; error: unknown };
+        try {
+          const res = await fetch(
+            `/api/public/payments/mmqr/status?ref=${encodeURIComponent(paymentRef)}`,
+          );
+          if (!res.ok) return;
+          const data: { mmqr_status: string } = await res.json();
 
-        if (!data) return;
-
-        if (data.mmqr_status === "SUCCESS") {
-          if (pollRef.current) clearInterval(pollRef.current);
-          setState("success");
-          onSuccess();
-        } else if (data.mmqr_status === "FAILED") {
-          if (pollRef.current) clearInterval(pollRef.current);
-          setState("error");
-          setErrorMsg("Payment was declined. Please try again.");
+          if (data.mmqr_status === "SUCCESS") {
+            if (pollRef.current) clearInterval(pollRef.current);
+            setState("success");
+            onSuccess();
+          } else if (data.mmqr_status === "FAILED") {
+            if (pollRef.current) clearInterval(pollRef.current);
+            setState("error");
+            setErrorMsg("Payment was declined. Please try again.");
+          }
+        } catch {
+          // Ignore polling errors — will retry next interval
         }
       }, 3000);
     },
