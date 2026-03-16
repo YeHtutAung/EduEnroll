@@ -146,11 +146,17 @@ export async function POST(request: NextRequest) {
       status: "pending",
     } as never);
 
+    // Log full response for debugging (visible in Vercel function logs)
+    console.log("[mmqr] SDK response:", JSON.stringify(result));
+
+    const r = result as Record<string, unknown>;
     return NextResponse.json({
-      qr: (result as { qr?: string }).qr ?? null,
+      qr: r.qr ?? r.qrCode ?? r.qr_code ?? r.qrUrl ?? r.qr_url ?? null,
       orderId,
       amount: totalFee,
-      transactionRefId: (result as { transactionRefId?: string }).transactionRefId ?? null,
+      transactionRefId: r.transactionRefId ?? r.transaction_ref_id ?? null,
+      // Pass raw response keys for debugging
+      _debug_keys: Object.keys(r),
     });
   } catch (err) {
     console.error("[mmqr] MyanMyanPay SDK error:", err);

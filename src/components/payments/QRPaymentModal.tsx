@@ -94,6 +94,7 @@ export default function QRPaymentModal({
         }
 
         const data = await res.json();
+        console.log("[QRPaymentModal] API response:", data);
         setQrData(data.qr);
         setOrderId(data.orderId);
         setState("qr");
@@ -207,14 +208,23 @@ export default function QRPaymentModal({
             </p>
 
             {/* QR Image */}
-            {qrData && (
+            {qrData ? (
               <div className="mt-4 rounded-xl border border-gray-200 bg-white p-3">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={qrData.startsWith("data:") ? qrData : `data:image/png;base64,${qrData}`}
+                  src={
+                    qrData.startsWith("http") ? qrData
+                    : qrData.startsWith("data:") ? qrData
+                    : `data:image/png;base64,${qrData}`
+                  }
                   alt="MMQR Payment Code"
                   className="h-56 w-56 object-contain"
                 />
+              </div>
+            ) : (
+              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-6 text-center">
+                <p className="text-sm text-amber-800">QR code not available from payment gateway.</p>
+                <p className="font-myanmar mt-1 text-xs text-amber-700">QR ကုဒ် မရရှိနိုင်သေးပါ။</p>
               </div>
             )}
 
