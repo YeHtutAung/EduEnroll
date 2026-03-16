@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useCallback } from "react";
+import QRCode from "qrcode";
 import { formatMMKSimple } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -28,6 +29,7 @@ export default function QRPaymentModal({
   const [qrData, setQrData] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string>("");
+  const [qrImageUrl, setQrImageUrl] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // ── Close on Escape ────────────────────────────────────────
@@ -96,6 +98,15 @@ export default function QRPaymentModal({
         console.log("[QRPaymentModal] API response:", data);
         setQrData(data.qr);
         setOrderId(data.orderId);
+        // Generate QR image from EMVCo string
+        if (data.qr) {
+          try {
+            const dataUrl = await QRCode.toDataURL(data.qr, { width: 280, margin: 2 });
+            setQrImageUrl(dataUrl);
+          } catch {
+            console.error("[QRPaymentModal] QR render failed");
+          }
+        }
         setState("qr");
         startPolling(data.orderId);
       } catch {
@@ -207,18 +218,18 @@ export default function QRPaymentModal({
             </p>
 
             {/* QR Image */}
-            {qrData ? (
+            {qrImageUrl ? (
               <div className="mt-4 rounded-xl border border-gray-200 bg-white p-3">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={
-                    qrData.startsWith("http") ? qrData
-                    : qrData.startsWith("data:") ? qrData
-                    : `data:image/png;base64,${qrData}`
-                  }
+                  src={qrImageUrl}
                   alt="MMQR Payment Code"
                   className="h-56 w-56 object-contain"
                 />
+              </div>
+            ) : qrData ? (
+              <div className="mt-4 rounded-xl border border-gray-200 bg-white p-3">
+                <p className="text-xs text-gray-500 text-center">Rendering QR...</p>
               </div>
             ) : (
               <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-6 text-center">

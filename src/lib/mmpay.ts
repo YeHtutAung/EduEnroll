@@ -1,8 +1,9 @@
 import crypto from "crypto";
 
 // ─── MyanMyanPay client ─────────────────────────────────────────────────────
-// Custom implementation matching docs at https://docs.myanmyanpay.com/api/
-// The npm SDK uses outdated endpoint paths (/sandbox-create vs /test-create).
+// Custom implementation — API host: ezapi.myanmyanpay.com
+// Sandbox: /payments/sandbox-handshake + /payments/sandbox-create
+// Production: /payments/handshake + /payments/create
 
 const APP_ID = () => process.env.MMPAY_APP_ID!;
 const PK = () => process.env.MMPAY_PUBLISHABLE_KEY!;
@@ -37,7 +38,7 @@ async function handshake(
   nonce: string,
   sandbox: boolean,
 ): Promise<string> {
-  const path = sandbox ? "/payments/test-handshake" : "/payments/handshake";
+  const path = sandbox ? "/payments/sandbox-handshake" : "/payments/handshake";
   const payload = { orderId, nonce };
   const bodyString = JSON.stringify(payload);
   const signature = generateSignature(bodyString, nonce);
@@ -67,16 +68,17 @@ async function createPayment(
   sandbox: boolean,
 ): Promise<PayResponse> {
   const nonce = Date.now().toString();
-  const path = sandbox ? "/payments/test-create" : "/payments/create";
+  const path = sandbox ? "/payments/sandbox-create" : "/payments/create";
 
-  const payload = {
+  // Payload must match SDK format exactly — no extra fields like `currency`
+  // or the HMAC signature will mismatch (KA0003)
+  const payload: Record<string, unknown> = {
     appId: APP_ID(),
     nonce,
     amount: params.amount,
     orderId: params.orderId,
     callbackUrl: params.callbackUrl,
     customMessage: params.customMessage,
-    currency: params.currency ?? "MMK",
     items: params.items,
   };
 
