@@ -303,7 +303,7 @@ function buildGuideTopics(L: OrgLabels): GuideTopic[] {
       id: "student-enrollment",
       title: `${L.student} Enrollment & Payment`,
       icon: "👤",
-      videoId: null,
+      videoId: "w3hcKjrPd7s",
       content: (
         <div className="space-y-4">
           <p className="text-gray-600">
@@ -359,7 +359,7 @@ function buildGuideTopics(L: OrgLabels): GuideTopic[] {
       id: "payment-management",
       title: "Approve / Reject Payments",
       icon: "✅",
-      videoId: null,
+      videoId: "IghCecbB38Q",
       content: (
         <div className="space-y-4">
           <p className="text-gray-600">
