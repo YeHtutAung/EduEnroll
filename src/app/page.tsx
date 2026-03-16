@@ -1,4 +1,5 @@
 import Link from "next/link";
+import Image from "next/image";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -92,9 +93,7 @@ export default function LandingPage() {
       <header className="border-b border-slate-200 bg-white/80 backdrop-blur-sm sticky top-0 z-30">
         <div className="max-w-5xl mx-auto flex items-center justify-between px-4 sm:px-6 h-14">
           <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-[#6d28d9] flex items-center justify-center shrink-0">
-              <span className="text-white font-bold text-sm select-none">K</span>
-            </div>
+            <Image src="/kuunyi-logo.jpeg" alt="KuuNyi" width={32} height={32} className="rounded-lg shrink-0" />
             <span className="text-base font-bold text-slate-900">KuuNyi</span>
           </div>
           <div className="flex items-center gap-3">
@@ -225,9 +224,7 @@ export default function LandingPage() {
       <footer className="border-t border-slate-200 bg-white">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded bg-[#6d28d9] flex items-center justify-center">
-              <span className="text-white font-bold text-xs select-none">K</span>
-            </div>
+            <Image src="/kuunyi-logo.jpeg" alt="KuuNyi" width={24} height={24} className="rounded" />
             <span className="text-sm font-semibold text-slate-700">KuuNyi</span>
           </div>
           <p className="text-xs text-slate-400">
