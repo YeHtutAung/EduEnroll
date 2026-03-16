@@ -26,6 +26,8 @@ interface EnrollmentInfo {
   status: string;
   status_label_en: string;
   status_label_mm: string;
+  enrolled_at?: string;
+  auto_cancel_hours?: number;
   items?: CartItem[] | null;
   payment?: {
     admin_note?: string | null;
@@ -513,6 +515,92 @@ function UploadSection({
   );
 }
 
+// ─── Payment deadline countdown ──────────────────────────────────────────────
+
+function PaymentCountdown({
+  enrolledAt,
+  autoCancelHours,
+}: {
+  enrolledAt: string;
+  autoCancelHours: number;
+}) {
+  const [remaining, setRemaining] = useState<number | null>(null);
+
+  useEffect(() => {
+    const deadline = new Date(enrolledAt).getTime() + autoCancelHours * 60 * 60 * 1000;
+
+    function tick() {
+      const diff = deadline - Date.now();
+      setRemaining(diff > 0 ? diff : 0);
+    }
+
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [enrolledAt, autoCancelHours]);
+
+  if (remaining === null) return null;
+
+  const totalSec = Math.floor(remaining / 1000);
+  const days = Math.floor(totalSec / 86400);
+  const hours = Math.floor((totalSec % 86400) / 3600);
+  const minutes = Math.floor((totalSec % 3600) / 60);
+  const seconds = totalSec % 60;
+
+  const expired = remaining === 0;
+  const urgent = totalSec < 3600; // less than 1 hour
+
+  // Format display
+  let timeDisplay: string;
+  if (days > 0) {
+    timeDisplay = `${days}d ${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  } else {
+    timeDisplay = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+
+  if (expired) {
+    return (
+      <div className="mb-8 rounded-xl border border-red-200 bg-red-50 p-5 text-center">
+        <p className="text-3xl font-bold font-mono text-red-600">00:00:00</p>
+        <p className="font-myanmar mt-2 text-sm text-red-700">
+          ငွေပေးချေရန် အချိန်ကုန်သွားပါပြီ။ စာရင်းသွင်းမှု ပယ်ဖျက်ခံရနိုင်ပါသည်။
+        </p>
+        <p className="mt-1 text-xs text-red-600">
+          Payment deadline has passed. Your enrollment may be cancelled.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`mb-8 rounded-xl border p-5 text-center ${
+      urgent
+        ? "border-red-200 bg-red-50"
+        : "border-amber-200 bg-amber-50"
+    }`}>
+      <p className={`text-3xl font-bold font-mono ${
+        urgent ? "text-red-600" : "text-gray-900"
+      }`}>
+        {timeDisplay}
+      </p>
+      <p className={`font-myanmar mt-2 text-sm ${urgent ? "text-red-700" : "text-gray-600"}`}>
+        {autoCancelHours < 24
+          ? `${autoCancelHours} နာရီအတွင်း ငွေပေးချေမှုကို အပြီးသတ်ပေးပါ`
+          : autoCancelHours < 168
+            ? `${Math.round(autoCancelHours / 24)} ရက်အတွင်း ငွေပေးချေမှုကို အပြီးသတ်ပေးပါ`
+            : `${autoCancelHours} နာရီအတွင်း ငွေပေးချေမှုကို အပြီးသတ်ပေးပါ`}
+      </p>
+      <p className={`mt-1 text-xs ${urgent ? "text-red-600" : "text-gray-500"}`}>
+        {autoCancelHours < 24
+          ? `Please complete payment within ${autoCancelHours} hour${autoCancelHours !== 1 ? "s" : ""}`
+          : autoCancelHours < 168
+            ? `Please complete payment within ${Math.round(autoCancelHours / 24)} day${autoCancelHours >= 48 ? "s" : ""}`
+            : `Please complete payment within ${autoCancelHours} hours`}
+      </p>
+    </div>
+  );
+}
+
 // ─── Partial payment banner ──────────────────────────────────────────────────
 
 function PartialPaymentBanner({ enrollment }: { enrollment: EnrollmentInfo }) {
@@ -669,6 +757,14 @@ export default function PaymentInstructionsPage() {
           </p>
         )}
       </div>
+
+      {/* ── Payment deadline countdown ─────────────────────────── */}
+      {showUpload && enrollment.enrolled_at && enrollment.auto_cancel_hours != null && enrollment.auto_cancel_hours > 0 && (
+        <PaymentCountdown
+          enrolledAt={enrollment.enrolled_at}
+          autoCancelHours={enrollment.auto_cancel_hours}
+        />
+      )}
 
       {/* ── Partial payment banner ──────────────────────────────── */}
       {isPartialReUpload && <PartialPaymentBanner enrollment={enrollment} />}
