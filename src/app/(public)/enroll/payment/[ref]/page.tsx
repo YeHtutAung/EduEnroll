@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams } from "next/navigation";
 import { formatMMK, formatMMKSimple } from "@/lib/utils";
-import QRPaymentModal from "@/components/payments/QRPaymentModal";
+// import QRPaymentModal from "@/components/payments/QRPaymentModal"; // MMQR hidden for now
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CartItem {
@@ -662,7 +662,7 @@ export default function PaymentInstructionsPage() {
   const [availableClasses, setAvailableClasses] = useState<AvailableClass[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showQRModal, setShowQRModal] = useState(false);
+  // const [showQRModal, setShowQRModal] = useState(false); // MMQR hidden for now
 
   useEffect(() => {
     async function fetchData() {
@@ -903,8 +903,8 @@ export default function PaymentInstructionsPage() {
         </div>
       )}
 
-      {/* ── Pay via MMQR button ──────────────────────────────── */}
-      {showUpload && (
+      {/* ── Pay via MMQR (hidden — enable per tenant later) ──── */}
+      {/* {showUpload && (
         <div className="mb-8">
           <button
             onClick={() => setShowQRModal(true)}
@@ -926,10 +926,10 @@ export default function PaymentInstructionsPage() {
             <div className="h-px flex-1 bg-gray-200" />
           </div>
         </div>
-      )}
+      )} */}
 
-      {/* ── MMQR Payment Modal ────────────────────────────────── */}
-      {showQRModal && enrollment && (
+      {/* ── MMQR Payment Modal (hidden) ───────────────────────── */}
+      {/* {showQRModal && enrollment && (
         <QRPaymentModal
           enrollmentRef={enrollment.enrollment_ref}
           amount={isPartialReUpload && enrollment.payment?.remaining_amount_mmk
@@ -942,7 +942,7 @@ export default function PaymentInstructionsPage() {
           }}
           onClose={() => setShowQRModal(false)}
         />
-      )}
+      )} */}
 
       {/* ── Bank accounts ──────────────────────────────────────── */}
       {showUpload && bankAccounts.length > 0 && (
