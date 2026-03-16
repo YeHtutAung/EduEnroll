@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams } from "next/navigation";
 import { formatMMK, formatMMKSimple } from "@/lib/utils";
+import QRPaymentModal from "@/components/payments/QRPaymentModal";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CartItem {
@@ -41,6 +42,7 @@ interface AvailableClass {
   fee_formatted: string;
   seat_remaining: number;
   status: string;
+  image_url: string | null;
 }
 
 interface BankAccountInfo {
@@ -568,26 +570,11 @@ export default function PaymentInstructionsPage() {
   const params = useParams<{ ref: string }>();
   const [enrollment, setEnrollment] = useState<EnrollmentInfo | null>(null);
   const [bankAccounts, setBankAccounts] = useState<BankAccountInfo[]>([]);
-  const [availableClasses, setAvailableClasses] = useState<AvailableClass[]>([]);
   const [orgType, setOrgType] = useState<string>("language_school");
+  const [availableClasses, setAvailableClasses] = useState<AvailableClass[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Fetch other available classes from the same intake
-  async function fetchAvailableClasses(intakeSlug: string) {
-    try {
-      const res = await fetch(`/api/public/enroll/${encodeURIComponent(intakeSlug)}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      if (data.labels?.orgType) setOrgType(data.labels.orgType);
-      const classes = (data.classes ?? []) as AvailableClass[];
-      setAvailableClasses(
-        classes.filter((c) => c.status === "open" && c.seat_remaining > 0),
-      );
-    } catch {
-      // Non-critical
-    }
-  }
+  const [showQRModal, setShowQRModal] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
@@ -611,18 +598,26 @@ export default function PaymentInstructionsPage() {
           setBankAccounts(banksData);
         }
 
-        // Fetch intake data (for orgType labels + available classes)
+        // Fetch intake data (for orgType labels + available classes for promotion)
         if (statusData.intake_slug) {
           try {
             const intakeRes = await fetch(`/api/public/enroll/${encodeURIComponent(statusData.intake_slug)}`);
-            if (intakeRes.ok) {
-              const intakeData = await intakeRes.json();
-              if (intakeData.labels?.orgType) setOrgType(intakeData.labels.orgType);
-              const classes = (intakeData.classes ?? []) as AvailableClass[];
-              setAvailableClasses(
-                classes.filter((c) => c.status === "open" && c.seat_remaining > 0),
-              );
+            const intakeData = await intakeRes.json();
+            if (intakeData.labels?.orgType) setOrgType(intakeData.labels.orgType);
+
+            // Build set of already-purchased class levels
+            const purchasedLevels = new Set<string>();
+            if (statusData.items) {
+              statusData.items.forEach((item: CartItem) => purchasedLevels.add(item.class_level));
+            } else if (statusData.class_level) {
+              purchasedLevels.add(statusData.class_level);
             }
+
+            // Filter to open classes not already purchased
+            const classes: AvailableClass[] = (intakeData.classes ?? []).filter(
+              (c: AvailableClass) => c.status === "open" && c.seat_remaining > 0 && !purchasedLevels.has(c.level),
+            );
+            setAvailableClasses(classes);
           } catch { /* non-critical */ }
         }
       } catch {
@@ -639,9 +634,6 @@ export default function PaymentInstructionsPage() {
       .then((res) => res.json())
       .then((data: EnrollmentInfo) => {
         setEnrollment(data);
-        if (data.intake_slug) {
-          fetchAvailableClasses(data.intake_slug);
-        }
       })
       .catch(() => {});
   }
@@ -722,42 +714,6 @@ export default function PaymentInstructionsPage() {
               <span>Total</span>
               <span>{formatMMKSimple(totalFee)}</span>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Other available tickets (promotion) ────────────────── */}
-      {showUpload && availableClasses.length > 0 && enrollment.intake_slug && (
-        <div className="mb-8 rounded-xl border border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50 p-5">
-          <h3 className="mb-1 text-sm font-bold text-blue-900">
-            {orgType === "event" ? "Other Tickets Available" : "Other Classes Available"}
-          </h3>
-          <p className="mb-4 text-xs text-blue-600">
-            {orgType === "event"
-              ? "Want to add more? Start a new order for these tickets!"
-              : "Interested in other classes? Enroll separately!"}
-          </p>
-          <div className="space-y-2">
-            {availableClasses.map((cls) => (
-              <a
-                key={cls.id}
-                href={`/enroll/${enrollment.intake_slug}`}
-                className="flex items-center justify-between rounded-lg border border-blue-100 bg-white px-4 py-3 transition-colors hover:border-blue-300 hover:shadow-sm"
-              >
-                <div>
-                  <p className="text-sm font-semibold text-gray-900">{cls.level}</p>
-                  <p className="text-xs text-gray-500">{cls.fee_formatted}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">
-                    {cls.seat_remaining} left
-                  </span>
-                  <svg className="h-4 w-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </div>
-              </a>
-            ))}
           </div>
         </div>
       )}
@@ -849,6 +805,47 @@ export default function PaymentInstructionsPage() {
             </li>
           </ol>
         </div>
+      )}
+
+      {/* ── Pay via MMQR button ──────────────────────────────── */}
+      {showUpload && (
+        <div className="mb-8">
+          <button
+            onClick={() => setShowQRModal(true)}
+            className="flex w-full items-center justify-center gap-3 rounded-xl border-2 border-[#1a3f8a] bg-[#1a3f8a]/5 py-4 text-sm font-semibold text-[#1a3f8a] hover:bg-[#1a3f8a]/10 transition-colors"
+          >
+            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75zM6.75 16.5h.75v.75h-.75v-.75zM16.5 6.75h.75v.75h-.75v-.75zM13.5 13.5h.75v.75h-.75v-.75zM13.5 19.5h.75v.75h-.75v-.75zM19.5 13.5h.75v.75h-.75v-.75zM19.5 19.5h.75v.75h-.75v-.75zM16.5 16.5h.75v.75h-.75v-.75z" />
+            </svg>
+            <div>
+              <span className="block">Pay Instantly via MMQR</span>
+              <span className="font-myanmar block text-xs font-normal opacity-75">MMQR ဖြင့် ချက်ချင်း ငွေပေးချေမည်</span>
+            </div>
+          </button>
+
+          <div className="my-6 flex items-center gap-3">
+            <div className="h-px flex-1 bg-gray-200" />
+            <span className="text-xs font-medium text-gray-400">OR / <span className="font-myanmar">သို့မဟုတ်</span></span>
+            <div className="h-px flex-1 bg-gray-200" />
+          </div>
+        </div>
+      )}
+
+      {/* ── MMQR Payment Modal ────────────────────────────────── */}
+      {showQRModal && enrollment && (
+        <QRPaymentModal
+          enrollmentRef={enrollment.enrollment_ref}
+          amount={isPartialReUpload && enrollment.payment?.remaining_amount_mmk
+            ? enrollment.payment.remaining_amount_mmk
+            : totalFee}
+          studentName={enrollment.student_name_en}
+          onSuccess={() => {
+            setShowQRModal(false);
+            handleUploadSuccess();
+          }}
+          onClose={() => setShowQRModal(false)}
+        />
       )}
 
       {/* ── Bank accounts ──────────────────────────────────────── */}
@@ -952,41 +949,36 @@ export default function PaymentInstructionsPage() {
         </div>
       )}
 
-      {/* ── Other available classes ────────────────────────────────── */}
+      {/* ── Other tickets promotion (only on submitted/status view) ── */}
       {!showUpload && availableClasses.length > 0 && enrollment.intake_slug && (
-        <div className="mt-10 border-t border-gray-200 pt-8">
-          <h3 className="mb-2 text-center text-lg font-semibold text-gray-900">
-            {orgType === "event" ? "Buy Another Ticket" : "Enroll in Another Class"}
+        <div className="mt-8 rounded-xl border border-gray-200 bg-white p-5">
+          <h3 className="mb-1 text-sm font-semibold text-gray-900">
+            {orgType === "event" ? "Other Tickets Available" : "Other Classes Available"}
           </h3>
-          {orgType !== "event" && (
-            <p className="font-myanmar mb-6 text-center text-sm text-gray-500">
-              အခြားသင်တန်းတစ်ခု ထပ်မံစာရင်းသွင်းမည်
-            </p>
-          )}
-          <div className="space-y-3">
+          <p className="mb-4 text-xs text-gray-500">
+            {orgType === "event"
+              ? "Check out more ticket types for this event!"
+              : "Explore other classes you can enroll in."}
+          </p>
+          <div className="space-y-2">
             {availableClasses.map((cls) => (
-              <a
-                key={cls.id}
-                href={`/enroll/${enrollment.intake_slug}`}
-                className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-4 transition-colors hover:border-[#1a3f8a] hover:bg-blue-50/50"
-              >
+              <div key={cls.id} className="flex items-center justify-between rounded-lg border border-gray-100 bg-gray-50 px-4 py-3">
                 <div>
-                  <p className="text-base font-semibold text-gray-900">{cls.level}</p>
-                  <p className="text-sm text-gray-500">{cls.fee_formatted}</p>
+                  <p className="text-sm font-medium text-gray-900">{cls.level}</p>
+                  <p className="text-xs text-gray-500">{cls.fee_formatted} &middot; {cls.seat_remaining} left</p>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="text-xs text-gray-400">
-                    {cls.seat_remaining} {orgType === "event" ? "left" : "seats left"}
-                  </span>
-                  <svg className="h-5 w-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                  </svg>
-                </div>
-              </a>
+                <a
+                  href={`/enroll/${encodeURIComponent(enrollment.intake_slug!)}`}
+                  className="rounded-lg bg-[#1a6b3c] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#155d33] transition-colors"
+                >
+                  {orgType === "event" ? "Get Tickets" : "Enroll"}
+                </a>
+              </div>
             ))}
           </div>
         </div>
       )}
+
     </div>
   );
 }

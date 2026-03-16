@@ -41,6 +41,8 @@ TENANT_SUBDOMAIN=""
 CLASS_N5_ID=""; CLASS_N4_ID=""; CLASS_N3_ID=""; CLASS_N2_ID=""; CLASS_N1_ID=""
 ENROLLMENT_REF=""
 CART_ENROLLMENT_REF=""
+MMQR_ENROLLMENT_REF=""
+MMQR_ORDER_ID=""
 
 # Auth cookie header — populated by login()
 AUTH_H=()
@@ -706,6 +708,153 @@ test_cart_receipt_upload() {
   rm -f "$TMPIMG"
 }
 
+# ── 5d. MMQR Payment Flow ──────────────────────────────────────
+test_mmqr_payment() {
+  header "MMQR Payment Flow"
+
+  # Need a fresh enrollment in pending_payment status for MMQR tests
+  if [[ -z "$CLASS_N2_ID" ]]; then
+    skip "MMQR — no N2 class_id available"
+    return
+  fi
+
+  # Create a dedicated enrollment for MMQR testing
+  local BODY
+  BODY=$(jq -n \
+    --arg class_id "$CLASS_N2_ID" \
+    '{class_id: $class_id, form_data: {name_en: "U Maung", name_mm: "ဦးမောင်", nrc: "12/OuKaMa(N)999888", phone: "09111222333", email: "u.maung@example.com"}}')
+
+  local RESP
+  RESP=$(pub_post "/api/public/enroll" "$BODY") || RESP=""
+
+  if echo "$RESP" | jq -e '.enrollment_ref' &>/dev/null; then
+    MMQR_ENROLLMENT_REF=$(echo "$RESP" | jq -r '.enrollment_ref')
+    pass "POST /api/public/enroll — MMQR test enrollment created (ref=${MMQR_ENROLLMENT_REF})"
+  else
+    fail "POST /api/public/enroll — failed to create MMQR test enrollment" "$RESP"
+    return
+  fi
+
+  # ── Test 1: Create MMQR payment with valid enrollment ─────
+  RESP=$(pub_post "/api/public/payments/mmqr" \
+    "{\"enrollmentRef\":\"${MMQR_ENROLLMENT_REF}\"}") || RESP=""
+
+  if echo "$RESP" | jq -e '.orderId' &>/dev/null; then
+    MMQR_ORDER_ID=$(echo "$RESP" | jq -r '.orderId')
+    local QR; QR=$(echo "$RESP" | jq -r '.qr // empty')
+    local AMT; AMT=$(echo "$RESP" | jq '.amount')
+    pass "POST /api/public/payments/mmqr — QR generated (orderId=${MMQR_ORDER_ID:0:20}…)"
+
+    # QR string should be present (EMVCo format)
+    if [[ -n "$QR" ]]; then
+      pass "POST /api/public/payments/mmqr — QR payload present (${#QR} chars)"
+    else
+      fail "POST /api/public/payments/mmqr — QR payload is empty"
+    fi
+
+    # Amount should match N2 fee (450000)
+    if [[ "$AMT" == "450000" ]]; then
+      pass "POST /api/public/payments/mmqr — amount correct (450,000 MMK)"
+    else
+      fail "POST /api/public/payments/mmqr — expected amount 450000, got ${AMT}"
+    fi
+  else
+    fail "POST /api/public/payments/mmqr — failed to create payment" "$RESP"
+    # Don't return — continue with other tests that don't depend on orderId
+  fi
+
+  # ── Test 2: Invalid enrollmentRef should 404 ──────────────
+  local CODE
+  CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
+    -d '{"enrollmentRef":"NM-0000-99999"}' \
+    "$BASE_URL/api/public/payments/mmqr")
+  if [[ "$CODE" == "404" ]]; then
+    pass "POST /api/public/payments/mmqr — 404 on non-existent enrollment"
+  else
+    fail "POST /api/public/payments/mmqr — expected 404 for bad ref, got ${CODE}"
+  fi
+
+  # ── Test 3: Missing enrollmentRef should 400 ──────────────
+  CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
+    -d '{}' \
+    "$BASE_URL/api/public/payments/mmqr")
+  if [[ "$CODE" == "400" ]]; then
+    pass "POST /api/public/payments/mmqr — 400 on missing enrollmentRef"
+  else
+    fail "POST /api/public/payments/mmqr — expected 400 for missing ref, got ${CODE}"
+  fi
+
+  # ── Test 4: Poll status — should be PENDING ──────────────
+  if [[ -n "$MMQR_ORDER_ID" ]]; then
+    RESP=$(pub_get "/api/public/payments/mmqr/status?ref=${MMQR_ORDER_ID}") || RESP=""
+
+    local STATUS; STATUS=$(echo "$RESP" | jq -r '.mmqr_status // empty')
+    if [[ "$STATUS" == "PENDING" ]]; then
+      pass "GET /api/public/payments/mmqr/status — status is PENDING"
+    else
+      fail "GET /api/public/payments/mmqr/status — expected PENDING, got ${STATUS}" "$RESP"
+    fi
+  else
+    skip "GET /api/public/payments/mmqr/status — no orderId available"
+  fi
+
+  # ── Test 5: Poll status with unknown ref — returns PENDING (fallback) ──
+  RESP=$(pub_get "/api/public/payments/mmqr/status?ref=KNY-unknown-ref-999") || RESP=""
+  local UNK_STATUS; UNK_STATUS=$(echo "$RESP" | jq -r '.mmqr_status // empty')
+  if [[ "$UNK_STATUS" == "PENDING" ]]; then
+    pass "GET /api/public/payments/mmqr/status — PENDING fallback for unknown ref"
+  else
+    fail "GET /api/public/payments/mmqr/status — expected PENDING fallback, got ${UNK_STATUS}"
+  fi
+
+  # ── Test 6: Poll status with missing ref — should 400 ────
+  CODE=$(http_code_pub "$BASE_URL/api/public/payments/mmqr/status")
+  if [[ "$CODE" == "400" ]]; then
+    pass "GET /api/public/payments/mmqr/status — 400 on missing ref param"
+  else
+    fail "GET /api/public/payments/mmqr/status — expected 400, got ${CODE}"
+  fi
+
+  # ── Test 7: Webhook with invalid signature — should 403 ──
+  CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
+    -H "x-mmpay-signature: invalidsignature" \
+    -H "x-mmpay-nonce: 1234567890" \
+    -d '{"orderId":"fake","status":"SUCCESS"}' \
+    "$BASE_URL/api/public/payments/mmqr/webhook")
+  if [[ "$CODE" == "403" ]]; then
+    pass "POST /api/public/payments/mmqr/webhook — 403 on invalid signature"
+  else
+    fail "POST /api/public/payments/mmqr/webhook — expected 403, got ${CODE}"
+  fi
+
+  # ── Test 8: Non-pending enrollment should 409 ─────────────
+  # The MMQR_ENROLLMENT_REF enrollment now has a payment record, so creating
+  # another MMQR payment should still work (status is still pending_payment).
+  # But ENROLLMENT_REF (Ko Aung's) was receipt-uploaded → pending_verification.
+  # We test 409 using ENROLLMENT_REF if it exists and was already uploaded.
+  if [[ -n "$ENROLLMENT_REF" ]]; then
+    # First verify its status changed (receipt was uploaded in earlier test)
+    local STATUS_RESP
+    STATUS_RESP=$(pub_get "/api/public/status?ref=${ENROLLMENT_REF}") || STATUS_RESP=""
+    local ENROLL_STATUS; ENROLL_STATUS=$(echo "$STATUS_RESP" | jq -r '.status // empty')
+
+    if [[ "$ENROLL_STATUS" != "pending_payment" && "$ENROLL_STATUS" != "partial_payment" ]]; then
+      CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
+        -d "{\"enrollmentRef\":\"${ENROLLMENT_REF}\"}" \
+        "$BASE_URL/api/public/payments/mmqr")
+      if [[ "$CODE" == "409" ]]; then
+        pass "POST /api/public/payments/mmqr — 409 on non-pending enrollment"
+      else
+        fail "POST /api/public/payments/mmqr — expected 409 for non-pending, got ${CODE}"
+      fi
+    else
+      skip "POST /api/public/payments/mmqr — 409 test: enrollment still pending_payment"
+    fi
+  else
+    skip "POST /api/public/payments/mmqr — 409 test: no ENROLLMENT_REF available"
+  fi
+}
+
 # ── 6. Admin Stats ──────────────────────────────────────────────
 test_admin_stats() {
   header "Admin Stats"
@@ -961,6 +1110,7 @@ main() {
   test_cart_enrollment_status
   test_receipt_upload
   test_cart_receipt_upload
+  test_mmqr_payment
   test_admin_stats
   test_admin_students
   test_admin_pending_payments

@@ -108,17 +108,22 @@ export default function Sidebar({ displayName, displayEmail, displayRole, school
   const [pendingStudentCount, setPendingStudentCount] = useState(0);
   const pathname = usePathname();
 
-  // Fetch pending counts once on mount
+  // Fetch pending counts on mount + poll every 30s
   useEffect(() => {
-    fetch("/api/admin/stats")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (data) {
-          setPendingCount(data.payment_submitted_count ?? 0);
-          setPendingStudentCount(data.payment_submitted_count ?? 0);
-        }
-      })
-      .catch(() => {});
+    function fetchCounts() {
+      fetch("/api/admin/stats")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (data) {
+            setPendingCount(data.payment_submitted_count ?? 0);
+            setPendingStudentCount(data.payment_submitted_count ?? 0);
+          }
+        })
+        .catch(() => {});
+    }
+    fetchCounts();
+    const id = setInterval(fetchCounts, 30_000);
+    return () => clearInterval(id);
   }, []);
 
   function isActive(href: string) {

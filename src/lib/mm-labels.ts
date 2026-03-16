@@ -9,6 +9,8 @@ const MM_LABELS: Record<string, Record<string, string>> = {
     editForm: "စာရင်းသွင်းဖောင် ပြင်ဆင်ရန်",
     totalEnrolled: "စာရင်းသွင်းသူ စုစုပေါင်း",
     enrollmentTrend: "နေ့စဉ်စာရင်းသွင်းမှု",
+    classDistribution: "အတန်းအလိုက်ခွဲခြမ်း",
+    seatFillRate: "နေရာပြည့်နှုန်း",
     thisIntake: "ယခုသင်တန်း",
     announcementPlaceholder:
       "မင်္ဂလာပါ။ သင်တန်းနှင့် ပတ်သက်သော အကြောင်းကြားချက်…\n\nHello. This is an announcement regarding your class…",
@@ -20,6 +22,8 @@ const MM_LABELS: Record<string, Record<string, string>> = {
     editForm: "မှတ်ပုံတင်ဖောင် ပြင်ဆင်ရန်",
     totalEnrolled: "မှတ်ပုံတင်သူ စုစုပေါင်း",
     enrollmentTrend: "နေ့စဉ်မှတ်ပုံတင်မှု",
+    classDistribution: "လက်မှတ်အမျိုးအစားအလိုက်ခွဲခြမ်း",
+    seatFillRate: "လက်မှတ်ရောင်းအားနှုန်း",
     thisIntake: "ယခုပွဲ",
     announcementPlaceholder:
       "မင်္ဂလာပါ။ ပွဲနှင့် ပတ်သက်သော အကြောင်းကြားချက်…\n\nHello. This is an announcement regarding your event…",
@@ -31,6 +35,8 @@ const MM_LABELS: Record<string, Record<string, string>> = {
     editForm: "စာရင်းသွင်းဖောင် ပြင်ဆင်ရန်",
     totalEnrolled: "စာရင်းသွင်းသူ စုစုပေါင်း",
     enrollmentTrend: "နေ့စဉ်စာရင်းသွင်းမှု",
+    classDistribution: "အမျိုးအစားအလိုက်ခွဲခြမ်း",
+    seatFillRate: "နေရာပြည့်နှုန်း",
     thisIntake: "ယခုသင်တန်း",
     announcementPlaceholder:
       "မင်္ဂလာပါ။ သင်တန်းနှင့် ပတ်သက်သော အကြောင်းကြားချက်…\n\nHello. This is an announcement regarding your training…",

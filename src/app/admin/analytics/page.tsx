@@ -246,14 +246,18 @@ function AnalyticsContent() {
             {tl.class} Distribution
           </h2>
           <p className="text-xs text-gray-400 font-myanmar mb-4">
-            အတန်းအလိုက်ခွဲခြမ်း
+            {mm(tl.orgType, "classDistribution")}
           </p>
-          <ResponsiveContainer width="100%" height={260}>
-            <BarChart data={barData}>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={barData} margin={{ bottom: 40 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
               <XAxis
                 dataKey="level"
-                tick={{ fontSize: 12, fill: "#6b7280" }}
+                tick={{ fontSize: 11, fill: "#6b7280" }}
+                angle={-30}
+                textAnchor="end"
+                interval={0}
+                height={60}
               />
               <YAxis
                 yAxisId="left"
@@ -310,7 +314,7 @@ function AnalyticsContent() {
           {tl.seat} Fill Rate
         </h2>
         <p className="text-xs text-gray-400 font-myanmar mb-4">
-          နေရာပြည့်နှုန်း
+          {mm(tl.orgType, "seatFillRate")}
         </p>
         {data.seat_fill_rates.length === 0 ? (
           <p className="text-sm text-gray-400">No classes found.</p>
@@ -320,7 +324,7 @@ function AnalyticsContent() {
               const filled = s.seat_total - s.seat_remaining;
               return (
                 <div key={s.class_id} className="flex items-center gap-3">
-                  <span className="text-sm font-medium text-gray-700 w-10 shrink-0">
+                  <span className="text-sm font-medium text-gray-700 w-32 shrink-0 truncate" title={s.level}>
                     {s.level}
                   </span>
                   <div className="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">

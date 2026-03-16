@@ -653,12 +653,12 @@ function EnrollmentFormPage() {
           <h3 className="font-semibold text-gray-900 mb-3">Order Summary</h3>
           <div className="space-y-2">
             {cartItems.map((item, i) => (
-              <div key={i} className="flex justify-between text-sm">
+              <div key={i} className="flex justify-between text-sm text-gray-700">
                 <span>{item.level} &times; {item.quantity}</span>
-                <span className="font-medium">{formatMMKSimple(item.fee_mmk * item.quantity)}</span>
+                <span className="font-medium text-gray-900">{formatMMKSimple(item.fee_mmk * item.quantity)}</span>
               </div>
             ))}
-            <div className="border-t pt-2 mt-2 flex justify-between font-semibold">
+            <div className="border-t pt-2 mt-2 flex justify-between font-semibold text-gray-900">
               <span>Total ({cartTotalQty} tickets)</span>
               <span>{formatMMKSimple(cartTotalFee)}</span>
             </div>
