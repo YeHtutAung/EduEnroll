@@ -124,10 +124,18 @@ export async function POST(request: NextRequest) {
 
   // ── 6. Generate orderId and call MyanMyanPay ───────────────
   const orderId = `KNY-${tenantId.slice(0, 8)}-${enrollment.id.slice(0, 8)}-${Date.now()}`;
-  const callbackUrl = "https://kuunyi.com/api/sandbox/payments/webhook";
+
+  // Derive callback URL from the incoming request host
+  const host = request.headers.get("host") ?? "kuunyi.com";
+  const protocol = host.includes("localhost") ? "http" : "https";
+  const callbackUrl = `${protocol}://${host}/api/public/payments/mmqr/webhook`;
+
+  // Use sandbox or production based on env var (default: sandbox)
+  const useProd = process.env.MMPAY_MODE === "production";
 
   try {
-    const result = await mmpay.sandboxPay({
+    const pay = useProd ? mmpay.pay : mmpay.sandboxPay;
+    const result = await pay({
       orderId,
       amount: totalFee,
       currency: "MMK",
