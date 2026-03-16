@@ -73,7 +73,7 @@ function buildGuideTopics(L: OrgLabels): GuideTopic[] {
       id: "create-intake",
       title: `Create ${L.intake === "Intake" ? "an" : "a"} ${L.intake}`,
       icon: "🎪",
-      videoId: null,
+      videoId: "ef2oEm0SMtg",
       content: (
         <div className="space-y-4">
           <p className="text-gray-600">
@@ -108,7 +108,7 @@ function buildGuideTopics(L: OrgLabels): GuideTopic[] {
       id: "create-classes",
       title: `Create ${L.class}s`,
       icon: "🎫",
-      videoId: null,
+      videoId: "EBRZLMqCeSE",
       content: (
         <div className="space-y-4">
           <p className="text-gray-600">
@@ -141,7 +141,7 @@ function buildGuideTopics(L: OrgLabels): GuideTopic[] {
       id: "setup-classes",
       title: `Setup ${L.class} Details`,
       icon: "⚙️",
-      videoId: null,
+      videoId: "MPuCyj-yQXc",
       content: (
         <div className="space-y-4">
           <p className="text-gray-600">
@@ -180,7 +180,7 @@ function buildGuideTopics(L: OrgLabels): GuideTopic[] {
       id: "manage-forms",
       title: "Manage Registration Forms",
       icon: "📝",
-      videoId: null,
+      videoId: "mBWIFXAUg3o",
       content: (
         <div className="space-y-4">
           <p className="text-gray-600">
@@ -235,7 +235,7 @@ function buildGuideTopics(L: OrgLabels): GuideTopic[] {
       id: "bank-accounts",
       title: "Setup Payment Accounts",
       icon: "🏦",
-      videoId: null,
+      videoId: "IQ7h7g088rg",
       content: (
         <div className="space-y-4">
           <p className="text-gray-600">
@@ -266,7 +266,7 @@ function buildGuideTopics(L: OrgLabels): GuideTopic[] {
       id: "open-registration",
       title: "Open Registration",
       icon: "🚀",
-      videoId: null,
+      videoId: "XopK_RiB_Y4",
       content: (
         <div className="space-y-4">
           <p className="text-gray-600">
