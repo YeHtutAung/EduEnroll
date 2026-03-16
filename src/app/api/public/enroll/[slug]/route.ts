@@ -107,8 +107,26 @@ export async function GET(
   const intake = intakes[0] as Pick<Intake, "id" | "name" | "year" | "status" | "hero_image_url">;
 
   if (intake.status === "closed") {
+    // Still fetch classes so payment page can show promotions
+    const { data: closedClasses } = await supabase
+      .from("classes")
+      .select("id, level, fee_mmk, seat_remaining, seat_total, enrollment_open_at, enrollment_close_at, status, mode, event_date, start_time, end_time, venue, image_url, max_tickets_per_person")
+      .eq("intake_id", intake.id)
+      .eq("tenant_id", tenantId)
+      .in("status", ["open", "full"])
+      .order("level") as { data: Class[] | null; error: unknown };
+
+    const closedPublicClasses: PublicClassView[] = (closedClasses ?? []).map((c) => ({
+      id: c.id, level: c.level, fee_mmk: c.fee_mmk, fee_formatted: formatMMKSimple(c.fee_mmk),
+      seat_remaining: c.seat_remaining, seat_total: c.seat_total,
+      enrollment_open_at: c.enrollment_open_at, enrollment_close_at: c.enrollment_close_at,
+      status: c.status, mode: c.mode ?? "offline",
+      event_date: c.event_date ?? null, start_time: c.start_time ?? null, end_time: c.end_time ?? null,
+      venue: c.venue ?? null, image_url: c.image_url ?? null, max_tickets_per_person: c.max_tickets_per_person ?? 1,
+    }));
+
     return NextResponse.json(
-      { error: "Enrollment for this intake is closed.", code: "INTAKE_CLOSED", intake },
+      { error: "Enrollment for this intake is closed.", code: "INTAKE_CLOSED", intake, classes: closedPublicClasses, labels },
       { status: 410 },
     );
   }
