@@ -165,7 +165,7 @@ export async function POST(request: NextRequest) {
     const errMsg = err instanceof Error ? err.message : String(err);
     console.error("[mmqr] MyanMyanPay SDK error:", errMsg);
     return NextResponse.json(
-      { error: "Payment Gateway Error", message: "Failed to generate QR code. Please try again.", detail: errMsg },
+      { error: "Payment Gateway Error", message: "Failed to generate QR code. Please try again." },
       { status: 502 },
     );
   }
