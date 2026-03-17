@@ -116,11 +116,22 @@ function getLabels(orgType: string) {
   return ORG_LABELS[(orgType as OrgType)] ?? ORG_LABELS.language_school;
 }
 
+// Remap legacy payloads for event orgs
+const EVENT_PAYLOAD_MAP: Record<string, string> = {
+  OPEN_INTAKES: "EVENTS",
+  FEES: "BUY_TICKETS",
+  HOW_TO_ENROLL: "BUY_TICKETS",
+};
+
 function getMenuButtons(orgType: string, customButtons?: MenuButton[] | null) {
   if (customButtons && customButtons.length > 0) {
     return customButtons
       .filter((b) => b.visible)
-      .map((b) => ({ content_type: "text" as const, title: b.title, payload: b.key }));
+      .map((b) => ({
+        content_type: "text" as const,
+        title: b.title,
+        payload: orgType === "event" ? (EVENT_PAYLOAD_MAP[b.key] ?? b.key) : b.key,
+      }));
   }
   const l = getLabels(orgType);
   return l.menuButtons.map((b) => ({ content_type: "text" as const, ...b }));
