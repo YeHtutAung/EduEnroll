@@ -74,7 +74,7 @@ export default async function AdminLayout({
   let schoolLogoUrl: string | null = null;
   const tenantLabels: TenantLabels = {
     intake: "Intake",
-    class: "Class Type",
+    class: "Level",
     student: "Student",
     seat: "Seat",
     fee: "Fee",
@@ -102,7 +102,7 @@ export default async function AdminLayout({
     if (tenant?.logo_url) schoolLogoUrl = tenant.logo_url;
     if (tenant) {
       tenantLabels.intake = tenant.label_intake || "Intake";
-      tenantLabels.class = tenant.label_class || "Class Type";
+      tenantLabels.class = tenant.label_class || "Level";
       tenantLabels.student = tenant.label_student || "Student";
       tenantLabels.seat = tenant.label_seat || "Seat";
       tenantLabels.fee = tenant.label_fee || "Fee";

@@ -6,6 +6,7 @@ import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import { useToast } from "@/components/ui/Toast";
 import { useRole } from "@/components/admin/RoleContext";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
+import { mm } from "@/lib/mm-labels";
 import { formatMMKSimple } from "@/lib/utils";
 import type { EnrollmentStatus, Intake, JlptLevel, PaymentStatus } from "@/types/database";
 
@@ -297,14 +298,14 @@ function StudentDetailModal({
                     </>
                   )}
                   <DetailRow
-                    label="Enrollment Ref"
+                    label="Ref"
                     value={
                       <code className="text-sm font-mono text-[#1a3f8a] font-semibold">
                         {detail.enrollment_ref}
                       </code>
                     }
                   />
-                  <DetailRow label="Enrolled Date" value={fmtDate(detail.enrolled_at)} />
+                  <DetailRow label="Date" value={fmtDate(detail.enrolled_at)} />
                 </div>
 
                 {/* ── Right: Class + Payment ────────────────── */}
@@ -313,7 +314,7 @@ function StudentDetailModal({
                     {tl.class} &amp; Payment
                   </h3>
 
-                  {/* Ticket/class display — cart vs single */}
+                  {/* Class/level display — cart vs single */}
                   {detail.items && detail.items.length > 0 ? (
                     <DetailRow
                       label={tl.class}
@@ -495,8 +496,8 @@ export default function StudentsPage() {
   // Intakes for filter dropdown
   const [intakes, setIntakes] = useState<Intake[]>([]);
 
-  // Dynamic form field columns (used by detail modal fetch)
-  const [, setFormFields] = useState<FormFieldDef[]>([]);
+  // Dynamic form field columns (table + detail modal)
+  const [formFields, setFormFields] = useState<FormFieldDef[]>([]);
 
   // Available class levels (derived from loaded students)
   const [classLevels, setClassLevels] = useState<string[]>([]);
@@ -603,37 +604,40 @@ export default function StudentsPage() {
 
       const XLSX = await import("xlsx");
 
+      // Export all form fields (not just the 3 shown in table)
+      const exportFields = formFields.filter((f) => f.field_type !== "file");
+      const formHeadersExport = exportFields.length > 0
+        ? exportFields.map((f) => f.field_label)
+        : ["Name", "Phone", "Email"];
+
       const headers = [
         "No",
-        "Name",
-        "Phone Number",
-        "Email Address",
-        "Enrollment Ref",
-        "Ticket Type",
+        ...formHeadersExport,
+        "Ref",
+        tl.class,
         "Qty",
         `${tl.fee} (MMK)`,
         tl.intake,
         "Status",
-        "Enrolled Date",
+        "Date",
       ];
 
       const wsData: (string | number | null)[][] = [headers];
       let rowNum = 0;
+      const emptyFormCells = formHeadersExport.map(() => null);
 
       for (const s of rows) {
         rowNum++;
-        const email = s.form_data?.email || s.form_data?.email_address || "";
-        const phone = s.form_data?.phone || s.form_data?.phone_number || s.phone;
+        const formValues = exportFields.length > 0
+          ? exportFields.map((f) => s.form_data?.[f.field_key] || "")
+          : [s.student_name_en, s.form_data?.phone || s.form_data?.phone_number || s.phone || "", s.form_data?.email || s.form_data?.email_address || ""];
 
         if (s.items && s.items.length > 0) {
-          // Cart enrollment: first item row has all fields, subsequent rows only ticket/qty/fee
           s.items.forEach((ci, itemIdx) => {
             if (itemIdx === 0) {
               wsData.push([
                 rowNum,
-                s.student_name_en,
-                phone,
-                email,
+                ...formValues,
                 s.enrollment_ref,
                 ci.class_level,
                 ci.quantity,
@@ -644,7 +648,7 @@ export default function StudentsPage() {
               ]);
             } else {
               wsData.push([
-                null, null, null, null, null,
+                null, ...emptyFormCells, null,
                 ci.class_level,
                 ci.quantity,
                 ci.subtotal_mmk,
@@ -653,12 +657,9 @@ export default function StudentsPage() {
             }
           });
         } else {
-          // Single enrollment: one row
           wsData.push([
             rowNum,
-            s.student_name_en,
-            phone,
-            email,
+            ...formValues,
             s.enrollment_ref,
             s.class_level,
             s.quantity,
@@ -675,11 +676,9 @@ export default function StudentsPage() {
       // Column widths
       ws["!cols"] = [
         { wch: 5 },  // No
-        { wch: 22 }, // Name
-        { wch: 16 }, // Phone
-        { wch: 26 }, // Email
+        ...formHeadersExport.map(() => ({ wch: 22 })),
         { wch: 18 }, // Ref
-        { wch: 24 }, // Ticket Type
+        { wch: 24 }, // Level
         { wch: 5 },  // Qty
         { wch: 14 }, // Fee
         { wch: 16 }, // Intake
@@ -712,7 +711,7 @@ export default function StudentsPage() {
       <div className="flex items-start justify-between mb-6 gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 leading-tight">{tl.student}s</h1>
-          <p className="text-sm font-myanmar text-gray-400 mt-0.5">ကျောင်းသားများ</p>
+          <p className="text-sm font-myanmar text-gray-400 mt-0.5">{mm(tl.orgType, "studentsSubtitle")}</p>
         </div>
         {isOwnerOrAbove && (
           <button
@@ -792,7 +791,7 @@ export default function StudentsPage() {
             onChange={(e) => setFilter("intakeId", e.target.value)}
             className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] bg-white text-gray-700"
           >
-            <option value="">All Intakes</option>
+            <option value="">All {tl.intake}s</option>
             {intakes.map((i) => (
               <option key={i.id} value={i.id}>{i.name}</option>
             ))}
@@ -804,7 +803,7 @@ export default function StudentsPage() {
             onChange={(e) => setFilter("level", e.target.value)}
             className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] bg-white text-gray-700"
           >
-            <option value="">All Levels</option>
+            <option value="">All {tl.class}s</option>
             {classLevels.map((l) => (
               <option key={l} value={l}>{l}</option>
             ))}
@@ -833,7 +832,7 @@ export default function StudentsPage() {
                 onRemove={() => setFilter("intakeId", "")}
               />
             )}
-            {filters.level && <FilterChip label={`Level ${filters.level}`} onRemove={() => setFilter("level", "")} />}
+            {filters.level && <FilterChip label={`${tl.class}: ${filters.level}`} onRemove={() => setFilter("level", "")} />}
             {filters.status && <FilterChip label={filters.status.replace(/_/g, " ")} onRemove={() => setFilter("status", "")} />}
             {filters.search && <FilterChip label={`"${filters.search}"`} onRemove={() => { setSearchInput(""); setFilter("search", ""); }} />}
             <button
@@ -903,8 +902,12 @@ export default function StudentsPage() {
 
         {/* Table */}
         {(loading || students.length > 0) && (() => {
-          // Build dynamic headers: No. + form fields + fixed tail columns
-          const allHeaders = ["No.", "Name", "Phone Number", "Email Address", "Enrollment Ref", tl.class, "Qty", `${tl.fee} (MMK)`, tl.intake, "Status", "Enrolled"];
+          // Build dynamic headers: No. + form fields (max 3) + fixed tail columns
+          const displayFields = formFields.filter((f) => f.field_type !== "file").slice(0, 3);
+          const formHeaders = displayFields.length > 0
+            ? displayFields.map((f) => f.field_label)
+            : ["Name", "Phone", "Email"];
+          const allHeaders = ["No.", ...formHeaders, "Ref", tl.class, "Qty", `${tl.fee} (MMK)`, tl.intake, "Status", "Date"];
 
           return (
             <div className="overflow-x-auto">
@@ -925,8 +928,6 @@ export default function StudentsPage() {
                   {loading
                     ? Array.from({ length: 8 }).map((_, i) => <RowSkeleton key={i} cols={allHeaders.length} />)
                     : students.map((student, idx) => {
-                        const email = student.form_data?.email || student.form_data?.email_address || "";
-                        const phone = student.form_data?.phone || student.form_data?.phone_number || student.phone;
                         return (
                         <tr
                           key={student.enrollment_id}
@@ -938,36 +939,40 @@ export default function StudentsPage() {
                             {offset + idx + 1}
                           </td>
 
-                          {/* Name */}
-                          <td className="px-4 py-3.5">
-                            <p className="font-medium text-gray-800 whitespace-nowrap">
-                              {student.student_name_en}
-                            </p>
-                            {student.student_name_mm && (
-                              <p className="text-xs font-myanmar text-gray-400 mt-0.5">
-                                {student.student_name_mm}
-                              </p>
-                            )}
-                          </td>
+                          {/* Dynamic form fields */}
+                          {displayFields.length > 0 ? (
+                            displayFields.map((f) => {
+                              const val = student.form_data?.[f.field_key] || "";
+                              return (
+                                <td key={f.field_key} className="px-4 py-3.5 text-gray-600 text-xs whitespace-nowrap max-w-[180px]">
+                                  <span className="truncate block">{val || "—"}</span>
+                                </td>
+                              );
+                            })
+                          ) : (
+                            <>
+                              <td className="px-4 py-3.5">
+                                <p className="font-medium text-gray-800 whitespace-nowrap">
+                                  {student.student_name_en}
+                                </p>
+                              </td>
+                              <td className="px-4 py-3.5 text-gray-600 whitespace-nowrap tabular-nums text-xs">
+                                {student.form_data?.phone || student.form_data?.phone_number || student.phone || "—"}
+                              </td>
+                              <td className="px-4 py-3.5 text-gray-600 text-xs whitespace-nowrap max-w-[180px]">
+                                <span className="truncate block">{student.form_data?.email || student.form_data?.email_address || "—"}</span>
+                              </td>
+                            </>
+                          )}
 
-                          {/* Phone */}
-                          <td className="px-4 py-3.5 text-gray-600 whitespace-nowrap tabular-nums text-xs">
-                            {phone || "—"}
-                          </td>
-
-                          {/* Email */}
-                          <td className="px-4 py-3.5 text-gray-600 text-xs whitespace-nowrap max-w-[180px]">
-                            <span className="truncate block">{email || "—"}</span>
-                          </td>
-
-                          {/* Enrollment Ref */}
+                          {/* Ref */}
                           <td className="px-4 py-3.5">
                             <code className="text-xs font-mono text-[#1a3f8a] font-semibold whitespace-nowrap">
                               {student.enrollment_ref}
                             </code>
                           </td>
 
-                          {/* Ticket Type */}
+                          {/* Level */}
                           <td className="px-4 py-3.5">
                             {student.items && student.items.length > 0 ? (
                               <div className="space-y-0.5">

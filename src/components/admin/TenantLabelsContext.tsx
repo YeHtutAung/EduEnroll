@@ -13,7 +13,7 @@ export interface TenantLabels {
 
 const DEFAULT_LABELS: TenantLabels = {
   intake: "Intake",
-  class: "Class Type",
+  class: "Level",
   student: "Student",
   seat: "Seat",
   fee: "Fee",

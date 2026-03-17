@@ -12,6 +12,7 @@ const MM_LABELS: Record<string, Record<string, string>> = {
     classDistribution: "အတန်းအလိုက်ခွဲခြမ်း",
     seatFillRate: "နေရာပြည့်နှုန်း",
     thisIntake: "ယခုသင်တန်း",
+    studentsSubtitle: "ကျောင်းသားများ",
     announcementPlaceholder:
       "မင်္ဂလာပါ။ သင်တန်းနှင့် ပတ်သက်သော အကြောင်းကြားချက်…\n\nHello. This is an announcement regarding your class…",
   },
@@ -25,6 +26,7 @@ const MM_LABELS: Record<string, Record<string, string>> = {
     classDistribution: "လက်မှတ်အမျိုးအစားအလိုက်ခွဲခြမ်း",
     seatFillRate: "လက်မှတ်ရောင်းအားနှုန်း",
     thisIntake: "ယခုပွဲ",
+    studentsSubtitle: "တက်ရောက်သူများ",
     announcementPlaceholder:
       "မင်္ဂလာပါ။ ပွဲနှင့် ပတ်သက်သော အကြောင်းကြားချက်…\n\nHello. This is an announcement regarding your event…",
   },
@@ -38,6 +40,7 @@ const MM_LABELS: Record<string, Record<string, string>> = {
     classDistribution: "အမျိုးအစားအလိုက်ခွဲခြမ်း",
     seatFillRate: "နေရာပြည့်နှုန်း",
     thisIntake: "ယခုသင်တန်း",
+    studentsSubtitle: "သင်တန်းသားများ",
     announcementPlaceholder:
       "မင်္ဂလာပါ။ သင်တန်းနှင့် ပတ်သက်သော အကြောင်းကြားချက်…\n\nHello. This is an announcement regarding your training…",
   },

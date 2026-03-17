@@ -44,7 +44,7 @@ interface TenantLabels {
 }
 
 const DEFAULT_LABELS: TenantLabels = {
-  intake: "Intake", class: "Class Type", student: "Student",
+  intake: "Intake", class: "Level", student: "Student",
   seat: "Seat", fee: "Fee", orgType: "language_school",
 };
 

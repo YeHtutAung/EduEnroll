@@ -2,7 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatMMK } from "@/lib/utils";
-import { sendTextMessage, sendQuickReplies } from "./send";
+import { sendTextMessage, sendQuickReplies, sendButtonTemplate } from "./send";
 import type { Enrollment, Class, Payment, BankAccount, MenuButton } from "@/types/database";
 
 // ─── Org type ────────────────────────────────────────────────────────────────
@@ -59,9 +59,8 @@ const ORG_LABELS: Record<OrgType, {
   },
   event: {
     menuButtons: [
-      { title: "🎪 Events", payload: "OPEN_INTAKES" },
-      { title: "🎫 Tickets", payload: "FEES" },
-      { title: "📝 Register", payload: "HOW_TO_ENROLL" },
+      { title: "🎪 Events", payload: "EVENTS" },
+      { title: "🎫 Buy Tickets", payload: "BUY_TICKETS" },
       { title: "📅 Event Date", payload: "SCHEDULE" },
       { title: "🏦 Payment", payload: "PAYMENT" },
       { title: "📋 Check Status", payload: "CHECK_STATUS" },
@@ -117,11 +116,22 @@ function getLabels(orgType: string) {
   return ORG_LABELS[(orgType as OrgType)] ?? ORG_LABELS.language_school;
 }
 
+// Remap legacy payloads for event orgs
+const EVENT_PAYLOAD_MAP: Record<string, string> = {
+  OPEN_INTAKES: "EVENTS",
+  FEES: "BUY_TICKETS",
+  HOW_TO_ENROLL: "BUY_TICKETS",
+};
+
 function getMenuButtons(orgType: string, customButtons?: MenuButton[] | null) {
   if (customButtons && customButtons.length > 0) {
     return customButtons
       .filter((b) => b.visible)
-      .map((b) => ({ content_type: "text" as const, title: b.title, payload: b.key }));
+      .map((b) => ({
+        content_type: "text" as const,
+        title: b.title,
+        payload: orgType === "event" ? (EVENT_PAYLOAD_MAP[b.key] ?? b.key) : b.key,
+      }));
   }
   const l = getLabels(orgType);
   return l.menuButtons.map((b) => ({ content_type: "text" as const, ...b }));
@@ -178,11 +188,25 @@ async function getTenantInfo(tenantId: string): Promise<{ orgType: string; menuB
   };
 }
 
-const STATUS_LABELS: Record<string, { en: string; mm: string }> = {
-  pending_payment: { en: "Awaiting Payment", mm: "ငွေပေးချေမှု စောင့်ဆိုင်းဆဲ" },
-  payment_submitted: { en: "Payment Under Review", mm: "ငွေပေးချေမှု စစ်ဆေးနေဆဲ" },
-  confirmed: { en: "Enrollment Confirmed ✅", mm: "စာရင်းသွင်းမှု အတည်ပြုပြီး ✅" },
-  rejected: { en: "Enrollment Rejected ❌", mm: "စာရင်းသွင်းမှု ငြင်းဆိုထားသည် ❌" },
+const STATUS_LABELS: Record<OrgType, Record<string, { en: string; mm: string; enPay: string; mmPay: string }>> = {
+  language_school: {
+    pending_payment: { en: "Awaiting Payment", mm: "ငွေပေးချေမှု စောင့်ဆိုင်းဆဲ", enPay: "Pending", mmPay: "စောင့်ဆိုင်းဆဲ" },
+    payment_submitted: { en: "Payment Under Review", mm: "ငွေပေးချေမှု စစ်ဆေးနေဆဲ", enPay: "Under review", mmPay: "အတည်ပြုနေဆဲ" },
+    confirmed: { en: "Enrollment Confirmed ✅", mm: "စာရင်းသွင်းမှု အတည်ပြုပြီး ✅", enPay: "Verified", mmPay: "အတည်ပြုပြီး" },
+    rejected: { en: "Enrollment Rejected ❌", mm: "စာရင်းသွင်းမှု ငြင်းဆိုထားသည် ❌", enPay: "Failed", mmPay: "မအောင်မြင်ပါ" },
+  },
+  event: {
+    pending_payment: { en: "Ticket purchase under review", mm: "လက်မှတ်ဝယ်ယူမှု အတည်ပြုနေဆဲ", enPay: "Under review", mmPay: "အတည်ပြုနေဆဲ" },
+    payment_submitted: { en: "Ticket purchase under review", mm: "လက်မှတ်ဝယ်ယူမှု အတည်ပြုနေဆဲ", enPay: "Under review", mmPay: "အတည်ပြုနေဆဲ" },
+    confirmed: { en: "Ticket Order Successful", mm: "လက်မှတ်ဝယ်ယူမှု အောင်မြင်ပါပြီ", enPay: "Successful", mmPay: "အောင်မြင်ပါပြီ" },
+    rejected: { en: "Ticket Order Failed", mm: "လက်မှတ်ဝယ်ယူမှု မအောင်မြင်ပါ", enPay: "Failed", mmPay: "မအောင်မြင်ပါပြီ" },
+  },
+  training_center: {
+    pending_payment: { en: "Awaiting Payment", mm: "ငွေပေးချေမှု စောင့်ဆိုင်းဆဲ", enPay: "Pending", mmPay: "စောင့်ဆိုင်းဆဲ" },
+    payment_submitted: { en: "Payment Under Review", mm: "ငွေပေးချေမှု စစ်ဆေးနေဆဲ", enPay: "Under review", mmPay: "အတည်ပြုနေဆဲ" },
+    confirmed: { en: "Enrollment Confirmed ✅", mm: "စာရင်းသွင်းမှု အတည်ပြုပြီး ✅", enPay: "Verified", mmPay: "အတည်ပြုပြီး" },
+    rejected: { en: "Enrollment Rejected ❌", mm: "စာရင်းသွင်းမှု ငြင်းဆိုထားသည် ❌", enPay: "Failed", mmPay: "မအောင်မြင်ပါ" },
+  },
 };
 
 // ─── 1. Welcome ──────────────────────────────────────────────────────────────
@@ -207,13 +231,15 @@ export async function sendWelcome(
   const l = getLabels(orgType);
   const school = tenant?.name ?? "KuuNyi";
 
-  let msg = `မင်္ဂလာပါ! ${school} မှ ကြိုဆိုပါတယ် ${l.welcomeEmoji}\nHello! Welcome to ${school}`;
+  let msg: string;
 
   if (tenant?.messenger_greeting) {
-    msg += `\n\n${tenant.messenger_greeting}`;
+    // Fully custom greeting replaces the default template
+    msg = tenant.messenger_greeting;
+  } else {
+    msg = `မင်္ဂလာပါ! ${school} မှ ကြိုဆိုပါတယ် ${l.welcomeEmoji}\nHello! Welcome to ${school}`;
+    msg += `\n\nဘာကူညီပေးရမလဲ? / How can I help you?`;
   }
-
-  msg += `\n\nဘာကူညီပေးရမလဲ? / How can I help you?`;
 
   await sendQuickReplies(pageToken, senderPsid, msg, getMenuButtons(orgType, customButtons));
 }
@@ -352,6 +378,13 @@ export async function sendEnrollLink(
 ): Promise<void> {
   const supabase = createAdminClient();
   const { orgType } = await getTenantInfo(tenantId);
+
+  // Event orgs: delegate to Buy Tickets flow
+  if (orgType === "event") {
+    await sendBuyTickets(tenantId, senderPsid, pageToken);
+    return;
+  }
+
   const l = getLabels(orgType);
 
   const { data: tenant } = await supabase
@@ -381,11 +414,13 @@ export async function sendEnrollLink(
   const slug = intakeToSlug(intake.slug, intake.name, intake.year);
   const url = `https://${tenant.subdomain}.kuunyi.com/enroll/${slug}?psid=${senderPsid}`;
 
-  await sendTextMessage(
+  const buttonLabel = orgType === "event" ? "🎫 Buy Tickets" : "📝 Enroll Now";
+
+  await sendButtonTemplate(
     pageToken,
     senderPsid,
-    `${l.enrollTitle.mm} / ${l.enrollTitle.en}:\n👉 ${url}\n\n` +
-      `${l.enrollAction.mm}\n${l.enrollAction.en}`,
+    `${l.enrollTitle.mm} / ${l.enrollTitle.en}\n\n${l.enrollAction.mm}\n${l.enrollAction.en}`,
+    [{ type: "web_url", url, title: buttonLabel }],
   );
 }
 
@@ -511,14 +546,19 @@ export async function sendPaymentInfo(
 
   msg += "ငွေလွှဲပြီးပါက ငွေလွှဲပြေစာ ဓာတ်ပုံ upload လုပ်ပါ။\nAfter transfer, upload your payment proof.";
 
-  if (tenant?.subdomain) {
-    msg += `\n\n📤 Upload: https://${tenant.subdomain}.kuunyi.com/status`;
-  }
-
   await sendQuickReplies(pageToken, senderPsid, msg.trim(), [
     { content_type: "text", title: "📋 Check Status", payload: "CHECK_STATUS" },
     { content_type: "text", title: "🏠 Main Menu", payload: "MAIN_MENU" },
   ]);
+
+  if (tenant?.subdomain) {
+    await sendButtonTemplate(
+      pageToken,
+      senderPsid,
+      "📤 ငွေလွှဲပြေစာ upload လုပ်ရန်\nUpload your payment proof",
+      [{ type: "web_url", url: `https://${tenant.subdomain}.kuunyi.com/status`, title: "📤 Upload Proof" }],
+    );
+  }
 }
 
 // ─── 7. Status Check ─────────────────────────────────────────────────────────
@@ -547,32 +587,10 @@ export async function sendStatusCheck(
     await sendTextMessage(
       pageToken,
       senderPsid,
-      `Reference number မတွေ့ပါ / Reference number not found.\n\n"${ref}" ဖြင့် စာရင်းသွင်းမှု ရှာမတွေ့ပါ။\nNo enrollment found for "${ref}".\n\nPlease check and try again.`,
+      `Reference number မတွေ့ပါ / Reference number not found.\n\n"${ref}" ဖြင့် ရှာမတွေ့ပါ။\nNo record found for "${ref}".\n\nPlease check and try again.`,
     );
     return;
   }
-
-  const statusLabel = STATUS_LABELS[enrollment.status] ?? {
-    en: enrollment.status,
-    mm: enrollment.status,
-  };
-
-  let reply =
-    `📋 Enrollment Status / စာရင်းသွင်းမှု အခြေအနေ\n\n` +
-    `Ref: ${enrollment.enrollment_ref}\n` +
-    `Name / အမည်: ${enrollment.student_name_en}`;
-
-  if (enrollment.student_name_mm) {
-    reply += ` (${enrollment.student_name_mm})`;
-  }
-  reply += "\n";
-
-  if (enrollment.classes) {
-    reply += `${l.statusLevelLabel.en} / ${l.statusLevelLabel.mm}: ${l.levelPrefix}${enrollment.classes.level}\n`;
-    reply += `${l.statusFeeLabel.en} / ${l.statusFeeLabel.mm}: ${formatMMK(enrollment.classes.fee_mmk)}\n`;
-  }
-
-  reply += `\nStatus: ${statusLabel.en}\nအခြေအနေ: ${statusLabel.mm}`;
 
   // Check latest payment
   const { data: payment } = (await supabase
@@ -583,22 +601,170 @@ export async function sendStatusCheck(
     .limit(1)
     .single()) as { data: Pick<Payment, "status"> | null; error: unknown };
 
-  if (payment) {
-    const payLabel: Record<string, string> = {
-      pending: "⏳ Pending / အတည်ပြုမှု စောင့်ဆိုင်းဆဲ",
-      verified: "✅ Verified / အတည်ပြုပြီး",
-      rejected: "❌ Rejected / ငြင်းဆိုထားသည်",
-    };
-    reply += `\n\n💰 Payment: ${payLabel[payment.status] ?? payment.status}`;
-  }
+  const orgLabels = STATUS_LABELS[(orgType as OrgType)] ?? STATUS_LABELS.language_school;
+  const statusLabel = orgLabels[enrollment.status] ?? {
+    en: enrollment.status,
+    mm: enrollment.status,
+    enPay: payment?.status ?? "Unknown",
+    mmPay: payment?.status ?? "Unknown",
+  };
 
-  await sendQuickReplies(pageToken, senderPsid, reply, [
-    { content_type: "text", title: "🔄 Check Another", payload: "CHECK_STATUS" },
-    { content_type: "text", title: "🏠 Main Menu", payload: "MAIN_MENU" },
-  ]);
+  const name = enrollment.student_name_mm
+    ? `${enrollment.student_name_en} (${enrollment.student_name_mm})`
+    : enrollment.student_name_en;
+
+  if (orgType === "event") {
+    // Event / ticket-oriented status message
+    let reply =
+      `ဝယ်ယူပြီး Ticket Order အခြေအနေကို စစ်ဆေးရန်\n\n`;
+
+    // Myanmar section
+    reply += `Ref: ${enrollment.enrollment_ref}\n`;
+    reply += `အမည်: ${name}\n\n`;
+    reply += `အခြေအနေ: ${statusLabel.mm}\n`;
+    reply += `ငွေပေးချေမှု: ${statusLabel.mmPay}\n\n`;
+
+    // English section
+    reply += `Check Ticket Status\n\n`;
+    reply += `Ref: ${enrollment.enrollment_ref}\n`;
+    reply += `Name: ${name}\n\n`;
+    reply += `Status: ${statusLabel.en}\n`;
+    reply += `Payment: ${statusLabel.enPay}`;
+
+    await sendQuickReplies(pageToken, senderPsid, reply, [
+      { content_type: "text", title: "🔄 Check Another", payload: "CHECK_STATUS" },
+      { content_type: "text", title: "🏠 Main Menu", payload: "MAIN_MENU" },
+    ]);
+  } else {
+    // Language school / training center status message
+    let reply =
+      `📋 Enrollment Status / စာရင်းသွင်းမှု အခြေအနေ\n\n` +
+      `Ref: ${enrollment.enrollment_ref}\n` +
+      `Name / အမည်: ${name}\n`;
+
+    if (enrollment.classes) {
+      reply += `${l.statusLevelLabel.en} / ${l.statusLevelLabel.mm}: ${l.levelPrefix}${enrollment.classes.level}\n`;
+      reply += `${l.statusFeeLabel.en} / ${l.statusFeeLabel.mm}: ${formatMMK(enrollment.classes.fee_mmk)}\n`;
+    }
+
+    reply += `\nStatus: ${statusLabel.en}\nအခြေအနေ: ${statusLabel.mm}`;
+
+    if (payment) {
+      reply += `\n\nPayment: ${statusLabel.enPay}\nငွေပေးချေမှု: ${statusLabel.mmPay}`;
+    }
+
+    await sendQuickReplies(pageToken, senderPsid, reply, [
+      { content_type: "text", title: "🔄 Check Another", payload: "CHECK_STATUS" },
+      { content_type: "text", title: "🏠 Main Menu", payload: "MAIN_MENU" },
+    ]);
+  }
 }
 
-// ─── 8. Live Agent Handoff ──────────────────────────────────────────────────
+// ─── 8. Buy Tickets ──────────────────────────────────────────────────────────
+
+export async function sendBuyTickets(
+  tenantId: string,
+  senderPsid: string,
+  pageToken: string,
+): Promise<void> {
+  const supabase = createAdminClient();
+
+  const { data: tenant } = await supabase
+    .from("tenants")
+    .select("subdomain")
+    .eq("id", tenantId)
+    .single() as { data: { subdomain: string } | null; error: unknown };
+
+  const { data: intake } = await supabase
+    .from("intakes")
+    .select("id, name, year, slug")
+    .eq("tenant_id", tenantId)
+    .eq("status", "open")
+    .order("year", { ascending: false })
+    .limit(1)
+    .single() as { data: { id: string; name: string; year: number; slug: string | null } | null; error: unknown };
+
+  if (!tenant || !intake) {
+    await sendTextMessage(
+      pageToken,
+      senderPsid,
+      "လောလောဆယ် လက်မှတ်ဝယ်ယူလို့ မရပါသေး\nNo tickets available for purchase currently.",
+    );
+    return;
+  }
+
+  const { data: classes } = await supabase
+    .from("classes")
+    .select("level, fee_mmk")
+    .eq("intake_id", intake.id)
+    .eq("tenant_id", tenantId)
+    .in("status", ["open", "full"])
+    .order("level") as {
+    data: Pick<Class, "level" | "fee_mmk">[] | null;
+    error: unknown;
+  };
+
+  const slug = intakeToSlug(intake.slug, intake.name, intake.year);
+  const url = `https://${tenant.subdomain}.kuunyi.com/enroll/${slug}?psid=${senderPsid}`;
+
+  // Build Myanmar section
+  let msg = `Ticket ဝယ်ယူရန်\n\nလက်မှတ်အမျိုးအစားများ\n`;
+  if (classes && classes.length > 0) {
+    for (const c of classes) {
+      msg += `${c.level} – ${formatMMK(c.fee_mmk)}\n`;
+    }
+  }
+  msg += `ဝယ်ယူလိုသော Ticket အမျိုးအစားကို ရွေးချယ်ပြီး ဆက်လက်လုပ်ဆောင်နိုင်ပါသည်။\n\n`;
+  msg += `အထက်ပါ link ကိုနှိပ်ပြီး လိုအပ်သော အချက်အလက်များကို ဖြည့်စွက်၍ Ticket ဝယ်ယူနိုင်ပါသည်။\n\n`;
+
+  // Build English section
+  msg += `Buy Tickets\n\nTicket Types:\n`;
+  if (classes && classes.length > 0) {
+    for (const c of classes) {
+      msg += `${c.level} – ${formatMMK(c.fee_mmk)}\n`;
+    }
+  }
+  msg += `Please select your preferred ticket type to continue.\n\n`;
+  msg += `Click the link above and fill in the required information to purchase your ticket.`;
+
+  // Send ticket info as text first
+  await sendTextMessage(pageToken, senderPsid, msg);
+
+  // Send tappable button for the enrollment link
+  await sendButtonTemplate(
+    pageToken,
+    senderPsid,
+    "🎫 Ticket ဝယ်ယူရန် အောက်ပါ button ကိုနှိပ်ပါ\nTap the button below to buy tickets",
+    [{ type: "web_url", url, title: "🎫 Buy Tickets" }],
+  );
+}
+
+// ─── 9. Events ───────────────────────────────────────────────────────────────
+
+export async function sendEvents(
+  tenantId: string,
+  senderPsid: string,
+  pageToken: string,
+): Promise<void> {
+  const { orgType, menuButtons: customButtons } = await getTenantInfo(tenantId);
+
+  const msg =
+    `ပွဲအစီစဉ် \n\n` +
+    `ပွဲကျင်းပမည့်ရက် – ၂၀၂၆ ခုနှစ် ဧပြီလ ၁၃ ရက် မှ ၁၆ ရက်အထိ\n` +
+    `နေရာ – Golden Inya Island, Yangon\n\n` +
+    `Events\n\n` +
+    `Event Dates – April 13 – April 16, 2026\n` +
+    `Location – Golden Inya Island, Yangon`;
+
+  const buttons = getMenuButtons(orgType, customButtons);
+  await sendQuickReplies(pageToken, senderPsid, msg, [
+    buttons.find((b) => b.payload === "HOW_TO_ENROLL")!,
+    buttons.find((b) => b.payload === "FEES")!,
+    { content_type: "text", title: "🏠 Main Menu", payload: "MAIN_MENU" },
+  ].filter((b): b is { content_type: "text"; title: string; payload: string } => !!b));
+}
+
+// ─── 9. Live Agent Handoff ─────────────────────────────────────────────────
 
 export async function sendHandoffStart(
   tenantId: string,
@@ -628,7 +794,12 @@ export async function sendHandoffStart(
   await sendTextMessage(
     pageToken,
     senderPsid,
-    `💬 Live Agent ကို ချိတ်ဆက်ပေးနေပါသည်။ ခေတ္တစောင့်ပေးပါ 🙏\nConnecting you to a live agent. Please wait...\n\n🤖 Bot ကို ပြန်သုံးလိုပါက "bot" ဟု ရိုက်ပါ။\nType "bot" anytime to return to the bot.`,
+    `Live Agent / Admin နှင့်တိုက်ရိုက်ပြောရန်\n\n` +
+      `Admin နှင့် တိုက်ရိုက် စကားပြောနိုင်ရန် ချိတ်ဆက်ပေးနေပါသည်။ ခဏလေး စောင့်ပေးပါ\n` +
+      `Bot ကို ပြန်အသုံးပြုလိုပါက "bot" ဟု ရိုက်ပါ။\n\n` +
+      `Live Agent\n\n` +
+      `Connecting you to an Admin. Please wait\n` +
+      `Type "bot" anytime to return to the bot`,
   );
 }
 
@@ -644,7 +815,8 @@ export async function sendUnrecognized(
   await sendQuickReplies(
     pageToken,
     senderPsid,
-    "ဝမ်းနည်းပါတယ်၊ နားမလည်ပါ 😊\nSorry, I didn't understand that.\n\nPlease choose an option below:",
+    `အသေးစိတ်လေးကို Admin မှပြန်လည်ဖြေကြားပေးပါမည်။ Admin နဲ့တိုက်ရိုက်ဆက်သွယ်ရန် Live Agent ဟုရိုက်ပါ။\n\n` +
+      `Admin team will get back to you with more details.\nType "Live Agent" to talk directly with Admin.`,
     getMenuButtons(orgType, customButtons),
   );
 }

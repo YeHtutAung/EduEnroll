@@ -47,7 +47,7 @@ interface OrgLabels {
 
 const DEFAULT_LABELS: OrgLabels = {
   intake: "Intake",
-  class: "Class Type",
+  class: "Level",
   student: "Student",
   seat: "Seat",
   fee: "Fee",
@@ -63,7 +63,7 @@ interface GuideTopic {
   content: React.ReactNode;
 }
 
-function buildGuideTopics(L: OrgLabels): GuideTopic[] {
+function buildGuideTopics(L: OrgLabels, orgType: string): GuideTopic[] {
   const intakeLower = L.intake.toLowerCase();
   const classLower = L.class.toLowerCase();
   const studentLower = L.student.toLowerCase();
@@ -303,7 +303,7 @@ function buildGuideTopics(L: OrgLabels): GuideTopic[] {
       id: "student-enrollment",
       title: `${L.student} Enrollment & Payment`,
       icon: "👤",
-      videoId: "w3hcKjrPd7s",
+      videoId: orgType === "event" ? "mnnhsMU6DZY" : "w3hcKjrPd7s",
       content: (
         <div className="space-y-4">
           <p className="text-gray-600">
@@ -359,7 +359,7 @@ function buildGuideTopics(L: OrgLabels): GuideTopic[] {
       id: "payment-management",
       title: "Approve / Reject Payments",
       icon: "✅",
-      videoId: "IghCecbB38Q",
+      videoId: orgType === "event" ? "M7JH9OK5kgY" : "IghCecbB38Q",
       content: (
         <div className="space-y-4">
           <p className="text-gray-600">
@@ -481,6 +481,74 @@ function buildGuideTopics(L: OrgLabels): GuideTopic[] {
         </div>
       ),
     },
+    {
+      id: "messenger-enrollment",
+      title: "Enrollment via Messenger Bot",
+      icon: "📲",
+      videoId: null,
+      content: (
+        <div className="space-y-4">
+          <p className="text-gray-600">
+            {L.student}s can browse {classLower}s, register, and check their status entirely through
+            your Facebook Messenger bot — without visiting your website directly.
+          </p>
+          <h3 className="text-sm font-semibold text-gray-900">
+            How {L.student}s Enroll via Messenger
+          </h3>
+          <ol className="space-y-3 text-sm text-gray-700">
+            <StepItem n={1} title="Message your Facebook Page">
+              When a {studentLower} sends a message (e.g. &quot;Hi&quot;), the bot replies with a
+              welcome greeting and quick-reply menu buttons.
+            </StepItem>
+            <StepItem n={2} title={`Browse ${intakeLower}s and ${L.fee.toLowerCase()}s`}>
+              {L.student}s can tap{" "}
+              {L.intake === "Event" ? (
+                <>&quot;🎪 Events&quot; or &quot;🎫 Buy Tickets&quot;</>
+              ) : (
+                <>&quot;📚 Open {L.intake}s&quot; or &quot;💰 Fees&quot;</>
+              )}{" "}
+              to see available {classLower}s and pricing.
+            </StepItem>
+            <StepItem n={3} title={L.intake === "Event" ? "Tap \"Buy Tickets\"" : "Tap \"Enroll Now\""}>
+              The bot sends a tappable link that opens the registration form. The link includes a
+              Messenger ID so the {studentLower}&apos;s enrollment is automatically linked to their
+              Messenger account.
+            </StepItem>
+            <StepItem n={4} title="Complete registration and payment">
+              The {studentLower} fills in the form, submits, and follows the payment instructions —
+              same as the regular enrollment flow. After paying, they upload a payment screenshot.
+            </StepItem>
+            <StepItem n={5} title="Check status via Messenger">
+              The {studentLower} can tap &quot;📋 Check Status&quot; and send their reference number
+              (e.g. &quot;NM-2026-00042&quot;) to see their enrollment and payment status instantly.
+            </StepItem>
+          </ol>
+          <h3 className="text-sm font-semibold text-gray-900 pt-2">Other Bot Features</h3>
+          <ul className="space-y-2 text-sm text-gray-700">
+            <BulletItem>
+              <strong>📅 Schedule:</strong> Shows enrollment dates for each {classLower} so{" "}
+              {studentLower}s know when registration opens and closes.
+            </BulletItem>
+            <BulletItem>
+              <strong>🏦 Payment Info:</strong> Displays your bank accounts and an &quot;Upload
+              Proof&quot; button linking to the status page.
+            </BulletItem>
+            <BulletItem>
+              <strong>💬 Live Agent:</strong> When a {studentLower} needs human help, the bot pauses
+              and your admin team can reply directly in Messenger.
+            </BulletItem>
+          </ul>
+          <TipBox color="blue">
+            <strong>Tip:</strong> The enrollment link includes a Messenger tracking ID. This means
+            you can see which {studentLower}s came through the bot in your admin dashboard.
+          </TipBox>
+          <TipBox color="amber">
+            <strong>Note:</strong> Make sure your {intakeLower}s, {classLower}s, and bank accounts
+            are set up before enabling the bot — the bot pulls this data automatically.
+          </TipBox>
+        </div>
+      ),
+    },
   ];
 }
 
@@ -526,6 +594,7 @@ function TipBox({ color, children }: { color: "blue" | "amber" | "green"; childr
 
 export default function GuidePage() {
   const [labels, setLabels] = useState<OrgLabels>(DEFAULT_LABELS);
+  const [orgType, setOrgType] = useState("language_school");
   const [loading, setLoading] = useState(true);
   const [activeTopic, setActiveTopic] = useState("create-intake");
   const [playingVideoId, setPlayingVideoId] = useState<string | null>(null);
@@ -551,10 +620,11 @@ export default function GuidePage() {
 
       const { data: tenant } = (await supabase
         .from("tenants")
-        .select("label_intake, label_class, label_student, label_seat, label_fee")
+        .select("org_type, label_intake, label_class, label_student, label_seat, label_fee")
         .eq("id", profile.tenant_id)
         .single()) as {
         data: {
+          org_type: string | null;
           label_intake: string | null;
           label_class: string | null;
           label_student: string | null;
@@ -565,9 +635,10 @@ export default function GuidePage() {
       };
 
       if (tenant) {
+        setOrgType(tenant.org_type ?? "language_school");
         setLabels({
           intake: tenant.label_intake ?? "Intake",
-          class: tenant.label_class ?? "Class Type",
+          class: tenant.label_class ?? "Level",
           student: tenant.label_student ?? "Student",
           seat: tenant.label_seat ?? "Seat",
           fee: tenant.label_fee ?? "Fee",
@@ -584,7 +655,7 @@ export default function GuidePage() {
     fetchLabels();
   }, [fetchLabels]);
 
-  const topics = buildGuideTopics(labels);
+  const topics = buildGuideTopics(labels, orgType);
   const activeContent = topics.find((t) => t.id === activeTopic);
 
   if (loading) {
