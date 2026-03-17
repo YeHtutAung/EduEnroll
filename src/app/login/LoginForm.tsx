@@ -55,6 +55,9 @@ export default function LoginForm({ schoolName, schoolNameMm, tenantSlug, isSupe
       password,
     });
 
+    // Clear password from state immediately after auth call
+    setPassword("");
+
     if (authError) {
       const isInvalid =
         authError.message.toLowerCase().includes("invalid") ||
