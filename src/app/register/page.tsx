@@ -94,7 +94,7 @@ export default function RegisterPage() {
   // ─── Normalize subdomain input ──────────────────────────────────────────────
 
   function handleSubdomainChange(value: string) {
-    const normalized = value.toLowerCase().replace(/[^a-z0-9-]/g, "").replace(/^-+/, "");
+    const normalized = value.toLowerCase().replace(/[^a-z0-9.-]/g, "").replace(/^[-.]+/, "");
     setSubdomain(normalized);
   }
 
