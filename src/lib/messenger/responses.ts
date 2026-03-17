@@ -178,11 +178,25 @@ async function getTenantInfo(tenantId: string): Promise<{ orgType: string; menuB
   };
 }
 
-const STATUS_LABELS: Record<string, { en: string; mm: string }> = {
-  pending_payment: { en: "Awaiting Payment", mm: "ငွေပေးချေမှု စောင့်ဆိုင်းဆဲ" },
-  payment_submitted: { en: "Payment Under Review", mm: "ငွေပေးချေမှု စစ်ဆေးနေဆဲ" },
-  confirmed: { en: "Enrollment Confirmed ✅", mm: "စာရင်းသွင်းမှု အတည်ပြုပြီး ✅" },
-  rejected: { en: "Enrollment Rejected ❌", mm: "စာရင်းသွင်းမှု ငြင်းဆိုထားသည် ❌" },
+const STATUS_LABELS: Record<OrgType, Record<string, { en: string; mm: string; enPay: string; mmPay: string }>> = {
+  language_school: {
+    pending_payment: { en: "Awaiting Payment", mm: "ငွေပေးချေမှု စောင့်ဆိုင်းဆဲ", enPay: "Pending", mmPay: "စောင့်ဆိုင်းဆဲ" },
+    payment_submitted: { en: "Payment Under Review", mm: "ငွေပေးချေမှု စစ်ဆေးနေဆဲ", enPay: "Under review", mmPay: "အတည်ပြုနေဆဲ" },
+    confirmed: { en: "Enrollment Confirmed ✅", mm: "စာရင်းသွင်းမှု အတည်ပြုပြီး ✅", enPay: "Verified", mmPay: "အတည်ပြုပြီး" },
+    rejected: { en: "Enrollment Rejected ❌", mm: "စာရင်းသွင်းမှု ငြင်းဆိုထားသည် ❌", enPay: "Failed", mmPay: "မအောင်မြင်ပါ" },
+  },
+  event: {
+    pending_payment: { en: "Ticket purchase under review", mm: "လက်မှတ်ဝယ်ယူမှု အတည်ပြုနေဆဲ", enPay: "Under review", mmPay: "အတည်ပြုနေဆဲ" },
+    payment_submitted: { en: "Ticket purchase under review", mm: "လက်မှတ်ဝယ်ယူမှု အတည်ပြုနေဆဲ", enPay: "Under review", mmPay: "အတည်ပြုနေဆဲ" },
+    confirmed: { en: "Ticket Order Successful", mm: "လက်မှတ်ဝယ်ယူမှု အောင်မြင်ပါပြီ", enPay: "Successful", mmPay: "အောင်မြင်ပါပြီ" },
+    rejected: { en: "Ticket Order Failed", mm: "လက်မှတ်ဝယ်ယူမှု မအောင်မြင်ပါ", enPay: "Failed", mmPay: "မအောင်မြင်ပါပြီ" },
+  },
+  training_center: {
+    pending_payment: { en: "Awaiting Payment", mm: "ငွေပေးချေမှု စောင့်ဆိုင်းဆဲ", enPay: "Pending", mmPay: "စောင့်ဆိုင်းဆဲ" },
+    payment_submitted: { en: "Payment Under Review", mm: "ငွေပေးချေမှု စစ်ဆေးနေဆဲ", enPay: "Under review", mmPay: "အတည်ပြုနေဆဲ" },
+    confirmed: { en: "Enrollment Confirmed ✅", mm: "စာရင်းသွင်းမှု အတည်ပြုပြီး ✅", enPay: "Verified", mmPay: "အတည်ပြုပြီး" },
+    rejected: { en: "Enrollment Rejected ❌", mm: "စာရင်းသွင်းမှု ငြင်းဆိုထားသည် ❌", enPay: "Failed", mmPay: "မအောင်မြင်ပါ" },
+  },
 };
 
 // ─── 1. Welcome ──────────────────────────────────────────────────────────────
@@ -549,32 +563,10 @@ export async function sendStatusCheck(
     await sendTextMessage(
       pageToken,
       senderPsid,
-      `Reference number မတွေ့ပါ / Reference number not found.\n\n"${ref}" ဖြင့် စာရင်းသွင်းမှု ရှာမတွေ့ပါ။\nNo enrollment found for "${ref}".\n\nPlease check and try again.`,
+      `Reference number မတွေ့ပါ / Reference number not found.\n\n"${ref}" ဖြင့် ရှာမတွေ့ပါ။\nNo record found for "${ref}".\n\nPlease check and try again.`,
     );
     return;
   }
-
-  const statusLabel = STATUS_LABELS[enrollment.status] ?? {
-    en: enrollment.status,
-    mm: enrollment.status,
-  };
-
-  let reply =
-    `📋 Enrollment Status / စာရင်းသွင်းမှု အခြေအနေ\n\n` +
-    `Ref: ${enrollment.enrollment_ref}\n` +
-    `Name / အမည်: ${enrollment.student_name_en}`;
-
-  if (enrollment.student_name_mm) {
-    reply += ` (${enrollment.student_name_mm})`;
-  }
-  reply += "\n";
-
-  if (enrollment.classes) {
-    reply += `${l.statusLevelLabel.en} / ${l.statusLevelLabel.mm}: ${l.levelPrefix}${enrollment.classes.level}\n`;
-    reply += `${l.statusFeeLabel.en} / ${l.statusFeeLabel.mm}: ${formatMMK(enrollment.classes.fee_mmk)}\n`;
-  }
-
-  reply += `\nStatus: ${statusLabel.en}\nအခြေအနေ: ${statusLabel.mm}`;
 
   // Check latest payment
   const { data: payment } = (await supabase
@@ -585,19 +577,63 @@ export async function sendStatusCheck(
     .limit(1)
     .single()) as { data: Pick<Payment, "status"> | null; error: unknown };
 
-  if (payment) {
-    const payLabel: Record<string, string> = {
-      pending: "⏳ Pending / အတည်ပြုမှု စောင့်ဆိုင်းဆဲ",
-      verified: "✅ Verified / အတည်ပြုပြီး",
-      rejected: "❌ Rejected / ငြင်းဆိုထားသည်",
-    };
-    reply += `\n\n💰 Payment: ${payLabel[payment.status] ?? payment.status}`;
-  }
+  const orgLabels = STATUS_LABELS[(orgType as OrgType)] ?? STATUS_LABELS.language_school;
+  const statusLabel = orgLabels[enrollment.status] ?? {
+    en: enrollment.status,
+    mm: enrollment.status,
+    enPay: payment?.status ?? "Unknown",
+    mmPay: payment?.status ?? "Unknown",
+  };
 
-  await sendQuickReplies(pageToken, senderPsid, reply, [
-    { content_type: "text", title: "🔄 Check Another", payload: "CHECK_STATUS" },
-    { content_type: "text", title: "🏠 Main Menu", payload: "MAIN_MENU" },
-  ]);
+  const name = enrollment.student_name_mm
+    ? `${enrollment.student_name_en} (${enrollment.student_name_mm})`
+    : enrollment.student_name_en;
+
+  if (orgType === "event") {
+    // Event / ticket-oriented status message
+    let reply =
+      `ဝယ်ယူပြီး Ticket Order အခြေအနေကို စစ်ဆေးရန်\n\n`;
+
+    // Myanmar section
+    reply += `Ref: ${enrollment.enrollment_ref}\n`;
+    reply += `အမည်: ${name}\n\n`;
+    reply += `အခြေအနေ: ${statusLabel.mm}\n`;
+    reply += `ငွေပေးချေမှု: ${statusLabel.mmPay}\n\n`;
+
+    // English section
+    reply += `Check Ticket Status\n\n`;
+    reply += `Ref: ${enrollment.enrollment_ref}\n`;
+    reply += `Name: ${name}\n\n`;
+    reply += `Status: ${statusLabel.en}\n`;
+    reply += `Payment: ${statusLabel.enPay}`;
+
+    await sendQuickReplies(pageToken, senderPsid, reply, [
+      { content_type: "text", title: "🔄 Check Another", payload: "CHECK_STATUS" },
+      { content_type: "text", title: "🏠 Main Menu", payload: "MAIN_MENU" },
+    ]);
+  } else {
+    // Language school / training center status message
+    let reply =
+      `📋 Enrollment Status / စာရင်းသွင်းမှု အခြေအနေ\n\n` +
+      `Ref: ${enrollment.enrollment_ref}\n` +
+      `Name / အမည်: ${name}\n`;
+
+    if (enrollment.classes) {
+      reply += `${l.statusLevelLabel.en} / ${l.statusLevelLabel.mm}: ${l.levelPrefix}${enrollment.classes.level}\n`;
+      reply += `${l.statusFeeLabel.en} / ${l.statusFeeLabel.mm}: ${formatMMK(enrollment.classes.fee_mmk)}\n`;
+    }
+
+    reply += `\nStatus: ${statusLabel.en}\nအခြေအနေ: ${statusLabel.mm}`;
+
+    if (payment) {
+      reply += `\n\nPayment: ${statusLabel.enPay}\nငွေပေးချေမှု: ${statusLabel.mmPay}`;
+    }
+
+    await sendQuickReplies(pageToken, senderPsid, reply, [
+      { content_type: "text", title: "🔄 Check Another", payload: "CHECK_STATUS" },
+      { content_type: "text", title: "🏠 Main Menu", payload: "MAIN_MENU" },
+    ]);
+  }
 }
 
 // ─── 8. Buy Tickets ──────────────────────────────────────────────────────────
