@@ -503,7 +503,7 @@ function SettingsContent() {
   const [orgType, setOrgType] = useState("language_school");
   const [orgLabels, setOrgLabels] = useState({
     intake: "Intake",
-    class: "Class Type",
+    class: "Level",
     student: "Student",
     seat: "Seat",
     fee: "Fee",
@@ -558,7 +558,7 @@ function SettingsContent() {
         setOrgType(tenant.org_type ?? "language_school");
         setOrgLabels({
           intake: tenant.label_intake ?? "Intake",
-          class: tenant.label_class ?? "Class Type",
+          class: tenant.label_class ?? "Level",
           student: tenant.label_student ?? "Student",
           seat: tenant.label_seat ?? "Seat",
           fee: tenant.label_fee ?? "Fee",
@@ -657,12 +657,12 @@ function SettingsContent() {
 
   // ── Org type presets ───────────────────────────────────────────────────────
   const ORG_PRESETS: Record<string, { label: string; intake: string; class: string; student: string; seat: string; fee: string }> = {
-    language_school:  { label: "Language School",    intake: "Intake",  class: "Class Type",   student: "Student",      seat: "Seat", fee: "Fee" },
+    language_school:  { label: "Language School",    intake: "Intake",  class: "Level",        student: "Student",      seat: "Seat", fee: "Fee" },
     event:            { label: "Event",              intake: "Event",   class: "Ticket Type",  student: "Attendee",     seat: "Seat", fee: "Fee" },
-    fitness:          { label: "Fitness",             intake: "Batch",   class: "Class Type",   student: "Member",       seat: "Seat", fee: "Fee" },
+    fitness:          { label: "Fitness",             intake: "Batch",   class: "Class",        student: "Member",       seat: "Seat", fee: "Fee" },
     beauty_wellness:  { label: "Beauty & Wellness",  intake: "Course",  class: "Session Type", student: "Client",       seat: "Seat", fee: "Fee" },
     training_center:  { label: "Training Center",    intake: "Cohort",  class: "Module Type",  student: "Participant",  seat: "Seat", fee: "Fee" },
-    custom:           { label: "Custom",             intake: "Intake",  class: "Class Type",   student: "Student",      seat: "Seat", fee: "Fee" },
+    custom:           { label: "Custom",             intake: "Intake",  class: "Level",        student: "Student",      seat: "Seat", fee: "Fee" },
   };
 
   function handleOrgTypeChange(value: string) {
@@ -689,7 +689,7 @@ function SettingsContent() {
         .update({
           org_type: orgType,
           label_intake: orgLabels.intake.trim() || "Intake",
-          label_class: orgLabels.class.trim() || "Class Type",
+          label_class: orgLabels.class.trim() || "Level",
           label_student: orgLabels.student.trim() || "Student",
           label_seat: orgLabels.seat.trim() || "Seat",
           label_fee: orgLabels.fee.trim() || "Fee",
@@ -1113,7 +1113,7 @@ function SettingsContent() {
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {([
                   ["intake", "e.g. Intake, Batch, Semester"],
-                  ["class", "e.g. Class Type, Course, Program"],
+                  ["class", "e.g. Level, Course, Program"],
                   ["student", "e.g. Student, Trainee"],
                   ["seat", "e.g. Seat, Slot, Spot"],
                   ["fee", "e.g. Fee, Tuition, Rate"],
