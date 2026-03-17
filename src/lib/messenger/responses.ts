@@ -600,7 +600,110 @@ export async function sendStatusCheck(
   ]);
 }
 
-// ─── 8. Live Agent Handoff ──────────────────────────────────────────────────
+// ─── 8. Buy Tickets ──────────────────────────────────────────────────────────
+
+export async function sendBuyTickets(
+  tenantId: string,
+  senderPsid: string,
+  pageToken: string,
+): Promise<void> {
+  const supabase = createAdminClient();
+  const { orgType, menuButtons: customButtons } = await getTenantInfo(tenantId);
+
+  const { data: tenant } = await supabase
+    .from("tenants")
+    .select("subdomain")
+    .eq("id", tenantId)
+    .single() as { data: { subdomain: string } | null; error: unknown };
+
+  const { data: intake } = await supabase
+    .from("intakes")
+    .select("id, name, year, slug")
+    .eq("tenant_id", tenantId)
+    .eq("status", "open")
+    .order("year", { ascending: false })
+    .limit(1)
+    .single() as { data: { id: string; name: string; year: number; slug: string | null } | null; error: unknown };
+
+  if (!tenant || !intake) {
+    await sendTextMessage(
+      pageToken,
+      senderPsid,
+      "လောလောဆယ် လက်မှတ်ဝယ်ယူလို့ မရပါသေး\nNo tickets available for purchase currently.",
+    );
+    return;
+  }
+
+  const { data: classes } = await supabase
+    .from("classes")
+    .select("level, fee_mmk")
+    .eq("intake_id", intake.id)
+    .eq("tenant_id", tenantId)
+    .in("status", ["open", "full"])
+    .order("level") as {
+    data: Pick<Class, "level" | "fee_mmk">[] | null;
+    error: unknown;
+  };
+
+  const slug = intakeToSlug(intake.slug, intake.name, intake.year);
+  const url = `https://${tenant.subdomain}.kuunyi.com/enroll/${slug}?psid=${senderPsid}`;
+
+  // Build Myanmar section
+  let msg = `Ticket ဝယ်ယူရန်\n\nလက်မှတ်အမျိုးအစားများ\n`;
+  if (classes && classes.length > 0) {
+    for (const c of classes) {
+      msg += `${c.level} – ${formatMMK(c.fee_mmk)}\n`;
+    }
+  }
+  msg += `ဝယ်ယူလိုသော Ticket အမျိုးအစားကို ရွေးချယ်ပြီး ဆက်လက်လုပ်ဆောင်နိုင်ပါသည်။\n\n`;
+  msg += `👉 ${url}\n\n`;
+  msg += `အထက်ပါ link ကိုနှိပ်ပြီး လိုအပ်သော အချက်အလက်များကို ဖြည့်စွက်၍ Ticket ဝယ်ယူနိုင်ပါသည်။\n\n`;
+
+  // Build English section
+  msg += `Buy Tickets\n\nTicket Types:\n`;
+  if (classes && classes.length > 0) {
+    for (const c of classes) {
+      msg += `${c.level} – ${formatMMK(c.fee_mmk)}\n`;
+    }
+  }
+  msg += `Please select your preferred ticket type to continue.\n\n`;
+  msg += `👉 ${url}\n\n`;
+  msg += `Click the link above and fill in the required information to purchase your ticket.`;
+
+  const buttons = getMenuButtons(orgType, customButtons);
+  await sendQuickReplies(pageToken, senderPsid, msg, [
+    buttons.find((b) => b.payload === "EVENTS")!,
+    buttons.find((b) => b.payload === "PAYMENT")!,
+    { content_type: "text", title: "🏠 Main Menu", payload: "MAIN_MENU" },
+  ].filter((b): b is { content_type: "text"; title: string; payload: string } => !!b));
+}
+
+// ─── 9. Events ───────────────────────────────────────────────────────────────
+
+export async function sendEvents(
+  tenantId: string,
+  senderPsid: string,
+  pageToken: string,
+): Promise<void> {
+  const { orgType, menuButtons: customButtons } = await getTenantInfo(tenantId);
+
+  const msg =
+    `ပွဲအစီစဉ် \n\n` +
+    `ပွဲကျင်းပမည့်ရက် – ၂၀၂၆ ခုနှစ် ဧပြီလ ၁၃ ရက် မှ ၁၆ ရက်အထိ\n` +
+    `နေရာ – Golden Inya Island, Yangon\n\n` +
+    `Events\n\n` +
+    `Event Dates – April 13 – April 16, 2026\n` +
+    `Location – Golden Inya Island, Yangon`;
+
+  const buttons = getMenuButtons(orgType, customButtons);
+  await sendQuickReplies(pageToken, senderPsid, msg, [
+    buttons.find((b) => b.payload === "HOW_TO_ENROLL")!,
+    buttons.find((b) => b.payload === "FEES")!,
+    { content_type: "text", title: "🏠 Main Menu", payload: "MAIN_MENU" },
+  ].filter((b): b is { content_type: "text"; title: string; payload: string } => !!b));
+}
+
+// ─── 9. Live Agent Handoff ─────────────────────────────────────────────────
 
 export async function sendHandoffStart(
   tenantId: string,
@@ -630,7 +733,12 @@ export async function sendHandoffStart(
   await sendTextMessage(
     pageToken,
     senderPsid,
-    `💬 Live Agent ကို ချိတ်ဆက်ပေးနေပါသည်။ ခေတ္တစောင့်ပေးပါ 🙏\nConnecting you to a live agent. Please wait...\n\n🤖 Bot ကို ပြန်သုံးလိုပါက "bot" ဟု ရိုက်ပါ။\nType "bot" anytime to return to the bot.`,
+    `Live Agent / Admin နှင့်တိုက်ရိုက်ပြောရန်\n\n` +
+      `Admin နှင့် တိုက်ရိုက် စကားပြောနိုင်ရန် ချိတ်ဆက်ပေးနေပါသည်။ ခဏလေး စောင့်ပေးပါ\n` +
+      `Bot ကို ပြန်အသုံးပြုလိုပါက "bot" ဟု ရိုက်ပါ။\n\n` +
+      `Live Agent\n\n` +
+      `Connecting you to an Admin. Please wait\n` +
+      `Type "bot" anytime to return to the bot`,
   );
 }
 
@@ -646,7 +754,8 @@ export async function sendUnrecognized(
   await sendQuickReplies(
     pageToken,
     senderPsid,
-    "ဝမ်းနည်းပါတယ်၊ နားမလည်ပါ 😊\nSorry, I didn't understand that.\n\nPlease choose an option below:",
+    `အသေးစိတ်လေးကို Admin မှပြန်လည်ဖြေကြားပေးပါမည်။ Admin နဲ့တိုက်ရိုက်ဆက်သွယ်ရန် Live Agent ဟုရိုက်ပါ။\n\n` +
+      `Admin team will get back to you with more details.\nType "Live Agent" to talk directly with Admin.`,
     getMenuButtons(orgType, customButtons),
   );
 }

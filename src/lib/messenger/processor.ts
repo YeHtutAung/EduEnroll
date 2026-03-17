@@ -7,6 +7,8 @@ import {
   sendFees,
   sendEnrollLink,
   sendSchedule,
+  sendEvents,
+  sendBuyTickets,
   sendPaymentInfo,
   sendStatusCheck,
   sendHandoffStart,
@@ -24,7 +26,7 @@ interface MessengerMessage {
 
 // ─── Reference number pattern ───────────────────────────────────────────────
 
-const REF_PATTERN = /^[A-Z]{2,4}-\d{4}-\d{4,6}$/i;
+const REF_PATTERN = /^[A-Z]{1,4}-\d{4}-\d{4,6}$/i;
 
 // ─── Main processor ─────────────────────────────────────────────────────────
 
@@ -74,7 +76,11 @@ export async function processMessage(
   }
 
   // Keyword matching for free-text messages
-  if (lower.includes("fee") || lower.includes("ကြေး") || lower.includes("price") || lower.includes("ticket")) {
+  if (lower.includes("buy ticket") || lower.includes("ticket") || lower.includes("လက်မှတ်")) {
+    await sendBuyTickets(tenantId, senderPsid, pageToken);
+    return;
+  }
+  if (lower.includes("fee") || lower.includes("ကြေး") || lower.includes("price")) {
     await sendFees(tenantId, senderPsid, pageToken);
     return;
   }
@@ -82,7 +88,11 @@ export async function processMessage(
     await sendEnrollLink(tenantId, senderPsid, pageToken);
     return;
   }
-  if (lower.includes("schedule") || lower.includes("date") || lower.includes("အချိန်") || lower.includes("event")) {
+  if (lower.includes("event") || lower.includes("ပွဲ")) {
+    await sendEvents(tenantId, senderPsid, pageToken);
+    return;
+  }
+  if (lower.includes("schedule") || lower.includes("date") || lower.includes("အချိန်")) {
     await sendSchedule(tenantId, senderPsid, pageToken);
     return;
   }
@@ -130,6 +140,14 @@ async function handlePayload(
 
     case "HOW_TO_ENROLL":
       await sendEnrollLink(tenantId, senderPsid, pageToken);
+      break;
+
+    case "BUY_TICKETS":
+      await sendBuyTickets(tenantId, senderPsid, pageToken);
+      break;
+
+    case "EVENTS":
+      await sendEvents(tenantId, senderPsid, pageToken);
       break;
 
     case "SCHEDULE":
