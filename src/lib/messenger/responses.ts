@@ -61,7 +61,6 @@ const ORG_LABELS: Record<OrgType, {
     menuButtons: [
       { title: "🎪 Events", payload: "EVENTS" },
       { title: "🎫 Buy Tickets", payload: "BUY_TICKETS" },
-      { title: "📝 Register", payload: "HOW_TO_ENROLL" },
       { title: "📅 Event Date", payload: "SCHEDULE" },
       { title: "🏦 Payment", payload: "PAYMENT" },
       { title: "📋 Check Status", payload: "CHECK_STATUS" },
@@ -368,6 +367,13 @@ export async function sendEnrollLink(
 ): Promise<void> {
   const supabase = createAdminClient();
   const { orgType } = await getTenantInfo(tenantId);
+
+  // Event orgs: delegate to Buy Tickets flow
+  if (orgType === "event") {
+    await sendBuyTickets(tenantId, senderPsid, pageToken);
+    return;
+  }
+
   const l = getLabels(orgType);
 
   const { data: tenant } = await supabase
