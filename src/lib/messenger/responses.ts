@@ -59,8 +59,8 @@ const ORG_LABELS: Record<OrgType, {
   },
   event: {
     menuButtons: [
-      { title: "🎪 Events", payload: "OPEN_INTAKES" },
-      { title: "🎫 Tickets", payload: "FEES" },
+      { title: "🎪 Events", payload: "EVENTS" },
+      { title: "🎫 Buy Tickets", payload: "BUY_TICKETS" },
       { title: "📝 Register", payload: "HOW_TO_ENROLL" },
       { title: "📅 Event Date", payload: "SCHEDULE" },
       { title: "🏦 Payment", payload: "PAYMENT" },
