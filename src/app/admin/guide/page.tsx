@@ -485,7 +485,7 @@ function buildGuideTopics(L: OrgLabels, orgType: string): GuideTopic[] {
       id: "messenger-enrollment",
       title: "Enrollment via Messenger Bot",
       icon: "📲",
-      videoId: null,
+      videoId: orgType === "event" ? "w9IN18kLNdU" : null,
       content: (
         <div className="space-y-4">
           <p className="text-gray-600">
