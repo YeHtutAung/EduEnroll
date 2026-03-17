@@ -6,6 +6,7 @@ import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import { useToast } from "@/components/ui/Toast";
 import { useRole } from "@/components/admin/RoleContext";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
+import { mm } from "@/lib/mm-labels";
 import { formatMMKSimple } from "@/lib/utils";
 import type { EnrollmentStatus, Intake, JlptLevel, PaymentStatus } from "@/types/database";
 
@@ -297,14 +298,14 @@ function StudentDetailModal({
                     </>
                   )}
                   <DetailRow
-                    label="Enrollment Ref"
+                    label="Ref"
                     value={
                       <code className="text-sm font-mono text-[#1a3f8a] font-semibold">
                         {detail.enrollment_ref}
                       </code>
                     }
                   />
-                  <DetailRow label="Enrolled Date" value={fmtDate(detail.enrolled_at)} />
+                  <DetailRow label="Date" value={fmtDate(detail.enrolled_at)} />
                 </div>
 
                 {/* ── Right: Class + Payment ────────────────── */}
@@ -313,7 +314,7 @@ function StudentDetailModal({
                     {tl.class} &amp; Payment
                   </h3>
 
-                  {/* Ticket/class display — cart vs single */}
+                  {/* Class/level display — cart vs single */}
                   {detail.items && detail.items.length > 0 ? (
                     <DetailRow
                       label={tl.class}
@@ -608,13 +609,13 @@ export default function StudentsPage() {
         "Name",
         "Phone Number",
         "Email Address",
-        "Enrollment Ref",
+        "Ref",
         tl.class,
         "Qty",
         `${tl.fee} (MMK)`,
         tl.intake,
         "Status",
-        "Enrolled Date",
+        "Date",
       ];
 
       const wsData: (string | number | null)[][] = [headers];
@@ -712,7 +713,7 @@ export default function StudentsPage() {
       <div className="flex items-start justify-between mb-6 gap-4">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 leading-tight">{tl.student}s</h1>
-          <p className="text-sm font-myanmar text-gray-400 mt-0.5">ကျောင်းသားများ</p>
+          <p className="text-sm font-myanmar text-gray-400 mt-0.5">{mm(tl.orgType, "studentsSubtitle")}</p>
         </div>
         {isOwnerOrAbove && (
           <button
@@ -792,7 +793,7 @@ export default function StudentsPage() {
             onChange={(e) => setFilter("intakeId", e.target.value)}
             className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] bg-white text-gray-700"
           >
-            <option value="">All Intakes</option>
+            <option value="">All {tl.intake}s</option>
             {intakes.map((i) => (
               <option key={i.id} value={i.id}>{i.name}</option>
             ))}
@@ -804,7 +805,7 @@ export default function StudentsPage() {
             onChange={(e) => setFilter("level", e.target.value)}
             className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] bg-white text-gray-700"
           >
-            <option value="">All Levels</option>
+            <option value="">All {tl.class}s</option>
             {classLevels.map((l) => (
               <option key={l} value={l}>{l}</option>
             ))}
@@ -833,7 +834,7 @@ export default function StudentsPage() {
                 onRemove={() => setFilter("intakeId", "")}
               />
             )}
-            {filters.level && <FilterChip label={`Level ${filters.level}`} onRemove={() => setFilter("level", "")} />}
+            {filters.level && <FilterChip label={`${tl.class}: ${filters.level}`} onRemove={() => setFilter("level", "")} />}
             {filters.status && <FilterChip label={filters.status.replace(/_/g, " ")} onRemove={() => setFilter("status", "")} />}
             {filters.search && <FilterChip label={`"${filters.search}"`} onRemove={() => { setSearchInput(""); setFilter("search", ""); }} />}
             <button
@@ -904,7 +905,7 @@ export default function StudentsPage() {
         {/* Table */}
         {(loading || students.length > 0) && (() => {
           // Build dynamic headers: No. + form fields + fixed tail columns
-          const allHeaders = ["No.", "Name", "Phone Number", "Email Address", "Enrollment Ref", tl.class, "Qty", `${tl.fee} (MMK)`, tl.intake, "Status", "Enrolled"];
+          const allHeaders = ["No.", "Name", "Phone Number", "Email Address", "Ref", tl.class, "Qty", `${tl.fee} (MMK)`, tl.intake, "Status", "Date"];
 
           return (
             <div className="overflow-x-auto">
