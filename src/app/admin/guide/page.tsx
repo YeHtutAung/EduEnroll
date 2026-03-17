@@ -47,7 +47,7 @@ interface OrgLabels {
 
 const DEFAULT_LABELS: OrgLabels = {
   intake: "Intake",
-  class: "Class Type",
+  class: "Level",
   student: "Student",
   seat: "Seat",
   fee: "Fee",
@@ -567,7 +567,7 @@ export default function GuidePage() {
       if (tenant) {
         setLabels({
           intake: tenant.label_intake ?? "Intake",
-          class: tenant.label_class ?? "Class Type",
+          class: tenant.label_class ?? "Level",
           student: tenant.label_student ?? "Student",
           seat: tenant.label_seat ?? "Seat",
           fee: tenant.label_fee ?? "Fee",

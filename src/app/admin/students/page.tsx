@@ -609,7 +609,7 @@ export default function StudentsPage() {
         "Phone Number",
         "Email Address",
         "Enrollment Ref",
-        "Ticket Type",
+        tl.class,
         "Qty",
         `${tl.fee} (MMK)`,
         tl.intake,
@@ -679,7 +679,7 @@ export default function StudentsPage() {
         { wch: 16 }, // Phone
         { wch: 26 }, // Email
         { wch: 18 }, // Ref
-        { wch: 24 }, // Ticket Type
+        { wch: 24 }, // Level
         { wch: 5 },  // Qty
         { wch: 14 }, // Fee
         { wch: 16 }, // Intake
@@ -967,7 +967,7 @@ export default function StudentsPage() {
                             </code>
                           </td>
 
-                          {/* Ticket Type */}
+                          {/* Level */}
                           <td className="px-4 py-3.5">
                             {student.items && student.items.length > 0 ? (
                               <div className="space-y-0.5">

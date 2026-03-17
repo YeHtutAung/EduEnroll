@@ -79,7 +79,7 @@ export async function GET(
   };
   const labels: TenantLabelsView = {
     intake:  tenantRow?.label_intake  || "Intake",
-    class:   tenantRow?.label_class   || "Class Type",
+    class:   tenantRow?.label_class   || "Level",
     student: tenantRow?.label_student || "Student",
     seat:    tenantRow?.label_seat    || "Seat",
     fee:     tenantRow?.label_fee     || "Fee",
