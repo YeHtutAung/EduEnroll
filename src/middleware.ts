@@ -25,11 +25,13 @@ function extractSubdomain(host: string): string | null {
     return parts[0];
   }
 
-  // Production domain: "nihon-moment.kuunyi.com" (3 parts)
-  // Bare "kuunyi.com" (2 parts) or "www.kuunyi.com" → no subdomain
+  // Production: "tmf.kuunyi.com" (3 parts) → "tmf"
+  // Staging:    "tmf.staging.kuunyi.com" (4 parts) → "tmf"
+  // Bare "kuunyi.com" or "www.kuunyi.com" → no subdomain
   if (hostname.endsWith(".kuunyi.com")) {
-    const sub = parts.slice(0, parts.length - 2).join(".");
-    return sub && sub !== "www" ? sub : null;
+    const sub = parts[0];
+    if (!sub || sub === "www" || sub === "staging") return null;
+    return sub;
   }
 
   // Vercel domains: "nihon-moment.edu-enroll-xi.vercel.app" (4 parts)
@@ -59,6 +61,7 @@ export async function middleware(request: NextRequest) {
   const isRootDomain =
     hostname === "kuunyi.com" ||
     hostname === "www.kuunyi.com" ||
+    hostname === "staging.kuunyi.com" ||
     hostname === "edu-enroll-xi.vercel.app";
 
   if (!shouldSkipTenant(pathname)) {
