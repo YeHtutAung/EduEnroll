@@ -207,13 +207,15 @@ export async function sendWelcome(
   const l = getLabels(orgType);
   const school = tenant?.name ?? "KuuNyi";
 
-  let msg = `မင်္ဂလာပါ! ${school} မှ ကြိုဆိုပါတယ် ${l.welcomeEmoji}\nHello! Welcome to ${school}`;
+  let msg: string;
 
   if (tenant?.messenger_greeting) {
-    msg += `\n\n${tenant.messenger_greeting}`;
+    // Fully custom greeting replaces the default template
+    msg = tenant.messenger_greeting;
+  } else {
+    msg = `မင်္ဂလာပါ! ${school} မှ ကြိုဆိုပါတယ် ${l.welcomeEmoji}\nHello! Welcome to ${school}`;
+    msg += `\n\nဘာကူညီပေးရမလဲ? / How can I help you?`;
   }
-
-  msg += `\n\nဘာကူညီပေးရမလဲ? / How can I help you?`;
 
   await sendQuickReplies(pageToken, senderPsid, msg, getMenuButtons(orgType, customButtons));
 }
