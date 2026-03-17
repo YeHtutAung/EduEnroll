@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { processMessage } from "@/lib/messenger/processor";
 import { decryptToken } from "@/lib/messenger/crypto";
+import { verifyMetaSignature } from "@/lib/messenger/verify";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -90,9 +91,17 @@ export async function POST(
     return NextResponse.json({ status: "ok" }, { status: 200 });
   }
 
+  // Verify Meta signature (HMAC-SHA256)
+  const rawBody = await request.text();
+  const signature = request.headers.get("x-hub-signature-256");
+  if (!verifyMetaSignature(rawBody, signature)) {
+    console.warn(`[messenger] Invalid signature for ${params.slug}`);
+    return NextResponse.json({ status: "ok" }, { status: 200 });
+  }
+
   let body: { entry?: WebhookEntry[] };
   try {
-    body = await request.json();
+    body = JSON.parse(rawBody);
   } catch {
     return NextResponse.json({ status: "ok" }, { status: 200 });
   }
