@@ -460,6 +460,9 @@ function EnrollmentFormPage() {
       if (val) dynamicData[field.field_key] = val;
     }
 
+    // Include honeypot value (server rejects if filled)
+    const hpValue = (formData.__hp ?? "").trim();
+
     // Build payload based on mode
     const payload = isCartMode
       ? {
@@ -467,6 +470,7 @@ function EnrollmentFormPage() {
           form_data: dynamicData,
           idempotency_key: idempotencyKeyRef.current,
           ...(messengerPsid ? { messenger_psid: messengerPsid } : {}),
+          ...(hpValue ? { __hp: hpValue } : {}),
         }
       : {
           class_id: classInfo!.id,
@@ -474,6 +478,7 @@ function EnrollmentFormPage() {
           idempotency_key: idempotencyKeyRef.current,
           quantity,
           ...(messengerPsid ? { messenger_psid: messengerPsid } : {}),
+          ...(hpValue ? { __hp: hpValue } : {}),
         };
 
     try {
@@ -616,6 +621,20 @@ function EnrollmentFormPage() {
             </div>
           </div>
         )}
+
+        {/* Honeypot — hidden from real users, filled by bots */}
+        <div aria-hidden="true" style={{ position: "absolute", left: "-9999px", top: "-9999px" }}>
+          <label htmlFor="website_url">Website</label>
+          <input
+            id="website_url"
+            name="website_url"
+            type="text"
+            tabIndex={-1}
+            autoComplete="off"
+            value={formData.__hp ?? ""}
+            onChange={(e) => updateField("__hp", e.target.value)}
+          />
+        </div>
 
         {/* Form fields */}
         <h2 className="mb-6 text-lg font-semibold text-gray-900">

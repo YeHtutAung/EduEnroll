@@ -36,7 +36,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { class_id, form_data, idempotency_key, quantity, items, messenger_psid } = body as Record<string, unknown>;
+  const { class_id, form_data, idempotency_key, quantity, items, messenger_psid, __hp } = body as Record<string, unknown>;
+
+  // ── Honeypot check — return fake success to fool bots ──────────
+  if (__hp && typeof __hp === "string" && __hp.trim().length > 0) {
+    return NextResponse.json({ enrollment_ref: "OK-0000-0000" }, { status: 200 });
+  }
 
   // ── Cart checkout (multiple ticket types) ───────────────────────
   if (Array.isArray(items)) {
