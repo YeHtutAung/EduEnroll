@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { Noto_Sans, Noto_Sans_Myanmar, JetBrains_Mono } from "next/font/google";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { extractSubdomainFromHost } from "@/lib/tenant";
 import "./globals.css";
 
 const notoSans = Noto_Sans({
@@ -20,21 +23,50 @@ const jetBrainsMono = JetBrains_Mono({
   weight: ["400", "600", "700"],
 });
 
-export const metadata: Metadata = {
-  title: "KuuNyi — School Enrollment Platform",
-  description:
-    "KuuNyi enrollment management for Myanmar language schools. " +
-    "Bilingual Myanmar + English enrollment system. Pay in MMK.",
-  openGraph: {
-    title: "KuuNyi — School Enrollment Platform",
-    description:
-      "KuuNyi enrollment management for Myanmar language schools. " +
-      "Easy online enrollment, MMK payment. သင်တန်းကျောင်းများအတွက် စာရင်းသွင်းစနစ်",
-    siteName: "KuuNyi",
-    locale: "my_MM",
-    type: "website",
-  },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const headersList = headers();
+  const slug =
+    headersList.get("x-tenant-slug") ||
+    extractSubdomainFromHost(headersList.get("host") ?? "");
+
+  let tenantName: string | null = null;
+  let logoUrl: string | null = null;
+
+  if (slug) {
+    const supabase = createAdminClient();
+    const { data: tenant } = (await supabase
+      .from("tenants")
+      .select("name, logo_url")
+      .eq("subdomain", slug)
+      .maybeSingle()) as {
+      data: { name: string; logo_url: string | null } | null;
+      error: unknown;
+    };
+
+    if (tenant) {
+      tenantName = tenant.name;
+      logoUrl = tenant.logo_url;
+    }
+  }
+
+  const title = tenantName ? `${tenantName} — powered by KuuNyi` : "KuuNyi — Enrollment Platform";
+  const description = tenantName
+    ? `${tenantName} — online enrollment powered by KuuNyi`
+    : "KuuNyi enrollment platform for schools, events, and training centers.";
+
+  return {
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      siteName: tenantName ?? "KuuNyi",
+      locale: "my_MM",
+      type: "website",
+      ...(logoUrl ? { images: [{ url: logoUrl }] } : {}),
+    },
+  };
+}
 
 export default function RootLayout({
   children,
