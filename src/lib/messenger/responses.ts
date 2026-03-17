@@ -2,7 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatMMK } from "@/lib/utils";
-import { sendTextMessage, sendQuickReplies } from "./send";
+import { sendTextMessage, sendQuickReplies, sendButtonTemplate } from "./send";
 import type { Enrollment, Class, Payment, BankAccount, MenuButton } from "@/types/database";
 
 // ─── Org type ────────────────────────────────────────────────────────────────
@@ -397,11 +397,13 @@ export async function sendEnrollLink(
   const slug = intakeToSlug(intake.slug, intake.name, intake.year);
   const url = `https://${tenant.subdomain}.kuunyi.com/enroll/${slug}?psid=${senderPsid}`;
 
-  await sendTextMessage(
+  const buttonLabel = orgType === "event" ? "🎫 Buy Tickets" : "📝 Enroll Now";
+
+  await sendButtonTemplate(
     pageToken,
     senderPsid,
-    `${l.enrollTitle.mm} / ${l.enrollTitle.en}:\n👉 ${url}\n\n` +
-      `${l.enrollAction.mm}\n${l.enrollAction.en}`,
+    `${l.enrollTitle.mm} / ${l.enrollTitle.en}\n\n${l.enrollAction.mm}\n${l.enrollAction.en}`,
+    [{ type: "web_url", url, title: buttonLabel }],
   );
 }
 
@@ -527,14 +529,19 @@ export async function sendPaymentInfo(
 
   msg += "ငွေလွှဲပြီးပါက ငွေလွှဲပြေစာ ဓာတ်ပုံ upload လုပ်ပါ။\nAfter transfer, upload your payment proof.";
 
-  if (tenant?.subdomain) {
-    msg += `\n\n📤 Upload: https://${tenant.subdomain}.kuunyi.com/status`;
-  }
-
   await sendQuickReplies(pageToken, senderPsid, msg.trim(), [
     { content_type: "text", title: "📋 Check Status", payload: "CHECK_STATUS" },
     { content_type: "text", title: "🏠 Main Menu", payload: "MAIN_MENU" },
   ]);
+
+  if (tenant?.subdomain) {
+    await sendButtonTemplate(
+      pageToken,
+      senderPsid,
+      "📤 ငွေလွှဲပြေစာ upload လုပ်ရန်\nUpload your payment proof",
+      [{ type: "web_url", url: `https://${tenant.subdomain}.kuunyi.com/status`, title: "📤 Upload Proof" }],
+    );
+  }
 }
 
 // ─── 7. Status Check ─────────────────────────────────────────────────────────
@@ -644,7 +651,6 @@ export async function sendBuyTickets(
   pageToken: string,
 ): Promise<void> {
   const supabase = createAdminClient();
-  const { orgType, menuButtons: customButtons } = await getTenantInfo(tenantId);
 
   const { data: tenant } = await supabase
     .from("tenants")
@@ -692,7 +698,6 @@ export async function sendBuyTickets(
     }
   }
   msg += `ဝယ်ယူလိုသော Ticket အမျိုးအစားကို ရွေးချယ်ပြီး ဆက်လက်လုပ်ဆောင်နိုင်ပါသည်။\n\n`;
-  msg += `👉 ${url}\n\n`;
   msg += `အထက်ပါ link ကိုနှိပ်ပြီး လိုအပ်သော အချက်အလက်များကို ဖြည့်စွက်၍ Ticket ဝယ်ယူနိုင်ပါသည်။\n\n`;
 
   // Build English section
@@ -703,15 +708,18 @@ export async function sendBuyTickets(
     }
   }
   msg += `Please select your preferred ticket type to continue.\n\n`;
-  msg += `👉 ${url}\n\n`;
   msg += `Click the link above and fill in the required information to purchase your ticket.`;
 
-  const buttons = getMenuButtons(orgType, customButtons);
-  await sendQuickReplies(pageToken, senderPsid, msg, [
-    buttons.find((b) => b.payload === "EVENTS")!,
-    buttons.find((b) => b.payload === "PAYMENT")!,
-    { content_type: "text", title: "🏠 Main Menu", payload: "MAIN_MENU" },
-  ].filter((b): b is { content_type: "text"; title: string; payload: string } => !!b));
+  // Send ticket info as text first
+  await sendTextMessage(pageToken, senderPsid, msg);
+
+  // Send tappable button for the enrollment link
+  await sendButtonTemplate(
+    pageToken,
+    senderPsid,
+    "🎫 Ticket ဝယ်ယူရန် အောက်ပါ button ကိုနှိပ်ပါ\nTap the button below to buy tickets",
+    [{ type: "web_url", url, title: "🎫 Buy Tickets" }],
+  );
 }
 
 // ─── 9. Events ───────────────────────────────────────────────────────────────

@@ -46,3 +46,30 @@ export async function sendQuickReplies(
     message: { text, quick_replies: quickReplies },
   });
 }
+
+interface UrlButton {
+  type: "web_url";
+  url: string;
+  title: string;
+}
+
+export async function sendButtonTemplate(
+  pageToken: string,
+  recipientPsid: string,
+  text: string,
+  buttons: UrlButton[],
+): Promise<void> {
+  await callSendAPI(pageToken, {
+    recipient: { id: recipientPsid },
+    message: {
+      attachment: {
+        type: "template",
+        payload: {
+          template_type: "button",
+          text,
+          buttons,
+        },
+      },
+    },
+  });
+}
