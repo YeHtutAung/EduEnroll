@@ -6,7 +6,7 @@ import { formatMMKSimple } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type QRProvider = "mmqr" | "abank";
+type QRProvider = "mmpay" | "abank";
 
 interface QRPaymentModalProps {
   enrollmentRef: string;
@@ -27,9 +27,9 @@ export default function QRPaymentModal({
   studentName,
   onSuccess,
   onClose,
-  provider = "mmqr",
+  provider = "mmpay",
 }: QRPaymentModalProps) {
-  const apiBase = provider === "abank" ? "/api/public/payments/abank" : "/api/public/payments/mmqr";
+  const apiBase = provider === "abank" ? "/api/public/payments/abank" : "/api/public/payments/mmpay";
   const [state, setState] = useState<ModalState>("loading");
   const [qrData, setQrData] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
