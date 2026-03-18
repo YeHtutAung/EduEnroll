@@ -38,6 +38,7 @@ export interface CreateOrderParams {
   orderId: string; // ≤ 20 chars, maps to enrollment ref or short ID
   amount: number; // in MMK
   description: string;
+  callbackUrl?: string;
 }
 
 export interface CreateOrderResponse {
@@ -101,6 +102,10 @@ async function createOrder(params: CreateOrderParams): Promise<CreateOrderRespon
   const channelCode = CHANNEL_CODE();
   if (channelCode) {
     body.channelCode = channelCode;
+  }
+
+  if (params.callbackUrl) {
+    body.callbackUrl = params.callbackUrl;
   }
 
   const res = await fetch(`${BASE_URL()}/v1/order/create`, {
