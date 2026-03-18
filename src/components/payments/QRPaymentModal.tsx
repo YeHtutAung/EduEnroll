@@ -251,17 +251,19 @@ export default function QRPaymentModal({
                   const blob = new Blob([ab], { type: "image/png" });
                   const file = new File([blob], fileName, { type: "image/png" });
 
-                  // iOS/mobile: use Web Share API (triggers "Save Image" option)
-                  if (navigator.share && navigator.canShare?.({ files: [file] })) {
+                  // Mobile: use Web Share API (triggers native share sheet → Save to Photos)
+                  if (navigator.share) {
                     try {
-                      await navigator.share({ files: [file], title: "MMQR Payment Code" });
-                      return;
+                      if (navigator.canShare?.({ files: [file] })) {
+                        await navigator.share({ files: [file], title: "MMQR Payment Code" });
+                        return;
+                      }
                     } catch {
                       // User cancelled or share failed — fall through to download
                     }
                   }
 
-                  // Desktop/Android fallback: blob download
+                  // Desktop fallback: blob download
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement("a");
                   a.href = url;
