@@ -45,12 +45,14 @@ interface FormFieldDef {
   is_default: boolean;
 }
 
-// ─── Myanmar phone validation ────────────────────────────────────────────────
+// ─── Phone validation (Myanmar + international) ─────────────────────────────
 
-const MM_PHONE_RE = /^(?:\+?95|0)(9\d{7,9})$/;
+const MM_PHONE_RE = /^(?:\+?95|0)9\d{7,9}$/;
+const INTL_PHONE_RE = /^\+[1-9]\d{6,14}$/;
 
-function isValidMyanmarPhone(phone: string): boolean {
-  return MM_PHONE_RE.test(phone.replace(/[\s\-().]/g, ""));
+function isValidPhone(phone: string): boolean {
+  const cleaned = phone.replace(/[\s\-().]/g, "");
+  return MM_PHONE_RE.test(cleaned) || INTL_PHONE_RE.test(cleaned);
 }
 
 // ─── Myanmar numerals ────────────────────────────────────────────────────────
@@ -183,7 +185,7 @@ function DynamicField({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className={cls}
-          placeholder="09-xxxxxxxxx"
+          placeholder="09xxxxxxxxx or +819xxxxxxxx"
         />
       );
       break;
@@ -422,8 +424,8 @@ function EnrollmentFormPage() {
       if (!val) continue;
 
       // Type-specific validation
-      if (field.field_type === "phone" && !isValidMyanmarPhone(val)) {
-        errors[field.field_key] = "Invalid Myanmar phone number (e.g. 09-xxxxxxxxx).";
+      if (field.field_type === "phone" && !isValidPhone(val)) {
+        errors[field.field_key] = "Invalid phone number (e.g. 09xxxxxxxxx or +819xxxxxxxx).";
       }
       if (field.field_key === "email" && field.field_type === "text" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
         errors[field.field_key] = "Invalid email address.";
