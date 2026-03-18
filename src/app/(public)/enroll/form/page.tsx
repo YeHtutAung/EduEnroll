@@ -172,7 +172,7 @@ function getFieldHint(field: FormFieldDef): { en: string; mm?: string } | null {
       mm: "မြန်မာ သို့မဟုတ် နိုင်ငံတကာ ဖုန်းနံပါတ်",
     };
   }
-  if (key === "email") {
+  if (key === "email" || field.field_type === "email") {
     return {
       en: "We'll send your ticket and payment updates here",
       mm: "လက်မှတ်နှင့် ငွေပေးချေမှု အချက်အလက်များ ဤအီးမေးလ်သို့ ပို့ပါမည်",
@@ -193,7 +193,7 @@ function getFieldHint(field: FormFieldDef): { en: string; mm?: string } | null {
 function getFieldPlaceholder(field: FormFieldDef): string {
   const key = field.field_key.toLowerCase();
   if (field.field_type === "phone") return "09xxxxxxxxx";
-  if (key === "email") return "example@email.com";
+  if (field.field_type === "email" || key === "email") return "example@email.com";
   if (key === "name_en" || key === "student_name_en") return "e.g. Aung Aung";
   if (key === "name_mm" || key === "student_name_mm") return "ဥပမာ - အောင်အောင်";
   if (key === "nrc" || key === "nrc_number") return "12/ThaGaKa(N)123456";
@@ -222,6 +222,17 @@ function DynamicField({
       input = (
         <input
           type="tel"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={cls}
+          placeholder={getFieldPlaceholder(field)}
+        />
+      );
+      break;
+    case "email":
+      input = (
+        <input
+          type="email"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className={cls}
@@ -473,7 +484,7 @@ function EnrollmentFormPage() {
       if (field.field_type === "phone" && !isValidPhone(val)) {
         errors[field.field_key] = "Invalid phone number (e.g. 09xxxxxxxxx or +819xxxxxxxx).";
       }
-      if (field.field_key === "email" && field.field_type === "text" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
+      if ((field.field_type === "email" || (field.field_key === "email" && field.field_type === "text")) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
         errors[field.field_key] = "Invalid email address.";
       }
     }
