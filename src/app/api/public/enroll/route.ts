@@ -176,10 +176,20 @@ export async function POST(request: NextRequest) {
       updatePayload.student_name_mm = fd.name_mm.trim();
     if (fd.phone && (fieldTypeMap.get("phone") === "phone" || fieldTypeMap.get("phone") === "text"))
       updatePayload.phone = fd.phone.trim();
-    if (fd.email && fieldTypeMap.get("email") === "text")
+    if (fd.email && (fieldTypeMap.get("email") === "text" || fieldTypeMap.get("email") === "email"))
       updatePayload.email = fd.email.trim();
     if (fd.nrc && fieldTypeMap.get("nrc") === "text")
       updatePayload.nrc_number = fd.nrc.trim();
+
+    // Also check custom email fields (e.g. custom_email_123456)
+    if (!updatePayload.email) {
+      for (const [key, val] of Object.entries(fd)) {
+        if (key.startsWith("custom_email_") && val && typeof val === "string") {
+          updatePayload.email = val.trim();
+          break;
+        }
+      }
+    }
 
     // Store messenger PSID if enrollment came from chatbot
     if (typeof messenger_psid === "string" && messenger_psid.trim()) {
@@ -193,8 +203,11 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Send confirmation email (best-effort, non-blocking) ──────
-  // Only send if email field is actually a text field (not repurposed to file/etc.)
-  if (fd?.email && fieldTypeMap.get("email") === "text") {
+  // Find email from standard field or custom email field
+  const recipientEmail = fd?.email?.trim()
+    || (fd && Object.entries(fd).find(([k, v]) => k.startsWith("custom_email_") && v)?.[1]?.trim())
+    || null;
+  if (recipientEmail) {
     const host = request.headers.get("host") ?? "localhost:3005";
     const proto = host.startsWith("localhost") ? "http" : "https";
     const baseUrl = `${proto}://${host}`;
@@ -207,7 +220,7 @@ export async function POST(request: NextRequest) {
       .single() as { data: { name: string; org_type: string; logo_url: string | null } | null; error: unknown };
 
     const emailData = enrollmentConfirmationEmail({
-      studentName: fd.name_en?.trim() || "Student",
+      studentName: fd?.name_en?.trim() || "Student",
       enrollmentRef: payload.enrollment_ref,
       classLevel: payload.class_level,
       feeMmk: payload.fee_mmk,
@@ -219,7 +232,7 @@ export async function POST(request: NextRequest) {
       logoUrl: tenantInfo?.logo_url ?? undefined,
     });
 
-    sendEmail({ to: fd.email.trim(), ...emailData }).catch((err) => {
+    sendEmail({ to: recipientEmail!, ...emailData }).catch((err) => {
       console.error("[enroll] Email send failed:", err);
     });
   }
@@ -391,10 +404,20 @@ async function handleCartEnrollment(
       updatePayload.student_name_mm = fd.name_mm.trim();
     if (fd.phone && (fieldTypeMap.get("phone") === "phone" || fieldTypeMap.get("phone") === "text"))
       updatePayload.phone = fd.phone.trim();
-    if (fd.email && fieldTypeMap.get("email") === "text")
+    if (fd.email && (fieldTypeMap.get("email") === "text" || fieldTypeMap.get("email") === "email"))
       updatePayload.email = fd.email.trim();
     if (fd.nrc && fieldTypeMap.get("nrc") === "text")
       updatePayload.nrc_number = fd.nrc.trim();
+
+    // Also check custom email fields (e.g. custom_email_123456)
+    if (!updatePayload.email) {
+      for (const [key, val] of Object.entries(fd)) {
+        if (key.startsWith("custom_email_") && val && typeof val === "string") {
+          updatePayload.email = val.trim();
+          break;
+        }
+      }
+    }
 
     // Store messenger PSID if enrollment came from chatbot
     if (typeof messenger_psid === "string" && messenger_psid.trim()) {
@@ -405,7 +428,10 @@ async function handleCartEnrollment(
   }
 
   // ── Send confirmation email ────────────────────────────────────
-  if (fd?.email && fieldTypeMap.get("email") === "text") {
+  const cartRecipientEmail = fd?.email?.trim()
+    || (fd && Object.entries(fd).find(([k, v]) => k.startsWith("custom_email_") && v)?.[1]?.trim())
+    || null;
+  if (cartRecipientEmail) {
     const host = request.headers.get("host") ?? "localhost:3005";
     const proto = host.startsWith("localhost") ? "http" : "https";
     const baseUrl = `${proto}://${host}`;
@@ -421,7 +447,7 @@ async function handleCartEnrollment(
       .map((i) => i.quantity > 1 ? `${i.class_level} x${i.quantity}` : i.class_level)
       .join(", ");
     const emailData = enrollmentConfirmationEmail({
-      studentName: fd.name_en?.trim() || "Student",
+      studentName: fd?.name_en?.trim() || "Student",
       enrollmentRef: payload.enrollment_ref,
       classLevel: itemsSummary,
       feeMmk: payload.total_fee_mmk,
@@ -433,7 +459,7 @@ async function handleCartEnrollment(
       logoUrl: tenantInfo?.logo_url ?? undefined,
     });
 
-    sendEmail({ to: fd.email.trim(), ...emailData }).catch((err) => {
+    sendEmail({ to: cartRecipientEmail!, ...emailData }).catch((err) => {
       console.error("[enroll/cart] Email send failed:", err);
     });
   }
