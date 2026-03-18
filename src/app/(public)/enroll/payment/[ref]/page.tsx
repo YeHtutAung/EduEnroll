@@ -831,18 +831,44 @@ export default function PaymentInstructionsPage() {
 
           {/* ── Receipt card ────────────────────────────────────────── */}
           <div className="mb-8 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
-            {/* Ticket image banner */}
+            {/* Ticket image(s) */}
             {(() => {
-              const bannerUrl = isCart
-                ? enrollment.items?.find((i) => i.image_url)?.image_url
-                : enrollment.class_image_url;
-              return bannerUrl ? (
-                <div className="relative h-44 w-full overflow-hidden">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={bannerUrl} alt="" className="h-full w-full object-cover" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
+              const images = isCart
+                ? (enrollment.items ?? [])
+                    .filter((i) => i.image_url)
+                    .map((i) => ({ url: i.image_url!, label: i.class_level }))
+                : enrollment.class_image_url
+                  ? [{ url: enrollment.class_image_url, label: enrollment.class_level ?? "" }]
+                  : [];
+
+              if (images.length === 0) return null;
+              if (images.length === 1) {
+                return (
+                  <div className="relative h-44 w-full overflow-hidden">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={images[0].url} alt={images[0].label} className="h-full w-full object-cover" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
+                    <span className="absolute bottom-3 left-4 rounded-full bg-black/50 px-3 py-1 text-xs font-medium text-white backdrop-blur-sm">
+                      {images[0].label}
+                    </span>
+                  </div>
+                );
+              }
+              // Multiple images — grid layout
+              return (
+                <div className={`grid ${images.length === 2 ? "grid-cols-2" : "grid-cols-3"} gap-px bg-gray-200`}>
+                  {images.map((img, i) => (
+                    <div key={i} className="relative h-36 overflow-hidden">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={img.url} alt={img.label} className="h-full w-full object-cover" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
+                      <span className="absolute bottom-2 left-2 right-2 truncate rounded-full bg-black/50 px-2 py-0.5 text-center text-[10px] font-medium text-white backdrop-blur-sm">
+                        {img.label}
+                      </span>
+                    </div>
+                  ))}
                 </div>
-              ) : null;
+              );
             })()}
 
             {/* Reference header */}
