@@ -18,7 +18,7 @@ export type EnrollmentStatus =
   | "confirmed"
   | "rejected";
 
-export type PaymentStatus = "pending" | "verified" | "rejected";
+export type PaymentStatus = "awaiting_payment" | "pending" | "verified" | "rejected";
 
 /** @deprecated Use plain string instead. Kept for backward compatibility. */
 export type MyanmarBank = string;

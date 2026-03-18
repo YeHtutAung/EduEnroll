@@ -31,6 +31,10 @@ const ENROLLMENT_STATUS_LABELS: Record<EnrollmentStatus, { en: string; mm: strin
 };
 
 const PAYMENT_STATUS_LABELS: Record<PaymentStatus, { en: string; mm: string }> = {
+  awaiting_payment: {
+    en: "Awaiting Payment",
+    mm: "ငွေပေးချေမှု စောင့်ဆိုင်းနေသည်",
+  },
   pending: {
     en: "Pending Verification",
     mm: "အတည်ပြုမှု စောင့်ဆိုင်းဆဲ",

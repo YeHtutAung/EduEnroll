@@ -134,7 +134,7 @@ export async function POST(request: NextRequest) {
       payment_ref: orderId,
       payment_method: "abank_mmqr",
       mmqr_status: "PENDING",
-      status: "pending",
+      status: "awaiting_payment",
     } as never);
 
     return NextResponse.json({
