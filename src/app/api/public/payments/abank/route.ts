@@ -132,7 +132,7 @@ export async function POST(request: NextRequest) {
     } as never);
 
     return NextResponse.json({
-      qr: result.qr ?? null,
+      qr: result.data?.qr ?? null,
       orderId,
       amount: totalFee,
     });

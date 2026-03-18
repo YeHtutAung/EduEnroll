@@ -41,8 +41,12 @@ export interface CreateOrderParams {
 }
 
 export interface CreateOrderResponse {
-  qr: string; // QR string to render
-  [key: string]: unknown;
+  data: {
+    qr: string; // QR string to render
+    [key: string]: unknown;
+  };
+  respondMessage: string;
+  respondCode: number;
 }
 
 // paymentTxnStatus codes
