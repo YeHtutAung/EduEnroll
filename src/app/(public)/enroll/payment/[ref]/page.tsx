@@ -1077,8 +1077,8 @@ export default function PaymentInstructionsPage() {
         </div>
       )}
 
-      {/* ── Connect Telegram for updates ─────────────────────── */}
-      {enrollment?.telegram_bot_username && (
+      {/* ── Connect Telegram for updates (hidden for now) ────── */}
+      {/* {enrollment?.telegram_bot_username && (
         <div className="mb-8 rounded-xl border border-sky-200 bg-sky-50 p-4 text-center">
           <p className="mb-2 text-sm font-medium text-sky-900">
             Get updates via Telegram
@@ -1098,7 +1098,7 @@ export default function PaymentInstructionsPage() {
             Connect Telegram
           </a>
         </div>
-      )}
+      )} */}
 
     </div>
   );
