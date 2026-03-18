@@ -51,7 +51,7 @@ export async function GET(request: NextRequest) {
         paid_at: params.transactionDateTime
           ? new Date(params.transactionDateTime).toISOString()
           : new Date().toISOString(),
-        bank_reference: params.transactionId || params.endToEndId || null,
+        bank_reference: `CB:${params.transactionId || params.endToEndId || "unknown"}`,
       } as never)
       .eq("id", payment.id);
 
