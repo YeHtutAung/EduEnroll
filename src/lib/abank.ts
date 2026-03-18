@@ -53,12 +53,18 @@ export interface CreateOrderResponse {
 // 200 = Success, 100 = Pending, 500 = Fail, 400 = Refunded, 403 = Not Found
 export type ABankTxnStatus = 200 | 100 | 500 | 400 | 403;
 
-export interface EnquiryResponse {
+export interface EnquiryData {
   paymentTxnStatus: ABankTxnStatus;
   orderId?: string;
   amount?: number;
   transactionId?: string;
   [key: string]: unknown;
+}
+
+export interface EnquiryResponse {
+  data: EnquiryData;
+  respondMessage: string;
+  respondCode: number;
 }
 
 export interface CallbackParams {

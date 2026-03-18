@@ -50,7 +50,8 @@ export async function GET(request: NextRequest) {
   // Poll ABank enquiry API
   try {
     const enquiry = await abank.enquiryOrder(paymentRef);
-    const txnStatus = STATUS_MAP[enquiry.paymentTxnStatus] ?? "PENDING";
+    const txnData = enquiry.data;
+    const txnStatus = STATUS_MAP[txnData.paymentTxnStatus] ?? "PENDING";
 
     if (txnStatus === "SUCCESS") {
       // Update payment + enrollment
@@ -60,7 +61,7 @@ export async function GET(request: NextRequest) {
           mmqr_status: "SUCCESS",
           status: "verified",
           paid_at: new Date().toISOString(),
-          bank_reference: enquiry.transactionId ?? null,
+          bank_reference: txnData.transactionId ?? null,
         } as never)
         .eq("id", payment.id);
 
