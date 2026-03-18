@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import abank from "@/lib/abank";
+import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 
 // ─── GET /api/public/payments/abank/status?ref=AB-xxx ───────────────────────
 // Polls ABank enquiry API and updates local payment record.
@@ -69,6 +70,35 @@ export async function GET(request: NextRequest) {
         .from("enrollments")
         .update({ status: "confirmed" } as never)
         .eq("id", payment.enrollment_id);
+
+      // Send Telegram notification (best-effort)
+      const { data: enrollment } = (await supabase
+        .from("enrollments")
+        .select("tenant_id, telegram_chat_id, enrollment_ref, student_name_en")
+        .eq("id", payment.enrollment_id)
+        .single()) as {
+        data: { tenant_id: string; telegram_chat_id: string | null; enrollment_ref: string; student_name_en: string } | null;
+        error: unknown;
+      };
+
+      if (enrollment?.telegram_chat_id) {
+        const host = request.headers.get("host") ?? "localhost:3005";
+        const proto = host.startsWith("localhost") ? "http" : "https";
+        const statusUrl = `${proto}://${host}/status?ref=${enrollment.enrollment_ref}`;
+
+        sendTelegramStatusNotification({
+          tenantId: enrollment.tenant_id,
+          telegramChatId: enrollment.telegram_chat_id,
+          action: "approve",
+          studentName: enrollment.student_name_en || "Student",
+          enrollmentRef: enrollment.enrollment_ref,
+          classLevel: "Ticket",
+          statusUrl,
+          paymentUrl: statusUrl,
+        }).catch((err) => {
+          console.error("[abank-status] Telegram notification failed:", err);
+        });
+      }
     } else if (txnStatus === "FAILED") {
       await supabase
         .from("payments")

@@ -185,9 +185,9 @@ export async function GET(request: NextRequest) {
   // ── Fetch tenant org_type ─────────────────────────────────────
   const { data: tenantInfo } = await supabase
     .from("tenants")
-    .select("org_type, auto_cancel_hours")
+    .select("org_type, auto_cancel_hours, telegram_bot_username, telegram_enabled")
     .eq("id", tenantId)
-    .single() as { data: { org_type: string; auto_cancel_hours: number } | null; error: unknown };
+    .single() as { data: { org_type: string; auto_cancel_hours: number; telegram_bot_username: string | null; telegram_enabled: boolean } | null; error: unknown };
 
   return NextResponse.json({
     enrollment_ref:   enrollment.enrollment_ref,
@@ -209,5 +209,6 @@ export async function GET(request: NextRequest) {
     org_type:         tenantInfo?.org_type ?? "language_school",
     enrolled_at:      enrollment.enrolled_at,
     auto_cancel_hours: tenantInfo?.auto_cancel_hours ?? 72,
+    telegram_bot_username: tenantInfo?.telegram_enabled ? (tenantInfo.telegram_bot_username ?? null) : null,
   });
 }
