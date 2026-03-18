@@ -241,10 +241,10 @@ export default function QRPaymentModal({
 
             {/* Instructions */}
             <p className="mt-4 text-center text-xs text-gray-500">
-              Scan with KBZPay, Wave, CB Pay or any MMQR-supported app
+              Scan with KBZPay, Wave, CB Pay, A+ wallet or any MMQR-supported app
             </p>
             <p className="font-myanmar mt-0.5 text-center text-xs text-gray-400">
-              KBZPay, Wave, CB Pay သို့မဟုတ် MMQR ပံ့ပိုးသော app ဖြင့် စကင်ဖတ်ပါ
+              KBZPay, Wave, CB Pay, A+ wallet သို့မဟုတ် MMQR ပံ့ပိုးသော app ဖြင့် စကင်ဖတ်ပါ
             </p>
 
             {/* Order reference */}
