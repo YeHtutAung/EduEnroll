@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { formatMMK, formatMMKSimple } from "@/lib/utils";
 import QRPaymentModal from "@/components/payments/QRPaymentModal";
@@ -720,14 +720,43 @@ export default function PaymentInstructionsPage() {
     fetchData();
   }, [params.ref]);
 
-  function handleUploadSuccess() {
+  const handleUploadSuccess = useCallback(() => {
     fetch(`/api/public/status?ref=${encodeURIComponent(params.ref)}`)
       .then((res) => res.json())
       .then((data: EnrollmentInfo) => {
         setEnrollment(data);
       })
       .catch(() => {});
-  }
+  }, [params.ref]);
+
+  // ── Poll enrollment status when MMQR mode + pending (even after modal closes) ──
+  const pagePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    const isPending = enrollment?.status === "pending_payment" || enrollment?.status === "partial_payment";
+    const isMMQR = enrollment?.payment_mode === "mmqr";
+
+    // Only poll when MMQR mode, payment is pending, and modal is closed
+    if (isMMQR && isPending && !showQRModal) {
+      pagePollRef.current = setInterval(() => {
+        fetch(`/api/public/status?ref=${encodeURIComponent(params.ref)}`)
+          .then((res) => res.ok ? res.json() : null)
+          .then((data: EnrollmentInfo | null) => {
+            if (data && data.status !== enrollment?.status) {
+              setEnrollment(data);
+            }
+          })
+          .catch(() => {});
+      }, 5000);
+    }
+
+    return () => {
+      if (pagePollRef.current) {
+        clearInterval(pagePollRef.current);
+        pagePollRef.current = null;
+      }
+    };
+  }, [enrollment?.status, enrollment?.payment_mode, showQRModal, params.ref]);
 
   if (loading) return <LoadingSkeleton />;
   if (error || !enrollment) return <ErrorPage message={error || "Unknown error"} />;
