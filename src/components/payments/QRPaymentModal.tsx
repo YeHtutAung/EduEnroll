@@ -6,12 +6,15 @@ import { formatMMKSimple } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+type QRProvider = "mmqr" | "abank";
+
 interface QRPaymentModalProps {
   enrollmentRef: string;
   amount: number;
   studentName: string;
   onSuccess: () => void;
   onClose: () => void;
+  provider?: QRProvider;
 }
 
 type ModalState = "loading" | "qr" | "success" | "error";
@@ -24,7 +27,9 @@ export default function QRPaymentModal({
   studentName,
   onSuccess,
   onClose,
+  provider = "mmqr",
 }: QRPaymentModalProps) {
+  const apiBase = provider === "abank" ? "/api/public/payments/abank" : "/api/public/payments/mmqr";
   const [state, setState] = useState<ModalState>("loading");
   const [qrData, setQrData] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
@@ -54,7 +59,7 @@ export default function QRPaymentModal({
       pollRef.current = setInterval(async () => {
         try {
           const res = await fetch(
-            `/api/public/payments/mmqr/status?ref=${encodeURIComponent(paymentRef)}`,
+            `${apiBase}/status?ref=${encodeURIComponent(paymentRef)}`,
           );
           if (!res.ok) return;
           const data: { mmqr_status: string } = await res.json();
@@ -73,7 +78,7 @@ export default function QRPaymentModal({
         }
       }, 3000);
     },
-    [onSuccess],
+    [onSuccess, apiBase],
   );
 
   // ── Create payment on mount ────────────────────────────────
@@ -81,7 +86,7 @@ export default function QRPaymentModal({
     async function createPayment() {
       setState("loading");
       try {
-        const res = await fetch("/api/public/payments/mmqr", {
+        const res = await fetch(apiBase, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ enrollmentRef }),
@@ -129,7 +134,7 @@ export default function QRPaymentModal({
     // Instead, just call createPayment inline
     (async () => {
       try {
-        const res = await fetch("/api/public/payments/mmqr", {
+        const res = await fetch(apiBase, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ enrollmentRef }),

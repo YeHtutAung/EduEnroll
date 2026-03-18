@@ -6,6 +6,7 @@
 const SECRET_KEY = () => process.env.ABANK_SECRET_KEY!;
 const EC_CODE = () => process.env.ABANK_EC_CODE!;
 const MERCHANT_ID = () => process.env.ABANK_MERCHANT_ID!;
+const CHANNEL_CODE = () => process.env.ABANK_CHANNEL_CODE ?? "";
 const BASE_URL = () =>
   process.env.ABANK_MODE === "production"
     ? "https://merchant-thirdparty-api.apluswallet.com.mm/acquiring-qr-service"
@@ -76,7 +77,7 @@ async function createOrder(params: CreateOrderParams): Promise<CreateOrderRespon
   const requestNo = `REQ-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const now = formatDate(new Date());
 
-  const body = {
+  const body: Record<string, unknown> = {
     requestNo,
     orderId: params.orderId,
     merchantId: MERCHANT_ID(),
@@ -86,6 +87,11 @@ async function createOrder(params: CreateOrderParams): Promise<CreateOrderRespon
     description: params.description,
     createdDate: now,
   };
+
+  const channelCode = CHANNEL_CODE();
+  if (channelCode) {
+    body.channelCode = channelCode;
+  }
 
   const res = await fetch(`${BASE_URL()}/v1/order/create`, {
     method: "POST",
