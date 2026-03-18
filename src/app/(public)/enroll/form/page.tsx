@@ -161,6 +161,45 @@ const INPUT_BASE =
   "focus:border-[#1a6b3c] focus:outline-none focus:ring-1 focus:ring-[#1a6b3c]";
 const INPUT_ERROR = "border-red-400 focus:border-red-500 focus:ring-red-500";
 
+// ─── Field hints ──────────────────────────────────────────────────────────────
+
+function getFieldHint(field: FormFieldDef): { en: string; mm?: string } | null {
+  const key = field.field_key.toLowerCase();
+
+  if (field.field_type === "phone") {
+    return {
+      en: "Myanmar or international format (+81, +66, etc.)",
+      mm: "မြန်မာ သို့မဟုတ် နိုင်ငံတကာ ဖုန်းနံပါတ်",
+    };
+  }
+  if (key === "email") {
+    return {
+      en: "We'll send your ticket and payment updates here",
+      mm: "လက်မှတ်နှင့် ငွေပေးချေမှု အချက်အလက်များ ဤအီးမေးလ်သို့ ပို့ပါမည်",
+    };
+  }
+  if (key === "name_en" || key === "student_name_en") {
+    return { en: "Full name in English" };
+  }
+  if (key === "name_mm" || key === "student_name_mm") {
+    return { en: "Full name in Myanmar", mm: "မြန်မာအမည် အပြည့်အစုံ" };
+  }
+  if (key === "nrc" || key === "nrc_number") {
+    return { en: "e.g. 12/ThaGaKa(N)123456" };
+  }
+  return null;
+}
+
+function getFieldPlaceholder(field: FormFieldDef): string {
+  const key = field.field_key.toLowerCase();
+  if (field.field_type === "phone") return "09xxxxxxxxx";
+  if (key === "email") return "example@email.com";
+  if (key === "name_en" || key === "student_name_en") return "e.g. Aung Aung";
+  if (key === "name_mm" || key === "student_name_mm") return "ဥပမာ - အောင်အောင်";
+  if (key === "nrc" || key === "nrc_number") return "12/ThaGaKa(N)123456";
+  return field.field_label;
+}
+
 function DynamicField({
   field,
   value,
@@ -174,6 +213,7 @@ function DynamicField({
 }) {
   const hasError = !!error;
   const cls = `${INPUT_BASE} ${hasError ? INPUT_ERROR : ""}`;
+  const hint = getFieldHint(field);
 
   let input: React.ReactNode;
 
@@ -185,7 +225,7 @@ function DynamicField({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className={cls}
-          placeholder="09xxxxxxxxx or +819xxxxxxxx"
+          placeholder={getFieldPlaceholder(field)}
         />
       );
       break;
@@ -274,7 +314,7 @@ function DynamicField({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className={`${cls} ${field.field_label.toLowerCase().includes("myanmar") ? "font-myanmar" : ""}`}
-          placeholder={field.field_label}
+          placeholder={getFieldPlaceholder(field)}
         />
       );
       break;
@@ -289,6 +329,12 @@ function DynamicField({
         </label>
       )}
       {input}
+      {hint && !error && (
+        <p className="mt-1 text-xs text-gray-400">
+          {hint.en}
+          {hint.mm && <span className="font-myanmar"> · {hint.mm}</span>}
+        </p>
+      )}
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </div>
   );
