@@ -11,6 +11,7 @@ interface CartItem {
   quantity: number;
   fee_mmk: number;
   subtotal_mmk: number;
+  image_url?: string | null;
 }
 
 interface EnrollmentInfo {
@@ -31,6 +32,7 @@ interface EnrollmentInfo {
   telegram_bot_username?: string | null;
   payment_mode?: "bank_transfer" | "mmqr";
   mmqr_provider?: "abank" | "mmpay";
+  class_image_url?: string | null;
   items?: CartItem[] | null;
   payment?: {
     admin_note?: string | null;
@@ -829,6 +831,20 @@ export default function PaymentInstructionsPage() {
 
           {/* ── Receipt card ────────────────────────────────────────── */}
           <div className="mb-8 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+            {/* Ticket image banner */}
+            {(() => {
+              const bannerUrl = isCart
+                ? enrollment.items?.find((i) => i.image_url)?.image_url
+                : enrollment.class_image_url;
+              return bannerUrl ? (
+                <div className="relative h-44 w-full overflow-hidden">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={bannerUrl} alt="" className="h-full w-full object-cover" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent" />
+                </div>
+              ) : null;
+            })()}
+
             {/* Reference header */}
             <div className="border-b border-dashed border-gray-200 bg-gray-50/80 px-6 py-5 text-center">
               <p className="mb-1 text-[11px] font-semibold uppercase tracking-widest text-gray-400">
@@ -852,12 +868,22 @@ export default function PaymentInstructionsPage() {
               <div className="space-y-3">
                 {isCart && enrollment.items ? (
                   enrollment.items.map((item, i) => (
-                    <div key={i} className="flex items-center justify-between">
-                      <div className="flex items-center gap-2.5">
-                        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-50 text-xs font-bold text-emerald-600">
-                          {item.quantity}x
-                        </span>
-                        <span className="text-sm font-medium text-gray-800">{item.class_level}</span>
+                    <div key={i} className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        {item.image_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={item.image_url} alt="" className="h-10 w-10 rounded-lg object-cover ring-1 ring-gray-200" />
+                        ) : (
+                          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50 text-xs font-bold text-emerald-600">
+                            {item.quantity}x
+                          </span>
+                        )}
+                        <div>
+                          <span className="text-sm font-medium text-gray-800">{item.class_level}</span>
+                          {item.image_url && (
+                            <span className="block text-xs text-gray-400">Qty: {item.quantity}</span>
+                          )}
+                        </div>
                       </div>
                       <span className="text-sm font-semibold text-gray-900">
                         {formatMMKSimple(item.subtotal_mmk)}
@@ -865,12 +891,22 @@ export default function PaymentInstructionsPage() {
                     </div>
                   ))
                 ) : (
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-50 text-xs font-bold text-emerald-600">
-                        {qty}x
-                      </span>
-                      <span className="text-sm font-medium text-gray-800">{enrollment.class_level}</span>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      {enrollment.class_image_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={enrollment.class_image_url} alt="" className="h-10 w-10 rounded-lg object-cover ring-1 ring-gray-200" />
+                      ) : (
+                        <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50 text-xs font-bold text-emerald-600">
+                          {qty}x
+                        </span>
+                      )}
+                      <div>
+                        <span className="text-sm font-medium text-gray-800">{enrollment.class_level}</span>
+                        {enrollment.class_image_url && (
+                          <span className="block text-xs text-gray-400">Qty: {qty}</span>
+                        )}
+                      </div>
                     </div>
                     <span className="text-sm font-semibold text-gray-900">
                       {formatMMKSimple(totalFee)}
