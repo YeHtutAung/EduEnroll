@@ -791,19 +791,25 @@ export default function PaymentInstructionsPage() {
 
   return (
     <div className="mx-auto max-w-lg">
-      {/* ── Success header ─────────────────────────────────────── */}
+      {/* ── Header ──────────────────────────────────────────────── */}
       <div className="mb-8 text-center">
-        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
+        <div className={`mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full ${
+          enrollment.status === "confirmed" ? "bg-green-100" : "bg-green-100"
+        }`}>
           <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
           </svg>
         </div>
         <h1 className="text-2xl font-bold text-gray-900">
-          {orgType === "event" ? "Order Submitted!" : "Enrollment Submitted!"}
+          {enrollment.status === "confirmed"
+            ? (orgType === "event" ? "Payment Confirmed!" : "Payment Confirmed!")
+            : (orgType === "event" ? "Order Submitted!" : "Enrollment Submitted!")}
         </h1>
         {orgType !== "event" && (
           <p className="font-myanmar mt-1 text-lg text-gray-600">
-            စာရင်းသွင်းမှု အောင်မြင်ပြီ
+            {enrollment.status === "confirmed"
+              ? "ငွေပေးချေမှု အတည်ပြုပြီး"
+              : "စာရင်းသွင်းမှု အောင်မြင်ပြီ"}
           </p>
         )}
       </div>
