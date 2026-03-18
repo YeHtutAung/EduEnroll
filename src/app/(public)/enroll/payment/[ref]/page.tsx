@@ -789,95 +789,210 @@ export default function PaymentInstructionsPage() {
   const paymentMode = enrollment.payment_mode ?? "bank_transfer";
   const mmqrProvider = enrollment.mmqr_provider ?? "abank";
 
+  const isConfirmed = enrollment.status === "confirmed";
+
   return (
     <div className="mx-auto max-w-lg">
-      {/* ── Header ──────────────────────────────────────────────── */}
-      <div className="mb-8 text-center">
-        <div className={`mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full ${
-          enrollment.status === "confirmed" ? "bg-green-100" : "bg-green-100"
-        }`}>
-          <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-          </svg>
-        </div>
-        <h1 className="text-2xl font-bold text-gray-900">
-          {enrollment.status === "confirmed"
-            ? (orgType === "event" ? "Payment Confirmed!" : "Payment Confirmed!")
-            : (orgType === "event" ? "Order Submitted!" : "Enrollment Submitted!")}
-        </h1>
-        {orgType !== "event" && (
-          <p className="font-myanmar mt-1 text-lg text-gray-600">
-            {enrollment.status === "confirmed"
-              ? "ငွေပေးချေမှု အတည်ပြုပြီး"
-              : "စာရင်းသွင်းမှု အောင်မြင်ပြီ"}
-          </p>
-        )}
-      </div>
 
-      {/* ── Payment deadline countdown ─────────────────────────── */}
-      {showUpload && enrollment.enrolled_at && enrollment.auto_cancel_hours != null && enrollment.auto_cancel_hours > 0 && (
-        <PaymentCountdown
-          enrolledAt={enrollment.enrolled_at}
-          autoCancelHours={enrollment.auto_cancel_hours}
-        />
-      )}
+      {/* ══════════════════════════════════════════════════════════════
+          CONFIRMED STATE — celebratory receipt-style layout
+         ══════════════════════════════════════════════════════════════ */}
+      {isConfirmed ? (
+        <>
+          {/* ── Success hero ────────────────────────────────────────── */}
+          <div className="relative mb-8 overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700 px-6 py-10 text-center text-white shadow-lg">
+            {/* Decorative circles */}
+            <div className="pointer-events-none absolute -left-8 -top-8 h-32 w-32 rounded-full bg-white/10" />
+            <div className="pointer-events-none absolute -bottom-6 -right-6 h-24 w-24 rounded-full bg-white/10" />
 
-      {/* ── Partial payment banner ──────────────────────────────── */}
-      {isPartialReUpload && <PartialPaymentBanner enrollment={enrollment} />}
+            <div className="relative">
+              <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-white/20 ring-4 ring-white/30">
+                <svg className="h-10 w-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
+              </div>
+              <h1 className="text-2xl font-bold tracking-tight">
+                {orgType === "event" ? "Payment Confirmed!" : "Payment Confirmed!"}
+              </h1>
+              {orgType !== "event" && (
+                <p className="font-myanmar mt-1 text-base text-emerald-100">
+                  ငွေပေးချေမှု အတည်ပြုပြီး
+                </p>
+              )}
+              <p className="mt-3 text-sm text-emerald-100">
+                {orgType === "event"
+                  ? "Your tickets are confirmed. See you at the event!"
+                  : "Your enrollment is confirmed. We look forward to seeing you!"}
+              </p>
+            </div>
+          </div>
 
-      {/* ── Enrollment reference box ───────────────────────────── */}
-      <div className="mb-8 rounded-xl bg-[#1a6b3c]/10 p-5">
-        <p className="mb-2 text-center text-xs font-semibold uppercase tracking-wide text-[#1a6b3c]">
-          {orgType === "event" ? "Your Order Reference" : "Your Enrollment Reference"}
-        </p>
-        {orgType !== "event" && (
-          <p className="font-myanmar mb-3 text-center text-xs text-gray-500">
-            သင့်စာရင်းသွင်းမှု ရည်ညွှန်းကုဒ်
-          </p>
-        )}
-        <div className="flex items-center justify-center gap-3">
-          <span className="font-mono text-[2rem] font-bold leading-tight text-[#1a6b3c]">
-            {enrollment.enrollment_ref}
-          </span>
-        </div>
-        <div className="mt-3 flex justify-center">
-          <CopyButton text={enrollment.enrollment_ref} />
-        </div>
-      </div>
-
-      {/* ── Order summary ─────────────────────────────────────────── */}
-      <div className="mb-8 rounded-xl border border-gray-200 bg-white p-5">
-        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-          {orgType === "event" ? "Order Summary" : <>Order Summary / <span className="font-myanmar normal-case">အော်ဒါ အကျဉ်းချုပ်</span></>}
-        </h3>
-        <div className="space-y-2">
-          {isCart && enrollment.items ? (
-            enrollment.items.map((item, i) => (
-              <div key={i} className="flex justify-between text-sm">
-                <span className="text-gray-700">
-                  {item.class_level} &times; {item.quantity}
-                </span>
-                <span className="font-medium text-gray-900">
-                  {formatMMKSimple(item.subtotal_mmk)}
+          {/* ── Receipt card ────────────────────────────────────────── */}
+          <div className="mb-8 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+            {/* Reference header */}
+            <div className="border-b border-dashed border-gray-200 bg-gray-50/80 px-6 py-5 text-center">
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-widest text-gray-400">
+                {orgType === "event" ? "Order Reference" : "Enrollment Reference"}
+              </p>
+              <div className="flex items-center justify-center gap-2">
+                <span className="font-mono text-2xl font-bold tracking-wider text-[#1a6b3c]">
+                  {enrollment.enrollment_ref}
                 </span>
               </div>
-            ))
-          ) : (
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-700">
-                {enrollment.class_level} &times; {qty}
-              </span>
-              <span className="font-medium text-gray-900">
-                {formatMMKSimple(totalFee)}
+              <div className="mt-2">
+                <CopyButton text={enrollment.enrollment_ref} />
+              </div>
+            </div>
+
+            {/* Order items */}
+            <div className="px-6 py-5">
+              <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-gray-400">
+                {orgType === "event" ? "Order Details" : <>Order Details / <span className="font-myanmar normal-case tracking-normal">အော်ဒါ အသေးစိတ်</span></>}
+              </h3>
+              <div className="space-y-3">
+                {isCart && enrollment.items ? (
+                  enrollment.items.map((item, i) => (
+                    <div key={i} className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5">
+                        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-50 text-xs font-bold text-emerald-600">
+                          {item.quantity}x
+                        </span>
+                        <span className="text-sm font-medium text-gray-800">{item.class_level}</span>
+                      </div>
+                      <span className="text-sm font-semibold text-gray-900">
+                        {formatMMKSimple(item.subtotal_mmk)}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2.5">
+                      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-50 text-xs font-bold text-emerald-600">
+                        {qty}x
+                      </span>
+                      <span className="text-sm font-medium text-gray-800">{enrollment.class_level}</span>
+                    </div>
+                    <span className="text-sm font-semibold text-gray-900">
+                      {formatMMKSimple(totalFee)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Total */}
+            <div className="border-t border-gray-100 bg-gray-50/50 px-6 py-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-gray-600">Total Paid</span>
+                <span className="text-lg font-bold text-[#1a6b3c]">{formatMMKSimple(totalFee)}</span>
+              </div>
+            </div>
+
+            {/* Confirmed badge */}
+            <div className="border-t border-dashed border-gray-200 px-6 py-4">
+              <div className="flex items-center justify-center gap-2">
+                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500">
+                  <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <span className="text-sm font-semibold text-emerald-700">{enrollment.status_label_en}</span>
+                {orgType !== "event" && (
+                  <span className="font-myanmar text-sm text-emerald-600">/ {enrollment.status_label_mm}</span>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          {/* ══════════════════════════════════════════════════════════
+              NON-CONFIRMED STATES — pending / partial / under_review
+             ══════════════════════════════════════════════════════════ */}
+
+          {/* ── Header ──────────────────────────────────────────────── */}
+          <div className="mb-8 text-center">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
+              <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h1 className="text-2xl font-bold text-gray-900">
+              {orgType === "event" ? "Order Submitted!" : "Enrollment Submitted!"}
+            </h1>
+            {orgType !== "event" && (
+              <p className="font-myanmar mt-1 text-lg text-gray-600">
+                စာရင်းသွင်းမှု အောင်မြင်ပြီ
+              </p>
+            )}
+          </div>
+
+          {/* ── Payment deadline countdown ─────────────────────────── */}
+          {showUpload && enrollment.enrolled_at && enrollment.auto_cancel_hours != null && enrollment.auto_cancel_hours > 0 && (
+            <PaymentCountdown
+              enrolledAt={enrollment.enrolled_at}
+              autoCancelHours={enrollment.auto_cancel_hours}
+            />
+          )}
+
+          {/* ── Partial payment banner ──────────────────────────────── */}
+          {isPartialReUpload && <PartialPaymentBanner enrollment={enrollment} />}
+
+          {/* ── Enrollment reference box ───────────────────────────── */}
+          <div className="mb-8 rounded-xl bg-[#1a6b3c]/10 p-5">
+            <p className="mb-2 text-center text-xs font-semibold uppercase tracking-wide text-[#1a6b3c]">
+              {orgType === "event" ? "Your Order Reference" : "Your Enrollment Reference"}
+            </p>
+            {orgType !== "event" && (
+              <p className="font-myanmar mb-3 text-center text-xs text-gray-500">
+                သင့်စာရင်းသွင်းမှု ရည်ညွှန်းကုဒ်
+              </p>
+            )}
+            <div className="flex items-center justify-center gap-3">
+              <span className="font-mono text-[2rem] font-bold leading-tight text-[#1a6b3c]">
+                {enrollment.enrollment_ref}
               </span>
             </div>
-          )}
-          <div className="border-t pt-2 mt-2 flex justify-between font-semibold text-gray-900">
-            <span>Total</span>
-            <span>{formatMMKSimple(totalFee)}</span>
+            <div className="mt-3 flex justify-center">
+              <CopyButton text={enrollment.enrollment_ref} />
+            </div>
           </div>
-        </div>
-      </div>
+
+          {/* ── Order summary ─────────────────────────────────────────── */}
+          <div className="mb-8 rounded-xl border border-gray-200 bg-white p-5">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+              {orgType === "event" ? "Order Summary" : <>Order Summary / <span className="font-myanmar normal-case">အော်ဒါ အကျဉ်းချုပ်</span></>}
+            </h3>
+            <div className="space-y-2">
+              {isCart && enrollment.items ? (
+                enrollment.items.map((item, i) => (
+                  <div key={i} className="flex justify-between text-sm">
+                    <span className="text-gray-700">
+                      {item.class_level} &times; {item.quantity}
+                    </span>
+                    <span className="font-medium text-gray-900">
+                      {formatMMKSimple(item.subtotal_mmk)}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-700">
+                    {enrollment.class_level} &times; {qty}
+                  </span>
+                  <span className="font-medium text-gray-900">
+                    {formatMMKSimple(totalFee)}
+                  </span>
+                </div>
+              )}
+              <div className="border-t pt-2 mt-2 flex justify-between font-semibold text-gray-900">
+                <span>Total</span>
+                <span>{formatMMKSimple(totalFee)}</span>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
 
       {/* ── Payment instructions (bank transfer only) ────────────── */}
       {showUpload && paymentMode === "bank_transfer" && (
@@ -1080,8 +1195,8 @@ export default function PaymentInstructionsPage() {
         </>
       )}
 
-      {/* ── Status box (when not showing upload) ─────────────────── */}
-      {!showUpload && (
+      {/* ── Status box (non-confirmed, non-upload states) ───────── */}
+      {!showUpload && !isConfirmed && (
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-5 text-center">
           <p className="font-semibold text-blue-800">{enrollment.status_label_en}</p>
           <p className="font-myanmar mt-1 text-sm text-blue-700">{enrollment.status_label_mm}</p>
