@@ -729,14 +729,14 @@ export default function PaymentInstructionsPage() {
       .catch(() => {});
   }, [params.ref]);
 
-  // ── Poll enrollment status when MMQR mode + pending (even after modal closes) ──
+  // ── Poll enrollment status when MMQR mode + pending (stop after 10 min) ──
   const pagePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pagePollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const isPending = enrollment?.status === "pending_payment" || enrollment?.status === "partial_payment";
     const isMMQR = enrollment?.payment_mode === "mmqr";
 
-    // Only poll when MMQR mode, payment is pending, and modal is closed
     if (isMMQR && isPending && !showQRModal) {
       pagePollRef.current = setInterval(() => {
         fetch(`/api/public/status?ref=${encodeURIComponent(params.ref)}`)
@@ -748,12 +748,24 @@ export default function PaymentInstructionsPage() {
           })
           .catch(() => {});
       }, 5000);
+
+      // Stop polling after 10 minutes
+      pagePollTimerRef.current = setTimeout(() => {
+        if (pagePollRef.current) {
+          clearInterval(pagePollRef.current);
+          pagePollRef.current = null;
+        }
+      }, 10 * 60 * 1000);
     }
 
     return () => {
       if (pagePollRef.current) {
         clearInterval(pagePollRef.current);
         pagePollRef.current = null;
+      }
+      if (pagePollTimerRef.current) {
+        clearTimeout(pagePollTimerRef.current);
+        pagePollTimerRef.current = null;
       }
     };
   }, [enrollment?.status, enrollment?.payment_mode, showQRModal, params.ref]);
