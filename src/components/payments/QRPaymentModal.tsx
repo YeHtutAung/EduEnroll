@@ -36,6 +36,7 @@ export default function QRPaymentModal({
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [qrImageUrl, setQrImageUrl] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Close on Escape ────────────────────────────────────────
   useEffect(() => {
@@ -46,14 +47,15 @@ export default function QRPaymentModal({
     return () => document.removeEventListener("keydown", handleKey);
   }, [onClose]);
 
-  // ── Cleanup polling on unmount ─────────────────────────────
+  // ── Cleanup polling + timer on unmount ─────────────────────
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
+      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
     };
   }, []);
 
-  // ── Start polling for payment status ───────────────────────
+  // ── Start polling for payment status (stops after 10 min) ──
   const startPolling = useCallback(
     (paymentRef: string) => {
       pollRef.current = setInterval(async () => {
@@ -66,10 +68,12 @@ export default function QRPaymentModal({
 
           if (data.mmqr_status === "SUCCESS") {
             if (pollRef.current) clearInterval(pollRef.current);
+            if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
             setState("success");
             onSuccess();
           } else if (data.mmqr_status === "FAILED") {
             if (pollRef.current) clearInterval(pollRef.current);
+            if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
             setState("error");
             setErrorMsg("Payment was declined. Please try again.");
           }
@@ -77,6 +81,13 @@ export default function QRPaymentModal({
           // Ignore polling errors — will retry next interval
         }
       }, 5000);
+
+      // Stop polling after 10 minutes (QR codes expire)
+      pollTimerRef.current = setTimeout(() => {
+        if (pollRef.current) clearInterval(pollRef.current);
+        setState("error");
+        setErrorMsg("QR code has expired. Please try again.");
+      }, 10 * 60 * 1000);
     },
     [onSuccess, apiBase],
   );
