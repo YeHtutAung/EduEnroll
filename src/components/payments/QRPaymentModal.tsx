@@ -76,7 +76,7 @@ export default function QRPaymentModal({
         } catch {
           // Ignore polling errors — will retry next interval
         }
-      }, 10000);
+      }, 5000);
     },
     [onSuccess, apiBase],
   );
