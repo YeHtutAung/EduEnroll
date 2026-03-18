@@ -241,16 +241,29 @@ export default function QRPaymentModal({
 
             {/* Download button */}
             {qrImageUrl && (
-              <a
-                href={qrImageUrl}
-                download={`MMQR-${orderId ?? "payment"}.png`}
+              <button
+                onClick={() => {
+                  const byteString = atob(qrImageUrl.split(",")[1]);
+                  const ab = new ArrayBuffer(byteString.length);
+                  const ia = new Uint8Array(ab);
+                  for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+                  const blob = new Blob([ab], { type: "image/png" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `MMQR-${orderId ?? "payment"}.png`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                }}
                 className="mt-3 flex items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-600 hover:bg-gray-100 transition-colors"
               >
                 <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
                 </svg>
                 Save QR / <span className="font-myanmar">QR သိမ်းမည်</span>
-              </a>
+              </button>
             )}
 
             {/* Instructions */}
