@@ -845,14 +845,14 @@ export default function PaymentInstructionsPage() {
         </div>
       </div>
 
-      {/* ── Ticket breakdown (cart) ──────────────────────────────── */}
-      {isCart && enrollment.items && (
-        <div className="mb-8 rounded-xl border border-gray-200 bg-white p-5">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-            Order Summary
-          </h3>
-          <div className="space-y-2">
-            {enrollment.items.map((item, i) => (
+      {/* ── Order summary ─────────────────────────────────────────── */}
+      <div className="mb-8 rounded-xl border border-gray-200 bg-white p-5">
+        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+          {orgType === "event" ? "Order Summary" : <>Order Summary / <span className="font-myanmar normal-case">အော်ဒါ အကျဉ်းချုပ်</span></>}
+        </h3>
+        <div className="space-y-2">
+          {isCart && enrollment.items ? (
+            enrollment.items.map((item, i) => (
               <div key={i} className="flex justify-between text-sm">
                 <span className="text-gray-700">
                   {item.class_level} &times; {item.quantity}
@@ -861,14 +861,23 @@ export default function PaymentInstructionsPage() {
                   {formatMMKSimple(item.subtotal_mmk)}
                 </span>
               </div>
-            ))}
-            <div className="border-t pt-2 mt-2 flex justify-between font-semibold text-gray-900">
-              <span>Total</span>
-              <span>{formatMMKSimple(totalFee)}</span>
+            ))
+          ) : (
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-700">
+                {enrollment.class_level} &times; {qty}
+              </span>
+              <span className="font-medium text-gray-900">
+                {formatMMKSimple(totalFee)}
+              </span>
             </div>
+          )}
+          <div className="border-t pt-2 mt-2 flex justify-between font-semibold text-gray-900">
+            <span>Total</span>
+            <span>{formatMMKSimple(totalFee)}</span>
           </div>
         </div>
-      )}
+      </div>
 
       {/* ── Payment instructions (bank transfer only) ────────────── */}
       {showUpload && paymentMode === "bank_transfer" && (
