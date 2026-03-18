@@ -295,7 +295,7 @@ export function enrollmentApprovedEmail(params: {
   const ticketListHtml = isMultiTicket
     ? `<ol style="margin: 8px 0 0; padding-left: 20px; font-size: 14px; color: #166534;">${ticketItems.map((t) => `<li style="margin: 2px 0;">${t}</li>`).join("")}</ol>`
     : "";
-  const singleTicketBold = !isMultiTicket ? ` for <strong>${ticketItems[0] || classLevel}</strong>` : ":";
+  const singleTicketBold = !isMultiTicket ? ` for <strong>${ticketItems[0] || classLevel}</strong>` : "";
 
   // Info section: one row per ticket
   const ticketRows = ticketItems
