@@ -514,6 +514,11 @@ function SettingsContent() {
   const [autoCancelHours, setAutoCancelHours] = useState(72);
   const [savingPolicy, setSavingPolicy] = useState(false);
 
+  // ── Payment mode ──────────────────────────────────────────────────────────
+  const [paymentMode, setPaymentMode] = useState<"bank_transfer" | "mmqr">("bank_transfer");
+  const [mmqrProvider, setMmqrProvider] = useState<"abank" | "mmpay">("abank");
+  const [savingPaymentMode, setSavingPaymentMode] = useState(false);
+
   const fetchProfile = useCallback(async () => {
     setLoadingProfile(true);
     try {
@@ -536,7 +541,7 @@ function SettingsContent() {
       // Fetch tenant name + logo + org labels
       const { data: tenant } = await supabase
         .from("tenants")
-        .select("name, logo_url, org_type, label_intake, label_class, label_student, label_seat, label_fee, auto_cancel_hours")
+        .select("name, logo_url, org_type, label_intake, label_class, label_student, label_seat, label_fee, auto_cancel_hours, payment_mode, mmqr_provider")
         .eq("id", profile.tenant_id)
         .single() as {
         data: {
@@ -549,6 +554,8 @@ function SettingsContent() {
           label_seat: string;
           label_fee: string;
           auto_cancel_hours: number;
+          payment_mode: string;
+          mmqr_provider: string;
         } | null;
         error: unknown;
       };
@@ -564,6 +571,8 @@ function SettingsContent() {
           fee: tenant.label_fee ?? "Fee",
         });
         setAutoCancelHours(tenant.auto_cancel_hours ?? 72);
+        setPaymentMode((tenant.payment_mode as "bank_transfer" | "mmqr") ?? "bank_transfer");
+        setMmqrProvider((tenant.mmqr_provider as "abank" | "mmpay") ?? "abank");
       }
     } catch {
       // non-critical; keep defaults
@@ -724,6 +733,24 @@ function SettingsContent() {
       toast.error(err instanceof Error ? err.message : "Failed to save enrollment policy.");
     } finally {
       setSavingPolicy(false);
+    }
+  }
+
+  // ── Payment mode ─────────────────────────────────────────────────────────
+  async function handleSavePaymentMode() {
+    if (!tenantId) return;
+    setSavingPaymentMode(true);
+    try {
+      const { error } = await supabase
+        .from("tenants")
+        .update({ payment_mode: paymentMode, mmqr_provider: mmqrProvider } as never)
+        .eq("id", tenantId);
+      if (error) throw new Error((error as Error).message);
+      toast.success("Payment mode saved.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save payment mode.");
+    } finally {
+      setSavingPaymentMode(false);
     }
   }
 
@@ -910,6 +937,92 @@ function SettingsContent() {
 
       {/* Tab bar */}
       <SettingsTabs />
+
+      {/* ── Payment Mode ──────────────────────────────────────────────── */}
+      <SectionCard
+        title="Payment Mode"
+        subtitle="Choose how students pay for enrollments."
+      >
+        <div className="space-y-4">
+          {/* Mode toggle */}
+          <div className="flex gap-3">
+            <button
+              onClick={() => setPaymentMode("bank_transfer")}
+              className={`flex-1 rounded-xl border-2 px-4 py-3 text-left transition-colors ${
+                paymentMode === "bank_transfer"
+                  ? "border-[#1a3f8a] bg-[#1a3f8a]/5"
+                  : "border-gray-200 hover:border-gray-300"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <svg className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 21h19.5m-18-18v18m10.5-18v18m6-13.5V21M6.75 6.75h.75m-.75 3h.75m-.75 3h.75m3-6h.75m-.75 3h.75m-.75 3h.75M6.75 21v-3.375c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21M3 3h12m-.75 4.5H21m-3.75 0h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008zm0 3h.008v.008h-.008v-.008z" />
+                </svg>
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">Other Banks</p>
+                  <p className="text-xs text-gray-500">Bank transfer + receipt upload</p>
+                </div>
+              </div>
+            </button>
+            <button
+              onClick={() => setPaymentMode("mmqr")}
+              className={`flex-1 rounded-xl border-2 px-4 py-3 text-left transition-colors ${
+                paymentMode === "mmqr"
+                  ? "border-[#1a3f8a] bg-[#1a3f8a]/5"
+                  : "border-gray-200 hover:border-gray-300"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <svg className="h-5 w-5 text-gray-600" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z" />
+                </svg>
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">MMQR</p>
+                  <p className="text-xs text-gray-500">Instant QR code payment</p>
+                </div>
+              </div>
+            </button>
+          </div>
+
+          {/* Provider selector (only when MMQR) */}
+          {paymentMode === "mmqr" && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1.5">MMQR Provider</label>
+              <select
+                value={mmqrProvider}
+                onChange={(e) => setMmqrProvider(e.target.value as "abank" | "mmpay")}
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
+              >
+                <option value="abank">ABank (A+ Wallet)</option>
+                <option value="mmpay">MyanMyanPay</option>
+              </select>
+            </div>
+          )}
+
+          {/* Info note */}
+          {paymentMode === "mmqr" && (
+            <div className="flex items-start gap-2 rounded-lg bg-blue-50 px-3 py-2.5">
+              <svg className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M11.25 11.25l.041-.02a.75.75 0 011.063.852l-.708 2.836a.75.75 0 001.063.853l.041-.021M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9-3.75h.008v.008H12V8.25z" />
+              </svg>
+              <p className="text-xs text-blue-700">
+                Bank accounts and receipt upload will be hidden from students. Only the MMQR payment button will be shown.
+              </p>
+            </div>
+          )}
+
+          {/* Save button */}
+          <div className="flex justify-end">
+            <button
+              onClick={handleSavePaymentMode}
+              disabled={savingPaymentMode}
+              className="rounded-xl bg-[#1a3f8a] px-6 py-2.5 text-sm font-semibold text-white hover:bg-blue-900 transition-colors disabled:opacity-50"
+            >
+              {savingPaymentMode ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </div>
+      </SectionCard>
 
       {/* ── Section 1: Bank Accounts ─────────────────────────────────── */}
       <SectionCard

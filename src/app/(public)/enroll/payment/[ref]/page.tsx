@@ -29,6 +29,8 @@ interface EnrollmentInfo {
   enrolled_at?: string;
   auto_cancel_hours?: number;
   telegram_bot_username?: string | null;
+  payment_mode?: "bank_transfer" | "mmqr";
+  mmqr_provider?: "abank" | "mmpay";
   items?: CartItem[] | null;
   payment?: {
     admin_note?: string | null;
@@ -739,6 +741,8 @@ export default function PaymentInstructionsPage() {
   const feeMm = formatMMK(totalFee).replace(" MMK", "");
   const showUpload = enrollment.status === "pending_payment" || enrollment.status === "partial_payment";
   const isPartialReUpload = enrollment.status === "partial_payment";
+  const paymentMode = enrollment.payment_mode ?? "bank_transfer";
+  const mmqrProvider = enrollment.mmqr_provider ?? "abank";
 
   return (
     <div className="mx-auto max-w-lg">
@@ -815,8 +819,8 @@ export default function PaymentInstructionsPage() {
         </div>
       )}
 
-      {/* ── Payment instructions ───────────────────────────────── */}
-      {showUpload && (
+      {/* ── Payment instructions (bank transfer only) ────────────── */}
+      {showUpload && paymentMode === "bank_transfer" && (
         <div className="mb-8">
           <h2 className="mb-5 text-lg font-semibold text-gray-900">
             {orgType === "event"
@@ -905,7 +909,7 @@ export default function PaymentInstructionsPage() {
       )}
 
       {/* ── Pay via MMQR ─────────────────────────────────────── */}
-      {showUpload && (
+      {showUpload && paymentMode === "mmqr" && (
         <div className="mb-8">
           <button
             onClick={() => setShowQRModal(true)}
@@ -920,12 +924,6 @@ export default function PaymentInstructionsPage() {
               <span className="font-myanmar block text-xs font-normal opacity-75">MMQR ဖြင့် ချက်ချင်း ငွေပေးချေမည်</span>
             </div>
           </button>
-
-          <div className="my-6 flex items-center gap-3">
-            <div className="h-px flex-1 bg-gray-200" />
-            <span className="text-xs font-medium text-gray-400">OR / <span className="font-myanmar">သို့မဟုတ်</span></span>
-            <div className="h-px flex-1 bg-gray-200" />
-          </div>
         </div>
       )}
 
@@ -937,7 +935,7 @@ export default function PaymentInstructionsPage() {
             ? enrollment.payment.remaining_amount_mmk
             : totalFee}
           studentName={enrollment.student_name_en}
-          provider="abank"
+          provider={mmqrProvider}
           onSuccess={() => {
             setShowQRModal(false);
             handleUploadSuccess();
@@ -946,8 +944,8 @@ export default function PaymentInstructionsPage() {
         />
       )}
 
-      {/* ── Bank accounts ──────────────────────────────────────── */}
-      {showUpload && bankAccounts.length > 0 && (
+      {/* ── Bank accounts (bank transfer only) ─────────────────── */}
+      {showUpload && paymentMode === "bank_transfer" && bankAccounts.length > 0 && (
         <div className="mb-8">
           <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">
             Bank Accounts{orgType !== "event" && <> / <span className="font-myanmar normal-case">ဘဏ်အကောင့်များ</span></>}
@@ -996,7 +994,8 @@ export default function PaymentInstructionsPage() {
       )}
 
       {/* ── Upload payment screenshot section ──────────────────── */}
-      {showUpload ? (
+      {/* ── Upload payment screenshot (bank transfer only) ────── */}
+      {showUpload && paymentMode === "bank_transfer" && (
         <>
           <a
             href="#upload-section"
@@ -1021,7 +1020,10 @@ export default function PaymentInstructionsPage() {
             />
           </div>
         </>
-      ) : (
+      )}
+
+      {/* ── Status box (when not showing upload) ─────────────────── */}
+      {!showUpload && (
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-5 text-center">
           <p className="font-semibold text-blue-800">{enrollment.status_label_en}</p>
           <p className="font-myanmar mt-1 text-sm text-blue-700">{enrollment.status_label_mm}</p>
