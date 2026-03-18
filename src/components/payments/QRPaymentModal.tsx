@@ -239,19 +239,33 @@ export default function QRPaymentModal({
               </div>
             )}
 
-            {/* Download button */}
+            {/* Save QR button */}
             {qrImageUrl && (
               <button
-                onClick={() => {
+                onClick={async () => {
+                  const fileName = `MMQR-${orderId ?? "payment"}.png`;
                   const byteString = atob(qrImageUrl.split(",")[1]);
                   const ab = new ArrayBuffer(byteString.length);
                   const ia = new Uint8Array(ab);
                   for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
                   const blob = new Blob([ab], { type: "image/png" });
+                  const file = new File([blob], fileName, { type: "image/png" });
+
+                  // iOS/mobile: use Web Share API (triggers "Save Image" option)
+                  if (navigator.share && navigator.canShare?.({ files: [file] })) {
+                    try {
+                      await navigator.share({ files: [file], title: "MMQR Payment Code" });
+                      return;
+                    } catch {
+                      // User cancelled or share failed — fall through to download
+                    }
+                  }
+
+                  // Desktop/Android fallback: blob download
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement("a");
                   a.href = url;
-                  a.download = `MMQR-${orderId ?? "payment"}.png`;
+                  a.download = fileName;
                   document.body.appendChild(a);
                   a.click();
                   document.body.removeChild(a);
