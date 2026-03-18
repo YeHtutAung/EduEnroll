@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useParams } from "next/navigation";
 import { formatMMK, formatMMKSimple } from "@/lib/utils";
-// import QRPaymentModal from "@/components/payments/QRPaymentModal"; // MMQR hidden for now
+import QRPaymentModal from "@/components/payments/QRPaymentModal";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CartItem {
@@ -28,6 +28,7 @@ interface EnrollmentInfo {
   status_label_mm: string;
   enrolled_at?: string;
   auto_cancel_hours?: number;
+  telegram_bot_username?: string | null;
   items?: CartItem[] | null;
   payment?: {
     admin_note?: string | null;
@@ -662,7 +663,7 @@ export default function PaymentInstructionsPage() {
   const [availableClasses, setAvailableClasses] = useState<AvailableClass[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // const [showQRModal, setShowQRModal] = useState(false); // MMQR hidden for now
+  const [showQRModal, setShowQRModal] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
@@ -903,8 +904,8 @@ export default function PaymentInstructionsPage() {
         </div>
       )}
 
-      {/* ── Pay via MMQR (hidden — enable per tenant later) ──── */}
-      {/* {showUpload && (
+      {/* ── Pay via MMQR ─────────────────────────────────────── */}
+      {showUpload && (
         <div className="mb-8">
           <button
             onClick={() => setShowQRModal(true)}
@@ -926,23 +927,24 @@ export default function PaymentInstructionsPage() {
             <div className="h-px flex-1 bg-gray-200" />
           </div>
         </div>
-      )} */}
+      )}
 
-      {/* ── MMQR Payment Modal (hidden) ───────────────────────── */}
-      {/* {showQRModal && enrollment && (
+      {/* ── MMQR Payment Modal ────────────────────────────────── */}
+      {showQRModal && enrollment && (
         <QRPaymentModal
           enrollmentRef={enrollment.enrollment_ref}
           amount={isPartialReUpload && enrollment.payment?.remaining_amount_mmk
             ? enrollment.payment.remaining_amount_mmk
             : totalFee}
           studentName={enrollment.student_name_en}
+          provider="abank"
           onSuccess={() => {
             setShowQRModal(false);
             handleUploadSuccess();
           }}
           onClose={() => setShowQRModal(false)}
         />
-      )} */}
+      )}
 
       {/* ── Bank accounts ──────────────────────────────────────── */}
       {showUpload && bankAccounts.length > 0 && (
@@ -1072,6 +1074,29 @@ export default function PaymentInstructionsPage() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* ── Connect Telegram for updates ─────────────────────── */}
+      {enrollment?.telegram_bot_username && (
+        <div className="mb-8 rounded-xl border border-sky-200 bg-sky-50 p-4 text-center">
+          <p className="mb-2 text-sm font-medium text-sky-900">
+            Get updates via Telegram
+          </p>
+          <p className="font-myanmar mb-3 text-xs text-sky-700">
+            Telegram မှတဆင့် အပ်ဒိတ်များ ရယူပါ
+          </p>
+          <a
+            href={`https://t.me/${enrollment.telegram_bot_username}?start=${encodeURIComponent(enrollment.enrollment_ref)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 rounded-lg bg-[#0088cc] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#006daa] transition-colors"
+          >
+            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+            </svg>
+            Connect Telegram
+          </a>
         </div>
       )}
 

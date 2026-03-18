@@ -4,7 +4,7 @@ import { requireAuth, badRequest, notFound } from "@/lib/api";
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 const VALID_FIELD_TYPES = [
-  "text", "select", "radio", "file", "date", "checkbox", "phone", "address",
+  "text", "email", "select", "radio", "file", "date", "checkbox", "phone", "address",
 ] as const;
 
 type FieldType = (typeof VALID_FIELD_TYPES)[number];

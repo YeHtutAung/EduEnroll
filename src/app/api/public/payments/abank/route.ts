@@ -113,11 +113,17 @@ export async function POST(request: NextRequest) {
   const shortEnroll = enrollment.id.replace(/-/g, "").slice(0, 8);
   const orderId = `AB-${shortEnroll}-${ts}`.slice(0, 20);
 
+  // ── Build callback URL ────────────────────────────────────
+  const host = request.headers.get("host") ?? "localhost:3005";
+  const proto = host.startsWith("localhost") ? "http" : "https";
+  const callbackUrl = `${proto}://${host}/api/public/payments/abank/callback`;
+
   try {
     const result = await abank.createOrder({
       orderId,
       amount: totalFee,
       description: `Payment for ${enrollment.enrollment_ref}`,
+      callbackUrl,
     });
 
     // ── 7. Create payment record ─────────────────────────────
@@ -132,7 +138,7 @@ export async function POST(request: NextRequest) {
     } as never);
 
     return NextResponse.json({
-      qr: result.qr ?? null,
+      qr: result.data?.qr ?? null,
       orderId,
       amount: totalFee,
     });

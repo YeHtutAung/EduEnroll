@@ -178,6 +178,7 @@ export interface Enrollment {
   status: EnrollmentStatus;
   enrolled_at: string;
   messenger_psid: string | null;
+  telegram_chat_id: string | null;
 }
 
 export interface Payment {
