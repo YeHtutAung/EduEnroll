@@ -81,6 +81,12 @@ export async function PATCH(
 
   if (enrollErr || !enrollment) return notFound("Enrollment");
 
+  // Resolve email: column first, then form_data custom email field
+  const fd = enrollment.form_data as Record<string, string> | null;
+  const enrollEmail = enrollment.email
+    || (fd && Object.entries(fd).find(([k]) => k === "email" || k.startsWith("custom_email_"))?.[1])
+    || null;
+
   const now = new Date().toISOString();
   const admin = createAdminClient(); // bypasses RLS for class seat update
 
@@ -232,7 +238,7 @@ export async function PATCH(
     }
 
     // Email notification
-    if (enrollment.email) {
+    if (enrollEmail) {
       const emailData = enrollmentApprovedEmail({
         studentName: enrollment.student_name_en || "Student",
         enrollmentRef: enrollment.enrollment_ref,
@@ -243,12 +249,12 @@ export async function PATCH(
         tenantName,
         logoUrl,
       });
-      sendEmail({ to: enrollment.email, ...emailData }).catch((err) => {
+      sendEmail({ to: enrollEmail, ...emailData }).catch((err) => {
         console.error("[verify] Approval email failed:", err);
       });
     }
 
-    if (enrollment.messenger_psid || enrollment.email) {
+    if (enrollment.messenger_psid || enrollEmail) {
       await admin
         .from("enrollments")
         .update({ status_notified_at: now } as never)
@@ -336,7 +342,7 @@ export async function PATCH(
     }
 
     // Email notification
-    if (enrollment.email) {
+    if (enrollEmail) {
       const emailData = partialPaymentEmail({
         studentName: enrollment.student_name_en || "Student",
         enrollmentRef: enrollment.enrollment_ref,
@@ -351,12 +357,12 @@ export async function PATCH(
         tenantName,
         logoUrl,
       });
-      sendEmail({ to: enrollment.email, ...emailData }).catch((err) => {
+      sendEmail({ to: enrollEmail, ...emailData }).catch((err) => {
         console.error("[verify] Partial payment email failed:", err);
       });
     }
 
-    if (enrollment.messenger_psid || enrollment.email) {
+    if (enrollment.messenger_psid || enrollEmail) {
       await admin
         .from("enrollments")
         .update({ status_notified_at: now } as never)
@@ -435,7 +441,7 @@ export async function PATCH(
   }
 
   // Email notification
-  if (enrollment.email) {
+  if (enrollEmail) {
     const emailData = enrollmentRejectedEmail({
       studentName: enrollment.student_name_en || "Student",
       enrollmentRef: enrollment.enrollment_ref,
@@ -446,12 +452,12 @@ export async function PATCH(
       tenantName,
       logoUrl,
     });
-    sendEmail({ to: enrollment.email, ...emailData }).catch((err) => {
+    sendEmail({ to: enrollEmail, ...emailData }).catch((err) => {
       console.error("[verify] Rejection email failed:", err);
     });
   }
 
-  if (enrollment.messenger_psid || enrollment.email) {
+  if (enrollment.messenger_psid || enrollEmail) {
     await admin
       .from("enrollments")
       .update({ status_notified_at: now } as never)

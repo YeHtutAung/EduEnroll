@@ -75,7 +75,7 @@ export async function GET(request: NextRequest) {
       // Send notifications (best-effort)
       const { data: enrollment } = (await supabase
         .from("enrollments")
-        .select("tenant_id, telegram_chat_id, email, enrollment_ref, student_name_en, class_id, quantity")
+        .select("tenant_id, telegram_chat_id, email, enrollment_ref, student_name_en, class_id, quantity, form_data")
         .eq("id", payment.enrollment_id)
         .single()) as {
         data: {
@@ -86,11 +86,16 @@ export async function GET(request: NextRequest) {
           student_name_en: string;
           class_id: string | null;
           quantity: number | null;
+          form_data: Record<string, string> | null;
         } | null;
         error: unknown;
       };
 
       if (enrollment) {
+        // Resolve email: column first, then form_data custom email field
+        const enrollEmail = enrollment.email
+          || (enrollment.form_data && Object.entries(enrollment.form_data).find(([k]) => k === "email" || k.startsWith("custom_email_"))?.[1])
+          || null;
         const host = request.headers.get("host") ?? "localhost:3005";
         const proto = host.startsWith("localhost") ? "http" : "https";
         const statusUrl = `${proto}://${host}/status?ref=${enrollment.enrollment_ref}`;
@@ -155,7 +160,7 @@ export async function GET(request: NextRequest) {
         }
 
         // Email notification
-        if (enrollment.email) {
+        if (enrollEmail) {
           const emailData = enrollmentApprovedEmail({
             studentName: enrollment.student_name_en || "Student",
             enrollmentRef: enrollment.enrollment_ref,
@@ -166,7 +171,7 @@ export async function GET(request: NextRequest) {
             tenantName: tenantInfo?.name,
             logoUrl: tenantInfo?.logo_url ?? undefined,
           });
-          sendEmail({ to: enrollment.email, ...emailData }).catch((err) => {
+          sendEmail({ to: enrollEmail, ...emailData }).catch((err) => {
             console.error("[abank-status] Approval email failed:", err);
           });
         }
