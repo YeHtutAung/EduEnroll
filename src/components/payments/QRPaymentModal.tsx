@@ -37,6 +37,7 @@ export default function QRPaymentModal({
   const [qrImageUrl, setQrImageUrl] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const slowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Close on Escape ────────────────────────────────────────
   useEffect(() => {
@@ -47,18 +48,20 @@ export default function QRPaymentModal({
     return () => document.removeEventListener("keydown", handleKey);
   }, [onClose]);
 
-  // ── Cleanup polling + timer on unmount ─────────────────────
+  // ── Cleanup polling + timers on unmount ────────────────────
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
       if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+      if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
     };
   }, []);
 
-  // ── Start polling for payment status (stops after 10 min) ──
+  // ── Smart polling: 5s for 2min → 15s until 10min → stop ────
+
   const startPolling = useCallback(
     (paymentRef: string) => {
-      pollRef.current = setInterval(async () => {
+      const pollFn = async () => {
         try {
           const res = await fetch(
             `${apiBase}/status?ref=${encodeURIComponent(paymentRef)}`,
@@ -69,22 +72,34 @@ export default function QRPaymentModal({
           if (data.mmqr_status === "SUCCESS") {
             if (pollRef.current) clearInterval(pollRef.current);
             if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+            if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
             setState("success");
             onSuccess();
           } else if (data.mmqr_status === "FAILED") {
             if (pollRef.current) clearInterval(pollRef.current);
             if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+            if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
             setState("error");
             setErrorMsg("Payment was declined. Please try again.");
           }
         } catch {
           // Ignore polling errors — will retry next interval
         }
-      }, 5000);
+      };
 
-      // Stop polling after 10 minutes (QR codes expire)
+      // Phase 1: poll every 5s
+      pollRef.current = setInterval(pollFn, 5000);
+
+      // Phase 2: after 2 min, slow down to 15s
+      slowTimerRef.current = setTimeout(() => {
+        if (pollRef.current) clearInterval(pollRef.current);
+        pollRef.current = setInterval(pollFn, 15000);
+      }, 2 * 60 * 1000);
+
+      // Phase 3: after 10 min, stop and show expiry
       pollTimerRef.current = setTimeout(() => {
         if (pollRef.current) clearInterval(pollRef.current);
+        if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
         setState("error");
         setErrorMsg("QR code has expired. Please try again.");
       }, 10 * 60 * 1000);
