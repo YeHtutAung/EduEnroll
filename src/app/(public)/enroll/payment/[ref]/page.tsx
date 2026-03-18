@@ -729,16 +729,17 @@ export default function PaymentInstructionsPage() {
       .catch(() => {});
   }, [params.ref]);
 
-  // ── Poll enrollment status when MMQR mode + pending (stop after 10 min) ──
+  // ── Smart poll: 5s for 2min → 15s until 10min → stop ──────
   const pagePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pagePollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pageSlowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const isPending = enrollment?.status === "pending_payment" || enrollment?.status === "partial_payment";
     const isMMQR = enrollment?.payment_mode === "mmqr";
 
     if (isMMQR && isPending && !showQRModal) {
-      pagePollRef.current = setInterval(() => {
+      const pollFn = () => {
         fetch(`/api/public/status?ref=${encodeURIComponent(params.ref)}`)
           .then((res) => res.ok ? res.json() : null)
           .then((data: EnrollmentInfo | null) => {
@@ -747,26 +748,29 @@ export default function PaymentInstructionsPage() {
             }
           })
           .catch(() => {});
-      }, 5000);
+      };
 
-      // Stop polling after 10 minutes
+      // Phase 1: poll every 5s
+      pagePollRef.current = setInterval(pollFn, 5000);
+
+      // Phase 2: after 2 min, slow to 15s
+      pageSlowTimerRef.current = setTimeout(() => {
+        if (pagePollRef.current) clearInterval(pagePollRef.current);
+        pagePollRef.current = setInterval(pollFn, 15000);
+      }, 2 * 60 * 1000);
+
+      // Phase 3: stop after 10 min
       pagePollTimerRef.current = setTimeout(() => {
-        if (pagePollRef.current) {
-          clearInterval(pagePollRef.current);
-          pagePollRef.current = null;
-        }
+        if (pagePollRef.current) clearInterval(pagePollRef.current);
+        if (pageSlowTimerRef.current) clearTimeout(pageSlowTimerRef.current);
+        pagePollRef.current = null;
       }, 10 * 60 * 1000);
     }
 
     return () => {
-      if (pagePollRef.current) {
-        clearInterval(pagePollRef.current);
-        pagePollRef.current = null;
-      }
-      if (pagePollTimerRef.current) {
-        clearTimeout(pagePollTimerRef.current);
-        pagePollTimerRef.current = null;
-      }
+      if (pagePollRef.current) { clearInterval(pagePollRef.current); pagePollRef.current = null; }
+      if (pagePollTimerRef.current) { clearTimeout(pagePollTimerRef.current); pagePollTimerRef.current = null; }
+      if (pageSlowTimerRef.current) { clearTimeout(pageSlowTimerRef.current); pageSlowTimerRef.current = null; }
     };
   }, [enrollment?.status, enrollment?.payment_mode, showQRModal, params.ref]);
 
