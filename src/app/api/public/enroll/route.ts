@@ -212,29 +212,31 @@ export async function POST(request: NextRequest) {
     const proto = host.startsWith("localhost") ? "http" : "https";
     const baseUrl = `${proto}://${host}`;
 
-    // Fetch tenant info for email branding
+    // Fetch tenant info for email branding + email_on_enroll toggle
     const { data: tenantInfo } = await supabase
       .from("tenants")
-      .select("name, org_type, logo_url")
+      .select("name, org_type, logo_url, email_on_enroll")
       .eq("id", payload.tenant_id)
-      .single() as { data: { name: string; org_type: string; logo_url: string | null } | null; error: unknown };
+      .single() as { data: { name: string; org_type: string; logo_url: string | null; email_on_enroll: boolean } | null; error: unknown };
 
-    const emailData = enrollmentConfirmationEmail({
-      studentName: fd?.name_en?.trim() || "Student",
-      enrollmentRef: payload.enrollment_ref,
-      classLevel: payload.class_level,
-      feeMmk: payload.fee_mmk,
-      feeFormatted: formatMMKSimple(payload.fee_mmk),
-      paymentUrl: `${baseUrl}/enroll/payment/${payload.enrollment_ref}`,
-      statusUrl: `${baseUrl}/status?ref=${payload.enrollment_ref}`,
-      orgType: tenantInfo?.org_type,
-      tenantName: tenantInfo?.name,
-      logoUrl: tenantInfo?.logo_url ?? undefined,
-    });
+    if (tenantInfo?.email_on_enroll) {
+      const emailData = enrollmentConfirmationEmail({
+        studentName: fd?.name_en?.trim() || "Student",
+        enrollmentRef: payload.enrollment_ref,
+        classLevel: payload.class_level,
+        feeMmk: payload.fee_mmk,
+        feeFormatted: formatMMKSimple(payload.fee_mmk),
+        paymentUrl: `${baseUrl}/enroll/payment/${payload.enrollment_ref}`,
+        statusUrl: `${baseUrl}/status?ref=${payload.enrollment_ref}`,
+        orgType: tenantInfo?.org_type,
+        tenantName: tenantInfo?.name,
+        logoUrl: tenantInfo?.logo_url ?? undefined,
+      });
 
-    sendEmail({ to: recipientEmail!, ...emailData }).catch((err) => {
-      console.error("[enroll] Email send failed:", err);
-    });
+      sendEmail({ to: recipientEmail!, ...emailData }).catch((err) => {
+        console.error("[enroll] Email send failed:", err);
+      });
+    }
   }
 
   // ── Fetch active bank accounts for payment instructions ───────
@@ -436,32 +438,34 @@ async function handleCartEnrollment(
     const proto = host.startsWith("localhost") ? "http" : "https";
     const baseUrl = `${proto}://${host}`;
 
-    // Fetch tenant info for email branding
+    // Fetch tenant info for email branding + email_on_enroll toggle
     const { data: tenantInfo } = await supabase
       .from("tenants")
-      .select("name, org_type, logo_url")
+      .select("name, org_type, logo_url, email_on_enroll")
       .eq("id", payload.tenant_id)
-      .single() as { data: { name: string; org_type: string; logo_url: string | null } | null; error: unknown };
+      .single() as { data: { name: string; org_type: string; logo_url: string | null; email_on_enroll: boolean } | null; error: unknown };
 
-    const itemsSummary = payload.items
-      .map((i) => i.quantity > 1 ? `${i.class_level} x${i.quantity}` : i.class_level)
-      .join(", ");
-    const emailData = enrollmentConfirmationEmail({
-      studentName: fd?.name_en?.trim() || "Student",
-      enrollmentRef: payload.enrollment_ref,
-      classLevel: itemsSummary,
-      feeMmk: payload.total_fee_mmk,
-      feeFormatted: formatMMKSimple(payload.total_fee_mmk),
-      paymentUrl: `${baseUrl}/enroll/payment/${payload.enrollment_ref}`,
-      statusUrl: `${baseUrl}/status?ref=${payload.enrollment_ref}`,
-      orgType: tenantInfo?.org_type,
-      tenantName: tenantInfo?.name,
-      logoUrl: tenantInfo?.logo_url ?? undefined,
-    });
+    if (tenantInfo?.email_on_enroll) {
+      const itemsSummary = payload.items
+        .map((i) => i.quantity > 1 ? `${i.class_level} x${i.quantity}` : i.class_level)
+        .join(", ");
+      const emailData = enrollmentConfirmationEmail({
+        studentName: fd?.name_en?.trim() || "Student",
+        enrollmentRef: payload.enrollment_ref,
+        classLevel: itemsSummary,
+        feeMmk: payload.total_fee_mmk,
+        feeFormatted: formatMMKSimple(payload.total_fee_mmk),
+        paymentUrl: `${baseUrl}/enroll/payment/${payload.enrollment_ref}`,
+        statusUrl: `${baseUrl}/status?ref=${payload.enrollment_ref}`,
+        orgType: tenantInfo?.org_type,
+        tenantName: tenantInfo?.name,
+        logoUrl: tenantInfo?.logo_url ?? undefined,
+      });
 
-    sendEmail({ to: cartRecipientEmail!, ...emailData }).catch((err) => {
-      console.error("[enroll/cart] Email send failed:", err);
-    });
+      sendEmail({ to: cartRecipientEmail!, ...emailData }).catch((err) => {
+        console.error("[enroll/cart] Email send failed:", err);
+      });
+    }
   }
 
   // ── Fetch bank accounts ────────────────────────────────────────

@@ -214,7 +214,7 @@ export async function GET(request: NextRequest) {
     items:            cartItems,
     org_type:         tenantInfo?.org_type ?? "language_school",
     enrolled_at:      enrollment.enrolled_at,
-    auto_cancel_hours: tenantInfo?.auto_cancel_hours ?? 72,
+    auto_cancel_minutes: tenantInfo?.auto_cancel_hours ?? 4320,
     telegram_bot_username: tenantInfo?.telegram_enabled ? (tenantInfo.telegram_bot_username ?? null) : null,
     payment_mode: tenantInfo?.payment_mode ?? "bank_transfer",
     mmqr_provider: tenantInfo?.mmqr_provider ?? "abank",
