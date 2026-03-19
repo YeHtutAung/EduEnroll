@@ -525,24 +525,31 @@ function UploadSection({
 function PaymentCountdown({
   enrolledAt,
   autoCancelMinutes,
+  onExpire,
 }: {
   enrolledAt: string;
   autoCancelMinutes: number;
+  onExpire?: () => void;
 }) {
   const [remaining, setRemaining] = useState<number | null>(null);
 
   useEffect(() => {
     const deadline = new Date(enrolledAt).getTime() + autoCancelMinutes * 60 * 1000;
 
+    let fired = false;
     function tick() {
       const diff = deadline - Date.now();
       setRemaining(diff > 0 ? diff : 0);
+      if (diff <= 0 && !fired) {
+        fired = true;
+        onExpire?.();
+      }
     }
 
     tick();
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
-  }, [enrolledAt, autoCancelMinutes]);
+  }, [enrolledAt, autoCancelMinutes, onExpire]);
 
   if (remaining === null) return null;
 
@@ -797,6 +804,7 @@ export default function PaymentInstructionsPage() {
   const isPartialReUpload = enrollment.status === "partial_payment";
   const paymentMode = enrollment.payment_mode ?? "bank_transfer";
   const mmqrProvider = enrollment.mmqr_provider ?? "abank";
+  const [timerExpired, setTimerExpired] = useState(false);
 
   const isConfirmed = enrollment.status === "confirmed";
 
@@ -1035,24 +1043,60 @@ export default function PaymentInstructionsPage() {
 
           {/* ── Pay via MMQR (high priority for owner) ────────────── */}
           {showUpload && paymentMode === "mmqr" && (
-            <div className="mb-6 rounded-xl border-2 border-[#1a3f8a] bg-[#1a3f8a] p-5 text-center shadow-sm">
+            <div className={`mb-6 rounded-xl border-2 p-5 text-center shadow-sm ${
+              timerExpired
+                ? "border-gray-300 bg-gray-400"
+                : "border-[#1a3f8a] bg-[#1a3f8a]"
+            }`}>
               <p className="text-sm text-white/80">
-                {orgType === "event" ? "Pay to complete your order" : <>Pay to complete your enrollment / <span className="font-myanmar">ငွေပေးချေပြီး အပြီးသတ်ပါ</span></>}
+                {timerExpired
+                  ? (orgType === "event" ? "Payment time has expired" : <>Payment time has expired / <span className="font-myanmar">ငွေပေးချေချိန် ကုန်သွားပါပြီ</span></>)
+                  : (orgType === "event" ? "Pay to complete your order" : <>Pay to complete your enrollment / <span className="font-myanmar">ငွေပေးချေပြီး အပြီးသတ်ပါ</span></>)}
               </p>
               <p className="mt-1 text-3xl font-bold font-mono text-white">
                 {isPartialReUpload && enrollment.payment?.remaining_amount_mmk ? formatMMKSimple(enrollment.payment.remaining_amount_mmk) : formatMMKSimple(totalFee)}
               </p>
               <button
                 onClick={() => setShowQRModal(true)}
-                className="mt-4 flex w-full items-center justify-center gap-3 rounded-lg bg-white py-3.5 text-base font-semibold text-[#1a3f8a] hover:bg-white/90 transition-colors"
+                disabled={timerExpired}
+                className={`mt-4 flex w-full items-center justify-center gap-3 rounded-lg py-3.5 text-base font-semibold transition-colors ${
+                  timerExpired
+                    ? "bg-white/50 text-gray-400 cursor-not-allowed"
+                    : "bg-white text-[#1a3f8a] hover:bg-white/90"
+                }`}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/mmqr-logo.png" alt="MyanmarPay MMQR" className="h-8 w-auto" />
+                <img src="/mmqr-logo.png" alt="MyanmarPay MMQR" className={`h-8 w-auto ${timerExpired ? "opacity-40" : ""}`} />
                 <div>
-                  <span className="block">Pay Instantly via MMQR</span>
-                  <span className="font-myanmar block text-xs font-normal text-[#1a3f8a]/70">MMQR ဖြင့် ချက်ချင်း ငွေပေးချေမည်</span>
+                  <span className="block">{timerExpired ? "Payment Expired" : "Pay Instantly via MMQR"}</span>
+                  <span className={`font-myanmar block text-xs font-normal ${timerExpired ? "text-gray-400" : "text-[#1a3f8a]/70"}`}>
+                    {timerExpired ? "ငွေပေးချေချိန် ကုန်သွားပါပြီ" : "MMQR ဖြင့် ချက်ချင်း ငွေပေးချေမည်"}
+                  </span>
                 </div>
               </button>
+              {timerExpired && enrollment.intake_slug && (
+                <div className="mt-4 rounded-lg bg-white/20 px-4 py-3">
+                  <p className="text-sm text-white">
+                    {orgType === "event"
+                      ? "Your spot has been released. Place a new order to try again."
+                      : <>Your spot has been released. Enroll again to secure a new one.</>}
+                  </p>
+                  {orgType !== "event" && (
+                    <p className="font-myanmar mt-1 text-xs text-white/70">
+                      သင့်နေရာ ပြန်လွတ်သွားပါပြီ။ နေရာအသစ် ရယူရန် ပြန်လည်စာရင်းသွင်းပါ။
+                    </p>
+                  )}
+                  <a
+                    href={`/enroll/${encodeURIComponent(enrollment.intake_slug)}`}
+                    className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-white py-3 text-sm font-semibold text-[#1a6b3c] hover:bg-white/90 transition-colors"
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                    {orgType === "event" ? "Place New Order" : "Enroll Again"}
+                  </a>
+                </div>
+              )}
             </div>
           )}
 
@@ -1074,6 +1118,7 @@ export default function PaymentInstructionsPage() {
             <PaymentCountdown
               enrolledAt={enrollment.enrolled_at}
               autoCancelMinutes={enrollment.auto_cancel_minutes}
+              onExpire={() => setTimerExpired(true)}
             />
           )}
         </>
