@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { formatMMK, formatMMKSimple } from "@/lib/utils";
-// import QRPaymentModal from "@/components/payments/QRPaymentModal"; // MMQR hidden for now
+import QRPaymentModal from "@/components/payments/QRPaymentModal";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CartItem {
@@ -11,6 +11,7 @@ interface CartItem {
   quantity: number;
   fee_mmk: number;
   subtotal_mmk: number;
+  image_url?: string | null;
 }
 
 interface EnrollmentInfo {
@@ -27,7 +28,11 @@ interface EnrollmentInfo {
   status_label_en: string;
   status_label_mm: string;
   enrolled_at?: string;
-  auto_cancel_hours?: number;
+  auto_cancel_minutes?: number;
+  telegram_bot_username?: string | null;
+  payment_mode?: "bank_transfer" | "mmqr";
+  mmqr_provider?: "abank" | "mmpay";
+  class_image_url?: string | null;
   items?: CartItem[] | null;
   payment?: {
     admin_note?: string | null;
@@ -519,15 +524,15 @@ function UploadSection({
 
 function PaymentCountdown({
   enrolledAt,
-  autoCancelHours,
+  autoCancelMinutes,
 }: {
   enrolledAt: string;
-  autoCancelHours: number;
+  autoCancelMinutes: number;
 }) {
   const [remaining, setRemaining] = useState<number | null>(null);
 
   useEffect(() => {
-    const deadline = new Date(enrolledAt).getTime() + autoCancelHours * 60 * 60 * 1000;
+    const deadline = new Date(enrolledAt).getTime() + autoCancelMinutes * 60 * 1000;
 
     function tick() {
       const diff = deadline - Date.now();
@@ -537,7 +542,7 @@ function PaymentCountdown({
     tick();
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
-  }, [enrolledAt, autoCancelHours]);
+  }, [enrolledAt, autoCancelMinutes]);
 
   if (remaining === null) return null;
 
@@ -548,7 +553,7 @@ function PaymentCountdown({
   const seconds = totalSec % 60;
 
   const expired = remaining === 0;
-  const urgent = totalSec < 3600; // less than 1 hour
+  const urgent = totalSec < 300; // less than 5 minutes
 
   // Format display
   let timeDisplay: string;
@@ -557,6 +562,19 @@ function PaymentCountdown({
   } else {
     timeDisplay = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   }
+
+  // Human-readable duration for display text
+  const durationTextMm = autoCancelMinutes < 60
+    ? `${autoCancelMinutes} မိနစ်အတွင်း ငွေပေးချေမှုကို အပြီးသတ်ပေးပါ`
+    : autoCancelMinutes < 1440
+      ? `${(autoCancelMinutes / 60).toFixed(0)} နာရီအတွင်း ငွေပေးချေမှုကို အပြီးသတ်ပေးပါ`
+      : `${Math.round(autoCancelMinutes / 1440)} ရက်အတွင်း ငွေပေးချေမှုကို အပြီးသတ်ပေးပါ`;
+
+  const durationTextEn = autoCancelMinutes < 60
+    ? `Please complete payment within ${autoCancelMinutes} minute${autoCancelMinutes !== 1 ? "s" : ""}`
+    : autoCancelMinutes < 1440
+      ? `Please complete payment within ${(autoCancelMinutes / 60).toFixed(0)} hour${autoCancelMinutes >= 120 ? "s" : ""}`
+      : `Please complete payment within ${Math.round(autoCancelMinutes / 1440)} day${autoCancelMinutes >= 2880 ? "s" : ""}`;
 
   if (expired) {
     return (
@@ -584,18 +602,10 @@ function PaymentCountdown({
         {timeDisplay}
       </p>
       <p className={`font-myanmar mt-2 text-sm ${urgent ? "text-red-700" : "text-gray-600"}`}>
-        {autoCancelHours < 24
-          ? `${autoCancelHours} နာရီအတွင်း ငွေပေးချေမှုကို အပြီးသတ်ပေးပါ`
-          : autoCancelHours < 168
-            ? `${Math.round(autoCancelHours / 24)} ရက်အတွင်း ငွေပေးချေမှုကို အပြီးသတ်ပေးပါ`
-            : `${autoCancelHours} နာရီအတွင်း ငွေပေးချေမှုကို အပြီးသတ်ပေးပါ`}
+        {durationTextMm}
       </p>
       <p className={`mt-1 text-xs ${urgent ? "text-red-600" : "text-gray-500"}`}>
-        {autoCancelHours < 24
-          ? `Please complete payment within ${autoCancelHours} hour${autoCancelHours !== 1 ? "s" : ""}`
-          : autoCancelHours < 168
-            ? `Please complete payment within ${Math.round(autoCancelHours / 24)} day${autoCancelHours >= 48 ? "s" : ""}`
-            : `Please complete payment within ${autoCancelHours} hours`}
+        {durationTextEn}
       </p>
     </div>
   );
@@ -662,7 +672,7 @@ export default function PaymentInstructionsPage() {
   const [availableClasses, setAvailableClasses] = useState<AvailableClass[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  // const [showQRModal, setShowQRModal] = useState(false); // MMQR hidden for now
+  const [showQRModal, setShowQRModal] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
@@ -717,14 +727,59 @@ export default function PaymentInstructionsPage() {
     fetchData();
   }, [params.ref]);
 
-  function handleUploadSuccess() {
+  const handleUploadSuccess = useCallback(() => {
     fetch(`/api/public/status?ref=${encodeURIComponent(params.ref)}`)
       .then((res) => res.json())
       .then((data: EnrollmentInfo) => {
         setEnrollment(data);
       })
       .catch(() => {});
-  }
+  }, [params.ref]);
+
+  // ── Smart poll: 5s for 2min → 15s until 10min → stop ──────
+  const pagePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pagePollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pageSlowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    const isPending = enrollment?.status === "pending_payment" || enrollment?.status === "partial_payment";
+    const isMMQR = enrollment?.payment_mode === "mmqr";
+
+    if (isMMQR && isPending && !showQRModal) {
+      const pollFn = () => {
+        fetch(`/api/public/status?ref=${encodeURIComponent(params.ref)}`)
+          .then((res) => res.ok ? res.json() : null)
+          .then((data: EnrollmentInfo | null) => {
+            if (data && data.status !== enrollment?.status) {
+              setEnrollment(data);
+            }
+          })
+          .catch(() => {});
+      };
+
+      // Phase 1: poll every 5s
+      pagePollRef.current = setInterval(pollFn, 5000);
+
+      // Phase 2: after 2 min, slow to 15s
+      pageSlowTimerRef.current = setTimeout(() => {
+        if (pagePollRef.current) clearInterval(pagePollRef.current);
+        pagePollRef.current = setInterval(pollFn, 15000);
+      }, 2 * 60 * 1000);
+
+      // Phase 3: stop after 10 min
+      pagePollTimerRef.current = setTimeout(() => {
+        if (pagePollRef.current) clearInterval(pagePollRef.current);
+        if (pageSlowTimerRef.current) clearTimeout(pageSlowTimerRef.current);
+        pagePollRef.current = null;
+      }, 10 * 60 * 1000);
+    }
+
+    return () => {
+      if (pagePollRef.current) { clearInterval(pagePollRef.current); pagePollRef.current = null; }
+      if (pagePollTimerRef.current) { clearTimeout(pagePollTimerRef.current); pagePollTimerRef.current = null; }
+      if (pageSlowTimerRef.current) { clearTimeout(pageSlowTimerRef.current); pageSlowTimerRef.current = null; }
+    };
+  }, [enrollment?.status, enrollment?.payment_mode, showQRModal, params.ref]);
 
   if (loading) return <LoadingSkeleton />;
   if (error || !enrollment) return <ErrorPage message={error || "Unknown error"} />;
@@ -738,84 +793,276 @@ export default function PaymentInstructionsPage() {
   const feeMm = formatMMK(totalFee).replace(" MMK", "");
   const showUpload = enrollment.status === "pending_payment" || enrollment.status === "partial_payment";
   const isPartialReUpload = enrollment.status === "partial_payment";
+  const paymentMode = enrollment.payment_mode ?? "bank_transfer";
+  const mmqrProvider = enrollment.mmqr_provider ?? "abank";
+
+  const isConfirmed = enrollment.status === "confirmed";
 
   return (
     <div className="mx-auto max-w-lg">
-      {/* ── Success header ─────────────────────────────────────── */}
-      <div className="mb-8 text-center">
-        <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
-          <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-          </svg>
-        </div>
-        <h1 className="text-2xl font-bold text-gray-900">
-          {orgType === "event" ? "Order Submitted!" : "Enrollment Submitted!"}
-        </h1>
-        {orgType !== "event" && (
-          <p className="font-myanmar mt-1 text-lg text-gray-600">
-            စာရင်းသွင်းမှု အောင်မြင်ပြီ
-          </p>
-        )}
-      </div>
 
-      {/* ── Payment deadline countdown ─────────────────────────── */}
-      {showUpload && enrollment.enrolled_at && enrollment.auto_cancel_hours != null && enrollment.auto_cancel_hours > 0 && (
-        <PaymentCountdown
-          enrolledAt={enrollment.enrolled_at}
-          autoCancelHours={enrollment.auto_cancel_hours}
-        />
-      )}
+      {/* ══════════════════════════════════════════════════════════════
+          CONFIRMED STATE — celebratory receipt-style layout
+         ══════════════════════════════════════════════════════════════ */}
+      {isConfirmed ? (
+        <>
+          {/* ── Success hero ────────────────────────────────────────── */}
+          <div className="relative mb-8 overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700 px-6 py-10 text-center text-white shadow-lg">
+            {/* Decorative circles */}
+            <div className="pointer-events-none absolute -left-8 -top-8 h-32 w-32 rounded-full bg-white/10" />
+            <div className="pointer-events-none absolute -bottom-6 -right-6 h-24 w-24 rounded-full bg-white/10" />
 
-      {/* ── Partial payment banner ──────────────────────────────── */}
-      {isPartialReUpload && <PartialPaymentBanner enrollment={enrollment} />}
-
-      {/* ── Enrollment reference box ───────────────────────────── */}
-      <div className="mb-8 rounded-xl bg-[#1a6b3c]/10 p-5">
-        <p className="mb-2 text-center text-xs font-semibold uppercase tracking-wide text-[#1a6b3c]">
-          {orgType === "event" ? "Your Order Reference" : "Your Enrollment Reference"}
-        </p>
-        {orgType !== "event" && (
-          <p className="font-myanmar mb-3 text-center text-xs text-gray-500">
-            သင့်စာရင်းသွင်းမှု ရည်ညွှန်းကုဒ်
-          </p>
-        )}
-        <div className="flex items-center justify-center gap-3">
-          <span className="font-mono text-[2rem] font-bold leading-tight text-[#1a6b3c]">
-            {enrollment.enrollment_ref}
-          </span>
-        </div>
-        <div className="mt-3 flex justify-center">
-          <CopyButton text={enrollment.enrollment_ref} />
-        </div>
-      </div>
-
-      {/* ── Ticket breakdown (cart) ──────────────────────────────── */}
-      {isCart && enrollment.items && (
-        <div className="mb-8 rounded-xl border border-gray-200 bg-white p-5">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-            Order Summary
-          </h3>
-          <div className="space-y-2">
-            {enrollment.items.map((item, i) => (
-              <div key={i} className="flex justify-between text-sm">
-                <span className="text-gray-700">
-                  {item.class_level} &times; {item.quantity}
-                </span>
-                <span className="font-medium text-gray-900">
-                  {formatMMKSimple(item.subtotal_mmk)}
-                </span>
+            <div className="relative">
+              <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-white/20 ring-4 ring-white/30">
+                <svg className="h-10 w-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                </svg>
               </div>
-            ))}
-            <div className="border-t pt-2 mt-2 flex justify-between font-semibold text-gray-900">
-              <span>Total</span>
-              <span>{formatMMKSimple(totalFee)}</span>
+              <h1 className="text-2xl font-bold tracking-tight">
+                {orgType === "event" ? "Payment Confirmed!" : "Payment Confirmed!"}
+              </h1>
+              {orgType !== "event" && (
+                <p className="font-myanmar mt-1 text-base text-emerald-100">
+                  ငွေပေးချေမှု အတည်ပြုပြီး
+                </p>
+              )}
+              <p className="mt-3 text-sm text-emerald-100">
+                {orgType === "event"
+                  ? "Your tickets are confirmed. See you at the event!"
+                  : "Your enrollment is confirmed. We look forward to seeing you!"}
+              </p>
             </div>
           </div>
-        </div>
+
+          {/* ── Receipt card ────────────────────────────────────────── */}
+          <div className="mb-8 overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm">
+            {/* Ticket image(s) */}
+            {(() => {
+              const images = isCart
+                ? (enrollment.items ?? [])
+                    .filter((i) => i.image_url)
+                    .map((i) => ({ url: i.image_url!, label: i.class_level }))
+                : enrollment.class_image_url
+                  ? [{ url: enrollment.class_image_url, label: enrollment.class_level ?? "" }]
+                  : [];
+
+              if (images.length === 0) return null;
+              if (images.length === 1) {
+                return (
+                  <div className="relative h-44 w-full overflow-hidden">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={images[0].url} alt={images[0].label} className="h-full w-full object-cover" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
+                    <span className="absolute bottom-3 left-4 rounded-full bg-black/50 px-3 py-1 text-xs font-medium text-white backdrop-blur-sm">
+                      {images[0].label}
+                    </span>
+                  </div>
+                );
+              }
+              // Multiple images — grid layout
+              return (
+                <div className={`grid ${images.length === 2 ? "grid-cols-2" : "grid-cols-3"} gap-px bg-gray-200`}>
+                  {images.map((img, i) => (
+                    <div key={i} className="relative h-36 overflow-hidden">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={img.url} alt={img.label} className="h-full w-full object-cover" />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
+                      <span className="absolute bottom-2 left-2 right-2 truncate rounded-full bg-black/50 px-2 py-0.5 text-center text-[10px] font-medium text-white backdrop-blur-sm">
+                        {img.label}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+
+            {/* Reference header */}
+            <div className="border-b border-dashed border-gray-200 bg-gray-50/80 px-6 py-5 text-center">
+              <p className="mb-1 text-[11px] font-semibold uppercase tracking-widest text-gray-400">
+                {orgType === "event" ? "Order Reference" : "Enrollment Reference"}
+              </p>
+              <div className="flex items-center justify-center gap-2">
+                <span className="font-mono text-2xl font-bold tracking-wider text-[#1a6b3c]">
+                  {enrollment.enrollment_ref}
+                </span>
+              </div>
+              <div className="mt-2">
+                <CopyButton text={enrollment.enrollment_ref} />
+              </div>
+            </div>
+
+            {/* Order items */}
+            <div className="px-6 py-5">
+              <h3 className="mb-3 text-[11px] font-semibold uppercase tracking-widest text-gray-400">
+                {orgType === "event" ? "Order Details" : <>Order Details / <span className="font-myanmar normal-case tracking-normal">အော်ဒါ အသေးစိတ်</span></>}
+              </h3>
+              <div className="space-y-3">
+                {isCart && enrollment.items ? (
+                  enrollment.items.map((item, i) => (
+                    <div key={i} className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        {item.image_url ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={item.image_url} alt="" className="h-10 w-10 rounded-lg object-cover ring-1 ring-gray-200" />
+                        ) : (
+                          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50 text-xs font-bold text-emerald-600">
+                            {item.quantity}x
+                          </span>
+                        )}
+                        <div>
+                          <span className="text-sm font-medium text-gray-800">{item.class_level}</span>
+                          {item.image_url && (
+                            <span className="block text-xs text-gray-400">Qty: {item.quantity}</span>
+                          )}
+                        </div>
+                      </div>
+                      <span className="text-sm font-semibold text-gray-900">
+                        {formatMMKSimple(item.subtotal_mmk)}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      {enrollment.class_image_url ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={enrollment.class_image_url} alt="" className="h-10 w-10 rounded-lg object-cover ring-1 ring-gray-200" />
+                      ) : (
+                        <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-50 text-xs font-bold text-emerald-600">
+                          {qty}x
+                        </span>
+                      )}
+                      <div>
+                        <span className="text-sm font-medium text-gray-800">{enrollment.class_level}</span>
+                        {enrollment.class_image_url && (
+                          <span className="block text-xs text-gray-400">Qty: {qty}</span>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-sm font-semibold text-gray-900">
+                      {formatMMKSimple(totalFee)}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Total */}
+            <div className="border-t border-gray-100 bg-gray-50/50 px-6 py-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-semibold text-gray-600">Total Paid</span>
+                <span className="text-lg font-bold text-[#1a6b3c]">{formatMMKSimple(totalFee)}</span>
+              </div>
+            </div>
+
+            {/* Confirmed badge */}
+            <div className="border-t border-dashed border-gray-200 px-6 py-4">
+              <div className="flex items-center justify-center gap-2">
+                <div className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500">
+                  <svg className="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <span className="text-sm font-semibold text-emerald-700">{enrollment.status_label_en}</span>
+                {orgType !== "event" && (
+                  <span className="font-myanmar text-sm text-emerald-600">/ {enrollment.status_label_mm}</span>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      ) : (
+        <>
+          {/* ══════════════════════════════════════════════════════════
+              NON-CONFIRMED STATES — pending / partial / under_review
+             ══════════════════════════════════════════════════════════ */}
+
+          {/* ── Header ──────────────────────────────────────────────── */}
+          <div className="mb-8 text-center">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
+              <svg className="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h1 className="text-2xl font-bold text-gray-900">
+              {orgType === "event" ? "Order Submitted!" : "Enrollment Submitted!"}
+            </h1>
+            {orgType !== "event" && (
+              <p className="font-myanmar mt-1 text-lg text-gray-600">
+                စာရင်းသွင်းမှု အောင်မြင်ပြီ
+              </p>
+            )}
+          </div>
+
+          {/* ── Payment deadline countdown ─────────────────────────── */}
+          {showUpload && enrollment.enrolled_at && enrollment.auto_cancel_minutes != null && enrollment.auto_cancel_minutes > 0 && (
+            <PaymentCountdown
+              enrolledAt={enrollment.enrolled_at}
+              autoCancelMinutes={enrollment.auto_cancel_minutes}
+            />
+          )}
+
+          {/* ── Partial payment banner ──────────────────────────────── */}
+          {isPartialReUpload && <PartialPaymentBanner enrollment={enrollment} />}
+
+          {/* ── Enrollment reference box ───────────────────────────── */}
+          <div className="mb-8 rounded-xl bg-[#1a6b3c]/10 p-5">
+            <p className="mb-2 text-center text-xs font-semibold uppercase tracking-wide text-[#1a6b3c]">
+              {orgType === "event" ? "Your Order Reference" : "Your Enrollment Reference"}
+            </p>
+            {orgType !== "event" && (
+              <p className="font-myanmar mb-3 text-center text-xs text-gray-500">
+                သင့်စာရင်းသွင်းမှု ရည်ညွှန်းကုဒ်
+              </p>
+            )}
+            <div className="flex items-center justify-center gap-3">
+              <span className="font-mono text-[2rem] font-bold leading-tight text-[#1a6b3c]">
+                {enrollment.enrollment_ref}
+              </span>
+            </div>
+            <div className="mt-3 flex justify-center">
+              <CopyButton text={enrollment.enrollment_ref} />
+            </div>
+          </div>
+
+          {/* ── Order summary ─────────────────────────────────────────── */}
+          <div className="mb-8 rounded-xl border border-gray-200 bg-white p-5">
+            <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+              {orgType === "event" ? "Order Summary" : <>Order Summary / <span className="font-myanmar normal-case">အော်ဒါ အကျဉ်းချုပ်</span></>}
+            </h3>
+            <div className="space-y-2">
+              {isCart && enrollment.items ? (
+                enrollment.items.map((item, i) => (
+                  <div key={i} className="flex justify-between text-sm">
+                    <span className="text-gray-700">
+                      {item.class_level} &times; {item.quantity}
+                    </span>
+                    <span className="font-medium text-gray-900">
+                      {formatMMKSimple(item.subtotal_mmk)}
+                    </span>
+                  </div>
+                ))
+              ) : (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-700">
+                    {enrollment.class_level} &times; {qty}
+                  </span>
+                  <span className="font-medium text-gray-900">
+                    {formatMMKSimple(totalFee)}
+                  </span>
+                </div>
+              )}
+              <div className="border-t pt-2 mt-2 flex justify-between font-semibold text-gray-900">
+                <span>Total</span>
+                <span>{formatMMKSimple(totalFee)}</span>
+              </div>
+            </div>
+          </div>
+        </>
       )}
 
-      {/* ── Payment instructions ───────────────────────────────── */}
-      {showUpload && (
+      {/* ── Payment instructions (bank transfer only) ────────────── */}
+      {showUpload && paymentMode === "bank_transfer" && (
         <div className="mb-8">
           <h2 className="mb-5 text-lg font-semibold text-gray-900">
             {orgType === "event"
@@ -903,49 +1150,42 @@ export default function PaymentInstructionsPage() {
         </div>
       )}
 
-      {/* ── Pay via MMQR (hidden — enable per tenant later) ──── */}
-      {/* {showUpload && (
+      {/* ── Pay via MMQR ─────────────────────────────────────── */}
+      {showUpload && paymentMode === "mmqr" && (
         <div className="mb-8">
           <button
             onClick={() => setShowQRModal(true)}
             className="flex w-full items-center justify-center gap-3 rounded-xl border-2 border-[#1a3f8a] bg-[#1a3f8a]/5 py-4 text-sm font-semibold text-[#1a3f8a] hover:bg-[#1a3f8a]/10 transition-colors"
           >
-            <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75zM6.75 16.5h.75v.75h-.75v-.75zM16.5 6.75h.75v.75h-.75v-.75zM13.5 13.5h.75v.75h-.75v-.75zM13.5 19.5h.75v.75h-.75v-.75zM19.5 13.5h.75v.75h-.75v-.75zM19.5 19.5h.75v.75h-.75v-.75zM16.5 16.5h.75v.75h-.75v-.75z" />
-            </svg>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/mmqr-logo.png" alt="MyanmarPay MMQR" className="h-10 w-auto" />
             <div>
               <span className="block">Pay Instantly via MMQR</span>
               <span className="font-myanmar block text-xs font-normal opacity-75">MMQR ဖြင့် ချက်ချင်း ငွေပေးချေမည်</span>
             </div>
           </button>
-
-          <div className="my-6 flex items-center gap-3">
-            <div className="h-px flex-1 bg-gray-200" />
-            <span className="text-xs font-medium text-gray-400">OR / <span className="font-myanmar">သို့မဟုတ်</span></span>
-            <div className="h-px flex-1 bg-gray-200" />
-          </div>
         </div>
-      )} */}
+      )}
 
-      {/* ── MMQR Payment Modal (hidden) ───────────────────────── */}
-      {/* {showQRModal && enrollment && (
+      {/* ── MMQR Payment Modal ────────────────────────────────── */}
+      {showQRModal && enrollment && (
         <QRPaymentModal
           enrollmentRef={enrollment.enrollment_ref}
           amount={isPartialReUpload && enrollment.payment?.remaining_amount_mmk
             ? enrollment.payment.remaining_amount_mmk
             : totalFee}
           studentName={enrollment.student_name_en}
+          provider={mmqrProvider}
           onSuccess={() => {
             setShowQRModal(false);
             handleUploadSuccess();
           }}
           onClose={() => setShowQRModal(false)}
         />
-      )} */}
+      )}
 
-      {/* ── Bank accounts ──────────────────────────────────────── */}
-      {showUpload && bankAccounts.length > 0 && (
+      {/* ── Bank accounts (bank transfer only) ─────────────────── */}
+      {showUpload && paymentMode === "bank_transfer" && bankAccounts.length > 0 && (
         <div className="mb-8">
           <h3 className="mb-4 text-sm font-semibold uppercase tracking-wide text-gray-500">
             Bank Accounts{orgType !== "event" && <> / <span className="font-myanmar normal-case">ဘဏ်အကောင့်များ</span></>}
@@ -994,7 +1234,8 @@ export default function PaymentInstructionsPage() {
       )}
 
       {/* ── Upload payment screenshot section ──────────────────── */}
-      {showUpload ? (
+      {/* ── Upload payment screenshot (bank transfer only) ────── */}
+      {showUpload && paymentMode === "bank_transfer" && (
         <>
           <a
             href="#upload-section"
@@ -1019,7 +1260,10 @@ export default function PaymentInstructionsPage() {
             />
           </div>
         </>
-      ) : (
+      )}
+
+      {/* ── Status box (non-confirmed, non-upload states) ───────── */}
+      {!showUpload && !isConfirmed && (
         <div className="rounded-xl border border-blue-200 bg-blue-50 p-5 text-center">
           <p className="font-semibold text-blue-800">{enrollment.status_label_en}</p>
           <p className="font-myanmar mt-1 text-sm text-blue-700">{enrollment.status_label_mm}</p>
@@ -1074,6 +1318,29 @@ export default function PaymentInstructionsPage() {
           </div>
         </div>
       )}
+
+      {/* ── Connect Telegram for updates (hidden for now) ────── */}
+      {/* {enrollment?.telegram_bot_username && (
+        <div className="mb-8 rounded-xl border border-sky-200 bg-sky-50 p-4 text-center">
+          <p className="mb-2 text-sm font-medium text-sky-900">
+            Get updates via Telegram
+          </p>
+          <p className="font-myanmar mb-3 text-xs text-sky-700">
+            Telegram မှတဆင့် အပ်ဒိတ်များ ရယူပါ
+          </p>
+          <a
+            href={`https://t.me/${enrollment.telegram_bot_username}?start=${encodeURIComponent(enrollment.enrollment_ref)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 rounded-lg bg-[#0088cc] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#006daa] transition-colors"
+          >
+            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+            </svg>
+            Connect Telegram
+          </a>
+        </div>
+      )} */}
 
     </div>
   );

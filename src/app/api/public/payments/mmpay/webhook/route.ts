@@ -1,62 +1,80 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import abank from "@/lib/abank";
+import mmpay from "@/lib/mmpay";
 import { sendEmail, enrollmentApprovedEmail } from "@/lib/email";
 import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 
-// ─── GET /api/public/payments/abank/callback ────────────────────────────────
-// ABank calls this URL (GET) after payment completes.
-// Success params: orderId, amount, status, transactionId, billNo,
-//                 endToEndId, transactionDateTime, institutionName
-// Fail adds: errorCode, errorDesc
+// ─── POST /api/public/payments/mmqr/webhook ─────────────────────────────────
+// MyanMyanPay webhook callback handler.
+// Verifies HMAC signature, then updates payment + enrollment status.
 
-export async function GET(request: NextRequest) {
-  const params = abank.parseCallback(request.nextUrl.searchParams);
+export async function POST(request: NextRequest) {
+  // ── 1. Read headers and body ───────────────────────────────
+  const signature = request.headers.get("x-mmpay-signature") ?? "";
+  const nonce = request.headers.get("x-mmpay-nonce") ?? "";
+  const bodyText = await request.text();
 
-  if (!params.orderId) {
-    return NextResponse.json({ error: "Missing orderId" }, { status: 400 });
+  // ── 2. Verify HMAC signature ───────────────────────────────
+  const isValid = await mmpay.verifyCb(bodyText, nonce, signature);
+  if (!isValid) {
+    console.warn("[mmqr-webhook] Invalid signature");
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  console.log("[abank-callback]", params);
+  // ── 3. Parse payload ───────────────────────────────────────
+  let payload: {
+    orderId: string;
+    amount: number;
+    currency: string;
+    vendor: string;
+    method: string;
+    status: "PENDING" | "SUCCESS" | "FAILED" | "REFUNDED";
+    condition: string;
+    transactionRefId: string;
+  };
+
+  try {
+    payload = JSON.parse(bodyText);
+  } catch {
+    return NextResponse.json({ error: "Bad Request" }, { status: 400 });
+  }
 
   const supabase = createAdminClient();
 
-  // ── Find payment by payment_ref ───────────────────────────
+  // ── 4. Find payment by payment_ref ─────────────────────────
   const { data: payment } = (await supabase
     .from("payments")
     .select("id, enrollment_id, status")
-    .eq("payment_ref", params.orderId)
+    .eq("payment_ref", payload.orderId)
     .single()) as {
     data: { id: string; enrollment_id: string; status: string } | null;
     error: unknown;
   };
 
   if (!payment) {
-    console.warn("[abank-callback] Payment not found for orderId:", params.orderId);
+    console.warn("[mmqr-webhook] Payment not found for orderId:", payload.orderId);
     return NextResponse.json({ error: "Not Found" }, { status: 404 });
   }
 
-  // Skip if already finalized
+  // Skip if payment already finalized
   if (payment.status === "verified" || payment.status === "rejected") {
     return NextResponse.json({ message: "Already processed" }, { status: 200 });
   }
 
-  // ── Update based on callback status ───────────────────────
-  const isSuccess = !params.errorCode && params.status;
-
-  if (isSuccess) {
+  // ── 5. Update based on status ──────────────────────────────
+  if (payload.status === "SUCCESS") {
+    // Update payment to verified
     await supabase
       .from("payments")
       .update({
         mmqr_status: "SUCCESS",
         status: "verified",
-        paid_at: params.transactionDateTime
-          ? new Date(params.transactionDateTime).toISOString()
-          : new Date().toISOString(),
-        bank_reference: `CB:${params.transactionId || params.endToEndId || "unknown"}`,
+        paid_at: new Date().toISOString(),
+        bank_reference: payload.transactionRefId,
       } as never)
       .eq("id", payment.id);
 
+    // Update enrollment to confirmed
     await supabase
       .from("enrollments")
       .update({ status: "confirmed" } as never)
@@ -90,7 +108,7 @@ export async function GET(request: NextRequest) {
       const proto = host.startsWith("localhost") ? "http" : "https";
       const statusUrl = `${proto}://${host}/status?ref=${enrollment.enrollment_ref}`;
 
-      // Resolve class level for email
+      // Resolve class level
       let classLevel = "Ticket";
       let feeFormatted: string | undefined;
       const isCart = enrollment.class_id === null;
@@ -145,7 +163,7 @@ export async function GET(request: NextRequest) {
           statusUrl,
           paymentUrl: statusUrl,
         }).catch((err) => {
-          console.error("[abank-callback] Telegram notification failed:", err);
+          console.error("[mmqr-webhook] Telegram notification failed:", err);
         });
       }
 
@@ -162,18 +180,23 @@ export async function GET(request: NextRequest) {
           logoUrl: tenantInfo?.logo_url ?? undefined,
         });
         sendEmail({ to: enrollEmail, ...emailData }).catch((err) => {
-          console.error("[abank-callback] Approval email failed:", err);
+          console.error("[mmqr-webhook] Approval email failed:", err);
         });
       }
     }
-  } else {
+  } else if (payload.status === "FAILED") {
     await supabase
       .from("payments")
       .update({
         mmqr_status: "FAILED",
-        bank_reference: params.errorCode
-          ? `${params.errorCode}: ${params.errorDesc ?? ""}`
-          : null,
+      } as never)
+      .eq("id", payment.id);
+  } else if (payload.status === "REFUNDED") {
+    await supabase
+      .from("payments")
+      .update({
+        mmqr_status: "REFUNDED",
+        status: "rejected",
       } as never)
       .eq("id", payment.id);
   }

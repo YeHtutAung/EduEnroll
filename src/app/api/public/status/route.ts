@@ -31,6 +31,10 @@ const ENROLLMENT_STATUS_LABELS: Record<EnrollmentStatus, { en: string; mm: strin
 };
 
 const PAYMENT_STATUS_LABELS: Record<PaymentStatus, { en: string; mm: string }> = {
+  awaiting_payment: {
+    en: "Awaiting Payment",
+    mm: "ငွေပေးချေမှု စောင့်ဆိုင်းနေသည်",
+  },
   pending: {
     en: "Pending Verification",
     mm: "အတည်ပြုမှု စောင့်ဆိုင်းဆဲ",
@@ -48,7 +52,7 @@ const PAYMENT_STATUS_LABELS: Record<PaymentStatus, { en: string; mm: string }> =
 // ─── Joined row types ─────────────────────────────────────────────────────────
 
 interface EnrollmentWithClass extends Enrollment {
-  classes: Pick<Class, "id" | "level" | "fee_mmk"> & {
+  classes: Pick<Class, "id" | "level" | "fee_mmk" | "image_url"> & {
     intakes: Pick<Intake, "name" | "year" | "slug"> | null;
   } | null;
 }
@@ -100,7 +104,7 @@ export async function GET(request: NextRequest) {
   // ── Fetch enrollment with class info ─────────────────────────────
   const { data: enrollment, error: enrollmentError } = await supabase
     .from("enrollments")
-    .select("*, classes(id, level, fee_mmk, intakes(name, year, slug))")
+    .select("*, classes(id, level, fee_mmk, image_url, intakes(name, year, slug))")
     .eq("enrollment_ref", ref)
     .eq("tenant_id", tenantId)
     .single() as EnrollmentResult;
@@ -122,16 +126,16 @@ export async function GET(request: NextRequest) {
     .single() as PaymentResult;
 
   // ── Fetch enrollment items for cart enrollments ──────────────────
-  let cartItems: { class_level: string; quantity: number; fee_mmk: number; subtotal_mmk: number }[] | null = null;
+  let cartItems: { class_level: string; quantity: number; fee_mmk: number; subtotal_mmk: number; image_url: string | null }[] | null = null;
   let cartTotalFee: number | null = null;
   let cartIntakeInfo: Pick<Intake, "name" | "year" | "slug"> | null = null;
 
   if (enrollment.class_id === null) {
     const { data: items } = await supabase
       .from("enrollment_items")
-      .select("quantity, fee_mmk, classes(level, intakes(name, year, slug))")
+      .select("quantity, fee_mmk, classes(level, image_url, intakes(name, year, slug))")
       .eq("enrollment_id", enrollment.id) as {
-      data: { quantity: number; fee_mmk: number; classes: { level: string; intakes: Pick<Intake, "name" | "year" | "slug"> | null } | null }[] | null;
+      data: { quantity: number; fee_mmk: number; classes: { level: string; image_url: string | null; intakes: Pick<Intake, "name" | "year" | "slug"> | null } | null }[] | null;
       error: unknown;
     };
 
@@ -141,6 +145,7 @@ export async function GET(request: NextRequest) {
         quantity: i.quantity,
         fee_mmk: i.fee_mmk,
         subtotal_mmk: i.fee_mmk * i.quantity,
+        image_url: i.classes?.image_url ?? null,
       }));
       cartTotalFee = cartItems.reduce((sum, i) => sum + i.subtotal_mmk, 0);
 
@@ -185,9 +190,9 @@ export async function GET(request: NextRequest) {
   // ── Fetch tenant org_type ─────────────────────────────────────
   const { data: tenantInfo } = await supabase
     .from("tenants")
-    .select("org_type, auto_cancel_hours")
+    .select("org_type, auto_cancel_hours, telegram_bot_username, telegram_enabled, payment_mode, mmqr_provider")
     .eq("id", tenantId)
-    .single() as { data: { org_type: string; auto_cancel_hours: number } | null; error: unknown };
+    .single() as { data: { org_type: string; auto_cancel_hours: number; telegram_bot_username: string | null; telegram_enabled: boolean; payment_mode: string; mmqr_provider: string } | null; error: unknown };
 
   return NextResponse.json({
     enrollment_ref:   enrollment.enrollment_ref,
@@ -205,9 +210,13 @@ export async function GET(request: NextRequest) {
     status_label_en:  enrollmentLabel.en,
     status_label_mm:  enrollmentLabel.mm,
     payment:          paymentBlock,
+    class_image_url:  enrollment.classes?.image_url ?? null,
     items:            cartItems,
     org_type:         tenantInfo?.org_type ?? "language_school",
     enrolled_at:      enrollment.enrolled_at,
-    auto_cancel_hours: tenantInfo?.auto_cancel_hours ?? 72,
+    auto_cancel_minutes: tenantInfo?.auto_cancel_hours ?? 4320,
+    telegram_bot_username: tenantInfo?.telegram_enabled ? (tenantInfo.telegram_bot_username ?? null) : null,
+    payment_mode: tenantInfo?.payment_mode ?? "bank_transfer",
+    mmqr_provider: tenantInfo?.mmqr_provider ?? "abank",
   });
 }

@@ -152,7 +152,7 @@ export async function POST(request: NextRequest) {
       payment_ref: orderId,
       payment_method: "mmqr",
       mmqr_status: "PENDING",
-      status: "pending",
+      status: "awaiting_payment",
     } as never);
 
     return NextResponse.json({

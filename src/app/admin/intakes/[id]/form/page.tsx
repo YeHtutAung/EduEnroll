@@ -42,6 +42,7 @@ interface FormField {
 
 type FieldType =
   | "text"
+  | "email"
   | "select"
   | "radio"
   | "file"
@@ -65,6 +66,7 @@ interface IntakeItem {
 
 const FIELD_TYPES: FieldTypeOption[] = [
   { type: "text", label: "Text", icon: "T" },
+  { type: "email", label: "Email", icon: "@" },
   { type: "select", label: "Dropdown", icon: "▾" },
   { type: "radio", label: "Radio", icon: "◉" },
   { type: "file", label: "File Upload", icon: "📎" },
@@ -358,6 +360,13 @@ function FieldPreview({ field }: { field: FormField }) {
         <div>
           {label}
           <input type="tel" disabled placeholder="09xxxxxxxxx" className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white" />
+        </div>
+      );
+    case "email":
+      return (
+        <div>
+          {label}
+          <input type="email" disabled placeholder="example@email.com" className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white" />
         </div>
       );
     default:

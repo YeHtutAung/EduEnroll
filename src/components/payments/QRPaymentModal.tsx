@@ -6,12 +6,15 @@ import { formatMMKSimple } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+type QRProvider = "mmpay" | "abank";
+
 interface QRPaymentModalProps {
   enrollmentRef: string;
   amount: number;
   studentName: string;
   onSuccess: () => void;
   onClose: () => void;
+  provider?: QRProvider;
 }
 
 type ModalState = "loading" | "qr" | "success" | "error";
@@ -24,13 +27,17 @@ export default function QRPaymentModal({
   studentName,
   onSuccess,
   onClose,
+  provider = "mmpay",
 }: QRPaymentModalProps) {
+  const apiBase = provider === "abank" ? "/api/public/payments/abank" : "/api/public/payments/mmpay";
   const [state, setState] = useState<ModalState>("loading");
   const [qrData, setQrData] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [qrImageUrl, setQrImageUrl] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const slowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Close on Escape ────────────────────────────────────────
   useEffect(() => {
@@ -41,39 +48,63 @@ export default function QRPaymentModal({
     return () => document.removeEventListener("keydown", handleKey);
   }, [onClose]);
 
-  // ── Cleanup polling on unmount ─────────────────────────────
+  // ── Cleanup polling + timers on unmount ────────────────────
   useEffect(() => {
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
+      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+      if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
     };
   }, []);
 
-  // ── Start polling for payment status ───────────────────────
+  // ── Smart polling: 5s for 2min → 15s until 10min → stop ────
+
   const startPolling = useCallback(
     (paymentRef: string) => {
-      pollRef.current = setInterval(async () => {
+      const pollFn = async () => {
         try {
           const res = await fetch(
-            `/api/public/payments/mmqr/status?ref=${encodeURIComponent(paymentRef)}`,
+            `${apiBase}/status?ref=${encodeURIComponent(paymentRef)}`,
           );
           if (!res.ok) return;
           const data: { mmqr_status: string } = await res.json();
 
           if (data.mmqr_status === "SUCCESS") {
             if (pollRef.current) clearInterval(pollRef.current);
+            if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+            if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
             setState("success");
             onSuccess();
           } else if (data.mmqr_status === "FAILED") {
             if (pollRef.current) clearInterval(pollRef.current);
+            if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+            if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
             setState("error");
             setErrorMsg("Payment was declined. Please try again.");
           }
         } catch {
           // Ignore polling errors — will retry next interval
         }
-      }, 3000);
+      };
+
+      // Phase 1: poll every 5s
+      pollRef.current = setInterval(pollFn, 5000);
+
+      // Phase 2: after 2 min, slow down to 15s
+      slowTimerRef.current = setTimeout(() => {
+        if (pollRef.current) clearInterval(pollRef.current);
+        pollRef.current = setInterval(pollFn, 15000);
+      }, 2 * 60 * 1000);
+
+      // Phase 3: after 10 min, stop and show expiry
+      pollTimerRef.current = setTimeout(() => {
+        if (pollRef.current) clearInterval(pollRef.current);
+        if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
+        setState("error");
+        setErrorMsg("QR code has expired. Please try again.");
+      }, 10 * 60 * 1000);
     },
-    [onSuccess],
+    [onSuccess, apiBase],
   );
 
   // ── Create payment on mount ────────────────────────────────
@@ -81,7 +112,7 @@ export default function QRPaymentModal({
     async function createPayment() {
       setState("loading");
       try {
-        const res = await fetch("/api/public/payments/mmqr", {
+        const res = await fetch(apiBase, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ enrollmentRef }),
@@ -129,7 +160,7 @@ export default function QRPaymentModal({
     // Instead, just call createPayment inline
     (async () => {
       try {
-        const res = await fetch("/api/public/payments/mmqr", {
+        const res = await fetch(apiBase, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ enrollmentRef }),
@@ -196,12 +227,8 @@ export default function QRPaymentModal({
         {state === "qr" && (
           <div className="flex flex-col items-center">
             {/* Header */}
-            <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-full bg-[#1a6b3c]/10">
-              <svg className="h-5 w-5 text-[#1a6b3c]" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z" />
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 6.75h.75v.75h-.75v-.75zM6.75 16.5h.75v.75h-.75v-.75zM16.5 6.75h.75v.75h-.75v-.75zM13.5 13.5h.75v.75h-.75v-.75zM13.5 19.5h.75v.75h-.75v-.75zM19.5 13.5h.75v.75h-.75v-.75zM19.5 19.5h.75v.75h-.75v-.75zM16.5 16.5h.75v.75h-.75v-.75z" />
-              </svg>
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/mmqr-logo.png" alt="MyanmarPay MMQR" className="mb-2 h-14 w-auto" />
 
             <h3 className="text-lg font-semibold text-gray-900">Pay with MMQR</h3>
             <p className="font-myanmar mt-0.5 text-sm text-gray-500">MMQR ဖြင့် ငွေပေးချေပါ</p>
@@ -238,12 +265,55 @@ export default function QRPaymentModal({
               </div>
             )}
 
+            {/* Save QR button */}
+            {qrImageUrl && (
+              <button
+                onClick={async () => {
+                  const fileName = `MMQR-${orderId ?? "payment"}.png`;
+                  const byteString = atob(qrImageUrl.split(",")[1]);
+                  const ab = new ArrayBuffer(byteString.length);
+                  const ia = new Uint8Array(ab);
+                  for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+                  const blob = new Blob([ab], { type: "image/png" });
+                  const file = new File([blob], fileName, { type: "image/png" });
+
+                  // Mobile: use Web Share API (triggers native share sheet → Save to Photos)
+                  if (navigator.share) {
+                    try {
+                      if (navigator.canShare?.({ files: [file] })) {
+                        await navigator.share({ files: [file], title: "MMQR Payment Code" });
+                        return;
+                      }
+                    } catch {
+                      // User cancelled or share failed — fall through to download
+                    }
+                  }
+
+                  // Desktop fallback: blob download
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = fileName;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                }}
+                className="mt-3 flex items-center justify-center gap-1.5 rounded-lg border border-gray-200 bg-gray-50 px-4 py-2 text-xs font-medium text-gray-600 hover:bg-gray-100 transition-colors"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                </svg>
+                Save QR / <span className="font-myanmar">QR သိမ်းမည်</span>
+              </button>
+            )}
+
             {/* Instructions */}
             <p className="mt-4 text-center text-xs text-gray-500">
-              Scan with KBZPay, Wave, CB Pay or any MMQR-supported app
+              Scan with KBZPay, Wave, CB Pay, A+ wallet or any MMQR-supported app
             </p>
             <p className="font-myanmar mt-0.5 text-center text-xs text-gray-400">
-              KBZPay, Wave, CB Pay သို့မဟုတ် MMQR ပံ့ပိုးသော app ဖြင့် စကင်ဖတ်ပါ
+              KBZPay, Wave, CB Pay, A+ wallet သို့မဟုတ် MMQR ပံ့ပိုးသော app ဖြင့် စကင်ဖတ်ပါ
             </p>
 
             {/* Order reference */}

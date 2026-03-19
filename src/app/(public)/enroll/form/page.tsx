@@ -45,12 +45,14 @@ interface FormFieldDef {
   is_default: boolean;
 }
 
-// ─── Myanmar phone validation ────────────────────────────────────────────────
+// ─── Phone validation (Myanmar + international) ─────────────────────────────
 
-const MM_PHONE_RE = /^(?:\+?95|0)(9\d{7,9})$/;
+const MM_PHONE_RE = /^(?:\+?95|0)9\d{7,9}$/;
+const INTL_PHONE_RE = /^\+[1-9]\d{6,14}$/;
 
-function isValidMyanmarPhone(phone: string): boolean {
-  return MM_PHONE_RE.test(phone.replace(/[\s\-().]/g, ""));
+function isValidPhone(phone: string): boolean {
+  const cleaned = phone.replace(/[\s\-().]/g, "");
+  return MM_PHONE_RE.test(cleaned) || INTL_PHONE_RE.test(cleaned);
 }
 
 // ─── Myanmar numerals ────────────────────────────────────────────────────────
@@ -159,6 +161,45 @@ const INPUT_BASE =
   "focus:border-[#1a6b3c] focus:outline-none focus:ring-1 focus:ring-[#1a6b3c]";
 const INPUT_ERROR = "border-red-400 focus:border-red-500 focus:ring-red-500";
 
+// ─── Field hints ──────────────────────────────────────────────────────────────
+
+function getFieldHint(field: FormFieldDef): { en: string; mm?: string } | null {
+  const key = field.field_key.toLowerCase();
+
+  if (field.field_type === "phone") {
+    return {
+      en: "Myanmar or international format (+81, +66, etc.)",
+      mm: "မြန်မာ သို့မဟုတ် နိုင်ငံတကာ ဖုန်းနံပါတ်",
+    };
+  }
+  if (key === "email" || field.field_type === "email") {
+    return {
+      en: "We'll send your ticket and payment updates here",
+      mm: "လက်မှတ်နှင့် ငွေပေးချေမှု အချက်အလက်များ ဤအီးမေးလ်သို့ ပို့ပါမည်",
+    };
+  }
+  if (key === "name_en" || key === "student_name_en") {
+    return { en: "Full name in English" };
+  }
+  if (key === "name_mm" || key === "student_name_mm") {
+    return { en: "Full name in Myanmar", mm: "မြန်မာအမည် အပြည့်အစုံ" };
+  }
+  if (key === "nrc" || key === "nrc_number") {
+    return { en: "e.g. 12/ThaGaKa(N)123456" };
+  }
+  return null;
+}
+
+function getFieldPlaceholder(field: FormFieldDef): string {
+  const key = field.field_key.toLowerCase();
+  if (field.field_type === "phone") return "09xxxxxxxxx";
+  if (field.field_type === "email" || key === "email") return "example@email.com";
+  if (key === "name_en" || key === "student_name_en") return "e.g. Aung Aung";
+  if (key === "name_mm" || key === "student_name_mm") return "ဥပမာ - အောင်အောင်";
+  if (key === "nrc" || key === "nrc_number") return "12/ThaGaKa(N)123456";
+  return field.field_label;
+}
+
 function DynamicField({
   field,
   value,
@@ -172,6 +213,7 @@ function DynamicField({
 }) {
   const hasError = !!error;
   const cls = `${INPUT_BASE} ${hasError ? INPUT_ERROR : ""}`;
+  const hint = getFieldHint(field);
 
   let input: React.ReactNode;
 
@@ -183,7 +225,18 @@ function DynamicField({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className={cls}
-          placeholder="09-xxxxxxxxx"
+          placeholder={getFieldPlaceholder(field)}
+        />
+      );
+      break;
+    case "email":
+      input = (
+        <input
+          type="email"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={cls}
+          placeholder={getFieldPlaceholder(field)}
         />
       );
       break;
@@ -272,7 +325,7 @@ function DynamicField({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           className={`${cls} ${field.field_label.toLowerCase().includes("myanmar") ? "font-myanmar" : ""}`}
-          placeholder={field.field_label}
+          placeholder={getFieldPlaceholder(field)}
         />
       );
       break;
@@ -287,6 +340,12 @@ function DynamicField({
         </label>
       )}
       {input}
+      {hint && !error && (
+        <p className="mt-1 text-xs text-gray-400">
+          {hint.en}
+          {hint.mm && <span className="font-myanmar"> · {hint.mm}</span>}
+        </p>
+      )}
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
     </div>
   );
@@ -422,10 +481,10 @@ function EnrollmentFormPage() {
       if (!val) continue;
 
       // Type-specific validation
-      if (field.field_type === "phone" && !isValidMyanmarPhone(val)) {
-        errors[field.field_key] = "Invalid Myanmar phone number (e.g. 09-xxxxxxxxx).";
+      if (field.field_type === "phone" && !isValidPhone(val)) {
+        errors[field.field_key] = "Invalid phone number (e.g. 09xxxxxxxxx or +819xxxxxxxx).";
       }
-      if (field.field_key === "email" && field.field_type === "text" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
+      if ((field.field_type === "email" || (field.field_key === "email" && field.field_type === "text")) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
         errors[field.field_key] = "Invalid email address.";
       }
     }
@@ -460,6 +519,9 @@ function EnrollmentFormPage() {
       if (val) dynamicData[field.field_key] = val;
     }
 
+    // Include honeypot value (server rejects if filled)
+    const hpValue = (formData.__hp ?? "").trim();
+
     // Build payload based on mode
     const payload = isCartMode
       ? {
@@ -467,6 +529,7 @@ function EnrollmentFormPage() {
           form_data: dynamicData,
           idempotency_key: idempotencyKeyRef.current,
           ...(messengerPsid ? { messenger_psid: messengerPsid } : {}),
+          ...(hpValue ? { __hp: hpValue } : {}),
         }
       : {
           class_id: classInfo!.id,
@@ -474,6 +537,7 @@ function EnrollmentFormPage() {
           idempotency_key: idempotencyKeyRef.current,
           quantity,
           ...(messengerPsid ? { messenger_psid: messengerPsid } : {}),
+          ...(hpValue ? { __hp: hpValue } : {}),
         };
 
     try {
@@ -616,6 +680,20 @@ function EnrollmentFormPage() {
             </div>
           </div>
         )}
+
+        {/* Honeypot — hidden from real users, filled by bots */}
+        <div aria-hidden="true" style={{ position: "absolute", left: "-9999px", top: "-9999px" }}>
+          <label htmlFor="website_url">Website</label>
+          <input
+            id="website_url"
+            name="website_url"
+            type="text"
+            tabIndex={-1}
+            autoComplete="off"
+            value={formData.__hp ?? ""}
+            onChange={(e) => updateField("__hp", e.target.value)}
+          />
+        </div>
 
         {/* Form fields */}
         <h2 className="mb-6 text-lg font-semibold text-gray-900">
