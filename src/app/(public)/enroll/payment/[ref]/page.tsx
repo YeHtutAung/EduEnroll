@@ -994,39 +994,11 @@ export default function PaymentInstructionsPage() {
             )}
           </div>
 
-          {/* ── Payment deadline countdown ─────────────────────────── */}
-          {showUpload && enrollment.enrolled_at && enrollment.auto_cancel_minutes != null && enrollment.auto_cancel_minutes > 0 && (
-            <PaymentCountdown
-              enrolledAt={enrollment.enrolled_at}
-              autoCancelMinutes={enrollment.auto_cancel_minutes}
-            />
-          )}
-
           {/* ── Partial payment banner ──────────────────────────────── */}
           {isPartialReUpload && <PartialPaymentBanner enrollment={enrollment} />}
 
-          {/* ── Enrollment reference box ───────────────────────────── */}
-          <div className="mb-8 rounded-xl bg-[#1a6b3c]/10 p-5">
-            <p className="mb-2 text-center text-xs font-semibold uppercase tracking-wide text-[#1a6b3c]">
-              {orgType === "event" ? "Your Order Reference" : "Your Enrollment Reference"}
-            </p>
-            {orgType !== "event" && (
-              <p className="font-myanmar mb-3 text-center text-xs text-gray-500">
-                သင့်စာရင်းသွင်းမှု ရည်ညွှန်းကုဒ်
-              </p>
-            )}
-            <div className="flex items-center justify-center gap-3">
-              <span className="font-mono text-[2rem] font-bold leading-tight text-[#1a6b3c]">
-                {enrollment.enrollment_ref}
-              </span>
-            </div>
-            <div className="mt-3 flex justify-center">
-              <CopyButton text={enrollment.enrollment_ref} />
-            </div>
-          </div>
-
-          {/* ── Order summary ─────────────────────────────────────────── */}
-          <div className="mb-8 rounded-xl border border-gray-200 bg-white p-5">
+          {/* ── Order summary (high priority for end user) ────────── */}
+          <div className="mb-6 rounded-xl border border-gray-200 bg-white p-5">
             <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
               {orgType === "event" ? "Order Summary" : <>Order Summary / <span className="font-myanmar normal-case">အော်ဒါ အကျဉ်းချုပ်</span></>}
             </h3>
@@ -1058,6 +1030,44 @@ export default function PaymentInstructionsPage() {
               </div>
             </div>
           </div>
+
+          {/* ── Pay via MMQR (high priority for owner) ────────────── */}
+          {showUpload && paymentMode === "mmqr" && (
+            <div className="mb-6">
+              <button
+                onClick={() => setShowQRModal(true)}
+                className="flex w-full items-center justify-center gap-3 rounded-xl border-2 border-[#1a3f8a] bg-[#1a3f8a] py-4 text-sm font-semibold text-white hover:bg-[#1a3f8a]/90 transition-colors shadow-sm"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/mmqr-logo.png" alt="MyanmarPay MMQR" className="h-10 w-auto" />
+                <div>
+                  <span className="block">Pay Instantly via MMQR</span>
+                  <span className="font-myanmar block text-xs font-normal opacity-75">MMQR ဖြင့် ချက်ချင်း ငွေပေးချေမည်</span>
+                </div>
+              </button>
+            </div>
+          )}
+
+          {/* ── Enrollment reference (compact, secondary) ─────────── */}
+          <div className="mb-6 flex items-center justify-between rounded-lg bg-gray-50 border border-gray-200 px-4 py-3">
+            <div className="min-w-0">
+              <p className="text-xs text-gray-500">
+                {orgType === "event" ? "Reference" : "Ref"}
+              </p>
+              <p className="font-mono text-lg font-bold text-gray-800 truncate">
+                {enrollment.enrollment_ref}
+              </p>
+            </div>
+            <CopyButton text={enrollment.enrollment_ref} size="small" />
+          </div>
+
+          {/* ── Payment deadline countdown (subtle, secondary) ────── */}
+          {showUpload && enrollment.enrolled_at && enrollment.auto_cancel_minutes != null && enrollment.auto_cancel_minutes > 0 && (
+            <PaymentCountdown
+              enrolledAt={enrollment.enrolled_at}
+              autoCancelMinutes={enrollment.auto_cancel_minutes}
+            />
+          )}
         </>
       )}
 
@@ -1147,23 +1157,6 @@ export default function PaymentInstructionsPage() {
               </div>
             </li>
           </ol>
-        </div>
-      )}
-
-      {/* ── Pay via MMQR ─────────────────────────────────────── */}
-      {showUpload && paymentMode === "mmqr" && (
-        <div className="mb-8">
-          <button
-            onClick={() => setShowQRModal(true)}
-            className="flex w-full items-center justify-center gap-3 rounded-xl border-2 border-[#1a3f8a] bg-[#1a3f8a]/5 py-4 text-sm font-semibold text-[#1a3f8a] hover:bg-[#1a3f8a]/10 transition-colors"
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/mmqr-logo.png" alt="MyanmarPay MMQR" className="h-10 w-auto" />
-            <div>
-              <span className="block">Pay Instantly via MMQR</span>
-              <span className="font-myanmar block text-xs font-normal opacity-75">MMQR ဖြင့် ချက်ချင်း ငွေပေးချေမည်</span>
-            </div>
-          </button>
         </div>
       )}
 
