@@ -578,34 +578,36 @@ function PaymentCountdown({
 
   if (expired) {
     return (
-      <div className="mb-8 rounded-xl border border-red-200 bg-red-50 p-5 text-center">
-        <p className="text-3xl font-bold font-mono text-red-600">00:00:00</p>
-        <p className="font-myanmar mt-2 text-sm text-red-700">
-          ငွေပေးချေရန် အချိန်ကုန်သွားပါပြီ။ စာရင်းသွင်းမှု ပယ်ဖျက်ခံရနိုင်ပါသည်။
+      <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-center">
+        <p className="text-sm font-bold font-mono text-red-600">00:00:00</p>
+        <p className="font-myanmar mt-1 text-xs text-red-700">
+          ငွေပေးချေရန် အချိန်ကုန်သွားပါပြီ။
         </p>
-        <p className="mt-1 text-xs text-red-600">
-          Payment deadline has passed. Your enrollment may be cancelled.
+        <p className="text-xs text-red-600">
+          Payment deadline has passed.
         </p>
       </div>
     );
   }
 
   return (
-    <div className={`mb-8 rounded-xl border p-5 text-center ${
+    <div className={`mb-6 rounded-lg border px-4 py-3 flex items-center justify-between ${
       urgent
         ? "border-red-200 bg-red-50"
-        : "border-amber-200 bg-amber-50"
+        : "border-gray-200 bg-gray-50"
     }`}>
-      <p className={`text-3xl font-bold font-mono ${
-        urgent ? "text-red-600" : "text-gray-900"
+      <div>
+        <p className={`text-xs ${urgent ? "text-red-600" : "text-gray-500"}`}>
+          {durationTextEn}
+        </p>
+        <p className={`font-myanmar text-xs ${urgent ? "text-red-500" : "text-gray-400"}`}>
+          {durationTextMm}
+        </p>
+      </div>
+      <p className={`text-lg font-bold font-mono ${
+        urgent ? "text-red-600" : "text-gray-700"
       }`}>
         {timeDisplay}
-      </p>
-      <p className={`font-myanmar mt-2 text-sm ${urgent ? "text-red-700" : "text-gray-600"}`}>
-        {durationTextMm}
-      </p>
-      <p className={`mt-1 text-xs ${urgent ? "text-red-600" : "text-gray-500"}`}>
-        {durationTextEn}
       </p>
     </div>
   );
@@ -1033,16 +1035,22 @@ export default function PaymentInstructionsPage() {
 
           {/* ── Pay via MMQR (high priority for owner) ────────────── */}
           {showUpload && paymentMode === "mmqr" && (
-            <div className="mb-6">
+            <div className="mb-6 rounded-xl border-2 border-[#1a3f8a] bg-[#1a3f8a] p-5 text-center shadow-sm">
+              <p className="text-sm text-white/80">
+                {orgType === "event" ? "Pay to complete your order" : <>Pay to complete your enrollment / <span className="font-myanmar">ငွေပေးချေပြီး အပြီးသတ်ပါ</span></>}
+              </p>
+              <p className="mt-1 text-3xl font-bold font-mono text-white">
+                {isPartialReUpload && enrollment.payment?.remaining_amount_mmk ? formatMMKSimple(enrollment.payment.remaining_amount_mmk) : formatMMKSimple(totalFee)}
+              </p>
               <button
                 onClick={() => setShowQRModal(true)}
-                className="flex w-full items-center justify-center gap-3 rounded-xl border-2 border-[#1a3f8a] bg-[#1a3f8a] py-4 text-sm font-semibold text-white hover:bg-[#1a3f8a]/90 transition-colors shadow-sm"
+                className="mt-4 flex w-full items-center justify-center gap-3 rounded-lg bg-white py-3.5 text-base font-semibold text-[#1a3f8a] hover:bg-white/90 transition-colors"
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/mmqr-logo.png" alt="MyanmarPay MMQR" className="h-10 w-auto" />
+                <img src="/mmqr-logo.png" alt="MyanmarPay MMQR" className="h-8 w-auto" />
                 <div>
                   <span className="block">Pay Instantly via MMQR</span>
-                  <span className="font-myanmar block text-xs font-normal opacity-75">MMQR ဖြင့် ချက်ချင်း ငွေပေးချေမည်</span>
+                  <span className="font-myanmar block text-xs font-normal text-[#1a3f8a]/70">MMQR ဖြင့် ချက်ချင်း ငွေပေးချေမည်</span>
                 </div>
               </button>
             </div>
