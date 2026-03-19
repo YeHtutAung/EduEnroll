@@ -951,7 +951,7 @@ function SettingsContent() {
     "w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent";
 
   return (
-    <div className="min-h-screen bg-[#f0f4ff] px-6 py-8 lg:px-8 space-y-8">
+    <div className="bg-[#f0f4ff] px-6 py-8 lg:px-8 space-y-8">
 
       {/* Header */}
       <div>
