@@ -427,12 +427,21 @@ export default function DashboardPage() {
                       </p>
                     </td>
                     <td className="px-4 py-3.5">
-                      <span
-                        className="inline-flex items-center justify-center w-9 h-7 rounded-lg text-xs font-bold text-white"
-                        style={{ backgroundColor: "#1a3f8a" }}
-                      >
-                        {row.class_level}
-                      </span>
+                      {row.class_level ? (
+                        <div className="flex flex-wrap gap-1">
+                          {row.class_level.split(",").map((lvl, i) => (
+                            <span
+                              key={i}
+                              className="inline-flex items-center justify-center px-2 h-7 rounded-lg text-xs font-bold text-white whitespace-nowrap"
+                              style={{ backgroundColor: "#1a3f8a" }}
+                            >
+                              {lvl.trim()}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-400">—</span>
+                      )}
                     </td>
                     <td className="px-4 py-3.5 text-sm text-gray-500 whitespace-nowrap">
                       {timeAgo(row.enrolled_at)}
