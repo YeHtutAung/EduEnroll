@@ -682,6 +682,7 @@ export default function PaymentInstructionsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showQRModal, setShowQRModal] = useState(false);
+  const [timerExpired, setTimerExpired] = useState(false);
 
   useEffect(() => {
     async function fetchData() {
@@ -804,7 +805,6 @@ export default function PaymentInstructionsPage() {
   const isPartialReUpload = enrollment.status === "partial_payment";
   const paymentMode = enrollment.payment_mode ?? "bank_transfer";
   const mmqrProvider = enrollment.mmqr_provider ?? "abank";
-  const [timerExpired, setTimerExpired] = useState(false);
 
   const isConfirmed = enrollment.status === "confirmed";
 
