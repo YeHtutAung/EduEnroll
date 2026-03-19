@@ -28,7 +28,7 @@ interface EnrollmentInfo {
   status_label_en: string;
   status_label_mm: string;
   enrolled_at?: string;
-  auto_cancel_hours?: number;
+  auto_cancel_minutes?: number;
   telegram_bot_username?: string | null;
   payment_mode?: "bank_transfer" | "mmqr";
   mmqr_provider?: "abank" | "mmpay";
@@ -524,15 +524,15 @@ function UploadSection({
 
 function PaymentCountdown({
   enrolledAt,
-  autoCancelHours,
+  autoCancelMinutes,
 }: {
   enrolledAt: string;
-  autoCancelHours: number;
+  autoCancelMinutes: number;
 }) {
   const [remaining, setRemaining] = useState<number | null>(null);
 
   useEffect(() => {
-    const deadline = new Date(enrolledAt).getTime() + autoCancelHours * 60 * 60 * 1000;
+    const deadline = new Date(enrolledAt).getTime() + autoCancelMinutes * 60 * 1000;
 
     function tick() {
       const diff = deadline - Date.now();
@@ -542,7 +542,7 @@ function PaymentCountdown({
     tick();
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
-  }, [enrolledAt, autoCancelHours]);
+  }, [enrolledAt, autoCancelMinutes]);
 
   if (remaining === null) return null;
 
@@ -553,7 +553,7 @@ function PaymentCountdown({
   const seconds = totalSec % 60;
 
   const expired = remaining === 0;
-  const urgent = totalSec < 3600; // less than 1 hour
+  const urgent = totalSec < 300; // less than 5 minutes
 
   // Format display
   let timeDisplay: string;
@@ -562,6 +562,19 @@ function PaymentCountdown({
   } else {
     timeDisplay = `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   }
+
+  // Human-readable duration for display text
+  const durationTextMm = autoCancelMinutes < 60
+    ? `${autoCancelMinutes} မိနစ်အတွင်း ငွေပေးချေမှုကို အပြီးသတ်ပေးပါ`
+    : autoCancelMinutes < 1440
+      ? `${(autoCancelMinutes / 60).toFixed(0)} နာရီအတွင်း ငွေပေးချေမှုကို အပြီးသတ်ပေးပါ`
+      : `${Math.round(autoCancelMinutes / 1440)} ရက်အတွင်း ငွေပေးချေမှုကို အပြီးသတ်ပေးပါ`;
+
+  const durationTextEn = autoCancelMinutes < 60
+    ? `Please complete payment within ${autoCancelMinutes} minute${autoCancelMinutes !== 1 ? "s" : ""}`
+    : autoCancelMinutes < 1440
+      ? `Please complete payment within ${(autoCancelMinutes / 60).toFixed(0)} hour${autoCancelMinutes >= 120 ? "s" : ""}`
+      : `Please complete payment within ${Math.round(autoCancelMinutes / 1440)} day${autoCancelMinutes >= 2880 ? "s" : ""}`;
 
   if (expired) {
     return (
@@ -589,18 +602,10 @@ function PaymentCountdown({
         {timeDisplay}
       </p>
       <p className={`font-myanmar mt-2 text-sm ${urgent ? "text-red-700" : "text-gray-600"}`}>
-        {autoCancelHours < 24
-          ? `${autoCancelHours} နာရီအတွင်း ငွေပေးချေမှုကို အပြီးသတ်ပေးပါ`
-          : autoCancelHours < 168
-            ? `${Math.round(autoCancelHours / 24)} ရက်အတွင်း ငွေပေးချေမှုကို အပြီးသတ်ပေးပါ`
-            : `${autoCancelHours} နာရီအတွင်း ငွေပေးချေမှုကို အပြီးသတ်ပေးပါ`}
+        {durationTextMm}
       </p>
       <p className={`mt-1 text-xs ${urgent ? "text-red-600" : "text-gray-500"}`}>
-        {autoCancelHours < 24
-          ? `Please complete payment within ${autoCancelHours} hour${autoCancelHours !== 1 ? "s" : ""}`
-          : autoCancelHours < 168
-            ? `Please complete payment within ${Math.round(autoCancelHours / 24)} day${autoCancelHours >= 48 ? "s" : ""}`
-            : `Please complete payment within ${autoCancelHours} hours`}
+        {durationTextEn}
       </p>
     </div>
   );
@@ -990,10 +995,10 @@ export default function PaymentInstructionsPage() {
           </div>
 
           {/* ── Payment deadline countdown ─────────────────────────── */}
-          {showUpload && enrollment.enrolled_at && enrollment.auto_cancel_hours != null && enrollment.auto_cancel_hours > 0 && (
+          {showUpload && enrollment.enrolled_at && enrollment.auto_cancel_minutes != null && enrollment.auto_cancel_minutes > 0 && (
             <PaymentCountdown
               enrolledAt={enrollment.enrolled_at}
-              autoCancelHours={enrollment.auto_cancel_hours}
+              autoCancelMinutes={enrollment.auto_cancel_minutes}
             />
           )}
 

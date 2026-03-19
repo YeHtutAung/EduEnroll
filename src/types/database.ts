@@ -116,6 +116,7 @@ export interface Tenant {
   handoff_timeout_min: number;
   menu_buttons: MenuButton[] | null;
   auto_cancel_hours: number;        // default 72, 0 = disabled
+  email_on_enroll: boolean;         // default false — send confirmation email on enrollment
   payment_mode: "bank_transfer" | "mmqr";
   mmqr_provider: "abank" | "mmpay";
   created_at: string;

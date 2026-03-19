@@ -511,8 +511,10 @@ function SettingsContent() {
   const [savingOrg, setSavingOrg] = useState(false);
 
   // ── Enrollment policy ──────────────────────────────────────────────────────
-  const [autoCancelHours, setAutoCancelHours] = useState(72);
+  const [autoCancelHours, setAutoCancelHours] = useState(4320);
   const [savingPolicy, setSavingPolicy] = useState(false);
+  const [emailOnEnroll, setEmailOnEnroll] = useState(false);
+  const [savingEmailToggle, setSavingEmailToggle] = useState(false);
 
   // ── Payment mode ──────────────────────────────────────────────────────────
   const [paymentMode, setPaymentMode] = useState<"bank_transfer" | "mmqr">("bank_transfer");
@@ -541,7 +543,7 @@ function SettingsContent() {
       // Fetch tenant name + logo + org labels
       const { data: tenant } = await supabase
         .from("tenants")
-        .select("name, logo_url, org_type, label_intake, label_class, label_student, label_seat, label_fee, auto_cancel_hours, payment_mode, mmqr_provider")
+        .select("name, logo_url, org_type, label_intake, label_class, label_student, label_seat, label_fee, auto_cancel_hours, email_on_enroll, payment_mode, mmqr_provider")
         .eq("id", profile.tenant_id)
         .single() as {
         data: {
@@ -554,6 +556,7 @@ function SettingsContent() {
           label_seat: string;
           label_fee: string;
           auto_cancel_hours: number;
+          email_on_enroll: boolean;
           payment_mode: string;
           mmqr_provider: string;
         } | null;
@@ -570,7 +573,8 @@ function SettingsContent() {
           seat: tenant.label_seat ?? "Seat",
           fee: tenant.label_fee ?? "Fee",
         });
-        setAutoCancelHours(tenant.auto_cancel_hours ?? 72);
+        setAutoCancelHours(tenant.auto_cancel_hours ?? 4320);
+        setEmailOnEnroll(tenant.email_on_enroll ?? false);
         setPaymentMode((tenant.payment_mode as "bank_transfer" | "mmqr") ?? "bank_transfer");
         setMmqrProvider((tenant.mmqr_provider as "abank" | "mmpay") ?? "abank");
       }
@@ -721,18 +725,38 @@ function SettingsContent() {
     if (!tenantId) return;
     setSavingPolicy(true);
     try {
-      const val = Math.max(0, Math.min(720, Math.round(autoCancelHours)));
+      const val = Math.max(0, Math.min(43200, Math.round(autoCancelHours)));
       const { error } = await supabase
         .from("tenants")
         .update({ auto_cancel_hours: val } as never)
         .eq("id", tenantId);
       if (error) throw new Error((error as Error).message);
       setAutoCancelHours(val);
-      toast.success(val === 0 ? "Auto-cancel disabled." : `Auto-cancel set to ${val} hours.`);
+      toast.success(val === 0 ? "Auto-cancel disabled." : `Auto-cancel set to ${val} minutes.`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save enrollment policy.");
     } finally {
       setSavingPolicy(false);
+    }
+  }
+
+  // ── Email on enroll toggle ───────────────────────────────────────────────
+  async function handleToggleEmailOnEnroll() {
+    if (!tenantId) return;
+    setSavingEmailToggle(true);
+    try {
+      const newVal = !emailOnEnroll;
+      const { error } = await supabase
+        .from("tenants")
+        .update({ email_on_enroll: newVal } as never)
+        .eq("id", tenantId);
+      if (error) throw new Error((error as Error).message);
+      setEmailOnEnroll(newVal);
+      toast.success(newVal ? "Enrollment confirmation email enabled." : "Enrollment confirmation email disabled.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update email setting.");
+    } finally {
+      setSavingEmailToggle(false);
     }
   }
 
@@ -1276,10 +1300,11 @@ function SettingsContent() {
             <label className="block text-sm font-medium text-gray-700 mb-2">Quick presets</label>
             <div className="flex flex-wrap gap-2">
               {[
-                { label: "24h", value: 24 },
-                { label: "48h", value: 48 },
-                { label: "72h", value: 72 },
-                { label: "7 days", value: 168 },
+                { label: "15 min", value: 15 },
+                { label: "30 min", value: 30 },
+                { label: "1 hour", value: 60 },
+                { label: "2 hours", value: 120 },
+                { label: "24 hours", value: 1440 },
                 { label: "Never", value: 0 },
               ].map((preset) => (
                 <button
@@ -1301,13 +1326,13 @@ function SettingsContent() {
           {/* Custom input */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              Custom duration (hours)
+              Custom duration (minutes)
             </label>
             <div className="flex items-center gap-3">
               <input
                 type="number"
                 min={0}
-                max={720}
+                max={43200}
                 value={autoCancelHours}
                 onChange={(e) => setAutoCancelHours(Number(e.target.value) || 0)}
                 className="w-32 border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
@@ -1315,9 +1340,11 @@ function SettingsContent() {
               <span className="text-sm text-gray-500">
                 {autoCancelHours === 0
                   ? "Auto-cancel disabled"
-                  : autoCancelHours < 24
-                    ? `${autoCancelHours} hour${autoCancelHours !== 1 ? "s" : ""}`
-                    : `${(autoCancelHours / 24).toFixed(1).replace(/\.0$/, "")} day${autoCancelHours >= 48 ? "s" : ""} (${autoCancelHours}h)`}
+                  : autoCancelHours < 60
+                    ? `${autoCancelHours} min`
+                    : autoCancelHours < 1440
+                      ? `${(autoCancelHours / 60).toFixed(1).replace(/\.0$/, "")} hour${autoCancelHours >= 120 ? "s" : ""}`
+                      : `${(autoCancelHours / 1440).toFixed(1).replace(/\.0$/, "")} day${autoCancelHours >= 2880 ? "s" : ""} (${(autoCancelHours / 60).toFixed(0)}h)`}
               </span>
             </div>
           </div>
@@ -1346,7 +1373,39 @@ function SettingsContent() {
         </form>
       </SectionCard>
 
-      {/* ── Section 5: School Profile ────────────────────────────────── */}
+      {/* ── Section 5: Email Notifications ──────────────────────────── */}
+      <SectionCard title="Email Notifications" subtitle="Control which emails are sent to students.">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-gray-800">
+              Send confirmation email on enrollment
+            </p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Sends an email with reference number and payment link when a student enrolls.
+            </p>
+            <p className="font-myanmar text-xs text-gray-400 mt-0.5">
+              ကျောင်းသား စာရင်းသွင်းသောအခါ အတည်ပြုချက် အီးမေးလ် ပို့ပါ။
+            </p>
+          </div>
+          <Toggle
+            checked={emailOnEnroll}
+            onChange={handleToggleEmailOnEnroll}
+            disabled={savingEmailToggle}
+          />
+        </div>
+        {!emailOnEnroll && (
+          <div className="rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 mt-4">
+            <p className="text-sm text-blue-800">
+              Enrollment confirmation emails are disabled. Students will still receive emails when their payment is approved, partially paid, or rejected.
+            </p>
+            <p className="font-myanmar text-xs text-blue-700 mt-1">
+              စာရင်းသွင်းမှု အတည်ပြုချက် အီးမေးလ်များ ပိတ်ထားသည်။ ငွေပေးချေမှု အတည်ပြု/ပယ်ဖျက်သောအခါ အီးမေးလ်များ ဆက်လက်ပို့မည်။
+            </p>
+          </div>
+        )}
+      </SectionCard>
+
+      {/* ── Section 6: School Profile ────────────────────────────────── */}
       <SectionCard title={orgType === "event" ? "Organization Profile" : "School Profile"} subtitle={orgType === "event" ? "Update your organization name displayed to customers." : "Update your school name displayed to students."}>
 
         {loadingProfile ? (
