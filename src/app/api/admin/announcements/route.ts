@@ -5,14 +5,17 @@ import type { Intake } from "@/types/database";
 type IntakeResult = { data: Pick<Intake, "id" | "name"> | null; error: unknown };
 
 export interface AnnouncementRow {
-  id:           string;
-  intake_id:    string | null;
-  class_level:  string | null;
-  target_label: string;
-  message:      string;
-  sent_by_id:   string | null;
-  sent_by_name: string | null;
-  created_at:   string;
+  id:                    string;
+  intake_id:             string | null;
+  class_level:           string | null;
+  target_label:          string;
+  message:               string;
+  sent_by_id:            string | null;
+  sent_by_name:          string | null;
+  created_at:            string;
+  telegram_sent_count:   number;
+  telegram_failed_count: number;
+  dispatched_at:         string | null;
 }
 
 // ─── GET /api/admin/announcements ────────────────────────────────────────────
@@ -84,6 +87,8 @@ export async function POST(request: NextRequest) {
     ? `${class_level} — ${intake.name}`
     : `All Classes — ${intake.name}`;
 
+  const { dispatch_telegram } = body as Record<string, unknown>;
+
   const { data, error } = await supabase
     .from("announcements")
     .insert({
@@ -100,6 +105,31 @@ export async function POST(request: NextRequest) {
 
   if (error) {
     return NextResponse.json({ error: (error as Error).message }, { status: 500 });
+  }
+
+  // Auto-dispatch via Telegram if requested
+  if (dispatch_telegram && data) {
+    try {
+      const origin = request.headers.get("origin") ?? `https://${request.headers.get("host")}`;
+      const dispatchRes = await fetch(
+        `${origin}/api/admin/announcements/${data.id}/dispatch`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            cookie: request.headers.get("cookie") ?? "",
+          },
+        },
+      );
+      if (dispatchRes.ok) {
+        const result = await dispatchRes.json();
+        data.telegram_sent_count = result.sent;
+        data.telegram_failed_count = result.failed;
+        data.dispatched_at = new Date().toISOString();
+      }
+    } catch {
+      // Dispatch failed but announcement was saved — don't block
+    }
   }
 
   return NextResponse.json(data, { status: 201 });
