@@ -4,7 +4,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendMessage } from "./send";
 
-const REF_PATTERN = /^[A-Z]{1,5}-\d{4}-\d{3,5}$/;
+const REF_PATTERN = /^[A-Z]{1,5}-\d{4}-[A-Z0-9]{3,6}$/;
 
 export async function processMessage(
   tenantId: string,

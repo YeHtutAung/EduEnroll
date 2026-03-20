@@ -26,7 +26,7 @@ interface MessengerMessage {
 
 // ─── Reference number pattern ───────────────────────────────────────────────
 
-const REF_PATTERN = /^[A-Z]{1,4}-\d{4}-\d{4,6}$/i;
+const REF_PATTERN = /^[A-Z]{1,4}-\d{4}-[A-Z0-9]{3,6}$/i;
 
 // ─── Main processor ─────────────────────────────────────────────────────────
 
