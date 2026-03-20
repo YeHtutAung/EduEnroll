@@ -1375,7 +1375,7 @@ export default function PaymentInstructionsPage() {
             Telegram မှတဆင့် အပ်ဒိတ်များ ရယူပါ
           </p>
           <a
-            href={`https://t.me/${enrollment.telegram_bot_username}?start=${encodeURIComponent(enrollment.enrollment_ref)}`}
+            href={`https://t.me/${enrollment.telegram_bot_username}?start=${enrollment.enrollment_ref.replace(/-/g, "_")}`}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 rounded-lg bg-[#0088cc] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#006daa] transition-colors"

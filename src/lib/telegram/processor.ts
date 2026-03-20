@@ -15,8 +15,9 @@ export async function processMessage(
   const trimmed = text.trim();
 
   // /start <enrollment_ref> — link chat to enrollment
+  // Telegram deep links only allow A-Z a-z 0-9 _ so hyphens are sent as underscores
   if (trimmed.startsWith("/start")) {
-    const ref = trimmed.substring(6).trim().toUpperCase();
+    const ref = trimmed.substring(6).trim().toUpperCase().replace(/_/g, "-");
     if (ref && REF_PATTERN.test(ref)) {
       await handleLink(tenantId, chatId, ref, botToken);
     } else {
