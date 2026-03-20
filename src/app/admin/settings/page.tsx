@@ -925,11 +925,103 @@ function SettingsContent() {
     }
   }
 
+  // ── Telegram Bot ─────────────────────────────────────────────────────────
+  const [tgLoading, setTgLoading] = useState(true);
+  const [tgConnected, setTgConnected] = useState(false);
+  const [tgEnabled, setTgEnabled] = useState(false);
+  const [tgBotUsername, setTgBotUsername] = useState<string | null>(null);
+  const [tgSaving, setTgSaving] = useState(false);
+  const [tgDisconnecting, setTgDisconnecting] = useState(false);
+  const [tgTokenInput, setTgTokenInput] = useState("");
+  const [tgConnecting, setTgConnecting] = useState(false);
+
+  const fetchTelegram = useCallback(async () => {
+    setTgLoading(true);
+    try {
+      const res = await fetch("/api/telegram/settings");
+      if (!res.ok) throw new Error(`${res.status}`);
+      const data = await res.json();
+      setTgConnected(data.connected);
+      setTgEnabled(data.enabled);
+      setTgBotUsername(data.botUsername);
+    } catch {
+      // non-critical
+    } finally {
+      setTgLoading(false);
+    }
+  }, []);
+
+  async function handleTgConnect() {
+    const token = tgTokenInput.trim();
+    if (!token) {
+      toast.error("Please enter a bot token.");
+      return;
+    }
+    setTgConnecting(true);
+    try {
+      const res = await fetch("/api/telegram/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ botToken: token }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `${res.status}`);
+      setTgConnected(true);
+      setTgEnabled(true);
+      setTgBotUsername(data.botUsername);
+      setTgTokenInput("");
+      toast.success(data.message ?? "Telegram bot connected!");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to connect bot.");
+    } finally {
+      setTgConnecting(false);
+    }
+  }
+
+  async function handleTgToggle() {
+    setTgSaving(true);
+    try {
+      const res = await fetch("/api/telegram/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !tgEnabled }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      setTgEnabled(!tgEnabled);
+      toast.success(tgEnabled ? "Telegram bot disabled." : "Telegram bot enabled!");
+    } catch {
+      toast.error("Failed to update Telegram settings.");
+    } finally {
+      setTgSaving(false);
+    }
+  }
+
+  async function handleTgDisconnect() {
+    setTgDisconnecting(true);
+    try {
+      const res = await fetch("/api/telegram/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ disconnect: true }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      setTgConnected(false);
+      setTgEnabled(false);
+      setTgBotUsername(null);
+      toast.success("Telegram bot disconnected.");
+    } catch {
+      toast.error("Failed to disconnect.");
+    } finally {
+      setTgDisconnecting(false);
+    }
+  }
+
   // ── Init ───────────────────────────────────────────────────────────────────
   useEffect(() => {
     fetchAccounts();
     fetchProfile();
     fetchMessenger();
+    fetchTelegram();
 
     // Show toast for OAuth callback results
     if (searchParams.get("connected") === "true") {
@@ -943,7 +1035,7 @@ function SettingsContent() {
     if (pickPage) {
       fetchPagePickerPages(pickPage);
     }
-  }, [fetchAccounts, fetchProfile, fetchMessenger]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fetchAccounts, fetchProfile, fetchMessenger, fetchTelegram]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -1801,6 +1893,128 @@ function SettingsContent() {
                   https://kuunyi.com/api/messenger/webhook
                 </code>
               </p>
+            </div>
+          </div>
+        )}
+      </SectionCard>
+
+      {/* ── Section 5: Telegram Bot ───────────────────────────────────── */}
+      <SectionCard title="Telegram Bot" subtitle={orgType === "event" ? "Auto-reply bot for your organization's Telegram." : "Auto-reply bot for your school's Telegram."}>
+        {tgLoading ? (
+          <div className="space-y-3">
+            <Pulse className="h-6 w-48" />
+            <Pulse className="h-10 w-full rounded-xl" />
+          </div>
+        ) : !tgConnected ? (
+          /* ── Not connected ──────────────────────────────────── */
+          <div className="text-center py-8">
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-sky-50 mb-4">
+              <svg className="w-7 h-7 text-sky-500" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
+              </svg>
+            </div>
+            <p className="text-sm text-gray-600 mb-1">
+              Connect your Telegram Bot to enable auto-reply notifications.
+            </p>
+            <p className="text-xs text-gray-400 font-myanmar mb-5">
+              Telegram Bot ချိတ်ဆက်ပြီး auto-reply notification ကို ဖွင့်ပါ။
+            </p>
+            <div className="max-w-sm mx-auto space-y-3">
+              <input
+                type="text"
+                value={tgTokenInput}
+                onChange={(e) => setTgTokenInput(e.target.value)}
+                placeholder="Paste bot token from @BotFather"
+                className="w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-sky-400 focus:border-transparent"
+              />
+              <button
+                onClick={handleTgConnect}
+                disabled={tgConnecting || !tgTokenInput.trim()}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-sky-500 text-white text-sm font-semibold rounded-xl hover:bg-sky-600 transition-colors disabled:opacity-50"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
+                </svg>
+                {tgConnecting ? "Connecting…" : "Connect Telegram Bot"}
+              </button>
+              <p className="text-xs text-gray-400">
+                Get your bot token from{" "}
+                <a
+                  href="https://t.me/BotFather"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sky-500 hover:underline"
+                >
+                  @BotFather
+                </a>{" "}
+                on Telegram.
+              </p>
+            </div>
+          </div>
+        ) : (
+          /* ── Connected ──────────────────────────────────────── */
+          <div className="space-y-5">
+            {/* Status + toggle */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {tgEnabled ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    Bot is Live
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-gray-100 text-gray-600">
+                    <span className="w-2 h-2 rounded-full bg-gray-400" />
+                    Bot Disabled
+                  </span>
+                )}
+                {tgBotUsername && (
+                  <a
+                    href={`https://t.me/${tgBotUsername}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-sky-500 hover:underline"
+                  >
+                    @{tgBotUsername}
+                  </a>
+                )}
+              </div>
+              <Toggle
+                checked={tgEnabled}
+                onChange={handleTgToggle}
+                disabled={tgSaving}
+              />
+            </div>
+
+            {/* Bot link */}
+            {tgBotUsername && (
+              <div className="flex items-start gap-2 rounded-xl bg-sky-50 px-4 py-3">
+                <svg className="w-4 h-4 text-sky-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 0 1 1.242 7.244l-4.5 4.5a4.5 4.5 0 0 1-6.364-6.364l1.757-1.757m13.35-.622 1.757-1.757a4.5 4.5 0 0 0-6.364-6.364l-4.5 4.5a4.5 4.5 0 0 0 1.242 7.244" />
+                </svg>
+                <div className="text-xs text-sky-700">
+                  <span className="font-medium">Share this link with students:</span>{" "}
+                  <a
+                    href={`https://t.me/${tgBotUsername}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono bg-white px-1.5 py-0.5 rounded text-[11px] hover:underline"
+                  >
+                    t.me/{tgBotUsername}
+                  </a>
+                </div>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex items-center gap-3 pt-2 border-t border-gray-100">
+              <button
+                onClick={handleTgDisconnect}
+                disabled={tgDisconnecting}
+                className="px-4 py-2 text-sm font-medium text-[#c0392b] hover:bg-red-50 rounded-xl disabled:opacity-50 transition-colors"
+              >
+                {tgDisconnecting ? "Disconnecting…" : "Disconnect"}
+              </button>
             </div>
           </div>
         )}
