@@ -7,6 +7,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendMessage, requestContact, removeKeyboard } from "./send";
+import { sendChannelInviteIfEligible } from "./channel-invite";
 
 const REF_PATTERN = /^[A-Z]{1,5}-\d{4}-[A-Z0-9]{3,6}$/;
 
@@ -29,7 +30,7 @@ export async function processLanguageSchoolContact(
   // Find enrollment that is pending phone collection for this chatId
   const { data: enrollment } = (await supabase
     .from("enrollments")
-    .select("id, enrollment_ref, status")
+    .select("id, enrollment_ref, status, class_id, student_name_en")
     .eq("telegram_link_pending_chat_id", chatId)
     .eq("tenant_id", tenantId)
     .single()) as {
@@ -37,6 +38,8 @@ export async function processLanguageSchoolContact(
       id: string;
       enrollment_ref: string;
       status: string;
+      class_id: string | null;
+      student_name_en: string;
     } | null;
     error: unknown;
   };
@@ -69,6 +72,19 @@ export async function processLanguageSchoolContact(
       `<b>${enrollment.enrollment_ref}</b> အတွက် အပ်ဒိတ်များ ဤနေရာတွင် ရရှိပါမည်။\n\n` +
       `Current status: <b>${enrollment.status.replace(/_/g, " ")}</b>`,
   );
+
+  // If already confirmed, send channel invite now (payment was verified before Telegram linked)
+  if (enrollment.status === "confirmed") {
+    sendChannelInviteIfEligible({
+      tenantId,
+      enrollmentId: enrollment.id,
+      classId: enrollment.class_id,
+      telegramChatId: chatId,
+      studentName: enrollment.student_name_en || "Student",
+    }).catch((err) => {
+      console.error("[lang-school] Channel invite after link failed:", err);
+    });
+  }
 }
 
 // ─── Text message handler ───────────────────────────────────────────────────
