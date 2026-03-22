@@ -245,9 +245,11 @@ async function handleStartLink(
     botToken,
     chatId,
     `📱 Please share your phone number to complete the connection.\n` +
-      `Tap the button below.\n\n` +
-      `ချိတ်ဆက်မှု ပြီးမြောက်ရန် ဖုန်းနံပါတ် ပေးပို့ပါ။\n` +
-      `အောက်ပါ ခလုတ်ကို နှိပ်ပါ။`,
+      `Tap the button below, then tap <b>Share</b> when the popup appears.\n` +
+      `This is safe — we only use it to link your enrollment.\n\n` +
+      `ချိတ်ဆက်မှု ပြီးမြောက်ရန် အောက်ပါ ခလုတ်ကို နှိပ်ပါ။\n` +
+      `Popup ပေါ်လာသောအခါ <b>Share</b> ကို နှိပ်ပါ။\n` +
+      `စာရင်းသွင်းမှု ချိတ်ဆက်ရန်သာ အသုံးပြုပါသည်။`,
   );
 }
 
