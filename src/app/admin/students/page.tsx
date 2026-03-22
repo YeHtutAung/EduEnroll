@@ -682,9 +682,9 @@ export default function StudentsPage() {
     if (isLanguageSchool) {
       fetch("/api/admin/channels")
         .then((r) => r.json())
-        .then((data: { id: string; telegram_channel_name: string | null }[]) => {
+        .then((res: { channels: { id: string; telegram_channel_name: string | null }[] }) => {
           setChannels(
-            (data ?? []).map((ch) => ({ id: ch.id, name: ch.telegram_channel_name || "Unnamed" })),
+            (res.channels ?? []).map((ch) => ({ id: ch.id, name: ch.telegram_channel_name || "Unnamed" })),
           );
         })
         .catch(() => {/* non-critical */});
