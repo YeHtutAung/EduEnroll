@@ -161,6 +161,19 @@ async function handleStartLink(
     return;
   }
 
+  // Block connection before payment is submitted
+  if (enrollment.status === "pending_payment") {
+    await sendMessage(
+      botToken,
+      chatId,
+      `⏳ Payment has not been submitted yet for <b>${ref}</b>.\n` +
+        `Please submit your payment first, then come back to connect Telegram.\n\n` +
+        `<b>${ref}</b> အတွက် ငွေပေးချေမှု မတင်ရသေးပါ။\n` +
+        `ငွေပေးချေမှု အရင်တင်ပြီးမှ Telegram ချိတ်ဆက်ရန် ပြန်လာပါ။`,
+    );
+    return;
+  }
+
   // Already linked to THIS chat
   if (enrollment.telegram_chat_id === chatId) {
     await sendMessage(
