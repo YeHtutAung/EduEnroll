@@ -29,6 +29,8 @@ export interface StudentRow {
   quantity:        number;
   items?:          { class_level: string; quantity: number; fee_mmk: number; subtotal_mmk: number }[] | null;
   telegram_linked: boolean;
+  telegram_phone:  string | null;
+  telegram_channel_name: string | null;
 }
 
 // ─── GET /api/admin/students ──────────────────────────────────────────────────
@@ -84,6 +86,7 @@ export async function GET(request: NextRequest) {
       quantity,
       class_id,
       telegram_chat_id,
+      telegram_phone,
       classes (
         level,
         fee_mmk,
@@ -128,6 +131,7 @@ export async function GET(request: NextRequest) {
       quantity:        number | null;
       class_id:        string | null;
       telegram_chat_id: string | null;
+      telegram_phone:  string | null;
       classes: {
         level:     JlptLevel;
         fee_mmk:   number;
@@ -147,6 +151,25 @@ export async function GET(request: NextRequest) {
 
   if (error) {
     return NextResponse.json({ error: (error as Error).message }, { status: 500 });
+  }
+
+  // Build class_id → channel_name map for Telegram column
+  const classIds = Array.from(new Set((data ?? []).map((r) => r.class_id).filter(Boolean))) as string[];
+  let channelMap: Record<string, string> = {};
+  if (classIds.length > 0) {
+    const { data: channels } = (await supabase
+      .from("class_channels")
+      .select("class_id, telegram_channel_name")
+      .eq("tenant_id", tenantId)
+      .in("class_id", classIds)) as {
+      data: { class_id: string; telegram_channel_name: string | null }[] | null;
+      error: unknown;
+    };
+    if (channels) {
+      channelMap = Object.fromEntries(
+        channels.map((ch) => [ch.class_id, ch.telegram_channel_name ?? ""]),
+      );
+    }
   }
 
   const students: StudentRow[] = (data ?? []).map((row) => {
@@ -188,6 +211,8 @@ export async function GET(request: NextRequest) {
         : (row.quantity ?? 1),
       items:           cartItems,
       telegram_linked: !!row.telegram_chat_id,
+      telegram_phone:  row.telegram_phone ?? null,
+      telegram_channel_name: row.class_id ? (channelMap[row.class_id] ?? null) : null,
     };
   });
 
