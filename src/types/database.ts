@@ -185,6 +185,8 @@ export interface Enrollment {
   telegram_chat_id: string | null;
   telegram_link_pending_chat_id: string | null;
   telegram_phone: string | null;
+  telegram_link_token: string | null;
+  telegram_link_token_expires_at: string | null;
 }
 
 export interface Payment {

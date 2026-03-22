@@ -55,13 +55,15 @@ export async function processLanguageSchoolContact(
     return;
   }
 
-  // Store phone + link chat_id
+  // Store phone + link chat_id + clear token (one-time use)
   await supabase
     .from("enrollments")
     .update({
       telegram_chat_id: chatId,
       telegram_phone: contact.phone_number,
       telegram_link_pending_chat_id: null,
+      telegram_link_token: null,
+      telegram_link_token_expires_at: null,
     } as never)
     .eq("id", enrollment.id);
 
@@ -97,17 +99,17 @@ export async function processLanguageSchoolMessage(
 ): Promise<void> {
   const trimmed = text.trim();
 
-  // /start <enrollment_ref> — begin phone collection flow
+  // /start <token> — begin phone collection flow (token from payment page)
   if (trimmed.startsWith("/start")) {
-    const ref = trimmed.substring(6).trim().toUpperCase().replace(/_/g, "-");
-    if (ref && REF_PATTERN.test(ref)) {
-      await handleStartLink(tenantId, chatId, ref, botToken);
+    const payload = trimmed.substring(6).trim();
+    if (payload) {
+      await handleStartLink(tenantId, chatId, payload, botToken);
     } else {
       await sendMessage(
         botToken,
         chatId,
-        `👋 Welcome! To connect your Telegram, tap the link from your payment page.\n\n` +
-          `Telegram ချိတ်ဆက်ရန် ငွေပေးချေမှုစာမျက်နှာမှ link ကို နှိပ်ပါ။\n\n` +
+        `👋 Welcome! To connect your Telegram, tap the button from your payment page.\n\n` +
+          `Telegram ချိတ်ဆက်ရန် ငွေပေးချေမှုစာမျက်နှာမှ ခလုတ်ကို နှိပ်ပါ။\n\n` +
           `Or send your enrollment reference (e.g. <b>T-2026-00123</b>) to check status.\n` +
           `သို့မဟုတ် enrollment reference ပို့ပြီး status စစ်ပါ။`,
       );
@@ -143,20 +145,21 @@ export async function processLanguageSchoolMessage(
   );
 }
 
-// ─── Start link: ask for phone, block overwrites ────────────────────────────
+// ─── Start link: validate token, ask for phone, block overwrites ────────────
 
 async function handleStartLink(
   tenantId: string,
   chatId: string,
-  ref: string,
+  token: string,
   botToken: string,
 ): Promise<void> {
   const supabase = createAdminClient();
 
+  // Look up enrollment by one-time token (not ref code)
   const { data: enrollment } = (await supabase
     .from("enrollments")
-    .select("id, enrollment_ref, status, telegram_chat_id")
-    .eq("enrollment_ref", ref)
+    .select("id, enrollment_ref, status, telegram_chat_id, telegram_link_token_expires_at")
+    .eq("telegram_link_token", token)
     .eq("tenant_id", tenantId)
     .single()) as {
     data: {
@@ -164,6 +167,7 @@ async function handleStartLink(
       enrollment_ref: string;
       status: string;
       telegram_chat_id: string | null;
+      telegram_link_token_expires_at: string | null;
     } | null;
     error: unknown;
   };
@@ -172,23 +176,37 @@ async function handleStartLink(
     await sendMessage(
       botToken,
       chatId,
-      `❌ Enrollment <b>${ref}</b> not found.\n\nစာရင်းသွင်းမှု ရှာမတွေ့ပါ။`,
+      `❌ Invalid or expired link.\n` +
+        `Please tap the "Connect Telegram" button on your payment page to get a new link.\n\n` +
+        `Link မမှန်ကန်ပါ သို့မဟုတ် သက်တမ်းကုန်သွားပါပြီ။\n` +
+        `ငွေပေးချေမှုစာမျက်နှာမှ "Connect Telegram" ခလုတ်ကို ပြန်နှိပ်ပါ။`,
     );
     return;
   }
 
-  // Block connection before payment is submitted
-  if (enrollment.status === "pending_payment") {
+  // Check token expiry
+  if (
+    enrollment.telegram_link_token_expires_at &&
+    new Date(enrollment.telegram_link_token_expires_at) < new Date()
+  ) {
+    // Clear expired token
+    await supabase
+      .from("enrollments")
+      .update({ telegram_link_token: null, telegram_link_token_expires_at: null } as never)
+      .eq("id", enrollment.id);
+
     await sendMessage(
       botToken,
       chatId,
-      `⏳ Payment has not been submitted yet for <b>${ref}</b>.\n` +
-        `Please submit your payment first, then come back to connect Telegram.\n\n` +
-        `<b>${ref}</b> အတွက် ငွေပေးချေမှု မတင်ရသေးပါ။\n` +
-        `ငွေပေးချေမှု အရင်တင်ပြီးမှ Telegram ချိတ်ဆက်ရန် ပြန်လာပါ။`,
+      `⏳ This link has expired.\n` +
+        `Please tap the "Connect Telegram" button on your payment page to get a new link.\n\n` +
+        `Link သက်တမ်းကုန်သွားပါပြီ။\n` +
+        `ငွေပေးချေမှုစာမျက်နှာမှ "Connect Telegram" ခလုတ်ကို ပြန်နှိပ်ပါ။`,
     );
     return;
   }
+
+  const ref = enrollment.enrollment_ref;
 
   // Already linked to THIS chat
   if (enrollment.telegram_chat_id === chatId) {
