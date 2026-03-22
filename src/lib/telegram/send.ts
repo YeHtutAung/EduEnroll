@@ -221,3 +221,29 @@ export async function declineChatJoinRequest(
   });
   return res.json();
 }
+
+export async function banChatMember(
+  botToken: string,
+  chatId: string | number,
+  userId: number,
+): Promise<{ ok: boolean }> {
+  const res = await fetch(`${TELEGRAM_API}/bot${botToken}/banChatMember`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, user_id: userId }),
+  });
+  return res.json();
+}
+
+export async function unbanChatMember(
+  botToken: string,
+  chatId: string | number,
+  userId: number,
+): Promise<{ ok: boolean }> {
+  const res = await fetch(`${TELEGRAM_API}/bot${botToken}/unbanChatMember`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, user_id: userId, only_if_banned: true }),
+  });
+  return res.json();
+}
