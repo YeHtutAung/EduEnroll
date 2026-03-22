@@ -19,6 +19,35 @@ function normalizePhone(phone: string): string {
   return p;
 }
 
+// ─── Shared link helper ─────────────────────────────────────────────────────
+
+import type { SupabaseClient } from "@supabase/supabase-js";
+
+async function linkEnrollment(
+  supabase: SupabaseClient,
+  enrollmentId: string,
+  chatId: string,
+  enrollmentRef: string,
+  status: string,
+  botToken: string,
+): Promise<void> {
+  await supabase
+    .from("enrollments")
+    .update({
+      telegram_chat_id: chatId,
+      telegram_link_pending_chat_id: null,
+    } as never)
+    .eq("id", enrollmentId);
+
+  await removeKeyboard(
+    botToken,
+    chatId,
+    `✅ Linked! You'll receive updates for <b>${enrollmentRef}</b> here.\n\n` +
+      `<b>${enrollmentRef}</b> အတွက် အပ်ဒိတ်များ ဤနေရာတွင် ရရှိပါမည်။\n\n` +
+      `Current status: <b>${status.replace(/_/g, " ")}</b>`,
+  );
+}
+
 // ─── Contact message handler ────────────────────────────────────────────────
 
 export interface TelegramContact {
@@ -64,8 +93,14 @@ export async function processLanguageSchoolContact(
   }
 
   // Compare phone numbers
-  const enrolledPhone = normalizePhone(enrollment.phone);
+  const enrolledPhone = normalizePhone(enrollment.phone ?? "");
   const sharedPhone = normalizePhone(contact.phone_number);
+
+  // If enrollment has no phone, skip verification and link directly
+  if (!enrolledPhone) {
+    await linkEnrollment(supabase, enrollment.id, chatId, enrollment.enrollment_ref, enrollment.status, botToken);
+    return;
+  }
 
   if (!sharedPhone.endsWith(enrolledPhone) && !enrolledPhone.endsWith(sharedPhone)) {
     await sendMessage(
@@ -80,21 +115,7 @@ export async function processLanguageSchoolContact(
   }
 
   // Phone matched — link the enrollment
-  await supabase
-    .from("enrollments")
-    .update({
-      telegram_chat_id: chatId,
-      telegram_link_pending_chat_id: null,
-    } as never)
-    .eq("id", enrollment.id);
-
-  await removeKeyboard(
-    botToken,
-    chatId,
-    `✅ Linked! You'll receive updates for <b>${enrollment.enrollment_ref}</b> here.\n\n` +
-      `<b>${enrollment.enrollment_ref}</b> အတွက် အပ်ဒိတ်များ ဤနေရာတွင် ရရှိပါမည်။\n\n` +
-      `Current status: <b>${enrollment.status.replace(/_/g, " ")}</b>`,
-  );
+  await linkEnrollment(supabase, enrollment.id, chatId, enrollment.enrollment_ref, enrollment.status, botToken);
 }
 
 // ─── Text message handler ───────────────────────────────────────────────────
@@ -165,13 +186,14 @@ async function handleVerifiedLink(
 
   const { data: enrollment } = (await supabase
     .from("enrollments")
-    .select("id, enrollment_ref, status, telegram_chat_id")
+    .select("id, enrollment_ref, phone, status, telegram_chat_id")
     .eq("enrollment_ref", ref)
     .eq("tenant_id", tenantId)
     .single()) as {
     data: {
       id: string;
       enrollment_ref: string;
+      phone: string | null;
       status: string;
       telegram_chat_id: string | null;
     } | null;
@@ -194,6 +216,13 @@ async function handleVerifiedLink(
       `✅ Already linked! You'll receive updates for <b>${ref}</b>.\n\n` +
         `<b>${ref}</b> အတွက် ချိတ်ဆက်ပြီးသားဖြစ်ပါသည်။`,
     );
+    return;
+  }
+
+  // If enrollment has no phone, link directly without verification
+  const enrolledPhone = normalizePhone(enrollment.phone ?? "");
+  if (!enrolledPhone) {
+    await linkEnrollment(supabase, enrollment.id, chatId, enrollment.enrollment_ref, enrollment.status, botToken);
     return;
   }
 
