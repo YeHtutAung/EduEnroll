@@ -56,6 +56,7 @@ export async function GET(request: NextRequest) {
   const status      = searchParams.get("status")       ?? undefined;
   const search      = searchParams.get("search")       ?? undefined;
   const telegram    = searchParams.get("telegram")     ?? undefined; // "linked" | "not_linked"
+  const channel     = searchParams.get("channel")      ?? undefined; // channel_id or "none"
 
   const pageRaw     = parseInt(searchParams.get("page")      ?? String(DEFAULT_PAGE),      10);
   const pageSizeRaw = parseInt(searchParams.get("page_size") ?? String(DEFAULT_PAGE_SIZE), 10);
@@ -106,10 +107,37 @@ export async function GET(request: NextRequest) {
   if (telegram === "linked")     query = query.not("telegram_chat_id", "is", null);
   if (telegram === "not_linked") query = query.is("telegram_chat_id", null);
 
-  // Free-text search: name (EN) OR phone — PostgREST OR filter
+  // Channel filter: filter by class_ids that have a specific channel
+  if (channel) {
+    if (channel === "none") {
+      // Students whose class has NO channel — need to find class_ids WITH channels, then exclude
+      const { data: chRows } = (await supabase
+        .from("class_channels")
+        .select("class_id")
+        .eq("tenant_id", tenantId)) as { data: { class_id: string }[] | null; error: unknown };
+      const classIdsWithChannel = (chRows ?? []).map((r) => r.class_id);
+      if (classIdsWithChannel.length > 0) {
+        // Include null class_id (cart) + class_ids not in the channel list
+        query = query.or(`class_id.is.null,class_id.not.in.(${classIdsWithChannel.join(",")})`);
+      }
+    } else {
+      // Specific channel — find class_id for this channel
+      const { data: ch } = (await supabase
+        .from("class_channels")
+        .select("class_id")
+        .eq("id", channel)
+        .eq("tenant_id", tenantId)
+        .single()) as { data: { class_id: string } | null; error: unknown };
+      if (ch) {
+        query = query.eq("class_id", ch.class_id);
+      }
+    }
+  }
+
+  // Free-text search: name (EN) OR phone OR telegram_phone — PostgREST OR filter
   if (search && search.trim() !== "") {
     const term = search.trim();
-    query = query.or(`student_name_en.ilike.%${term}%,phone.ilike.%${term}%`);
+    query = query.or(`student_name_en.ilike.%${term}%,phone.ilike.%${term}%,telegram_phone.ilike.%${term}%`);
   }
 
   // ── Pagination ─────────────────────────────────────────────────────────────

@@ -78,6 +78,12 @@ interface Filters {
   status: string;
   search: string;
   telegram: string;
+  channel: string;
+}
+
+interface ChannelOption {
+  id: string;
+  name: string;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -124,6 +130,7 @@ function buildQS(filters: Filters, page: number): string {
   if (filters.status)   p.set("status", filters.status);
   if (filters.search)   p.set("search", filters.search.trim());
   if (filters.telegram) p.set("telegram", filters.telegram);
+  if (filters.channel)  p.set("channel", filters.channel);
   return p.toString();
 }
 
@@ -604,6 +611,7 @@ export default function StudentsPage() {
     status: "",
     search: "",
     telegram: "",
+    channel: "",
   });
   const [searchInput, setSearchInput] = useState(""); // debounced separately
   const [page, setPage] = useState(1);
@@ -622,6 +630,9 @@ export default function StudentsPage() {
 
   // Available class levels (derived from loaded students)
   const [classLevels, setClassLevels] = useState<string[]>([]);
+
+  // Channels for filter (language_school only)
+  const [channels, setChannels] = useState<ChannelOption[]>([]);
 
   // Modal
   const [selectedStudent, setSelectedStudent] = useState<StudentRow | null>(null);
@@ -666,6 +677,18 @@ export default function StudentsPage() {
         });
       })
       .catch(() => {/* non-critical */});
+
+    // Fetch channels for filter (language_school only)
+    if (isLanguageSchool) {
+      fetch("/api/admin/channels")
+        .then((r) => r.json())
+        .then((data: { id: string; telegram_channel_name: string | null }[]) => {
+          setChannels(
+            (data ?? []).map((ch) => ({ id: ch.id, name: ch.telegram_channel_name || "Unnamed" })),
+          );
+        })
+        .catch(() => {/* non-critical */});
+    }
   }, []);
 
   // ── Fetch form fields for selected intake (or most recent) ────────────────
@@ -954,10 +977,25 @@ export default function StudentsPage() {
               <option value="not_linked">Telegram: Not Linked</option>
             </select>
           )}
+
+          {/* Channel filter (language_school only) */}
+          {isLanguageSchool && channels.length > 0 && (
+            <select
+              value={filters.channel}
+              onChange={(e) => setFilter("channel", e.target.value)}
+              className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#0088cc] bg-white text-gray-700"
+            >
+              <option value="">All Channels</option>
+              {channels.map((ch) => (
+                <option key={ch.id} value={ch.id}>{ch.name}</option>
+              ))}
+              <option value="none">No Channel</option>
+            </select>
+          )}
         </div>
 
         {/* Active filter chips + clear */}
-        {(filters.intakeId || filters.level || filters.status || filters.search || filters.telegram) && (
+        {(filters.intakeId || filters.level || filters.status || filters.search || filters.telegram || filters.channel) && (
           <div className="flex items-center gap-2 mt-3 flex-wrap">
             <span className="text-xs text-gray-400">Filters:</span>
             {filters.intakeId && (
@@ -970,9 +1008,10 @@ export default function StudentsPage() {
             {filters.status && <FilterChip label={filters.status.replace(/_/g, " ")} onRemove={() => setFilter("status", "")} />}
             {filters.search && <FilterChip label={`"${filters.search}"`} onRemove={() => { setSearchInput(""); setFilter("search", ""); }} />}
             {filters.telegram && <FilterChip label={`Telegram: ${filters.telegram === "linked" ? "Linked" : "Not Linked"}`} onRemove={() => setFilter("telegram", "")} />}
+            {filters.channel && <FilterChip label={`Channel: ${filters.channel === "none" ? "No Channel" : channels.find((c) => c.id === filters.channel)?.name ?? "Channel"}`} onRemove={() => setFilter("channel", "")} />}
             <button
               onClick={() => {
-                setFilters({ intakeId: "", level: "", status: "", search: "", telegram: "" });
+                setFilters({ intakeId: "", level: "", status: "", search: "", telegram: "", channel: "" });
                 setSearchInput("");
                 setPage(1);
               }}
@@ -1028,7 +1067,7 @@ export default function StudentsPage() {
             <div className="w-14 h-14 rounded-full bg-[#f0f4ff] flex items-center justify-center text-2xl mb-1">👥</div>
             <p className="text-base font-semibold text-gray-700">No students found</p>
             <p className="text-sm text-gray-400 max-w-xs">
-              {filters.intakeId || filters.level || filters.status || filters.search || filters.telegram
+              {filters.intakeId || filters.level || filters.status || filters.search || filters.telegram || filters.channel
                 ? "Try adjusting your filters."
                 : "No enrollments yet."}
             </p>
