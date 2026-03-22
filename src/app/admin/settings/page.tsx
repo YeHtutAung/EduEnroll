@@ -934,6 +934,8 @@ function SettingsContent() {
   const [tgDisconnecting, setTgDisconnecting] = useState(false);
   const [tgTokenInput, setTgTokenInput] = useState("");
   const [tgConnecting, setTgConnecting] = useState(false);
+  const [tgAutoSendInvite, setTgAutoSendInvite] = useState(false);
+  const [tgAutoSendSaving, setTgAutoSendSaving] = useState(false);
 
   const fetchTelegram = useCallback(async () => {
     setTgLoading(true);
@@ -944,6 +946,7 @@ function SettingsContent() {
       setTgConnected(data.connected);
       setTgEnabled(data.enabled);
       setTgBotUsername(data.botUsername);
+      setTgAutoSendInvite(data.autoSendInvite ?? false);
     } catch {
       // non-critical
     } finally {
@@ -1013,6 +1016,28 @@ function SettingsContent() {
       toast.error("Failed to disconnect.");
     } finally {
       setTgDisconnecting(false);
+    }
+  }
+
+  async function handleTgAutoSendToggle() {
+    setTgAutoSendSaving(true);
+    try {
+      const res = await fetch("/api/telegram/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ autoSendInvite: !tgAutoSendInvite }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      setTgAutoSendInvite(!tgAutoSendInvite);
+      toast.success(
+        !tgAutoSendInvite
+          ? "Auto-send channel invite enabled."
+          : "Auto-send channel invite disabled.",
+      );
+    } catch {
+      toast.error("Failed to update setting.");
+    } finally {
+      setTgAutoSendSaving(false);
     }
   }
 
@@ -2003,6 +2028,25 @@ function SettingsContent() {
                     t.me/{tgBotUsername}
                   </a>
                 </div>
+              </div>
+            )}
+
+            {/* Auto-send channel invite (language_school only) */}
+            {orgType === "language_school" && tgEnabled && (
+              <div className="flex items-center justify-between rounded-xl bg-sky-50 px-4 py-3">
+                <div>
+                  <p className="text-sm font-medium text-gray-700">
+                    Auto-send channel invite
+                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Automatically send Telegram channel invite link after payment is verified.
+                  </p>
+                </div>
+                <Toggle
+                  checked={tgAutoSendInvite}
+                  onChange={handleTgAutoSendToggle}
+                  disabled={tgAutoSendSaving}
+                />
               </div>
             )}
 

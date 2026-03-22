@@ -162,10 +162,18 @@ function StudentDetailModal({
   onClose: () => void;
 }) {
   const tl = useTenantLabels();
+  const toast = useToast();
+  const role = useRole();
   const [detail, setDetail] = useState<StudentDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fullscreenImg, setFullscreenImg] = useState<string | null>(null);
+
+  // Telegram re-link (language_school only)
+  const isLanguageSchool = tl.orgType === "language_school";
+  const [tgLinked, setTgLinked] = useState(false);
+  const [tgPending, setTgPending] = useState(false);
+  const [tgUnlinking, setTgUnlinking] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -175,6 +183,18 @@ function StudentDetailModal({
         if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json();
         if (!cancelled) setDetail(data as StudentDetail);
+
+        // Fetch telegram status for language schools
+        if (isLanguageSchool) {
+          const tgRes = await fetch(`/api/admin/enrollments/${row.enrollment_id}/telegram`);
+          if (tgRes.ok) {
+            const tgData = await tgRes.json();
+            if (!cancelled) {
+              setTgLinked(tgData.linked);
+              setTgPending(tgData.pending);
+            }
+          }
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load.");
       } finally {
@@ -419,6 +439,56 @@ function StudentDetailModal({
                   ) : (
                     <div className="rounded-xl border border-dashed border-gray-200 p-4 text-center text-sm text-gray-400">
                       No payment submitted yet
+                    </div>
+                  )}
+
+                  {/* Telegram status (language_school only) */}
+                  {isLanguageSchool && (
+                    <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                          Telegram
+                        </span>
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                          tgLinked
+                            ? "bg-sky-50 text-sky-700 border border-sky-200"
+                            : tgPending
+                              ? "bg-amber-50 text-amber-700 border border-amber-200"
+                              : "bg-gray-100 text-gray-500 border border-gray-200"
+                        }`}>
+                          {tgLinked ? "Linked" : tgPending ? "Pending Verification" : "Not Linked"}
+                        </span>
+                      </div>
+                      {tgLinked && role === "owner" && (
+                        <button
+                          onClick={async () => {
+                            setTgUnlinking(true);
+                            try {
+                              const res = await fetch(
+                                `/api/admin/enrollments/${row.enrollment_id}/telegram`,
+                                { method: "DELETE" },
+                              );
+                              if (!res.ok) throw new Error(`${res.status}`);
+                              setTgLinked(false);
+                              setTgPending(false);
+                              toast.success("Telegram unlinked. Student can re-link with a new account.");
+                            } catch {
+                              toast.error("Failed to unlink Telegram.");
+                            } finally {
+                              setTgUnlinking(false);
+                            }
+                          }}
+                          disabled={tgUnlinking}
+                          className="w-full text-center px-3 py-2 text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50 transition-colors"
+                        >
+                          {tgUnlinking ? "Unlinking…" : "Unlink Telegram (for re-link)"}
+                        </button>
+                      )}
+                      {!tgLinked && !tgPending && (
+                        <p className="text-xs text-gray-400">
+                          Student hasn&apos;t connected Telegram yet. They can do so from the payment page.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
