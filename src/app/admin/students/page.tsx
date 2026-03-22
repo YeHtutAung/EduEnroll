@@ -179,6 +179,7 @@ function StudentDetailModal({
   const [tgPhone, setTgPhone] = useState<string | null>(null);
   const [tgUnlinking, setTgUnlinking] = useState(false);
   const [tgRelinkUrl, setTgRelinkUrl] = useState<string | null>(null);
+  const [tgChannelName, setTgChannelName] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -198,6 +199,7 @@ function StudentDetailModal({
               setTgLinked(tgData.linked);
               setTgPending(tgData.pending);
               setTgPhone(tgData.phone ?? null);
+              setTgChannelName(tgData.channelName ?? null);
             }
           }
         }
@@ -469,6 +471,15 @@ function StudentDetailModal({
                         <p className="text-sm text-gray-600">
                           Phone: <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{tgPhone}</code>
                         </p>
+                      )}
+                      {tgChannelName && (
+                        <p className="text-sm text-gray-600">
+                          Channel: <span className="font-medium text-sky-700">{tgChannelName}</span>
+                          {tgLinked && <span className="ml-1.5 text-xs text-green-600">(joined)</span>}
+                        </p>
+                      )}
+                      {!tgChannelName && (
+                        <p className="text-xs text-gray-400">No channel linked to this class.</p>
                       )}
                       {tgLinked && role === "owner" && (
                         <button

@@ -20,12 +20,13 @@ export async function GET(
 
   const { data: enrollment } = (await supabase
     .from("enrollments")
-    .select("id, telegram_chat_id, telegram_link_pending_chat_id, telegram_phone")
+    .select("id, class_id, telegram_chat_id, telegram_link_pending_chat_id, telegram_phone")
     .eq("id", id)
     .eq("tenant_id", tenantId)
     .single()) as {
     data: {
       id: string;
+      class_id: string | null;
       telegram_chat_id: string | null;
       telegram_link_pending_chat_id: string | null;
       telegram_phone: string | null;
@@ -35,11 +36,27 @@ export async function GET(
 
   if (!enrollment) return notFound("Enrollment");
 
+  // Fetch linked channel for this class
+  let channelName: string | null = null;
+  if (enrollment.class_id) {
+    const { data: channel } = (await supabase
+      .from("class_channels")
+      .select("telegram_channel_name")
+      .eq("tenant_id", tenantId)
+      .eq("class_id", enrollment.class_id)
+      .single()) as {
+      data: { telegram_channel_name: string | null } | null;
+      error: unknown;
+    };
+    channelName = channel?.telegram_channel_name ?? null;
+  }
+
   return NextResponse.json({
     linked: !!enrollment.telegram_chat_id,
     chatId: enrollment.telegram_chat_id,
     pending: !!enrollment.telegram_link_pending_chat_id,
     phone: enrollment.telegram_phone,
+    channelName,
   });
 }
 
