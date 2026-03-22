@@ -77,15 +77,17 @@ export async function processLanguageSchoolContact(
 
   // If already confirmed, send channel invite now (payment was verified before Telegram linked)
   if (enrollment.status === "confirmed") {
-    sendChannelInviteIfEligible({
-      tenantId,
-      enrollmentId: enrollment.id,
-      classId: enrollment.class_id,
-      telegramChatId: chatId,
-      studentName: enrollment.student_name_en || "Student",
-    }).catch((err) => {
+    try {
+      await sendChannelInviteIfEligible({
+        tenantId,
+        enrollmentId: enrollment.id,
+        classId: enrollment.class_id,
+        telegramChatId: chatId,
+        studentName: enrollment.student_name_en || "Student",
+      });
+    } catch (err) {
       console.error("[lang-school] Channel invite after link failed:", err);
-    });
+    }
   }
 }
 
