@@ -178,6 +178,7 @@ function StudentDetailModal({
   const [tgPending, setTgPending] = useState(false);
   const [tgPhone, setTgPhone] = useState<string | null>(null);
   const [tgUnlinking, setTgUnlinking] = useState(false);
+  const [tgRelinkUrl, setTgRelinkUrl] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -481,7 +482,9 @@ function StudentDetailModal({
                               if (!res.ok) throw new Error(`${res.status}`);
                               setTgLinked(false);
                               setTgPending(false);
-                              toast.success("Telegram unlinked. Student can re-link with a new account.");
+                              const relinkUrl = `${window.location.origin}/enroll/payment/${row.enrollment_ref}`;
+                              setTgRelinkUrl(relinkUrl);
+                              toast.success("Telegram unlinked and removed from channels.");
                             } catch {
                               toast.error("Failed to unlink Telegram.");
                             } finally {
@@ -494,7 +497,29 @@ function StudentDetailModal({
                           {tgUnlinking ? "Unlinking…" : "Unlink Telegram (for re-link)"}
                         </button>
                       )}
-                      {!tgLinked && !tgPending && (
+                      {/* Re-link URL shown after unlink */}
+                      {tgRelinkUrl && (
+                        <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 space-y-2">
+                          <p className="text-xs font-medium text-sky-900">
+                            Send this link to the student to re-connect Telegram:
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <code className="flex-1 text-xs bg-white border border-sky-200 rounded px-2 py-1.5 break-all select-all text-sky-800">
+                              {tgRelinkUrl}
+                            </code>
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(tgRelinkUrl);
+                                toast.success("Link copied!");
+                              }}
+                              className="shrink-0 px-2.5 py-1.5 text-xs font-medium bg-[#0088cc] text-white rounded-lg hover:bg-[#006daa] transition-colors"
+                            >
+                              Copy
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      {!tgLinked && !tgPending && !tgRelinkUrl && (
                         <p className="text-xs text-gray-400">
                           Student hasn&apos;t connected Telegram yet. They can do so from the payment page.
                         </p>
