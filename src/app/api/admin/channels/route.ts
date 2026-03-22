@@ -62,9 +62,18 @@ export async function POST(request: NextRequest) {
     return badRequest("Invalid JSON");
   }
 
-  const { class_id, intake_id, telegram_channel_id } = body;
-  if (!class_id || !intake_id || !telegram_channel_id) {
+  const { class_id, intake_id, telegram_channel_id: rawChannelId } = body;
+  if (!class_id || !intake_id || !rawChannelId) {
     return badRequest("class_id, intake_id, and telegram_channel_id are required.");
+  }
+
+  // Validate channel ID format — must be numeric (e.g. -1001234567890)
+  const telegram_channel_id = rawChannelId.trim();
+  if (!/^-?\d+$/.test(telegram_channel_id)) {
+    return badRequest(
+      "Please enter the numeric Channel ID (e.g. -1001234567890), not an invite link. " +
+        "To find it: forward any message from the channel to @RawDataBot on Telegram.",
+    );
   }
 
   const supabase = createAdminClient();

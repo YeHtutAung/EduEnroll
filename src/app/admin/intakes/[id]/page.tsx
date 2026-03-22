@@ -1539,19 +1539,26 @@ export default function IntakeDetailPage({
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1.5">
-                  Channel ID
+                  Channel ID (numeric)
                 </label>
                 <input
                   type="text"
                   value={channelIdInput}
                   onChange={(e) => setChannelIdInput(e.target.value)}
                   placeholder="e.g. -1001234567890"
-                  className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#0088cc] focus:border-transparent"
+                  className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#0088cc] focus:border-transparent"
                 />
-                <p className="text-xs text-gray-400 mt-1.5">
-                  To find the channel ID, forward a message from the channel to
-                  @userinfobot or @RawDataBot on Telegram.
-                </p>
+                <div className="mt-2 rounded-lg bg-gray-50 p-3 space-y-1.5">
+                  <p className="text-xs font-medium text-gray-600">How to find Channel ID:</p>
+                  <ol className="text-xs text-gray-500 list-decimal list-inside space-y-1">
+                    <li>Open your private channel in Telegram</li>
+                    <li>Forward any message to <span className="font-mono text-[#0088cc]">@RawDataBot</span></li>
+                    <li>Copy the number that starts with <span className="font-mono">-100</span></li>
+                  </ol>
+                  <p className="text-xs text-red-400 mt-1">
+                    Do NOT paste invite links (t.me/+xxx) — only numeric IDs work.
+                  </p>
+                </div>
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-2">
