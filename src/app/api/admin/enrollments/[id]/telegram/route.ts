@@ -18,7 +18,7 @@ export async function GET(
 
   const { data: enrollment } = (await supabase
     .from("enrollments")
-    .select("id, telegram_chat_id, telegram_link_pending_chat_id")
+    .select("id, telegram_chat_id, telegram_link_pending_chat_id, telegram_phone")
     .eq("id", id)
     .eq("tenant_id", tenantId)
     .single()) as {
@@ -26,6 +26,7 @@ export async function GET(
       id: string;
       telegram_chat_id: string | null;
       telegram_link_pending_chat_id: string | null;
+      telegram_phone: string | null;
     } | null;
     error: unknown;
   };
@@ -36,6 +37,7 @@ export async function GET(
     linked: !!enrollment.telegram_chat_id,
     chatId: enrollment.telegram_chat_id,
     pending: !!enrollment.telegram_link_pending_chat_id,
+    phone: enrollment.telegram_phone,
   });
 }
 
@@ -67,6 +69,7 @@ export async function DELETE(
     .update({
       telegram_chat_id: null,
       telegram_link_pending_chat_id: null,
+      telegram_phone: null,
     } as never)
     .eq("id", id);
 

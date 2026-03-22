@@ -184,6 +184,7 @@ export interface Enrollment {
   messenger_psid: string | null;
   telegram_chat_id: string | null;
   telegram_link_pending_chat_id: string | null;
+  telegram_phone: string | null;
 }
 
 export interface Payment {

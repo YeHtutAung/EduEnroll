@@ -1,52 +1,14 @@
 // ─── Language-school Telegram processor (Sprint 9) ──────────────────────────
-// Adds phone verification before linking chat_id to enrollment.
+// Collects Telegram phone number and links chat_id to enrollment.
 // Only used when tenant org_type === 'language_school'.
 // Does NOT modify the original processor.ts.
+// Flow: /start REF → ask phone → store phone + link chat_id.
+// Blocks overwrites: if already linked to a different account, rejects.
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendMessage, requestContact, removeKeyboard } from "./send";
 
 const REF_PATTERN = /^[A-Z]{1,5}-\d{4}-[A-Z0-9]{3,6}$/;
-
-/** Normalize phone for comparison: strip +, spaces, leading country code 95 */
-function normalizePhone(phone: string): string {
-  let p = phone.replace(/[\s\-\+\(\)]/g, "");
-  // +959xxx → 09xxx
-  if (p.startsWith("959") && p.length >= 10) {
-    p = "0" + p.substring(2);
-  }
-  // 09xxx stays 09xxx
-  return p;
-}
-
-// ─── Shared link helper ─────────────────────────────────────────────────────
-
-import type { SupabaseClient } from "@supabase/supabase-js";
-
-async function linkEnrollment(
-  supabase: SupabaseClient,
-  enrollmentId: string,
-  chatId: string,
-  enrollmentRef: string,
-  status: string,
-  botToken: string,
-): Promise<void> {
-  await supabase
-    .from("enrollments")
-    .update({
-      telegram_chat_id: chatId,
-      telegram_link_pending_chat_id: null,
-    } as never)
-    .eq("id", enrollmentId);
-
-  await removeKeyboard(
-    botToken,
-    chatId,
-    `✅ Linked! You'll receive updates for <b>${enrollmentRef}</b> here.\n\n` +
-      `<b>${enrollmentRef}</b> အတွက် အပ်ဒိတ်များ ဤနေရာတွင် ရရှိပါမည်။\n\n` +
-      `Current status: <b>${status.replace(/_/g, " ")}</b>`,
-  );
-}
 
 // ─── Contact message handler ────────────────────────────────────────────────
 
@@ -64,19 +26,17 @@ export async function processLanguageSchoolContact(
 ): Promise<void> {
   const supabase = createAdminClient();
 
-  // Find enrollment that is pending verification for this chatId
+  // Find enrollment that is pending phone collection for this chatId
   const { data: enrollment } = (await supabase
     .from("enrollments")
-    .select("id, enrollment_ref, phone, status, telegram_chat_id")
+    .select("id, enrollment_ref, status")
     .eq("telegram_link_pending_chat_id", chatId)
     .eq("tenant_id", tenantId)
     .single()) as {
     data: {
       id: string;
       enrollment_ref: string;
-      phone: string;
       status: string;
-      telegram_chat_id: string | null;
     } | null;
     error: unknown;
   };
@@ -85,37 +45,30 @@ export async function processLanguageSchoolContact(
     await removeKeyboard(
       botToken,
       chatId,
-      `❌ No pending verification found.\nPlease tap the "Connect Telegram" link from your payment page first.\n\n` +
-        `အတည်ပြု ရန် စောင့်ဆိုင်းနေသည့် ချိတ်ဆက်မှု မရှိပါ။\n` +
+      `❌ No pending connection found.\nPlease tap the "Connect Telegram" link from your payment page first.\n\n` +
+        `ချိတ်ဆက်ရန် စောင့်ဆိုင်းနေသည့် အချက် မရှိပါ။\n` +
         `ငွေပေးချေမှုစာမျက်နှာမှ "Connect Telegram" ကို အရင်နှိပ်ပါ။`,
     );
     return;
   }
 
-  // Compare phone numbers
-  const enrolledPhone = normalizePhone(enrollment.phone ?? "");
-  const sharedPhone = normalizePhone(contact.phone_number);
+  // Store phone + link chat_id
+  await supabase
+    .from("enrollments")
+    .update({
+      telegram_chat_id: chatId,
+      telegram_phone: contact.phone_number,
+      telegram_link_pending_chat_id: null,
+    } as never)
+    .eq("id", enrollment.id);
 
-  // If enrollment has no phone, skip verification and link directly
-  if (!enrolledPhone) {
-    await linkEnrollment(supabase, enrollment.id, chatId, enrollment.enrollment_ref, enrollment.status, botToken);
-    return;
-  }
-
-  if (!sharedPhone.endsWith(enrolledPhone) && !enrolledPhone.endsWith(sharedPhone)) {
-    await sendMessage(
-      botToken,
-      chatId,
-      `❌ Phone number doesn't match.\n` +
-        `Please share the phone number you used to enroll.\n\n` +
-        `ဖုန်းနံပါတ် မကိုက်ညီပါ။\n` +
-        `စာရင်းသွင်းရာတွင် သုံးခဲ့သော ဖုန်းနံပါတ်ကို ပေးပို့ပါ။`,
-    );
-    return;
-  }
-
-  // Phone matched — link the enrollment
-  await linkEnrollment(supabase, enrollment.id, chatId, enrollment.enrollment_ref, enrollment.status, botToken);
+  await removeKeyboard(
+    botToken,
+    chatId,
+    `✅ Linked! You'll receive updates for <b>${enrollment.enrollment_ref}</b> here.\n\n` +
+      `<b>${enrollment.enrollment_ref}</b> အတွက် အပ်ဒိတ်များ ဤနေရာတွင် ရရှိပါမည်။\n\n` +
+      `Current status: <b>${enrollment.status.replace(/_/g, " ")}</b>`,
+  );
 }
 
 // ─── Text message handler ───────────────────────────────────────────────────
@@ -128,11 +81,11 @@ export async function processLanguageSchoolMessage(
 ): Promise<void> {
   const trimmed = text.trim();
 
-  // /start <enrollment_ref> — begin phone verification flow
+  // /start <enrollment_ref> — begin phone collection flow
   if (trimmed.startsWith("/start")) {
     const ref = trimmed.substring(6).trim().toUpperCase().replace(/_/g, "-");
     if (ref && REF_PATTERN.test(ref)) {
-      await handleVerifiedLink(tenantId, chatId, ref, botToken);
+      await handleStartLink(tenantId, chatId, ref, botToken);
     } else {
       await sendMessage(
         botToken,
@@ -174,9 +127,9 @@ export async function processLanguageSchoolMessage(
   );
 }
 
-// ─── Start phone verification ───────────────────────────────────────────────
+// ─── Start link: ask for phone, block overwrites ────────────────────────────
 
-async function handleVerifiedLink(
+async function handleStartLink(
   tenantId: string,
   chatId: string,
   ref: string,
@@ -186,14 +139,13 @@ async function handleVerifiedLink(
 
   const { data: enrollment } = (await supabase
     .from("enrollments")
-    .select("id, enrollment_ref, phone, status, telegram_chat_id")
+    .select("id, enrollment_ref, status, telegram_chat_id")
     .eq("enrollment_ref", ref)
     .eq("tenant_id", tenantId)
     .single()) as {
     data: {
       id: string;
       enrollment_ref: string;
-      phone: string | null;
       status: string;
       telegram_chat_id: string | null;
     } | null;
@@ -209,6 +161,7 @@ async function handleVerifiedLink(
     return;
   }
 
+  // Already linked to THIS chat
   if (enrollment.telegram_chat_id === chatId) {
     await sendMessage(
       botToken,
@@ -219,26 +172,32 @@ async function handleVerifiedLink(
     return;
   }
 
-  // If enrollment has no phone, link directly without verification
-  const enrolledPhone = normalizePhone(enrollment.phone ?? "");
-  if (!enrolledPhone) {
-    await linkEnrollment(supabase, enrollment.id, chatId, enrollment.enrollment_ref, enrollment.status, botToken);
+  // Already linked to a DIFFERENT chat — block overwrite
+  if (enrollment.telegram_chat_id) {
+    await sendMessage(
+      botToken,
+      chatId,
+      `❌ This enrollment is already connected to another Telegram account.\n` +
+        `If you need to re-link, please contact the school admin.\n\n` +
+        `ဤစာရင်းသွင်းမှုသည် အခြား Telegram အကောင့်နှင့် ချိတ်ဆက်ပြီးဖြစ်သည်။\n` +
+        `ပြန်လည်ချိတ်ဆက်လိုပါက ကျောင်း admin ထံ ဆက်သွယ်ပါ။`,
+    );
     return;
   }
 
-  // Set pending state — store chatId so we can match when phone is shared
+  // Set pending state — waiting for phone share
   await supabase
     .from("enrollments")
     .update({ telegram_link_pending_chat_id: chatId } as never)
     .eq("id", enrollment.id);
 
-  // Ask for phone verification
+  // Ask for phone number (to collect, not to verify)
   await requestContact(
     botToken,
     chatId,
-    `🔐 To verify your identity, please share your phone number.\n` +
-      `Tap the button below to share.\n\n` +
-      `သင့်အထောက်အထားကို အတည်ပြုရန် ဖုန်းနံပါတ် ပေးပို့ပါ။\n` +
+    `📱 Please share your phone number to complete the connection.\n` +
+      `Tap the button below.\n\n` +
+      `ချိတ်ဆက်မှု ပြီးမြောက်ရန် ဖုန်းနံပါတ် ပေးပို့ပါ။\n` +
       `အောက်ပါ ခလုတ်ကို နှိပ်ပါ။`,
   );
 }

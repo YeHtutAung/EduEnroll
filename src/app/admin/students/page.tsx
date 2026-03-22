@@ -173,6 +173,7 @@ function StudentDetailModal({
   const isLanguageSchool = tl.orgType === "language_school";
   const [tgLinked, setTgLinked] = useState(false);
   const [tgPending, setTgPending] = useState(false);
+  const [tgPhone, setTgPhone] = useState<string | null>(null);
   const [tgUnlinking, setTgUnlinking] = useState(false);
 
   useEffect(() => {
@@ -192,6 +193,7 @@ function StudentDetailModal({
             if (!cancelled) {
               setTgLinked(tgData.linked);
               setTgPending(tgData.pending);
+              setTgPhone(tgData.phone ?? null);
             }
           }
         }
@@ -456,9 +458,14 @@ function StudentDetailModal({
                               ? "bg-amber-50 text-amber-700 border border-amber-200"
                               : "bg-gray-100 text-gray-500 border border-gray-200"
                         }`}>
-                          {tgLinked ? "Linked" : tgPending ? "Pending Verification" : "Not Linked"}
+                          {tgLinked ? "Linked" : tgPending ? "Pending" : "Not Linked"}
                         </span>
                       </div>
+                      {tgLinked && tgPhone && (
+                        <p className="text-sm text-gray-600">
+                          Phone: <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{tgPhone}</code>
+                        </p>
+                      )}
                       {tgLinked && role === "owner" && (
                         <button
                           onClick={async () => {
