@@ -28,6 +28,7 @@ export interface StudentRow {
   fee_mmk:         number;
   quantity:        number;
   items?:          { class_level: string; quantity: number; fee_mmk: number; subtotal_mmk: number }[] | null;
+  telegram_linked: boolean;
 }
 
 // ─── GET /api/admin/students ──────────────────────────────────────────────────
@@ -52,6 +53,7 @@ export async function GET(request: NextRequest) {
   const class_level = searchParams.get("class_level")  ?? undefined;
   const status      = searchParams.get("status")       ?? undefined;
   const search      = searchParams.get("search")       ?? undefined;
+  const telegram    = searchParams.get("telegram")     ?? undefined; // "linked" | "not_linked"
 
   const pageRaw     = parseInt(searchParams.get("page")      ?? String(DEFAULT_PAGE),      10);
   const pageSizeRaw = parseInt(searchParams.get("page_size") ?? String(DEFAULT_PAGE_SIZE), 10);
@@ -81,6 +83,7 @@ export async function GET(request: NextRequest) {
       enrolled_at,
       quantity,
       class_id,
+      telegram_chat_id,
       classes (
         level,
         fee_mmk,
@@ -97,6 +100,8 @@ export async function GET(request: NextRequest) {
   if (status)      query = query.eq("status", status);
   if (class_level) query = query.eq("classes.level", class_level);
   if (intake_id)   query = query.eq("classes.intake_id", intake_id);
+  if (telegram === "linked")     query = query.not("telegram_chat_id", "is", null);
+  if (telegram === "not_linked") query = query.is("telegram_chat_id", null);
 
   // Free-text search: name (EN) OR phone — PostgREST OR filter
   if (search && search.trim() !== "") {
@@ -122,6 +127,7 @@ export async function GET(request: NextRequest) {
       enrolled_at:     string;
       quantity:        number | null;
       class_id:        string | null;
+      telegram_chat_id: string | null;
       classes: {
         level:     JlptLevel;
         fee_mmk:   number;
@@ -181,6 +187,7 @@ export async function GET(request: NextRequest) {
         ? cartItems!.reduce((sum, ci) => sum + ci.quantity, 0)
         : (row.quantity ?? 1),
       items:           cartItems,
+      telegram_linked: !!row.telegram_chat_id,
     };
   });
 

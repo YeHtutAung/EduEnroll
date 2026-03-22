@@ -26,6 +26,7 @@ interface StudentRow {
   fee_mmk: number;
   quantity: number;
   items?: { class_level: string; quantity: number; fee_mmk: number; subtotal_mmk: number }[] | null;
+  telegram_linked: boolean;
 }
 
 interface FormFieldDef {
@@ -74,6 +75,7 @@ interface Filters {
   level: string;
   status: string;
   search: string;
+  telegram: string;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -119,6 +121,7 @@ function buildQS(filters: Filters, page: number): string {
   if (filters.level)    p.set("class_level", filters.level);
   if (filters.status)   p.set("status", filters.status);
   if (filters.search)   p.set("search", filters.search.trim());
+  if (filters.telegram) p.set("telegram", filters.telegram);
   return p.toString();
 }
 
@@ -554,6 +557,7 @@ export default function StudentsPage() {
   const role = useRole();
   const tl = useTenantLabels();
   const isOwnerOrAbove = role === "owner" || role === "superadmin";
+  const isLanguageSchool = tl.orgType === "language_school";
 
   // Filters
   const [filters, setFilters] = useState<Filters>({
@@ -561,6 +565,7 @@ export default function StudentsPage() {
     level: "",
     status: "",
     search: "",
+    telegram: "",
   });
   const [searchInput, setSearchInput] = useState(""); // debounced separately
   const [page, setPage] = useState(1);
@@ -898,10 +903,23 @@ export default function StudentsPage() {
               <option key={s.value} value={s.value}>{s.label}</option>
             ))}
           </select>
+
+          {/* Telegram filter (language_school only) */}
+          {isLanguageSchool && (
+            <select
+              value={filters.telegram}
+              onChange={(e) => setFilter("telegram", e.target.value)}
+              className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#0088cc] bg-white text-gray-700"
+            >
+              <option value="">Telegram: All</option>
+              <option value="linked">Telegram: Linked</option>
+              <option value="not_linked">Telegram: Not Linked</option>
+            </select>
+          )}
         </div>
 
         {/* Active filter chips + clear */}
-        {(filters.intakeId || filters.level || filters.status || filters.search) && (
+        {(filters.intakeId || filters.level || filters.status || filters.search || filters.telegram) && (
           <div className="flex items-center gap-2 mt-3 flex-wrap">
             <span className="text-xs text-gray-400">Filters:</span>
             {filters.intakeId && (
@@ -913,9 +931,10 @@ export default function StudentsPage() {
             {filters.level && <FilterChip label={`${tl.class}: ${filters.level}`} onRemove={() => setFilter("level", "")} />}
             {filters.status && <FilterChip label={filters.status.replace(/_/g, " ")} onRemove={() => setFilter("status", "")} />}
             {filters.search && <FilterChip label={`"${filters.search}"`} onRemove={() => { setSearchInput(""); setFilter("search", ""); }} />}
+            {filters.telegram && <FilterChip label={`Telegram: ${filters.telegram === "linked" ? "Linked" : "Not Linked"}`} onRemove={() => setFilter("telegram", "")} />}
             <button
               onClick={() => {
-                setFilters({ intakeId: "", level: "", status: "", search: "" });
+                setFilters({ intakeId: "", level: "", status: "", search: "", telegram: "" });
                 setSearchInput("");
                 setPage(1);
               }}
@@ -971,7 +990,7 @@ export default function StudentsPage() {
             <div className="w-14 h-14 rounded-full bg-[#f0f4ff] flex items-center justify-center text-2xl mb-1">👥</div>
             <p className="text-base font-semibold text-gray-700">No students found</p>
             <p className="text-sm text-gray-400 max-w-xs">
-              {filters.intakeId || filters.level || filters.status || filters.search
+              {filters.intakeId || filters.level || filters.status || filters.search || filters.telegram
                 ? "Try adjusting your filters."
                 : "No enrollments yet."}
             </p>
@@ -985,7 +1004,8 @@ export default function StudentsPage() {
           const formHeaders = displayFields.length > 0
             ? displayFields.map((f) => f.field_label)
             : ["Name", "Phone", "Email"];
-          const allHeaders = ["No.", ...formHeaders, "Ref", tl.class, "Qty", `${tl.fee} (MMK)`, tl.intake, "Status", "Date"];
+          const baseHeaders = ["No.", ...formHeaders, "Ref", tl.class, "Qty", `${tl.fee} (MMK)`, tl.intake, "Status"];
+          const allHeaders = isLanguageSchool ? [...baseHeaders, "TG", "Date"] : [...baseHeaders, "Date"];
 
           return (
             <div className="overflow-x-auto">
@@ -1115,6 +1135,25 @@ export default function StudentsPage() {
                           <td className="px-4 py-3.5">
                             <StatusBadge status={student.status} />
                           </td>
+
+                          {/* Telegram linked indicator */}
+                          {isLanguageSchool && (
+                            <td className="px-4 py-3.5 text-center">
+                              {student.telegram_linked ? (
+                                <span title="Telegram linked" className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#0088cc]/10">
+                                  <svg className="w-3.5 h-3.5 text-[#0088cc]" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+                                  </svg>
+                                </span>
+                              ) : (
+                                <span title="Not linked" className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-100">
+                                  <svg className="w-3.5 h-3.5 text-gray-300" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+                                  </svg>
+                                </span>
+                              )}
+                            </td>
+                          )}
 
                           {/* Enrolled Date */}
                           <td className="px-4 py-3.5 text-gray-500 text-xs whitespace-nowrap">
