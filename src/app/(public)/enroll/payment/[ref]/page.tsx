@@ -139,7 +139,7 @@ function CopyButton({
 
 // ─── Telegram connect button (generates one-time token) ─────────────────────
 
-function TelegramConnectButton({ enrollmentRef }: { enrollmentRef: string }) {
+function TelegramConnectButton({ enrollmentRef, classLevel }: { enrollmentRef: string; classLevel: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deepLink, setDeepLink] = useState<string | null>(null);
@@ -173,10 +173,10 @@ function TelegramConnectButton({ enrollmentRef }: { enrollmentRef: string }) {
   return (
     <div className="mb-8 rounded-xl border border-sky-200 bg-sky-50 p-4 text-center">
       <p className="mb-2 text-sm font-medium text-sky-900">
-        Get updates via Telegram
+        To connect {classLevel} channel via Telegram
       </p>
       <p className="font-myanmar mb-3 text-xs text-sky-700">
-        Telegram မှတဆင့် အပ်ဒိတ်များ ရယူပါ
+        {classLevel} channel ကို Telegram မှတဆင့် ချိတ်ဆက်ရန်
       </p>
       {loading ? (
         <span className="inline-flex items-center gap-2 rounded-lg bg-[#0088cc] px-5 py-2.5 text-sm font-semibold text-white opacity-50">
@@ -1436,7 +1436,7 @@ export default function PaymentInstructionsPage() {
 
       {/* ── Connect Telegram for updates ────── */}
       {enrollment?.telegram_bot_username && enrollment.status !== "pending_payment" && (
-        <TelegramConnectButton enrollmentRef={enrollment.enrollment_ref} />
+        <TelegramConnectButton enrollmentRef={enrollment.enrollment_ref} classLevel={enrollment.class_level ?? "Class"} />
       )}
 
     </div>
