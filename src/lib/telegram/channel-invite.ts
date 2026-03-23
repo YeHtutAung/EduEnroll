@@ -3,7 +3,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { decryptToken } from "@/lib/messenger/crypto";
-import { sendMessageWithButtons } from "./send";
+import { sendMessageWithButtons, getChat } from "./send";
 
 interface SendInviteParams {
   tenantId: string;
@@ -49,11 +49,12 @@ export async function sendChannelInviteIfEligible(
   // Find channel for this class
   const { data: channel } = (await supabase
     .from("class_channels")
-    .select("telegram_channel_name, telegram_invite_link")
+    .select("telegram_channel_id, telegram_channel_name, telegram_invite_link")
     .eq("tenant_id", tenantId)
     .eq("class_id", classId)
     .single()) as {
     data: {
+      telegram_channel_id: string;
       telegram_channel_name: string | null;
       telegram_invite_link: string | null;
     } | null;
@@ -71,7 +72,23 @@ export async function sendChannelInviteIfEligible(
     return false;
   }
 
-  const channelName = channel.telegram_channel_name ?? "Class Channel";
+  // Fetch live channel name from Telegram (falls back to DB name)
+  let channelName = channel.telegram_channel_name ?? "Class Channel";
+  try {
+    const chatInfo = await getChat(botToken, channel.telegram_channel_id);
+    if (chatInfo?.ok && chatInfo.result?.title) {
+      channelName = chatInfo.result.title;
+      // Update DB with the current name (best-effort, non-blocking)
+      supabase
+        .from("class_channels")
+        .update({ telegram_channel_name: chatInfo.result.title } as never)
+        .eq("tenant_id", tenantId)
+        .eq("class_id", classId)
+        .then();
+    }
+  } catch {
+    // Fall back to DB name silently
+  }
 
   await sendMessageWithButtons(botToken, telegramChatId, [
     `🎉 <b>Payment verified!</b>`,
