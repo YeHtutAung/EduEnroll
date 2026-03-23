@@ -144,20 +144,26 @@ export async function GET(request: NextRequest) {
           error: unknown;
         };
 
+        // Collect notification promises — must await before returning
+        // so Vercel serverless doesn't kill the function prematurely
+        const notifyTasks: Promise<unknown>[] = [];
+
         // Telegram notification
         if (enrollment.telegram_chat_id) {
-          sendTelegramStatusNotification({
-            tenantId: enrollment.tenant_id,
-            telegramChatId: enrollment.telegram_chat_id,
-            action: "approve",
-            studentName: enrollment.student_name_en || "Student",
-            enrollmentRef: enrollment.enrollment_ref,
-            classLevel,
-            statusUrl,
-            paymentUrl: statusUrl,
-          }).catch((err) => {
-            console.error("[abank-status] Telegram notification failed:", err);
-          });
+          notifyTasks.push(
+            sendTelegramStatusNotification({
+              tenantId: enrollment.tenant_id,
+              telegramChatId: enrollment.telegram_chat_id,
+              action: "approve",
+              studentName: enrollment.student_name_en || "Student",
+              enrollmentRef: enrollment.enrollment_ref,
+              classLevel,
+              statusUrl,
+              paymentUrl: statusUrl,
+            }).catch((err) => {
+              console.error("[abank-status] Telegram notification failed:", err);
+            }),
+          );
         }
 
         // Email notification
@@ -172,23 +178,29 @@ export async function GET(request: NextRequest) {
             tenantName: tenantInfo?.name,
             logoUrl: tenantInfo?.logo_url ?? undefined,
           });
-          sendEmail({ to: enrollEmail, ...emailData }).catch((err) => {
-            console.error("[abank-status] Approval email failed:", err);
-          });
+          notifyTasks.push(
+            sendEmail({ to: enrollEmail, ...emailData }).catch((err) => {
+              console.error("[abank-status] Approval email failed:", err);
+            }),
+          );
         }
 
         // Channel invite (language_school only, gated inside)
         if (enrollment.telegram_chat_id) {
-          sendChannelInviteIfEligible({
-            tenantId: enrollment.tenant_id,
-            enrollmentId: payment.enrollment_id,
-            classId: enrollment.class_id,
-            telegramChatId: enrollment.telegram_chat_id,
-            studentName: enrollment.student_name_en || "Student",
-          }).catch((err) => {
-            console.error("[abank-status] Channel invite failed:", err);
-          });
+          notifyTasks.push(
+            sendChannelInviteIfEligible({
+              tenantId: enrollment.tenant_id,
+              enrollmentId: payment.enrollment_id,
+              classId: enrollment.class_id,
+              telegramChatId: enrollment.telegram_chat_id,
+              studentName: enrollment.student_name_en || "Student",
+            }).catch((err) => {
+              console.error("[abank-status] Channel invite failed:", err);
+            }),
+          );
         }
+
+        await Promise.allSettled(notifyTasks);
       }
     } else if (txnStatus === "FAILED") {
       await supabase
