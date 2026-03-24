@@ -43,3 +43,9 @@
 - ALWAYS ask for confirmation before any destructive action
 - ALWAYS prefer reversible actions over irreversible ones
 - When in doubt — STOP and ask
+
+## Deployment Workflow
+- NEVER deploy directly to production
+- Feature branches → PR to staging → test → PR to main → CI/CD deploys
+- YOU must review and merge all PRs manually
+- NEVER merge your own PRs without review
