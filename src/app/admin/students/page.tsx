@@ -596,12 +596,26 @@ export default function StudentsPage() {
     exportingRef.current = true;
     setExporting(true);
     try {
-      // Fetch all matching records (up to API max of 100)
-      const qs = buildQS({ ...filters, search: filters.search }, 1);
-      const res = await fetch(`/api/admin/students?${qs}&page_size=100`);
-      if (!res.ok) throw new Error(`${res.status}`);
-      const json = await res.json();
-      const rows = (json.data ?? []) as StudentRow[];
+      // Fetch ALL matching records by paginating through every page
+      const allRows: StudentRow[] = [];
+      let currentPage = 1;
+      let totalPages = 1;
+      do {
+        const p = new URLSearchParams({ page: String(currentPage), page_size: "100" });
+        if (filters.intakeId) p.set("intake_id", filters.intakeId);
+        if (filters.level)    p.set("class_level", filters.level);
+        if (filters.status)   p.set("status", filters.status);
+        if (filters.search && filters.search.trim()) p.set("search", filters.search.trim());
+        if (filters.telegram) p.set("telegram", filters.telegram);
+        if (filters.channel)  p.set("channel", filters.channel);
+        const res = await fetch(`/api/admin/students?${p.toString()}`);
+        if (!res.ok) throw new Error(`${res.status}`);
+        const json = await res.json();
+        allRows.push(...((json.data ?? []) as StudentRow[]));
+        totalPages = json.pagination?.total_pages ?? 1;
+        currentPage++;
+      } while (currentPage <= totalPages);
+      const rows = allRows;
 
       const XLSX = await import("xlsx");
 
