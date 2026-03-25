@@ -606,8 +606,6 @@ export default function StudentsPage() {
         if (filters.level)    p.set("class_level", filters.level);
         if (filters.status)   p.set("status", filters.status);
         if (filters.search && filters.search.trim()) p.set("search", filters.search.trim());
-        if (filters.telegram) p.set("telegram", filters.telegram);
-        if (filters.channel)  p.set("channel", filters.channel);
         const res = await fetch(`/api/admin/students?${p.toString()}`);
         if (!res.ok) throw new Error(`${res.status}`);
         const json = await res.json();
