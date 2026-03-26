@@ -189,6 +189,7 @@ function StudentDetailModal({
   const [tgUnlinking, setTgUnlinking] = useState(false);
   const [tgRelinkUrl, setTgRelinkUrl] = useState<string | null>(null);
   const [tgChannelName, setTgChannelName] = useState<string | null>(null);
+  const [resendingEmail, setResendingEmail] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -451,6 +452,35 @@ function StudentDetailModal({
                         </div>
                       ) : (
                         <p className="text-xs text-gray-400 italic">No proof image uploaded</p>
+                      )}
+
+                      {/* Resend email button */}
+                      {detail.email && (
+                        <button
+                          onClick={async () => {
+                            setResendingEmail(true);
+                            try {
+                              const res = await fetch(
+                                `/api/admin/enrollments/${row.enrollment_id}/resend-email`,
+                                { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) },
+                              );
+                              const data = await res.json();
+                              if (!res.ok) throw new Error(data.error || `${res.status}`);
+                              toast.success(`Email resent to ${detail.email}`);
+                            } catch (err) {
+                              toast.error(err instanceof Error ? err.message : "Failed to resend email.");
+                            } finally {
+                              setResendingEmail(false);
+                            }
+                          }}
+                          disabled={resendingEmail}
+                          className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-[#1a3f8a] bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50 transition-colors"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
+                          </svg>
+                          {resendingEmail ? "Sending…" : "Resend Email"}
+                        </button>
                       )}
                     </div>
                   ) : (
