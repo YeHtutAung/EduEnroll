@@ -139,7 +139,7 @@ export async function POST(
       studentName: enrollment.student_name_en,
       enrollmentRef: enrollment.enrollment_ref,
       classLevel,
-      reason: (enrollment as Record<string, unknown>).rejection_reason as string | null,
+      reason: (enrollment as unknown as Record<string, unknown>).rejection_reason as string | null,
       statusUrl,
       orgType,
       tenantName,
@@ -155,8 +155,8 @@ export async function POST(
       .limit(1)
       .single() as PaymentResult;
 
-    const receivedAmount = (payment as Record<string, unknown>)?.received_amount as number | null;
-    const adminNote = (payment as Record<string, unknown>)?.admin_note as string | null;
+    const receivedAmount = (payment as unknown as Record<string, unknown>)?.received_amount as number | null;
+    const adminNote = (payment as unknown as Record<string, unknown>)?.admin_note as string | null;
     const remainingAmount =
       receivedAmount != null && payment?.amount_mmk != null
         ? payment.amount_mmk - receivedAmount
