@@ -75,6 +75,11 @@ export async function PATCH(
     const takenSeats = existing.seat_total - existing.seat_remaining;
     update.seat_total = seat_total;
     update.seat_remaining = Math.max(0, seat_total - takenSeats);
+
+    // Auto-reopen if class was full and now has seats available
+    if (existing.status === "full" && update.seat_remaining > 0) {
+      update.status = "open";
+    }
   }
 
   // enrollment_open_at — null is allowed to clear the value
