@@ -898,8 +898,8 @@ function DownloadReceiptButton({
                             crossOrigin="anonymous"
                             style={{ width: "100%", display: "block", objectFit: "contain", maxHeight: "180px", background: "#f9fafb" }}
                           />
-                          <div style={{ padding: "6px 8px", background: "#f9fafb", borderTop: "1px solid #f3f4f6", textAlign: "center" }}>
-                            <span style={{ fontSize: "10px", fontWeight: 600, color: "#374151", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", display: "block" }}>
+                          <div style={{ padding: "5px 4px", background: "#f9fafb", borderTop: "1px solid #f3f4f6", textAlign: "center", minHeight: "22px" }}>
+                            <span style={{ fontSize: "9px", fontWeight: 600, color: "#374151", lineHeight: "1.2", display: "block", wordBreak: "break-word" }}>
                               {img.label}
                             </span>
                           </div>
@@ -952,8 +952,7 @@ function DownloadReceiptButton({
 
               {/* Status badge */}
               <div style={{ textAlign: "center" }}>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "5px 14px", background: "#dcfce7", color: "#166534", borderRadius: "20px", fontWeight: 600, fontSize: "11px" }}>
-                  <span style={{ display: "inline-block", width: "6px", height: "6px", borderRadius: "50%", background: "#16a34a" }} />
+                <span style={{ display: "inline-block", padding: "6px 18px", background: "#dcfce7", color: "#166534", borderRadius: "20px", fontWeight: 600, fontSize: "11px", textAlign: "center" }}>
                   {l.enrollLabel} Confirmed
                   {orgType !== "event" && <span style={{ fontFamily: "'Noto Sans Myanmar', sans-serif" }}> / {l.enrollLabelMm} အတည်ပြုပြီး</span>}
                 </span>
@@ -988,7 +987,7 @@ function DownloadReceiptButton({
               <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17v3a2 2 0 002 2h14a2 2 0 002-2v-3" />
               </svg>
-              Download Receipt / <span className="font-myanmar">ပြေစာ ဒေါင်းလုဒ်</span>
+              Download E-Ticket / <span className="font-myanmar">E-Ticket ကိုရယူပါ</span>
             </>
           )}
         </button>
