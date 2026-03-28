@@ -793,9 +793,10 @@ function DownloadReceiptButton({
       : [];
 
   // Build ticket items
+  const qty = enrollment.quantity ?? 1;
   const ticketItems = isCart && enrollment.items
-    ? enrollment.items.map((i) => ({ label: i.class_level, subtotal: formatMMKSimple(i.subtotal_mmk) }))
-    : [{ label: enrollment.class_level ?? "", subtotal: formatMMKSimple(totalFee) }];
+    ? enrollment.items.map((i) => ({ label: i.class_level, qty: i.quantity, subtotal: formatMMKSimple(i.subtotal_mmk) }))
+    : [{ label: enrollment.class_level ?? "", qty, subtotal: formatMMKSimple(totalFee) }];
 
   async function handleDownload() {
     if (!receiptRef.current || generating) return;
@@ -853,56 +854,55 @@ function DownloadReceiptButton({
             {/* Green accent bar */}
             <div style={{ height: "4px", background: "linear-gradient(90deg, #16a34a, #0d9488)" }} />
 
-            <div style={{ padding: "32px" }}>
+            <div style={{ padding: "24px 28px 20px" }}>
               {/* Header */}
-              <div style={{ textAlign: "center", marginBottom: "20px" }}>
-                <div style={{ width: "52px", height: "52px", borderRadius: "50%", background: "#dcfce7", margin: "0 auto 12px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <span style={{ fontSize: "24px", lineHeight: 1 }}>&#x2713;</span>
+              <div style={{ textAlign: "center", marginBottom: "16px" }}>
+                <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#16a34a", margin: "0 auto 10px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M5 13l4 4L19 7" />
+                  </svg>
                 </div>
-                <h1 style={{ margin: 0, fontSize: "20px", color: "#1a6b3c", fontWeight: 700 }}>{l.approvedTitle}</h1>
+                <h1 style={{ margin: 0, fontSize: "19px", color: "#1a6b3c", fontWeight: 700 }}>{l.approvedTitle}</h1>
                 {orgType !== "event" && (
-                  <p style={{ margin: "4px 0 0", fontSize: "14px", color: "#6b7280", fontFamily: "'Noto Sans Myanmar', sans-serif" }}>{l.approvedTitleMm}</p>
+                  <p style={{ margin: "3px 0 0", fontSize: "13px", color: "#6b7280", fontFamily: "'Noto Sans Myanmar', sans-serif" }}>{l.approvedTitleMm}</p>
                 )}
               </div>
 
               {/* Reference — hero box */}
-              <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px", padding: "14px", textAlign: "center", margin: "0 0 20px" }}>
-                <p style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: "1px", color: "#1a6b3c", margin: "0 0 6px", fontWeight: 600 }}>{l.refLabel}</p>
-                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "22px", fontWeight: 700, color: "#1a6b3c", letterSpacing: "1px", margin: 0 }}>{enrollment.enrollment_ref}</p>
+              <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px", padding: "12px", textAlign: "center", margin: "0 0 16px" }}>
+                <p style={{ fontSize: "9px", textTransform: "uppercase", letterSpacing: "1px", color: "#1a6b3c", margin: "0 0 4px", fontWeight: 600 }}>{l.refLabel}</p>
+                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "20px", fontWeight: 700, color: "#1a6b3c", letterSpacing: "1px", margin: 0 }}>{enrollment.enrollment_ref}</p>
               </div>
 
               {/* Ticket images */}
               {images.length > 0 && (
-                <div style={{ margin: "0 0 20px", borderRadius: "8px", overflow: "hidden" }}>
+                <div style={{ margin: "0 0 16px" }}>
                   {images.length === 1 ? (
-                    <div style={{ position: "relative" }}>
+                    <div style={{ border: "1px solid #e5e7eb", borderRadius: "10px", overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }}>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={images[0].url}
                         alt={images[0].label}
                         crossOrigin="anonymous"
-                        style={{ width: "100%", height: "180px", objectFit: "cover", display: "block", borderRadius: "8px" }}
+                        style={{ width: "100%", display: "block", objectFit: "contain", maxHeight: "280px", background: "#f9fafb" }}
                       />
-                      <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.4), transparent)", borderRadius: "8px" }} />
-                      <span style={{ position: "absolute", bottom: "8px", left: "12px", background: "rgba(0,0,0,0.5)", color: "#fff", padding: "4px 12px", borderRadius: "20px", fontSize: "12px", fontWeight: 500, backdropFilter: "blur(4px)" }}>
-                        {images[0].label}
-                      </span>
                     </div>
                   ) : (
-                    <div style={{ display: "grid", gridTemplateColumns: images.length === 2 ? "1fr 1fr" : "1fr 1fr 1fr", gap: "2px" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: images.length === 2 ? "1fr 1fr" : "1fr 1fr 1fr", gap: "8px" }}>
                       {images.map((img, i) => (
-                        <div key={i} style={{ position: "relative" }}>
+                        <div key={i} style={{ border: "1px solid #e5e7eb", borderRadius: "8px", overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={img.url}
                             alt={img.label}
                             crossOrigin="anonymous"
-                            style={{ width: "100%", height: "120px", objectFit: "cover", display: "block" }}
+                            style={{ width: "100%", display: "block", objectFit: "contain", maxHeight: "180px", background: "#f9fafb" }}
                           />
-                          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.5), transparent)" }} />
-                          <span style={{ position: "absolute", bottom: "4px", left: "4px", right: "4px", background: "rgba(0,0,0,0.5)", color: "#fff", padding: "2px 8px", borderRadius: "20px", fontSize: "10px", fontWeight: 500, textAlign: "center", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
-                            {img.label}
-                          </span>
+                          <div style={{ padding: "6px 8px", background: "#f9fafb", borderTop: "1px solid #f3f4f6", textAlign: "center" }}>
+                            <span style={{ fontSize: "10px", fontWeight: 600, color: "#374151", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis", display: "block" }}>
+                              {img.label}
+                            </span>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -911,28 +911,30 @@ function DownloadReceiptButton({
               )}
 
               {/* Section header */}
-              <p style={{ fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: "#9ca3af", margin: "0 0 8px" }}>
+              <p style={{ fontSize: "9px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: "#9ca3af", margin: "0 0 6px" }}>
                 {orgType === "event" ? "Order Details" : "Details"}
               </p>
 
               {/* Detail rows */}
-              <div style={{ margin: "0 0 20px" }}>
+              <div style={{ margin: "0 0 14px" }}>
                 {/* Name row */}
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid #f3f4f6", fontSize: "13px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f3f4f6", fontSize: "13px" }}>
                   <span style={{ color: "#6b7280" }}>Name</span>
                   <span style={{ fontWeight: 600, color: "#1f2937", textAlign: "right" }}>{enrollment.student_name_en}</span>
                 </div>
 
                 {/* Item rows */}
                 {ticketItems.map((item, i) => (
-                  <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid #f3f4f6", fontSize: "13px" }}>
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f3f4f6", fontSize: "13px" }}>
                     <span style={{ color: "#6b7280" }}>{i === 0 ? l.itemLabel : ""}</span>
-                    <span style={{ fontWeight: 600, color: "#1f2937", textAlign: "right" }}>{item.label}</span>
+                    <span style={{ fontWeight: 600, color: "#1f2937", textAlign: "right" }}>
+                      {item.label}{item.qty > 1 ? ` x${item.qty}` : ""}
+                    </span>
                   </div>
                 ))}
 
                 {/* Date row */}
-                <div style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid #f3f4f6", fontSize: "13px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", fontSize: "13px" }}>
                   <span style={{ color: "#6b7280" }}>Date</span>
                   <span style={{ fontWeight: 600, color: "#1f2937", textAlign: "right" }}>
                     {enrollment.enrolled_at
@@ -943,14 +945,14 @@ function DownloadReceiptButton({
               </div>
 
               {/* Total / fee */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", background: "#f9fafb", borderRadius: "8px", margin: "0 0 20px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#f9fafb", borderRadius: "8px", margin: "0 0 14px" }}>
                 <span style={{ fontSize: "13px", fontWeight: 600, color: "#6b7280" }}>Total Paid</span>
-                <span style={{ fontSize: "18px", fontWeight: 700, color: "#1a6b3c" }}>{feeFormatted}</span>
+                <span style={{ fontSize: "17px", fontWeight: 700, color: "#1a6b3c" }}>{feeFormatted}</span>
               </div>
 
               {/* Status badge */}
               <div style={{ textAlign: "center" }}>
-                <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "6px 16px", background: "#dcfce7", color: "#166534", borderRadius: "20px", fontWeight: 600, fontSize: "12px" }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "5px 14px", background: "#dcfce7", color: "#166534", borderRadius: "20px", fontWeight: 600, fontSize: "11px" }}>
                   <span style={{ display: "inline-block", width: "6px", height: "6px", borderRadius: "50%", background: "#16a34a" }} />
                   {l.enrollLabel} Confirmed
                   {orgType !== "event" && <span style={{ fontFamily: "'Noto Sans Myanmar', sans-serif" }}> / {l.enrollLabelMm} အတည်ပြုပြီး</span>}
