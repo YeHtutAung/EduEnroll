@@ -4,6 +4,8 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { formatMMK, formatMMKSimple } from "@/lib/utils";
 import QRPaymentModal from "@/components/payments/QRPaymentModal";
+import html2canvas from "html2canvas";
+import { jsPDF } from "jspdf";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CartItem {
@@ -740,6 +742,237 @@ function PartialPaymentBanner({ enrollment }: { enrollment: EnrollmentInfo }) {
   );
 }
 
+// ─── Org-aware labels (matches email template) ──────────────────────────────
+
+const ORG_RECEIPT_LABELS: Record<string, { itemLabel: string; feeLabel: string; feeLabelMm: string; enrollLabel: string; enrollLabelMm: string; approvedTitle: string; approvedTitleMm: string; refLabel: string }> = {
+  language_school: {
+    itemLabel: "Class Level", feeLabel: "Fee", feeLabelMm: "ကျောင်းလခ",
+    enrollLabel: "Enrollment", enrollLabelMm: "စာရင်းသွင်းမှု",
+    approvedTitle: "Your Enrollment is Confirmed!", approvedTitleMm: "သင့်စာရင်းသွင်းမှု အတည်ပြုပြီးပါပြီ",
+    refLabel: "Enrollment Reference",
+  },
+  event: {
+    itemLabel: "Ticket", feeLabel: "Price", feeLabelMm: "စျေးနှုန်း",
+    enrollLabel: "Order", enrollLabelMm: "အော်ဒါ",
+    approvedTitle: "Your Order is Confirmed!", approvedTitleMm: "သင့်အော်ဒါ အတည်ပြုပြီးပါပြီ",
+    refLabel: "Order Reference",
+  },
+  training_center: {
+    itemLabel: "Course", feeLabel: "Fee", feeLabelMm: "သင်တန်းကြေး",
+    enrollLabel: "Enrollment", enrollLabelMm: "စာရင်းသွင်းမှု",
+    approvedTitle: "Your Enrollment is Confirmed!", approvedTitleMm: "သင့်စာရင်းသွင်းမှု အတည်ပြုပြီးပါပြီ",
+    refLabel: "Enrollment Reference",
+  },
+};
+
+// ─── Download receipt as PDF ─────────────────────────────────────────────────
+
+function DownloadReceiptButton({
+  enrollment,
+  orgType,
+  totalFee,
+  feeFormatted,
+  isCart,
+}: {
+  enrollment: EnrollmentInfo;
+  orgType: string;
+  totalFee: number;
+  feeFormatted: string;
+  isCart: boolean;
+}) {
+  const receiptRef = useRef<HTMLDivElement>(null);
+  const [generating, setGenerating] = useState(false);
+
+  const l = ORG_RECEIPT_LABELS[orgType] ?? ORG_RECEIPT_LABELS.language_school;
+
+  // Collect images for the receipt
+  const images = isCart
+    ? (enrollment.items ?? []).filter((i) => i.image_url).map((i) => ({ url: i.image_url!, label: i.class_level }))
+    : enrollment.class_image_url
+      ? [{ url: enrollment.class_image_url, label: enrollment.class_level ?? "" }]
+      : [];
+
+  // Build ticket items
+  const ticketItems = isCart && enrollment.items
+    ? enrollment.items.map((i) => ({ label: i.class_level, subtotal: formatMMKSimple(i.subtotal_mmk) }))
+    : [{ label: enrollment.class_level ?? "", subtotal: formatMMKSimple(totalFee) }];
+
+  async function handleDownload() {
+    if (!receiptRef.current || generating) return;
+    setGenerating(true);
+
+    try {
+      // Wait for images to load
+      const imgs = receiptRef.current.querySelectorAll("img");
+      await Promise.all(
+        Array.from(imgs).map(
+          (img) =>
+            new Promise<void>((resolve) => {
+              if (img.complete) return resolve();
+              img.onload = () => resolve();
+              img.onerror = () => resolve();
+            }),
+        ),
+      );
+
+      const canvas = await html2canvas(receiptRef.current, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#f5f7fa",
+        logging: false,
+      });
+
+      const imgWidth = 148; // A5 width in mm
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      const pdf = new jsPDF({ unit: "mm", format: [imgWidth, imgHeight + 10] });
+      const imgData = canvas.toDataURL("image/png");
+      pdf.addImage(imgData, "PNG", 0, 5, imgWidth, imgHeight);
+      pdf.save(`receipt-${enrollment.enrollment_ref}.pdf`);
+    } catch (err) {
+      console.error("[pdf] Failed to generate receipt:", err);
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  return (
+    <>
+      {/* Hidden receipt for PDF capture */}
+      <div style={{ position: "absolute", left: "-9999px", top: 0 }}>
+        <div
+          ref={receiptRef}
+          style={{
+            width: "520px",
+            padding: "32px 20px",
+            background: "#f5f7fa",
+            fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+            color: "#1a1a1a",
+          }}
+        >
+          <div style={{ background: "#fff", borderRadius: "12px", padding: "32px", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+            {/* Header */}
+            <div style={{ textAlign: "center", marginBottom: "24px" }}>
+              <div style={{ width: "56px", height: "56px", borderRadius: "50%", background: "#dcfce7", margin: "0 auto 12px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ fontSize: "28px" }}>&#x1F389;</span>
+              </div>
+              <h1 style={{ margin: 0, fontSize: "22px", color: "#1a6b3c" }}>{l.approvedTitle}</h1>
+              <p style={{ margin: "4px 0 0", color: "#6b7280", fontFamily: "'Noto Sans Myanmar', sans-serif" }}>{l.approvedTitleMm}</p>
+            </div>
+
+            {/* Confirmed alert box */}
+            <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px", padding: "16px", margin: "20px 0" }}>
+              <p style={{ margin: 0, fontSize: "14px", color: "#166534" }}>
+                <strong>{enrollment.student_name_en}</strong>, your payment has been verified and your {l.enrollLabel.toLowerCase()} is now confirmed.
+              </p>
+              <p style={{ margin: "8px 0 0", fontSize: "13px", color: "#15803d", fontFamily: "'Noto Sans Myanmar', sans-serif" }}>
+                သင့်ငွေပေးချေမှု အတည်ပြုပြီးဖြစ်ပြီး {l.enrollLabelMm} အတည်ပြုပြီးပါပြီ။
+              </p>
+            </div>
+
+            {/* Ticket images */}
+            {images.length > 0 && (
+              <div style={{ margin: "20px 0", borderRadius: "8px", overflow: "hidden" }}>
+                {images.length === 1 ? (
+                  <div style={{ position: "relative" }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={images[0].url}
+                      alt={images[0].label}
+                      crossOrigin="anonymous"
+                      style={{ width: "100%", height: "180px", objectFit: "cover", display: "block", borderRadius: "8px" }}
+                    />
+                    <span style={{ position: "absolute", bottom: "8px", left: "12px", background: "rgba(0,0,0,0.5)", color: "#fff", padding: "4px 12px", borderRadius: "20px", fontSize: "12px", fontWeight: 500 }}>
+                      {images[0].label}
+                    </span>
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gridTemplateColumns: images.length === 2 ? "1fr 1fr" : "1fr 1fr 1fr", gap: "2px" }}>
+                    {images.map((img, i) => (
+                      <div key={i} style={{ position: "relative" }}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={img.url}
+                          alt={img.label}
+                          crossOrigin="anonymous"
+                          style={{ width: "100%", height: "120px", objectFit: "cover", display: "block" }}
+                        />
+                        <span style={{ position: "absolute", bottom: "4px", left: "4px", right: "4px", background: "rgba(0,0,0,0.5)", color: "#fff", padding: "2px 8px", borderRadius: "20px", fontSize: "10px", fontWeight: 500, textAlign: "center", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+                          {img.label}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Reference */}
+            <div style={{ margin: "20px 0" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f3f4f6", fontSize: "14px" }}>
+                <span style={{ color: "#6b7280", minWidth: "100px" }}>Reference</span>
+                <span style={{ fontWeight: 600, color: "#1f2937", textAlign: "right", fontFamily: "monospace" }}>{enrollment.enrollment_ref}</span>
+              </div>
+
+              {/* Item rows */}
+              {ticketItems.map((item, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f3f4f6", fontSize: "14px" }}>
+                  <span style={{ color: "#6b7280", minWidth: "100px" }}>{i === 0 ? l.itemLabel : ""}</span>
+                  <span style={{ fontWeight: 600, color: "#1f2937", textAlign: "right" }}>{item.label}</span>
+                </div>
+              ))}
+
+              {/* Fee row */}
+              <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", fontSize: "14px" }}>
+                <span style={{ color: "#6b7280", minWidth: "100px" }}>{l.feeLabel}</span>
+                <span style={{ fontWeight: 600, color: "#1f2937", textAlign: "right" }}>{feeFormatted}</span>
+              </div>
+            </div>
+
+            {/* Status badge */}
+            <div style={{ textAlign: "center", margin: "24px 0 0" }}>
+              <span style={{ display: "inline-block", padding: "8px 20px", background: "#dcfce7", color: "#166534", borderRadius: "8px", fontWeight: 600, fontSize: "14px" }}>
+                {enrollment.status_label_en}
+                {orgType !== "event" && <span style={{ fontFamily: "'Noto Sans Myanmar', sans-serif" }}> / {enrollment.status_label_mm}</span>}
+              </span>
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div style={{ textAlign: "center", marginTop: "16px", fontSize: "12px", color: "#9ca3af" }}>
+            <p>&copy; {new Date().getFullYear()} Powered by KuuNyi</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Download button */}
+      <div className="mt-4 text-center">
+        <button
+          onClick={handleDownload}
+          disabled={generating}
+          className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:opacity-50"
+        >
+          {generating ? (
+            <>
+              <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+                <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
+              </svg>
+              Generating...
+            </>
+          ) : (
+            <>
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17v3a2 2 0 002 2h14a2 2 0 002-2v-3" />
+              </svg>
+              Download Receipt / <span className="font-myanmar">ပြေစာ ဒေါင်းလုဒ်</span>
+            </>
+          )}
+        </button>
+      </div>
+    </>
+  );
+}
+
 // ─── Main page ───────────────────────────────────────────────────────────────
 
 export default function PaymentInstructionsPage() {
@@ -1049,6 +1282,15 @@ export default function PaymentInstructionsPage() {
               </div>
             </div>
           </div>
+
+          {/* ── Download receipt button ─────────────────────────────── */}
+          <DownloadReceiptButton
+            enrollment={enrollment}
+            orgType={orgType}
+            totalFee={totalFee}
+            feeFormatted={feeEn}
+            isCart={isCart}
+          />
         </>
       ) : (
         <>
