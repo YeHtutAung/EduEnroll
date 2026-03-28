@@ -884,7 +884,7 @@ function DownloadReceiptButton({
                         src={images[0].url}
                         alt={images[0].label}
                         crossOrigin="anonymous"
-                        style={{ width: "100%", display: "block", objectFit: "contain", maxHeight: "280px", background: "#f9fafb" }}
+                        style={{ width: "100%", height: "240px", display: "block", objectFit: "cover" }}
                       />
                     </div>
                   ) : (
@@ -896,7 +896,7 @@ function DownloadReceiptButton({
                             src={img.url}
                             alt={img.label}
                             crossOrigin="anonymous"
-                            style={{ width: "100%", display: "block", objectFit: "contain", maxHeight: "180px", background: "#f9fafb" }}
+                            style={{ width: "100%", height: "160px", display: "block", objectFit: "cover" }}
                           />
                         </div>
                       ))}
