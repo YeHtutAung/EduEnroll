@@ -28,6 +28,14 @@ TEST_EMAIL="${TEST_EMAIL:-}"
 TEST_PASSWORD="${TEST_PASSWORD:-}"
 TIMESTAMP=$(date +%s)
 
+# ── Safety: block production URLs ──────────────────────────────
+if echo "$BASE_URL" | grep -qiE "vercel\.app|kuunyi\.com|edu-enroll"; then
+  echo "ERROR: Cannot run tests against production!"
+  echo "       BASE_URL=$BASE_URL"
+  echo "       Use http://localhost:3005 or a dev/staging URL instead."
+  exit 1
+fi
+
 # ── Counters ────────────────────────────────────────────────────
 PASS=0
 FAIL=0
