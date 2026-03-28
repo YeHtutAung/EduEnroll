@@ -849,97 +849,119 @@ function DownloadReceiptButton({
             color: "#1a1a1a",
           }}
         >
-          <div style={{ background: "#fff", borderRadius: "12px", padding: "32px", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
-            {/* Header */}
-            <div style={{ textAlign: "center", marginBottom: "24px" }}>
-              <div style={{ width: "56px", height: "56px", borderRadius: "50%", background: "#dcfce7", margin: "0 auto 12px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <span style={{ fontSize: "28px" }}>&#x1F389;</span>
-              </div>
-              <h1 style={{ margin: 0, fontSize: "22px", color: "#1a6b3c" }}>{l.approvedTitle}</h1>
-              <p style={{ margin: "4px 0 0", color: "#6b7280", fontFamily: "'Noto Sans Myanmar', sans-serif" }}>{l.approvedTitleMm}</p>
-            </div>
+          <div style={{ background: "#fff", borderRadius: "12px", overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+            {/* Green accent bar */}
+            <div style={{ height: "4px", background: "linear-gradient(90deg, #16a34a, #0d9488)" }} />
 
-            {/* Confirmed alert box */}
-            <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px", padding: "16px", margin: "20px 0" }}>
-              <p style={{ margin: 0, fontSize: "14px", color: "#166534" }}>
-                <strong>{enrollment.student_name_en}</strong>, your payment has been verified and your {l.enrollLabel.toLowerCase()} is now confirmed.
-              </p>
-              <p style={{ margin: "8px 0 0", fontSize: "13px", color: "#15803d", fontFamily: "'Noto Sans Myanmar', sans-serif" }}>
-                သင့်ငွေပေးချေမှု အတည်ပြုပြီးဖြစ်ပြီး {l.enrollLabelMm} အတည်ပြုပြီးပါပြီ။
-              </p>
-            </div>
-
-            {/* Ticket images */}
-            {images.length > 0 && (
-              <div style={{ margin: "20px 0", borderRadius: "8px", overflow: "hidden" }}>
-                {images.length === 1 ? (
-                  <div style={{ position: "relative" }}>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={images[0].url}
-                      alt={images[0].label}
-                      crossOrigin="anonymous"
-                      style={{ width: "100%", height: "180px", objectFit: "cover", display: "block", borderRadius: "8px" }}
-                    />
-                    <span style={{ position: "absolute", bottom: "8px", left: "12px", background: "rgba(0,0,0,0.5)", color: "#fff", padding: "4px 12px", borderRadius: "20px", fontSize: "12px", fontWeight: 500 }}>
-                      {images[0].label}
-                    </span>
-                  </div>
-                ) : (
-                  <div style={{ display: "grid", gridTemplateColumns: images.length === 2 ? "1fr 1fr" : "1fr 1fr 1fr", gap: "2px" }}>
-                    {images.map((img, i) => (
-                      <div key={i} style={{ position: "relative" }}>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={img.url}
-                          alt={img.label}
-                          crossOrigin="anonymous"
-                          style={{ width: "100%", height: "120px", objectFit: "cover", display: "block" }}
-                        />
-                        <span style={{ position: "absolute", bottom: "4px", left: "4px", right: "4px", background: "rgba(0,0,0,0.5)", color: "#fff", padding: "2px 8px", borderRadius: "20px", fontSize: "10px", fontWeight: 500, textAlign: "center", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
-                          {img.label}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+            <div style={{ padding: "32px" }}>
+              {/* Header */}
+              <div style={{ textAlign: "center", marginBottom: "20px" }}>
+                <div style={{ width: "52px", height: "52px", borderRadius: "50%", background: "#dcfce7", margin: "0 auto 12px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <span style={{ fontSize: "24px", lineHeight: 1 }}>&#x2713;</span>
+                </div>
+                <h1 style={{ margin: 0, fontSize: "20px", color: "#1a6b3c", fontWeight: 700 }}>{l.approvedTitle}</h1>
+                {orgType !== "event" && (
+                  <p style={{ margin: "4px 0 0", fontSize: "14px", color: "#6b7280", fontFamily: "'Noto Sans Myanmar', sans-serif" }}>{l.approvedTitleMm}</p>
                 )}
               </div>
-            )}
 
-            {/* Reference */}
-            <div style={{ margin: "20px 0" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f3f4f6", fontSize: "14px" }}>
-                <span style={{ color: "#6b7280", minWidth: "100px" }}>Reference</span>
-                <span style={{ fontWeight: 600, color: "#1f2937", textAlign: "right", fontFamily: "monospace" }}>{enrollment.enrollment_ref}</span>
+              {/* Reference — hero box */}
+              <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px", padding: "14px", textAlign: "center", margin: "0 0 20px" }}>
+                <p style={{ fontSize: "10px", textTransform: "uppercase", letterSpacing: "1px", color: "#1a6b3c", margin: "0 0 6px", fontWeight: 600 }}>{l.refLabel}</p>
+                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "22px", fontWeight: 700, color: "#1a6b3c", letterSpacing: "1px", margin: 0 }}>{enrollment.enrollment_ref}</p>
               </div>
 
-              {/* Item rows */}
-              {ticketItems.map((item, i) => (
-                <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f3f4f6", fontSize: "14px" }}>
-                  <span style={{ color: "#6b7280", minWidth: "100px" }}>{i === 0 ? l.itemLabel : ""}</span>
-                  <span style={{ fontWeight: 600, color: "#1f2937", textAlign: "right" }}>{item.label}</span>
+              {/* Ticket images */}
+              {images.length > 0 && (
+                <div style={{ margin: "0 0 20px", borderRadius: "8px", overflow: "hidden" }}>
+                  {images.length === 1 ? (
+                    <div style={{ position: "relative" }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={images[0].url}
+                        alt={images[0].label}
+                        crossOrigin="anonymous"
+                        style={{ width: "100%", height: "180px", objectFit: "cover", display: "block", borderRadius: "8px" }}
+                      />
+                      <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.4), transparent)", borderRadius: "8px" }} />
+                      <span style={{ position: "absolute", bottom: "8px", left: "12px", background: "rgba(0,0,0,0.5)", color: "#fff", padding: "4px 12px", borderRadius: "20px", fontSize: "12px", fontWeight: 500, backdropFilter: "blur(4px)" }}>
+                        {images[0].label}
+                      </span>
+                    </div>
+                  ) : (
+                    <div style={{ display: "grid", gridTemplateColumns: images.length === 2 ? "1fr 1fr" : "1fr 1fr 1fr", gap: "2px" }}>
+                      {images.map((img, i) => (
+                        <div key={i} style={{ position: "relative" }}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={img.url}
+                            alt={img.label}
+                            crossOrigin="anonymous"
+                            style={{ width: "100%", height: "120px", objectFit: "cover", display: "block" }}
+                          />
+                          <div style={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.5), transparent)" }} />
+                          <span style={{ position: "absolute", bottom: "4px", left: "4px", right: "4px", background: "rgba(0,0,0,0.5)", color: "#fff", padding: "2px 8px", borderRadius: "20px", fontSize: "10px", fontWeight: 500, textAlign: "center", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+                            {img.label}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
-              ))}
+              )}
 
-              {/* Fee row */}
-              <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", fontSize: "14px" }}>
-                <span style={{ color: "#6b7280", minWidth: "100px" }}>{l.feeLabel}</span>
-                <span style={{ fontWeight: 600, color: "#1f2937", textAlign: "right" }}>{feeFormatted}</span>
+              {/* Section header */}
+              <p style={{ fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: "#9ca3af", margin: "0 0 8px" }}>
+                {orgType === "event" ? "Order Details" : "Details"}
+              </p>
+
+              {/* Detail rows */}
+              <div style={{ margin: "0 0 20px" }}>
+                {/* Name row */}
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid #f3f4f6", fontSize: "13px" }}>
+                  <span style={{ color: "#6b7280" }}>Name</span>
+                  <span style={{ fontWeight: 600, color: "#1f2937", textAlign: "right" }}>{enrollment.student_name_en}</span>
+                </div>
+
+                {/* Item rows */}
+                {ticketItems.map((item, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid #f3f4f6", fontSize: "13px" }}>
+                    <span style={{ color: "#6b7280" }}>{i === 0 ? l.itemLabel : ""}</span>
+                    <span style={{ fontWeight: 600, color: "#1f2937", textAlign: "right" }}>{item.label}</span>
+                  </div>
+                ))}
+
+                {/* Date row */}
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "9px 0", borderBottom: "1px solid #f3f4f6", fontSize: "13px" }}>
+                  <span style={{ color: "#6b7280" }}>Date</span>
+                  <span style={{ fontWeight: 600, color: "#1f2937", textAlign: "right" }}>
+                    {enrollment.enrolled_at
+                      ? new Date(enrollment.enrolled_at).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })
+                      : new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}
+                  </span>
+                </div>
               </div>
-            </div>
 
-            {/* Status badge */}
-            <div style={{ textAlign: "center", margin: "24px 0 0" }}>
-              <span style={{ display: "inline-block", padding: "8px 20px", background: "#dcfce7", color: "#166534", borderRadius: "8px", fontWeight: 600, fontSize: "14px" }}>
-                {enrollment.status_label_en}
-                {orgType !== "event" && <span style={{ fontFamily: "'Noto Sans Myanmar', sans-serif" }}> / {enrollment.status_label_mm}</span>}
-              </span>
+              {/* Total / fee */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", background: "#f9fafb", borderRadius: "8px", margin: "0 0 20px" }}>
+                <span style={{ fontSize: "13px", fontWeight: 600, color: "#6b7280" }}>Total Paid</span>
+                <span style={{ fontSize: "18px", fontWeight: 700, color: "#1a6b3c" }}>{feeFormatted}</span>
+              </div>
+
+              {/* Status badge */}
+              <div style={{ textAlign: "center" }}>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "6px 16px", background: "#dcfce7", color: "#166534", borderRadius: "20px", fontWeight: 600, fontSize: "12px" }}>
+                  <span style={{ display: "inline-block", width: "6px", height: "6px", borderRadius: "50%", background: "#16a34a" }} />
+                  {l.enrollLabel} Confirmed
+                  {orgType !== "event" && <span style={{ fontFamily: "'Noto Sans Myanmar', sans-serif" }}> / {l.enrollLabelMm} အတည်ပြုပြီး</span>}
+                </span>
+              </div>
             </div>
           </div>
 
           {/* Footer */}
-          <div style={{ textAlign: "center", marginTop: "16px", fontSize: "12px", color: "#9ca3af" }}>
-            <p>&copy; {new Date().getFullYear()} Powered by KuuNyi</p>
+          <div style={{ textAlign: "center", marginTop: "12px", fontSize: "11px", color: "#9ca3af" }}>
+            <p style={{ margin: 0 }}>&copy; {new Date().getFullYear()} Powered by KuuNyi</p>
           </div>
         </div>
       </div>
