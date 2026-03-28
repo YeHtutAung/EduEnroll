@@ -26,6 +26,9 @@ interface StudentRow {
   fee_mmk: number;
   quantity: number;
   items?: { class_level: string; quantity: number; fee_mmk: number; subtotal_mmk: number }[] | null;
+  telegram_linked: boolean;
+  telegram_phone: string | null;
+  telegram_channel_name: string | null;
 }
 
 interface FormFieldDef {
@@ -74,6 +77,13 @@ interface Filters {
   level: string;
   status: string;
   search: string;
+  telegram: string;
+  channel: string;
+}
+
+interface ChannelOption {
+  id: string;
+  name: string;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -119,6 +129,8 @@ function buildQS(filters: Filters, page: number): string {
   if (filters.level)    p.set("class_level", filters.level);
   if (filters.status)   p.set("status", filters.status);
   if (filters.search)   p.set("search", filters.search.trim());
+  if (filters.telegram) p.set("telegram", filters.telegram);
+  if (filters.channel)  p.set("channel", filters.channel);
   return p.toString();
 }
 
@@ -162,10 +174,22 @@ function StudentDetailModal({
   onClose: () => void;
 }) {
   const tl = useTenantLabels();
+  const toast = useToast();
+  const role = useRole();
   const [detail, setDetail] = useState<StudentDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [fullscreenImg, setFullscreenImg] = useState<string | null>(null);
+
+  // Telegram re-link (language_school only)
+  const isLanguageSchool = tl.orgType === "language_school";
+  const [tgLinked, setTgLinked] = useState(false);
+  const [tgPending, setTgPending] = useState(false);
+  const [tgPhone, setTgPhone] = useState<string | null>(null);
+  const [tgUnlinking, setTgUnlinking] = useState(false);
+  const [tgRelinkUrl, setTgRelinkUrl] = useState<string | null>(null);
+  const [tgChannelName, setTgChannelName] = useState<string | null>(null);
+  const [resendingEmail, setResendingEmail] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -175,6 +199,20 @@ function StudentDetailModal({
         if (!res.ok) throw new Error(`${res.status}`);
         const data = await res.json();
         if (!cancelled) setDetail(data as StudentDetail);
+
+        // Fetch telegram status for language schools
+        if (isLanguageSchool) {
+          const tgRes = await fetch(`/api/admin/enrollments/${row.enrollment_id}/telegram`);
+          if (tgRes.ok) {
+            const tgData = await tgRes.json();
+            if (!cancelled) {
+              setTgLinked(tgData.linked);
+              setTgPending(tgData.pending);
+              setTgPhone(tgData.phone ?? null);
+              setTgChannelName(tgData.channelName ?? null);
+            }
+          }
+        }
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load.");
       } finally {
@@ -415,10 +453,127 @@ function StudentDetailModal({
                       ) : (
                         <p className="text-xs text-gray-400 italic">No proof image uploaded</p>
                       )}
+
+                      {/* Resend email button */}
+                      {detail.email && (
+                        <button
+                          onClick={async () => {
+                            setResendingEmail(true);
+                            try {
+                              const res = await fetch(
+                                `/api/admin/enrollments/${row.enrollment_id}/resend-email`,
+                                { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({}) },
+                              );
+                              const data = await res.json();
+                              if (!res.ok) throw new Error(data.error || `${res.status}`);
+                              toast.success(`Email resent to ${detail.email}`);
+                            } catch (err) {
+                              toast.error(err instanceof Error ? err.message : "Failed to resend email.");
+                            } finally {
+                              setResendingEmail(false);
+                            }
+                          }}
+                          disabled={resendingEmail}
+                          className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-[#1a3f8a] bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 disabled:opacity-50 transition-colors"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75" />
+                          </svg>
+                          {resendingEmail ? "Sending…" : "Resend Email"}
+                        </button>
+                      )}
                     </div>
                   ) : (
                     <div className="rounded-xl border border-dashed border-gray-200 p-4 text-center text-sm text-gray-400">
                       No payment submitted yet
+                    </div>
+                  )}
+
+                  {/* Telegram status (language_school only) */}
+                  {isLanguageSchool && (
+                    <div className="rounded-xl border border-gray-100 bg-gray-50 p-4 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">
+                          Telegram
+                        </span>
+                        <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                          tgLinked
+                            ? "bg-sky-50 text-sky-700 border border-sky-200"
+                            : tgPending
+                              ? "bg-amber-50 text-amber-700 border border-amber-200"
+                              : "bg-gray-100 text-gray-500 border border-gray-200"
+                        }`}>
+                          {tgLinked ? "Linked" : tgPending ? "Pending" : "Not Linked"}
+                        </span>
+                      </div>
+                      {tgLinked && tgPhone && (
+                        <p className="text-sm text-gray-600">
+                          Phone: <code className="text-xs bg-gray-100 px-1.5 py-0.5 rounded">{tgPhone}</code>
+                        </p>
+                      )}
+                      {tgChannelName && (
+                        <p className="text-sm text-gray-600">
+                          Channel: <span className="font-medium text-sky-700">{tgChannelName}</span>
+                          {tgLinked && <span className="ml-1.5 text-xs text-green-600">(joined)</span>}
+                        </p>
+                      )}
+                      {!tgChannelName && (
+                        <p className="text-xs text-gray-400">No channel linked to this class.</p>
+                      )}
+                      {tgLinked && role === "owner" && (
+                        <button
+                          onClick={async () => {
+                            setTgUnlinking(true);
+                            try {
+                              const res = await fetch(
+                                `/api/admin/enrollments/${row.enrollment_id}/telegram`,
+                                { method: "DELETE" },
+                              );
+                              if (!res.ok) throw new Error(`${res.status}`);
+                              setTgLinked(false);
+                              setTgPending(false);
+                              const relinkUrl = `${window.location.origin}/enroll/payment/${row.enrollment_ref}`;
+                              setTgRelinkUrl(relinkUrl);
+                              toast.success("Telegram unlinked and removed from channels.");
+                            } catch {
+                              toast.error("Failed to unlink Telegram.");
+                            } finally {
+                              setTgUnlinking(false);
+                            }
+                          }}
+                          disabled={tgUnlinking}
+                          className="w-full text-center px-3 py-2 text-xs font-medium text-red-600 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50 transition-colors"
+                        >
+                          {tgUnlinking ? "Unlinking…" : "Unlink Telegram (for re-link)"}
+                        </button>
+                      )}
+                      {/* Re-link URL shown after unlink */}
+                      {tgRelinkUrl && (
+                        <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 space-y-2">
+                          <p className="text-xs font-medium text-sky-900">
+                            Send this link to the student to re-connect Telegram:
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <code className="flex-1 text-xs bg-white border border-sky-200 rounded px-2 py-1.5 break-all select-all text-sky-800">
+                              {tgRelinkUrl}
+                            </code>
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(tgRelinkUrl);
+                                toast.success("Link copied!");
+                              }}
+                              className="shrink-0 px-2.5 py-1.5 text-xs font-medium bg-[#0088cc] text-white rounded-lg hover:bg-[#006daa] transition-colors"
+                            >
+                              Copy
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                      {!tgLinked && !tgPending && !tgRelinkUrl && (
+                        <p className="text-xs text-gray-400">
+                          Student hasn&apos;t connected Telegram yet. They can do so from the payment page.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -477,6 +632,7 @@ export default function StudentsPage() {
   const role = useRole();
   const tl = useTenantLabels();
   const isOwnerOrAbove = role === "owner" || role === "superadmin";
+  const isLanguageSchool = tl.orgType === "language_school";
 
   // Filters
   const [filters, setFilters] = useState<Filters>({
@@ -484,6 +640,8 @@ export default function StudentsPage() {
     level: "",
     status: "",
     search: "",
+    telegram: "",
+    channel: "",
   });
   const [searchInput, setSearchInput] = useState(""); // debounced separately
   const [page, setPage] = useState(1);
@@ -502,6 +660,9 @@ export default function StudentsPage() {
 
   // Available class levels (derived from loaded students)
   const [classLevels, setClassLevels] = useState<string[]>([]);
+
+  // Channels for filter (language_school only)
+  const [channels, setChannels] = useState<ChannelOption[]>([]);
 
   // Modal
   const [selectedStudent, setSelectedStudent] = useState<StudentRow | null>(null);
@@ -546,6 +707,18 @@ export default function StudentsPage() {
         });
       })
       .catch(() => {/* non-critical */});
+
+    // Fetch channels for filter (language_school only)
+    if (isLanguageSchool) {
+      fetch("/api/admin/channels")
+        .then((r) => r.json())
+        .then((res: { channels: { id: string; telegram_channel_name: string | null }[] }) => {
+          setChannels(
+            (res.channels ?? []).map((ch) => ({ id: ch.id, name: ch.telegram_channel_name || "Unnamed" })),
+          );
+        })
+        .catch(() => {/* non-critical */});
+    }
   }, []);
 
   // ── Fetch form fields for selected intake (or most recent) ────────────────
@@ -606,6 +779,8 @@ export default function StudentsPage() {
         if (filters.level)    p.set("class_level", filters.level);
         if (filters.status)   p.set("status", filters.status);
         if (filters.search && filters.search.trim()) p.set("search", filters.search.trim());
+        if (filters.telegram) p.set("telegram", filters.telegram);
+        if (filters.channel)  p.set("channel", filters.channel);
         const res = await fetch(`/api/admin/students?${p.toString()}`);
         if (!res.ok) throw new Error(`${res.status}`);
         const json = await res.json();
@@ -833,10 +1008,38 @@ export default function StudentsPage() {
               <option key={s.value} value={s.value}>{s.label}</option>
             ))}
           </select>
+
+          {/* Telegram filter (language_school only) */}
+          {isLanguageSchool && (
+            <select
+              value={filters.telegram}
+              onChange={(e) => setFilter("telegram", e.target.value)}
+              className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#0088cc] bg-white text-gray-700"
+            >
+              <option value="">Telegram: All</option>
+              <option value="linked">Telegram: Linked</option>
+              <option value="not_linked">Telegram: Not Linked</option>
+            </select>
+          )}
+
+          {/* Channel filter (language_school only) */}
+          {isLanguageSchool && channels.length > 0 && (
+            <select
+              value={filters.channel}
+              onChange={(e) => setFilter("channel", e.target.value)}
+              className="border border-gray-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#0088cc] bg-white text-gray-700"
+            >
+              <option value="">All Channels</option>
+              {channels.map((ch) => (
+                <option key={ch.id} value={ch.id}>{ch.name}</option>
+              ))}
+              <option value="none">No Channel</option>
+            </select>
+          )}
         </div>
 
         {/* Active filter chips + clear */}
-        {(filters.intakeId || filters.level || filters.status || filters.search) && (
+        {(filters.intakeId || filters.level || filters.status || filters.search || filters.telegram || filters.channel) && (
           <div className="flex items-center gap-2 mt-3 flex-wrap">
             <span className="text-xs text-gray-400">Filters:</span>
             {filters.intakeId && (
@@ -848,9 +1051,11 @@ export default function StudentsPage() {
             {filters.level && <FilterChip label={`${tl.class}: ${filters.level}`} onRemove={() => setFilter("level", "")} />}
             {filters.status && <FilterChip label={filters.status.replace(/_/g, " ")} onRemove={() => setFilter("status", "")} />}
             {filters.search && <FilterChip label={`"${filters.search}"`} onRemove={() => { setSearchInput(""); setFilter("search", ""); }} />}
+            {filters.telegram && <FilterChip label={`Telegram: ${filters.telegram === "linked" ? "Linked" : "Not Linked"}`} onRemove={() => setFilter("telegram", "")} />}
+            {filters.channel && <FilterChip label={`Channel: ${filters.channel === "none" ? "No Channel" : channels.find((c) => c.id === filters.channel)?.name ?? "Channel"}`} onRemove={() => setFilter("channel", "")} />}
             <button
               onClick={() => {
-                setFilters({ intakeId: "", level: "", status: "", search: "" });
+                setFilters({ intakeId: "", level: "", status: "", search: "", telegram: "", channel: "" });
                 setSearchInput("");
                 setPage(1);
               }}
@@ -906,7 +1111,7 @@ export default function StudentsPage() {
             <div className="w-14 h-14 rounded-full bg-[#f0f4ff] flex items-center justify-center text-2xl mb-1">👥</div>
             <p className="text-base font-semibold text-gray-700">No students found</p>
             <p className="text-sm text-gray-400 max-w-xs">
-              {filters.intakeId || filters.level || filters.status || filters.search
+              {filters.intakeId || filters.level || filters.status || filters.search || filters.telegram || filters.channel
                 ? "Try adjusting your filters."
                 : "No enrollments yet."}
             </p>
@@ -920,7 +1125,8 @@ export default function StudentsPage() {
           const formHeaders = displayFields.length > 0
             ? displayFields.map((f) => f.field_label)
             : ["Name", "Phone", "Email"];
-          const allHeaders = ["No.", ...formHeaders, "Ref", tl.class, "Qty", `${tl.fee} (MMK)`, tl.intake, "Status", "Date"];
+          const baseHeaders = ["No.", ...formHeaders, "Ref", tl.class, "Qty", `${tl.fee} (MMK)`, tl.intake, "Status"];
+          const allHeaders = isLanguageSchool ? [...baseHeaders, "TG", "TG Phone", "Channel", "Date"] : [...baseHeaders, "Date"];
 
           return (
             <div className="overflow-x-auto">
@@ -1050,6 +1256,43 @@ export default function StudentsPage() {
                           <td className="px-4 py-3.5">
                             <StatusBadge status={student.status} />
                           </td>
+
+                          {/* Telegram linked indicator */}
+                          {isLanguageSchool && (
+                            <td className="px-4 py-3.5 text-center">
+                              {student.telegram_linked ? (
+                                <span title="Telegram linked" className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-[#0088cc]/10">
+                                  <svg className="w-3.5 h-3.5 text-[#0088cc]" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+                                  </svg>
+                                </span>
+                              ) : (
+                                <span title="Not linked" className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-100">
+                                  <svg className="w-3.5 h-3.5 text-gray-300" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+                                  </svg>
+                                </span>
+                              )}
+                            </td>
+                          )}
+
+                          {/* TG Phone */}
+                          {isLanguageSchool && (
+                            <td className="px-4 py-3.5 text-xs text-gray-600 whitespace-nowrap tabular-nums">
+                              {student.telegram_phone || <span className="text-gray-300">—</span>}
+                            </td>
+                          )}
+
+                          {/* Channel */}
+                          {isLanguageSchool && (
+                            <td className="px-4 py-3.5 text-xs whitespace-nowrap max-w-[140px]">
+                              {student.telegram_channel_name ? (
+                                <span className="truncate block text-sky-700 font-medium">{student.telegram_channel_name}</span>
+                              ) : (
+                                <span className="text-gray-300">—</span>
+                              )}
+                            </td>
+                          )}
 
                           {/* Enrolled Date */}
                           <td className="px-4 py-3.5 text-gray-500 text-xs whitespace-nowrap">

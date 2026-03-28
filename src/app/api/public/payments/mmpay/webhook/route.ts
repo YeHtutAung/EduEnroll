@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import mmpay from "@/lib/mmpay";
 import { sendEmail, enrollmentApprovedEmail } from "@/lib/email";
 import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
+import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
 
 // ─── POST /api/public/payments/mmqr/webhook ─────────────────────────────────
 // MyanMyanPay webhook callback handler.
@@ -188,6 +189,21 @@ export async function POST(request: NextRequest) {
         notifyTasks.push(
           sendEmail({ to: enrollEmail, ...emailData }).catch((err) => {
             console.error("[mmqr-webhook] Approval email failed:", err);
+          }),
+        );
+      }
+
+      // Channel invite (language_school only, gated inside)
+      if (enrollment.telegram_chat_id) {
+        notifyTasks.push(
+          sendChannelInviteIfEligible({
+            tenantId: enrollment.tenant_id,
+            enrollmentId: payment.enrollment_id,
+            classId: enrollment.class_id,
+            telegramChatId: enrollment.telegram_chat_id,
+            studentName: enrollment.student_name_en || "Student",
+          }).catch((err) => {
+            console.error("[mmqr-webhook] Channel invite failed:", err);
           }),
         );
       }

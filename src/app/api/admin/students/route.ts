@@ -28,6 +28,9 @@ export interface StudentRow {
   fee_mmk:         number;
   quantity:        number;
   items?:          { class_level: string; quantity: number; fee_mmk: number; subtotal_mmk: number }[] | null;
+  telegram_linked: boolean;
+  telegram_phone:  string | null;
+  telegram_channel_name: string | null;
 }
 
 // ─── GET /api/admin/students ──────────────────────────────────────────────────
@@ -52,6 +55,8 @@ export async function GET(request: NextRequest) {
   const class_level = searchParams.get("class_level")  ?? undefined;
   const status      = searchParams.get("status")       ?? undefined;
   const search      = searchParams.get("search")       ?? undefined;
+  const telegram    = searchParams.get("telegram")     ?? undefined; // "linked" | "not_linked"
+  const channel     = searchParams.get("channel")      ?? undefined; // channel_id or "none"
 
   const pageRaw     = parseInt(searchParams.get("page")      ?? String(DEFAULT_PAGE),      10);
   const pageSizeRaw = parseInt(searchParams.get("page_size") ?? String(DEFAULT_PAGE_SIZE), 10);
@@ -81,6 +86,8 @@ export async function GET(request: NextRequest) {
       enrolled_at,
       quantity,
       class_id,
+      telegram_chat_id,
+      telegram_phone,
       classes (
         level,
         fee_mmk,
@@ -97,11 +104,40 @@ export async function GET(request: NextRequest) {
   if (status)      query = query.eq("status", status);
   if (class_level) query = query.eq("classes.level", class_level);
   if (intake_id)   query = query.eq("classes.intake_id", intake_id);
+  if (telegram === "linked")     query = query.not("telegram_chat_id", "is", null);
+  if (telegram === "not_linked") query = query.is("telegram_chat_id", null);
 
-  // Free-text search: name (EN) OR phone — PostgREST OR filter
+  // Channel filter: filter by class_ids that have a specific channel
+  if (channel) {
+    if (channel === "none") {
+      // Students whose class has NO channel — need to find class_ids WITH channels, then exclude
+      const { data: chRows } = (await supabase
+        .from("class_channels")
+        .select("class_id")
+        .eq("tenant_id", tenantId)) as { data: { class_id: string }[] | null; error: unknown };
+      const classIdsWithChannel = (chRows ?? []).map((r) => r.class_id);
+      if (classIdsWithChannel.length > 0) {
+        // Include null class_id (cart) + class_ids not in the channel list
+        query = query.or(`class_id.is.null,class_id.not.in.(${classIdsWithChannel.join(",")})`);
+      }
+    } else {
+      // Specific channel — find class_id for this channel
+      const { data: ch } = (await supabase
+        .from("class_channels")
+        .select("class_id")
+        .eq("id", channel)
+        .eq("tenant_id", tenantId)
+        .single()) as { data: { class_id: string } | null; error: unknown };
+      if (ch) {
+        query = query.eq("class_id", ch.class_id);
+      }
+    }
+  }
+
+  // Free-text search: name (EN) OR phone OR telegram_phone — PostgREST OR filter
   if (search && search.trim() !== "") {
     const term = search.trim();
-    query = query.or(`student_name_en.ilike.%${term}%,phone.ilike.%${term}%`);
+    query = query.or(`student_name_en.ilike.%${term}%,phone.ilike.%${term}%,telegram_phone.ilike.%${term}%`);
   }
 
   // ── Pagination ─────────────────────────────────────────────────────────────
@@ -122,6 +158,8 @@ export async function GET(request: NextRequest) {
       enrolled_at:     string;
       quantity:        number | null;
       class_id:        string | null;
+      telegram_chat_id: string | null;
+      telegram_phone:  string | null;
       classes: {
         level:     JlptLevel;
         fee_mmk:   number;
@@ -141,6 +179,25 @@ export async function GET(request: NextRequest) {
 
   if (error) {
     return NextResponse.json({ error: (error as Error).message }, { status: 500 });
+  }
+
+  // Build class_id → channel_name map for Telegram column
+  const classIds = Array.from(new Set((data ?? []).map((r) => r.class_id).filter(Boolean))) as string[];
+  let channelMap: Record<string, string> = {};
+  if (classIds.length > 0) {
+    const { data: channels } = (await supabase
+      .from("class_channels")
+      .select("class_id, telegram_channel_name")
+      .eq("tenant_id", tenantId)
+      .in("class_id", classIds)) as {
+      data: { class_id: string; telegram_channel_name: string | null }[] | null;
+      error: unknown;
+    };
+    if (channels) {
+      channelMap = Object.fromEntries(
+        channels.map((ch) => [ch.class_id, ch.telegram_channel_name ?? ""]),
+      );
+    }
   }
 
   const students: StudentRow[] = (data ?? []).map((row) => {
@@ -181,6 +238,9 @@ export async function GET(request: NextRequest) {
         ? cartItems!.reduce((sum, ci) => sum + ci.quantity, 0)
         : (row.quantity ?? 1),
       items:           cartItems,
+      telegram_linked: !!row.telegram_chat_id,
+      telegram_phone:  row.telegram_phone ?? null,
+      telegram_channel_name: row.class_id ? (channelMap[row.class_id] ?? null) : null,
     };
   });
 

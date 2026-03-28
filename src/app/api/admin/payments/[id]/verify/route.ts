@@ -9,6 +9,7 @@ import {
 } from "@/lib/email";
 import { sendStatusNotification } from "@/lib/messenger/notify";
 import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
+import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
 import type { Enrollment, Payment, PaymentStatus, EnrollmentStatus } from "@/types/database";
 
 type EnrollmentResult = { data: Enrollment | null; error: unknown };
@@ -234,6 +235,17 @@ export async function PATCH(
         paymentUrl,
       }).catch((err) => {
         console.error("[verify] Telegram approval notification failed:", err);
+      });
+
+      // Auto-send channel invite (language_school only, non-blocking)
+      sendChannelInviteIfEligible({
+        tenantId,
+        enrollmentId: enrollment.id,
+        classId: enrollment.class_id,
+        telegramChatId: enrollment.telegram_chat_id,
+        studentName: enrollment.student_name_en || "Student",
+      }).catch((err) => {
+        console.error("[verify] Channel invite failed:", err);
       });
     }
 

@@ -119,6 +119,7 @@ export interface Tenant {
   email_on_enroll: boolean;         // default false — send confirmation email on enrollment
   payment_mode: "bank_transfer" | "mmqr";
   mmqr_provider: "abank" | "mmpay";
+  telegram_auto_send_invite: boolean;
   created_at: string;
 }
 
@@ -182,6 +183,10 @@ export interface Enrollment {
   enrolled_at: string;
   messenger_psid: string | null;
   telegram_chat_id: string | null;
+  telegram_link_pending_chat_id: string | null;
+  telegram_phone: string | null;
+  telegram_link_token: string | null;
+  telegram_link_token_expires_at: string | null;
 }
 
 export interface Payment {
@@ -208,6 +213,18 @@ export interface EnrollmentItem {
   quantity: number;
   fee_mmk: number;
   created_at: string;
+}
+
+export interface ClassChannel {
+  id: string;
+  tenant_id: string;
+  intake_id: string;
+  class_id: string;
+  telegram_channel_id: string;
+  telegram_channel_name: string | null;
+  telegram_invite_link: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface BankAccount {

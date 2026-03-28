@@ -4,6 +4,8 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { formatMMK, formatMMKSimple } from "@/lib/utils";
 import QRPaymentModal from "@/components/payments/QRPaymentModal";
+import html2canvas from "html2canvas";
+import { jsPDF } from "jspdf";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CartItem {
@@ -134,6 +136,75 @@ function CopyButton({
         </span>
       )}
     </button>
+  );
+}
+
+// ─── Telegram connect button (generates one-time token) ─────────────────────
+
+function TelegramConnectButton({ enrollmentRef, classLevel }: { enrollmentRef: string; classLevel: string }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [deepLink, setDeepLink] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchLink() {
+      try {
+        const res = await fetch("/api/public/telegram-link-token", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enrollment_ref: enrollmentRef }),
+        });
+        const data = await res.json();
+        if (cancelled) return;
+        if (!res.ok) {
+          setError(data.error || "Something went wrong.");
+          return;
+        }
+        setDeepLink(data.deepLink);
+      } catch {
+        if (!cancelled) setError("Network error. Please try again.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    fetchLink();
+    return () => { cancelled = true; };
+  }, [enrollmentRef]);
+
+  return (
+    <div className="mb-8 rounded-xl border border-sky-200 bg-sky-50 p-4 text-center">
+      <p className="mb-2 text-sm font-medium text-sky-900">
+        To connect {classLevel} channel via Telegram
+      </p>
+      <p className="font-myanmar mb-3 text-xs text-sky-700">
+        {classLevel} channel ကို Telegram မှတဆင့် ချိတ်ဆက်ရန်
+      </p>
+      {loading ? (
+        <span className="inline-flex items-center gap-2 rounded-lg bg-[#0088cc] px-5 py-2.5 text-sm font-semibold text-white opacity-50">
+          <svg className="h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+            <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
+          </svg>
+          Loading...
+        </span>
+      ) : deepLink ? (
+        <a
+          href={deepLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 rounded-lg bg-[#0088cc] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#006daa] transition-colors"
+        >
+          <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
+          </svg>
+          Connect Telegram
+        </a>
+      ) : null}
+      {error && (
+        <p className="mt-2 text-xs text-red-600">{error}</p>
+      )}
+    </div>
   );
 }
 
@@ -671,6 +742,248 @@ function PartialPaymentBanner({ enrollment }: { enrollment: EnrollmentInfo }) {
   );
 }
 
+// ─── Org-aware labels (matches email template) ──────────────────────────────
+
+const ORG_RECEIPT_LABELS: Record<string, { itemLabel: string; feeLabel: string; feeLabelMm: string; enrollLabel: string; enrollLabelMm: string; approvedTitle: string; approvedTitleMm: string; refLabel: string }> = {
+  language_school: {
+    itemLabel: "Class Level", feeLabel: "Fee", feeLabelMm: "ကျောင်းလခ",
+    enrollLabel: "Enrollment", enrollLabelMm: "စာရင်းသွင်းမှု",
+    approvedTitle: "Your Enrollment is Confirmed!", approvedTitleMm: "သင့်စာရင်းသွင်းမှု အတည်ပြုပြီးပါပြီ",
+    refLabel: "Enrollment Reference",
+  },
+  event: {
+    itemLabel: "Ticket", feeLabel: "Price", feeLabelMm: "စျေးနှုန်း",
+    enrollLabel: "Order", enrollLabelMm: "အော်ဒါ",
+    approvedTitle: "Your Order is Confirmed!", approvedTitleMm: "သင့်အော်ဒါ အတည်ပြုပြီးပါပြီ",
+    refLabel: "Order Reference",
+  },
+  training_center: {
+    itemLabel: "Course", feeLabel: "Fee", feeLabelMm: "သင်တန်းကြေး",
+    enrollLabel: "Enrollment", enrollLabelMm: "စာရင်းသွင်းမှု",
+    approvedTitle: "Your Enrollment is Confirmed!", approvedTitleMm: "သင့်စာရင်းသွင်းမှု အတည်ပြုပြီးပါပြီ",
+    refLabel: "Enrollment Reference",
+  },
+};
+
+// ─── Download receipt as PDF ─────────────────────────────────────────────────
+
+function DownloadReceiptButton({
+  enrollment,
+  orgType,
+  totalFee,
+  feeFormatted,
+  isCart,
+}: {
+  enrollment: EnrollmentInfo;
+  orgType: string;
+  totalFee: number;
+  feeFormatted: string;
+  isCart: boolean;
+}) {
+  const receiptRef = useRef<HTMLDivElement>(null);
+  const [generating, setGenerating] = useState(false);
+
+  const l = ORG_RECEIPT_LABELS[orgType] ?? ORG_RECEIPT_LABELS.language_school;
+
+  // Collect images for the receipt
+  const images = isCart
+    ? (enrollment.items ?? []).filter((i) => i.image_url).map((i) => ({ url: i.image_url!, label: i.class_level }))
+    : enrollment.class_image_url
+      ? [{ url: enrollment.class_image_url, label: enrollment.class_level ?? "" }]
+      : [];
+
+  // Build ticket items
+  const qty = enrollment.quantity ?? 1;
+  const ticketItems = isCart && enrollment.items
+    ? enrollment.items.map((i) => ({ label: i.class_level, qty: i.quantity, subtotal: formatMMKSimple(i.subtotal_mmk) }))
+    : [{ label: enrollment.class_level ?? "", qty, subtotal: formatMMKSimple(totalFee) }];
+
+  async function handleDownload() {
+    if (!receiptRef.current || generating) return;
+    setGenerating(true);
+
+    try {
+      // Wait for images to load
+      const imgs = receiptRef.current.querySelectorAll("img");
+      await Promise.all(
+        Array.from(imgs).map(
+          (img) =>
+            new Promise<void>((resolve) => {
+              if (img.complete) return resolve();
+              img.onload = () => resolve();
+              img.onerror = () => resolve();
+            }),
+        ),
+      );
+
+      const canvas = await html2canvas(receiptRef.current, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: "#f5f7fa",
+        logging: false,
+      });
+
+      const imgWidth = 148; // A5 width in mm
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      const pdf = new jsPDF({ unit: "mm", format: [imgWidth, imgHeight + 10] });
+      const imgData = canvas.toDataURL("image/png");
+      pdf.addImage(imgData, "PNG", 0, 5, imgWidth, imgHeight);
+      pdf.save(`receipt-${enrollment.enrollment_ref}.pdf`);
+    } catch (err) {
+      console.error("[pdf] Failed to generate receipt:", err);
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  return (
+    <>
+      {/* Hidden receipt for PDF capture */}
+      <div style={{ position: "absolute", left: "-9999px", top: 0 }}>
+        <div
+          ref={receiptRef}
+          style={{
+            width: "520px",
+            padding: "32px 20px",
+            background: "#f5f7fa",
+            fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+            color: "#1a1a1a",
+          }}
+        >
+          <div style={{ background: "#fff", borderRadius: "12px", overflow: "hidden", boxShadow: "0 1px 3px rgba(0,0,0,0.08)" }}>
+            {/* Green accent bar */}
+            <div style={{ height: "4px", background: "linear-gradient(90deg, #16a34a, #0d9488)" }} />
+
+            <div style={{ padding: "24px 28px 20px" }}>
+              {/* Header */}
+              <div style={{ textAlign: "center", marginBottom: "16px" }}>
+                <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "#16a34a", margin: "0 auto 10px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M5 13l4 4L19 7" />
+                  </svg>
+                </div>
+                <h1 style={{ margin: 0, fontSize: "19px", color: "#1a6b3c", fontWeight: 700 }}>{l.approvedTitle}</h1>
+                {orgType !== "event" && (
+                  <p style={{ margin: "3px 0 0", fontSize: "13px", color: "#6b7280", fontFamily: "'Noto Sans Myanmar', sans-serif" }}>{l.approvedTitleMm}</p>
+                )}
+              </div>
+
+              {/* Reference — hero box */}
+              <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px", padding: "12px", textAlign: "center", margin: "0 0 16px" }}>
+                <p style={{ fontSize: "9px", textTransform: "uppercase", letterSpacing: "1px", color: "#1a6b3c", margin: "0 0 4px", fontWeight: 600 }}>{l.refLabel}</p>
+                <p style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "20px", fontWeight: 700, color: "#1a6b3c", letterSpacing: "1px", margin: 0 }}>{enrollment.enrollment_ref}</p>
+              </div>
+
+              {/* Ticket images */}
+              {images.length > 0 && (
+                <div style={{ margin: "0 0 16px" }}>
+                  {images.length === 1 ? (
+                    <div style={{ border: "1px solid #e5e7eb", borderRadius: "10px", overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={images[0].url}
+                        alt={images[0].label}
+                        crossOrigin="anonymous"
+                        style={{ width: "100%", display: "block" }}
+                      />
+                    </div>
+                  ) : (
+                    <div style={{ display: "grid", gridTemplateColumns: images.length === 2 ? "1fr 1fr" : "1fr 1fr 1fr", gap: "8px" }}>
+                      {images.map((img, i) => (
+                        <div key={i} style={{ border: "1px solid #e5e7eb", borderRadius: "8px", overflow: "hidden", boxShadow: "0 1px 4px rgba(0,0,0,0.06)" }}>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={img.url}
+                            alt={img.label}
+                            crossOrigin="anonymous"
+                            style={{ width: "100%", display: "block" }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Section header */}
+              <p style={{ fontSize: "9px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "1.5px", color: "#9ca3af", margin: "0 0 6px" }}>
+                {orgType === "event" ? "Order Details" : "Details"}
+              </p>
+
+              {/* Detail rows */}
+              <div style={{ margin: "0 0 14px" }}>
+                {/* Name row */}
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f3f4f6", fontSize: "13px" }}>
+                  <span style={{ color: "#6b7280" }}>Name</span>
+                  <span style={{ fontWeight: 600, color: "#1f2937", textAlign: "right" }}>{enrollment.student_name_en}</span>
+                </div>
+
+                {/* Item rows */}
+                {ticketItems.map((item, i) => (
+                  <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f3f4f6", fontSize: "13px" }}>
+                    <span style={{ color: "#6b7280" }}>{i === 0 ? l.itemLabel : ""}</span>
+                    <span style={{ fontWeight: 600, color: "#1f2937", textAlign: "right" }}>
+                      {item.label}{item.qty > 1 ? ` x${item.qty}` : ""}
+                    </span>
+                  </div>
+                ))}
+
+                {/* Date row */}
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", fontSize: "13px" }}>
+                  <span style={{ color: "#6b7280" }}>Date</span>
+                  <span style={{ fontWeight: 600, color: "#1f2937", textAlign: "right" }}>
+                    {enrollment.enrolled_at
+                      ? new Date(enrollment.enrolled_at).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })
+                      : new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })}
+                  </span>
+                </div>
+              </div>
+
+              {/* Total / fee */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#f9fafb", borderRadius: "8px" }}>
+                <span style={{ fontSize: "13px", fontWeight: 600, color: "#6b7280" }}>Total Paid</span>
+                <span style={{ fontSize: "17px", fontWeight: 700, color: "#1a6b3c" }}>{feeFormatted}</span>
+              </div>
+
+            </div>
+          </div>
+
+          {/* Footer */}
+          <div style={{ textAlign: "center", marginTop: "12px", fontSize: "11px", color: "#9ca3af" }}>
+            <p style={{ margin: 0 }}>&copy; {new Date().getFullYear()} Powered by KuuNyi</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Download button */}
+      <div className="mt-4 text-center">
+        <button
+          onClick={handleDownload}
+          disabled={generating}
+          className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:opacity-50"
+        >
+          {generating ? (
+            <>
+              <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+                <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
+              </svg>
+              Generating...
+            </>
+          ) : (
+            <>
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17v3a2 2 0 002 2h14a2 2 0 002-2v-3" />
+              </svg>
+              Download E-Ticket / <span className="font-myanmar">E-Ticket ကိုရယူပါ</span>
+            </>
+          )}
+        </button>
+      </div>
+    </>
+  );
+}
+
 // ─── Main page ───────────────────────────────────────────────────────────────
 
 export default function PaymentInstructionsPage() {
@@ -980,6 +1293,15 @@ export default function PaymentInstructionsPage() {
               </div>
             </div>
           </div>
+
+          {/* ── Download receipt button ─────────────────────────────── */}
+          <DownloadReceiptButton
+            enrollment={enrollment}
+            orgType={orgType}
+            totalFee={totalFee}
+            feeFormatted={feeEn}
+            isCart={isCart}
+          />
         </>
       ) : (
         <>
@@ -1365,28 +1687,10 @@ export default function PaymentInstructionsPage() {
         </div>
       )}
 
-      {/* ── Connect Telegram for updates (hidden for now) ────── */}
-      {/* {enrollment?.telegram_bot_username && (
-        <div className="mb-8 rounded-xl border border-sky-200 bg-sky-50 p-4 text-center">
-          <p className="mb-2 text-sm font-medium text-sky-900">
-            Get updates via Telegram
-          </p>
-          <p className="font-myanmar mb-3 text-xs text-sky-700">
-            Telegram မှတဆင့် အပ်ဒိတ်များ ရယူပါ
-          </p>
-          <a
-            href={`https://t.me/${enrollment.telegram_bot_username}?start=${encodeURIComponent(enrollment.enrollment_ref)}`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 rounded-lg bg-[#0088cc] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#006daa] transition-colors"
-          >
-            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z"/>
-            </svg>
-            Connect Telegram
-          </a>
-        </div>
-      )} */}
+      {/* ── Connect Telegram for updates ────── */}
+      {enrollment?.telegram_bot_username && enrollment.status !== "pending_payment" && (
+        <TelegramConnectButton enrollmentRef={enrollment.enrollment_ref} classLevel={enrollment.class_level ?? "Class"} />
+      )}
 
     </div>
   );

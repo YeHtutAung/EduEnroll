@@ -16,13 +16,14 @@ export async function GET() {
   const supabase = createAdminClient();
   const { data } = (await supabase
     .from("tenants")
-    .select("telegram_enabled, telegram_bot_username, telegram_webhook_secret")
+    .select("telegram_enabled, telegram_bot_username, telegram_webhook_secret, telegram_auto_send_invite")
     .eq("id", tenantId)
     .single()) as {
     data: {
       telegram_enabled: boolean;
       telegram_bot_username: string | null;
       telegram_webhook_secret: string | null;
+      telegram_auto_send_invite: boolean;
     } | null;
     error: unknown;
   };
@@ -32,6 +33,7 @@ export async function GET() {
     botUsername: data?.telegram_bot_username ?? null,
     connected: !!data?.telegram_bot_username,
     webhookConfigured: !!data?.telegram_webhook_secret,
+    autoSendInvite: data?.telegram_auto_send_invite ?? false,
   });
 }
 
@@ -44,7 +46,7 @@ export async function PATCH(request: NextRequest) {
   if (auth instanceof NextResponse) return auth;
   const { tenantId } = auth;
 
-  let body: { botToken?: string; enabled?: boolean; disconnect?: boolean };
+  let body: { botToken?: string; enabled?: boolean; disconnect?: boolean; autoSendInvite?: boolean };
   try {
     body = await request.json();
   } catch {
@@ -138,6 +140,16 @@ export async function PATCH(request: NextRequest) {
       .eq("id", tenantId);
 
     return NextResponse.json({ success: true, enabled: body.enabled });
+  }
+
+  // ── Toggle auto-send invite (language_school only) ─────
+  if (body.autoSendInvite !== undefined) {
+    await supabase
+      .from("tenants")
+      .update({ telegram_auto_send_invite: body.autoSendInvite } as never)
+      .eq("id", tenantId);
+
+    return NextResponse.json({ success: true, autoSendInvite: body.autoSendInvite });
   }
 
   return NextResponse.json({ error: "No action specified." }, { status: 400 });

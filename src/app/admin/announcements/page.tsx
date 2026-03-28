@@ -57,6 +57,12 @@ export default function AnnouncementsPage() {
   const [message, setMessage] = useState("");
   const [sending, setSending] = useState(false);
 
+  // ── Telegram dispatch ────────────────────────────────────────────────────
+  const [dispatchTelegram, setDispatchTelegram] = useState(false);
+  const [tgConnected, setTgConnected] = useState(false);
+  const [recipientCount, setRecipientCount] = useState<number | null>(null);
+  const [recipientLoading, setRecipientLoading] = useState(false);
+
   // ── History ───────────────────────────────────────────────────────────────
   const [history, setHistory] = useState<AnnouncementRow[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
@@ -64,7 +70,7 @@ export default function AnnouncementsPage() {
   const sendingRef = useRef(false);
   const messageRef = useRef<HTMLTextAreaElement>(null);
 
-  // ── Load intakes on mount ─────────────────────────────────────────────────
+  // ── Load intakes + Telegram status on mount ──────────────────────────────
   useEffect(() => {
     fetch("/api/intakes")
       .then((r) => r.json())
@@ -76,6 +82,13 @@ export default function AnnouncementsPage() {
       })
       .catch(() => toast.error("Failed to load intakes."))
       .finally(() => setIntakesLoading(false));
+
+    fetch("/api/telegram/settings")
+      .then((r) => r.json())
+      .then((data: { connected?: boolean; enabled?: boolean }) => {
+        setTgConnected(!!(data.connected && data.enabled));
+      })
+      .catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Load history on mount ─────────────────────────────────────────────────
@@ -108,6 +121,22 @@ export default function AnnouncementsPage() {
       .finally(() => setClassesLoading(false));
   }, [selectedIntakeId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Fetch Telegram recipient count ───────────────────────────────────────
+  useEffect(() => {
+    if (!dispatchTelegram || !selectedIntakeId) {
+      setRecipientCount(null);
+      return;
+    }
+    setRecipientLoading(true);
+    const params = new URLSearchParams({ intake_id: selectedIntakeId });
+    if (selectedLevel) params.set("class_level", selectedLevel);
+    fetch(`/api/admin/announcements/recipients?${params}`)
+      .then((r) => r.json())
+      .then((data: { count: number }) => setRecipientCount(data.count))
+      .catch(() => setRecipientCount(null))
+      .finally(() => setRecipientLoading(false));
+  }, [dispatchTelegram, selectedIntakeId, selectedLevel]);
+
   // ── Send ──────────────────────────────────────────────────────────────────
   async function handleSend() {
     if (sendingRef.current) return;
@@ -127,6 +156,7 @@ export default function AnnouncementsPage() {
       const body: Record<string, unknown> = {
         intake_id: selectedIntakeId,
         message: message.trim(),
+        dispatch_telegram: dispatchTelegram,
       };
       if (selectedLevel) body.class_level = selectedLevel;
 
@@ -143,9 +173,17 @@ export default function AnnouncementsPage() {
       }
 
       const created = (await res.json()) as AnnouncementRow;
-      toast.success("Announcement saved successfully.");
+      if (created.dispatched_at) {
+        const total = created.telegram_sent_count + created.telegram_failed_count;
+        toast.success(
+          `Announcement sent to ${created.telegram_sent_count}/${total} student${total !== 1 ? "s" : ""} via Telegram.`,
+        );
+      } else {
+        toast.success("Announcement saved successfully.");
+      }
       setMessage("");
       setSelectedLevel("");
+      setDispatchTelegram(false);
       // Prepend to history
       setHistory((prev) => [created, ...prev]);
     } catch {
@@ -271,12 +309,48 @@ export default function AnnouncementsPage() {
             </div>
           </div>
 
-          {/* Note about dispatch */}
-          <div className="flex items-start gap-2.5 px-3.5 py-3 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-700">
-            <span className="mt-0.5 shrink-0">ℹ️</span>
-            <span>
-              <strong>Sprint 4 note:</strong> Announcements are saved to history now. Email and SMS dispatch will be wired in the next sprint.
-            </span>
+          {/* Dispatch channel */}
+          <div className="space-y-2">
+            <label className="block text-xs font-medium text-gray-600">
+              Dispatch Channel
+            </label>
+            {tgConnected ? (
+              <label className="flex items-center gap-3 px-3.5 py-3 rounded-lg border border-gray-200 hover:border-sky-300 transition-colors cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={dispatchTelegram}
+                  onChange={(e) => setDispatchTelegram(e.target.checked)}
+                  disabled={sending}
+                  className="h-4 w-4 rounded border-gray-300 text-sky-500 focus:ring-sky-400"
+                />
+                <svg className="w-4 h-4 text-sky-500 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
+                </svg>
+                <span className="text-sm text-gray-700 font-medium">Send via Telegram</span>
+                {dispatchTelegram && selectedIntakeId && (
+                  <span className="ml-auto text-xs text-gray-400">
+                    {recipientLoading
+                      ? "counting…"
+                      : recipientCount !== null
+                        ? `${recipientCount} recipient${recipientCount !== 1 ? "s" : ""}`
+                        : ""}
+                  </span>
+                )}
+              </label>
+            ) : (
+              <div className="flex items-start gap-2.5 px-3.5 py-3 rounded-lg bg-gray-50 border border-gray-200 text-xs text-gray-500">
+                <svg className="w-4 h-4 text-gray-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
+                </svg>
+                <span>
+                  Telegram bot not connected.{" "}
+                  <a href="/admin/settings" className="text-[#1a3f8a] hover:underline font-medium">
+                    Connect in Settings
+                  </a>{" "}
+                  to send announcements via Telegram.
+                </span>
+              </div>
+            )}
           </div>
 
           {/* Send button */}
@@ -289,12 +363,12 @@ export default function AnnouncementsPage() {
               {sending ? (
                 <>
                   <LoadingSpinner size="sm" />
-                  Saving…
+                  {dispatchTelegram ? "Sending…" : "Saving…"}
                 </>
               ) : (
                 <>
-                  <span>📤</span>
-                  Save Announcement
+                  <span>{dispatchTelegram ? "📤" : "💾"}</span>
+                  {dispatchTelegram ? "Send Announcement" : "Save Announcement"}
                 </>
               )}
             </button>
@@ -350,6 +424,9 @@ export default function AnnouncementsPage() {
                   <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide w-36">
                     Sent by
                   </th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide w-32">
+                    Delivery
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -400,6 +477,20 @@ function HistoryRow({ row }: { row: AnnouncementRow }) {
           {row.sent_by_name ?? "—"}
         </span>
       </td>
+      <td className="px-4 py-3.5 align-top">
+        {row.dispatched_at ? (
+          <span className="inline-flex items-center gap-1.5 text-xs">
+            <svg className="w-3.5 h-3.5 text-sky-500 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
+            </svg>
+            <span className="text-emerald-700 font-medium">
+              {row.telegram_sent_count}/{row.telegram_sent_count + row.telegram_failed_count}
+            </span>
+          </span>
+        ) : (
+          <span className="text-xs text-gray-400">Saved only</span>
+        )}
+      </td>
     </tr>
   );
 }
@@ -418,6 +509,7 @@ function HistorySkeleton() {
             <div className="h-4 bg-gray-100 rounded w-3/4" />
           </div>
           <div className="h-4 w-24 bg-gray-100 rounded" />
+          <div className="h-4 w-20 bg-gray-100 rounded" />
         </div>
       ))}
     </div>

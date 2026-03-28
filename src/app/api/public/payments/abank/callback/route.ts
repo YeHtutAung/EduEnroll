@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import abank from "@/lib/abank";
 import { sendEmail, enrollmentApprovedEmail } from "@/lib/email";
 import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
+import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
 
 // ─── GET /api/public/payments/abank/callback ────────────────────────────────
 // ABank calls this URL (GET) after payment completes.
@@ -170,6 +171,21 @@ export async function GET(request: NextRequest) {
         notifyTasks.push(
           sendEmail({ to: enrollEmail, ...emailData }).catch((err) => {
             console.error("[abank-callback] Approval email failed:", err);
+          }),
+        );
+      }
+
+      // Channel invite (language_school only, gated inside)
+      if (enrollment.telegram_chat_id) {
+        notifyTasks.push(
+          sendChannelInviteIfEligible({
+            tenantId: enrollment.tenant_id,
+            enrollmentId: payment.enrollment_id,
+            classId: enrollment.class_id,
+            telegramChatId: enrollment.telegram_chat_id,
+            studentName: enrollment.student_name_en || "Student",
+          }).catch((err) => {
+            console.error("[abank-callback] Channel invite failed:", err);
           }),
         );
       }

@@ -10,7 +10,7 @@ import { formatMMKSimple } from "@/lib/utils";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
 import { useRole } from "@/components/admin/RoleContext";
 import { createClient } from "@/lib/supabase/client";
-import type { Class, ClassMode, ClassStatus, Intake, IntakeStatus } from "@/types/database";
+import type { Class, ClassChannel, ClassMode, ClassStatus, Intake, IntakeStatus } from "@/types/database";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -834,29 +834,106 @@ export default function IntakeDetailPage({
   const [editYear, setEditYear] = useState(new Date().getFullYear());
   const [savingIntake, setSavingIntake] = useState(false);
 
+  // ── Channel management (language_school only) ─────────────────────────────
+  const isLanguageSchool = tl.orgType === "language_school";
+  const [channelMap, setChannelMap] = useState<Record<string, ClassChannel>>({});
+  const [tgConnected, setTgConnected] = useState(false);
+  const [linkingChannel, setLinkingChannel] = useState<Class | null>(null);
+  const [channelIdInput, setChannelIdInput] = useState("");
+  const [channelSaving, setChannelSaving] = useState(false);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [iRes, cRes] = await Promise.all([
+      const fetches: Promise<Response>[] = [
         fetch(`/api/intakes/${params.id}`),
         fetch(`/api/intakes/${params.id}/classes`),
-      ]);
+      ];
+      // Fetch channels + telegram status for language schools
+      if (isLanguageSchool) {
+        fetches.push(
+          fetch(`/api/admin/channels?intake_id=${params.id}`),
+          fetch("/api/telegram/settings"),
+        );
+      }
+      const results = await Promise.all(fetches);
+      const [iRes, cRes] = results;
       if (!iRes.ok) throw new Error(`Failed to fetch intake (${iRes.status})`);
       if (!cRes.ok) throw new Error(`Failed to fetch classes (${cRes.status})`);
       const [intakeData, classesData] = await Promise.all([iRes.json(), cRes.json()]);
       setIntake(intakeData as Intake);
       setClasses(classesData as Class[]);
+
+      if (isLanguageSchool && results[2] && results[3]) {
+        if (results[2].ok) {
+          const channelData = await results[2].json();
+          const map: Record<string, ClassChannel> = {};
+          for (const ch of channelData.channels ?? []) {
+            map[ch.class_id] = ch as ClassChannel;
+          }
+          setChannelMap(map);
+        }
+        if (results[3].ok) {
+          const tgData = await results[3].json();
+          setTgConnected(tgData.connected);
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load data.");
     } finally {
       setLoading(false);
     }
-  }, [params.id]);
+  }, [params.id, isLanguageSchool]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // ── Channel link/unlink ─────────────────────────────────────────────────────
+
+  async function handleLinkChannel() {
+    if (!linkingChannel || !channelIdInput.trim()) return;
+    setChannelSaving(true);
+    try {
+      const res = await fetch("/api/admin/channels", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          class_id: linkingChannel.id,
+          intake_id: params.id,
+          telegram_channel_id: channelIdInput.trim(),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `${res.status}`);
+      setChannelMap((prev) => ({ ...prev, [linkingChannel.id]: data.channel as ClassChannel }));
+      setLinkingChannel(null);
+      setChannelIdInput("");
+      toast.success(data.message ?? "Channel linked!");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to link channel.");
+    } finally {
+      setChannelSaving(false);
+    }
+  }
+
+  async function handleUnlinkChannel(classId: string) {
+    const ch = channelMap[classId];
+    if (!ch) return;
+    try {
+      const res = await fetch(`/api/admin/channels/${ch.id}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`${res.status}`);
+      setChannelMap((prev) => {
+        const next = { ...prev };
+        delete next[classId];
+        return next;
+      });
+      toast.success("Channel unlinked.");
+    } catch {
+      toast.error("Failed to unlink channel.");
+    }
+  }
 
   // ── Add All 5 Classes ───────────────────────────────────────────────────────
 
@@ -1223,6 +1300,9 @@ export default function IntakeDetailPage({
                 <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">{tl.seat}s</th>
                 <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Enrollment Window</th>
                 <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+                {isLanguageSchool && tgConnected && (
+                  <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Channel</th>
+                )}
                 <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
@@ -1231,7 +1311,7 @@ export default function IntakeDetailPage({
                 Array.from({ length: 3 }).map((_, i) => <ClassRowSkeleton key={i} />)
               ) : classes.length === 0 ? (
                 <tr>
-                  <td colSpan={tl.orgType === "event" ? 6 : 7} className="px-5 py-12 text-center text-sm text-gray-400">
+                  <td colSpan={tl.orgType === "event" ? 6 : (isLanguageSchool && tgConnected ? 8 : 7)} className="px-5 py-12 text-center text-sm text-gray-400">
                     No {tl.class.toLowerCase()}s yet.{" "}
                     {tl.orgType === "language_school"
                       ? <>Use &ldquo;Add Default Classes (N5–N1)&rdquo; or &ldquo;+ Add Custom {tl.class}&rdquo; to get started.</>
@@ -1305,6 +1385,45 @@ export default function IntakeDetailPage({
                         <StatusBadge status={cls.status} />
                       </td>
 
+                      {/* Channel (language_school only) */}
+                      {isLanguageSchool && tgConnected && (
+                        <td className="px-5 py-4">
+                          {channelMap[cls.id] ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2.5 py-0.5 text-xs font-medium text-sky-700">
+                                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="currentColor">
+                                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                                </svg>
+                                {channelMap[cls.id].telegram_channel_name ?? "Linked"}
+                              </span>
+                              {isOwner && (
+                                <button
+                                  onClick={() => handleUnlinkChannel(cls.id)}
+                                  title="Unlink channel"
+                                  className="p-1 text-gray-400 hover:text-red-500 transition-colors"
+                                >
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                  </svg>
+                                </button>
+                              )}
+                            </div>
+                          ) : isOwner ? (
+                            <button
+                              onClick={() => { setLinkingChannel(cls); setChannelIdInput(""); }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 border border-dashed border-sky-300 text-sky-600 text-xs font-medium rounded-lg hover:bg-sky-50 transition-colors"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                              </svg>
+                              Link
+                            </button>
+                          ) : (
+                            <span className="text-xs text-gray-300 italic">Not linked</span>
+                          )}
+                        </td>
+                      )}
+
                       {/* Actions */}
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-1.5">
@@ -1376,6 +1495,90 @@ export default function IntakeDetailPage({
           }}
           showEventFields={tl.orgType !== "language_school"}
         />
+      )}
+
+      {/* Link Channel modal */}
+      {linkingChannel && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setLinkingChannel(null)}
+            aria-hidden="true"
+          />
+          <div className="relative w-full max-w-md bg-white rounded-2xl shadow-xl p-6">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 rounded-xl bg-[#0088cc] flex items-center justify-center text-white shrink-0">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+                </svg>
+              </div>
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Link Telegram Channel</h2>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {linkingChannel.level} — {intake?.name} {intake?.year}
+                </p>
+              </div>
+              <button
+                onClick={() => setLinkingChannel(null)}
+                className="ml-auto p-1.5 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="rounded-xl bg-sky-50 px-4 py-3">
+                <p className="text-xs text-sky-700">
+                  <span className="font-medium">Before linking:</span> Add your bot as an
+                  admin to the private channel with &ldquo;Invite Users via Link&rdquo;
+                  permission, and enable &ldquo;Approve New Members&rdquo; in channel settings.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Channel ID (numeric)
+                </label>
+                <input
+                  type="text"
+                  value={channelIdInput}
+                  onChange={(e) => setChannelIdInput(e.target.value)}
+                  placeholder="e.g. -1001234567890"
+                  className="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#0088cc] focus:border-transparent"
+                />
+                <div className="mt-2 rounded-lg bg-gray-50 p-3 space-y-1.5">
+                  <p className="text-xs font-medium text-gray-600">How to find Channel ID:</p>
+                  <ol className="text-xs text-gray-500 list-decimal list-inside space-y-1">
+                    <li>Open your private channel in Telegram</li>
+                    <li>Forward any message to <span className="font-mono text-[#0088cc]">@RawDataBot</span></li>
+                    <li>Copy the number that starts with <span className="font-mono">-100</span></li>
+                  </ol>
+                  <p className="text-xs text-red-400 mt-1">
+                    Do NOT paste invite links (t.me/+xxx) — only numeric IDs work.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  onClick={() => setLinkingChannel(null)}
+                  className="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 rounded-xl transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleLinkChannel}
+                  disabled={channelSaving || !channelIdInput.trim()}
+                  className="px-4 py-2 text-sm font-medium text-white bg-[#0088cc] rounded-xl hover:bg-[#006daa] disabled:opacity-50 transition-colors"
+                >
+                  {channelSaving ? "Linking…" : "Link Channel"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Edit Intake modal */}
