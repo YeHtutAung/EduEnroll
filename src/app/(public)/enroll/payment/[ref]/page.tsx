@@ -898,11 +898,6 @@ function DownloadReceiptButton({
                             crossOrigin="anonymous"
                             style={{ width: "100%", display: "block", objectFit: "contain", maxHeight: "180px", background: "#f9fafb" }}
                           />
-                          <div style={{ padding: "5px 4px", background: "#f9fafb", borderTop: "1px solid #f3f4f6", textAlign: "center", minHeight: "22px" }}>
-                            <span style={{ fontSize: "9px", fontWeight: 600, color: "#374151", lineHeight: "1.2", display: "block", wordBreak: "break-word" }}>
-                              {img.label}
-                            </span>
-                          </div>
                         </div>
                       ))}
                     </div>
@@ -945,18 +940,11 @@ function DownloadReceiptButton({
               </div>
 
               {/* Total / fee */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#f9fafb", borderRadius: "8px", margin: "0 0 14px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#f9fafb", borderRadius: "8px" }}>
                 <span style={{ fontSize: "13px", fontWeight: 600, color: "#6b7280" }}>Total Paid</span>
                 <span style={{ fontSize: "17px", fontWeight: 700, color: "#1a6b3c" }}>{feeFormatted}</span>
               </div>
 
-              {/* Status badge */}
-              <div style={{ textAlign: "center" }}>
-                <span style={{ display: "inline-block", padding: "6px 18px", background: "#dcfce7", color: "#166534", borderRadius: "20px", fontWeight: 600, fontSize: "11px", textAlign: "center" }}>
-                  {l.enrollLabel} Confirmed
-                  {orgType !== "event" && <span style={{ fontFamily: "'Noto Sans Myanmar', sans-serif" }}> / {l.enrollLabelMm} အတည်ပြုပြီး</span>}
-                </span>
-              </div>
             </div>
           </div>
 
