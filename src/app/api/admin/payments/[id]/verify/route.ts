@@ -412,8 +412,10 @@ export async function PATCH(
 
   if (ee) return NextResponse.json({ error: (ee as Error).message }, { status: 500 });
 
-  // Restore seats (best-effort)
-  await restoreSeats();
+  // Restore seats only if enrollment wasn't already rejected (prevents double-restore)
+  if (enrollment.status !== "rejected") {
+    await restoreSeats();
+  }
 
   // Send notifications (best-effort, non-blocking)
   const { classLevel: rejClassLevel, statusUrl: rejStatusUrl, paymentUrl: rejPaymentUrl } = await getClassAndUrls();
