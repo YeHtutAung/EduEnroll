@@ -203,12 +203,9 @@ export default function RegisterPage() {
             <Image src="/kuunyi-logo.jpeg" alt="KuuNyi" width={32} height={32} className="rounded-lg shrink-0" />
             <span className="text-base font-bold text-slate-900">KuuNyi</span>
           </Link>
-          <Link
-            href="/login"
-            className="text-sm font-medium text-slate-600 hover:text-slate-900 transition-colors"
-          >
+          <span className="text-sm font-medium text-slate-400 cursor-not-allowed">
             Sign In
-          </Link>
+          </span>
         </div>
       </header>
 
@@ -222,7 +219,21 @@ export default function RegisterPage() {
         </div>
 
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 sm:p-8">
-          <form onSubmit={handleSubmit} noValidate className="space-y-5">
+          <div className="text-center py-8">
+            <span className="inline-flex items-center justify-center gap-2 px-6 py-3 rounded-lg bg-[#6d28d9]/50 text-white font-semibold cursor-not-allowed select-none text-sm">
+              <span>Coming Soon</span>
+              <span className="font-myanmar font-normal opacity-90">/ မကြာမီ လာမည်</span>
+            </span>
+            <p className="mt-4 text-sm text-slate-500">
+              Registration is not yet available.
+            </p>
+            <p className="text-sm font-myanmar text-slate-400 mt-1">
+              မှတ်ပုံတင်ခြင်း မကြာမီ ဖွင့်လှစ်ပါမည်။
+            </p>
+          </div>
+
+          {/* Registration form — hidden until launch */}
+          <form onSubmit={handleSubmit} noValidate className="space-y-5 hidden">
             {/* Organization Name English */}
             <div>
               <label htmlFor="schoolNameEn" className="block text-sm font-medium text-slate-700">
@@ -421,11 +432,9 @@ export default function RegisterPage() {
             </button>
           </form>
 
-          <p className="mt-5 text-center text-sm text-slate-500">
+          <p className="mt-5 text-center text-sm text-slate-400">
             Already have an account?{" "}
-            <Link href="/login" className="text-[#6d28d9] font-medium hover:underline">
-              Sign In
-            </Link>
+            <span className="text-slate-400 cursor-not-allowed">Sign In</span>
           </p>
         </div>
 
