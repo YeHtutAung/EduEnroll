@@ -3,7 +3,7 @@ import { requireAuth } from "@/lib/api";
 import type { Class, EnrollmentStatus } from "@/types/database";
 
 type EnrollmentRow = { status: EnrollmentStatus };
-type PaymentRow    = { status: string; amount_mmk: number };
+type PaymentRow    = { amount_mmk: number };
 type ClassRow      = Pick<Class, "level" | "seat_remaining" | "seat_total">;
 
 // ─── GET /api/admin/stats ─────────────────────────────────────────────────────
@@ -31,8 +31,10 @@ export async function GET() {
 
     supabase
       .from("payments")
-      .select("status, amount_mmk")
-      .eq("tenant_id", tenantId) as unknown as Promise<{ data: PaymentRow[] | null; error: unknown }>,
+      .select("amount_mmk")
+      .eq("tenant_id", tenantId)
+      .eq("status", "verified")
+      .limit(10000) as unknown as Promise<{ data: PaymentRow[] | null; error: unknown }>,
 
     supabase
       .from("classes")
@@ -61,7 +63,6 @@ export async function GET() {
   const payment_submitted_count = enrollments.filter((e) => e.status === "payment_submitted").length;
 
   const total_revenue_mmk = payments
-    .filter((p) => p.status === "verified")
     .reduce((sum, p) => sum + (p.amount_mmk ?? 0), 0);
 
   const seats_by_class: { level: string; seat_remaining: number; seat_total: number }[] =
