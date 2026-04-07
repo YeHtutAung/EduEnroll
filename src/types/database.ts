@@ -199,6 +199,7 @@ export interface Payment {
   bank_reference: string | null;
   admin_note: string | null;
   received_amount_mmk: number | null;
+  payer_institution: string | null;
   status: PaymentStatus;
   verified_by: string | null;   // references users.id
   verified_at: string | null;
