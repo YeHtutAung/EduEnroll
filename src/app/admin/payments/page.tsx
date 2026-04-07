@@ -740,6 +740,11 @@ function ReviewModal({
                     {formatMMKSimple(payment.amount_mmk)}
                   </span>
                 </InfoRow>
+                {payment.payer_institution && (
+                  <InfoRow label="Paid Via">
+                    <span className="text-white/90 font-medium">{payment.payer_institution}</span>
+                  </InfoRow>
+                )}
                 {payment.bank_reference && (
                   <InfoRow label="Bank Reference">
                     <code className="text-sm text-white/70">{payment.bank_reference}</code>

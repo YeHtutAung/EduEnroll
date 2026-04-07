@@ -59,6 +59,7 @@ export interface EnquiryData {
   orderId?: string;
   amount?: number;
   transactionId?: string;
+  institutionName?: string;
   [key: string]: unknown;
 }
 

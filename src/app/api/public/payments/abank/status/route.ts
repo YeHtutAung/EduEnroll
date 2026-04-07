@@ -65,6 +65,7 @@ export async function GET(request: NextRequest) {
           status: "verified",
           paid_at: new Date().toISOString(),
           bank_reference: txnData.transactionId ?? null,
+          payer_institution: txnData.institutionName ?? null,
         } as never)
         .eq("id", payment.id);
 

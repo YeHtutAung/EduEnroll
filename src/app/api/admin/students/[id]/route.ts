@@ -151,8 +151,9 @@ export async function GET(
           id:               payment.id,
           status:           payment.status,
           amount_mmk:       payment.amount_mmk,
-          bank_reference:   payment.bank_reference ?? null,
-          submitted_at:     payment.created_at,
+          bank_reference:      payment.bank_reference ?? null,
+          payer_institution:   payment.payer_institution ?? null,
+          submitted_at:        payment.created_at,
           verified_at:      payment.verified_at ?? null,
           proof_signed_url,
         }
