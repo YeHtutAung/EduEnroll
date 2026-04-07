@@ -59,6 +59,7 @@ interface StudentDetail {
     status: PaymentStatus;
     amount_mmk: number;
     bank_reference: string | null;
+    payer_institution: string | null;
     submitted_at: string;
     verified_at: string | null;
     proof_signed_url: string | null;
@@ -411,6 +412,11 @@ function StudentDetailModal({
                         <p className="text-gray-500">
                           Amount: <span className="font-medium text-gray-800">{formatMMKSimple(detail.payment.amount_mmk)}</span>
                         </p>
+                        {detail.payment.payer_institution && (
+                          <p className="text-gray-500">
+                            Paid via: <span className="font-medium text-gray-800">{detail.payment.payer_institution}</span>
+                          </p>
+                        )}
                         {detail.payment.bank_reference && (
                           <p className="text-gray-500">
                             Ref: <code className="text-xs">{detail.payment.bank_reference}</code>
