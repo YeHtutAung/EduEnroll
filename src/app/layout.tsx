@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import { Noto_Sans, Noto_Sans_Myanmar, JetBrains_Mono } from "next/font/google";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { extractSubdomainFromHost } from "@/lib/tenant";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 const notoSans = Noto_Sans({
@@ -79,6 +80,7 @@ export default function RootLayout({
         className={`${notoSans.variable} ${notoSansMyanmar.variable} ${jetBrainsMono.variable} font-sans antialiased`}
       >
         {children}
+        <Analytics />
       </body>
     </html>
   );
