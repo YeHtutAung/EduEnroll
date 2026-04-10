@@ -80,7 +80,7 @@ export async function POST(
     query = query.eq("class_level", announcement.class_level);
   }
 
-  const { data: enrollments } = (await query) as {
+  const { data: enrollments } = (await query.limit(10000)) as {
     data: { telegram_chat_id: string }[] | null;
     error: unknown;
   };
@@ -113,23 +113,25 @@ export async function POST(
   let sent = 0;
   let failed = 0;
 
-  for (const chatId of uniqueChatIds) {
-    try {
-      const res = await fetch(
-        `https://api.telegram.org/bot${botToken}/sendMessage`,
-        {
+  // Send in parallel batches of 25 to stay within Telegram's ~30 msg/s rate limit
+  const BATCH_SIZE = 25;
+  for (let i = 0; i < uniqueChatIds.length; i += BATCH_SIZE) {
+    const batch = uniqueChatIds.slice(i, i + BATCH_SIZE);
+    const results = await Promise.allSettled(
+      batch.map((chatId) =>
+        fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML" }),
-        },
-      );
-      if (res.ok) {
+        }),
+      ),
+    );
+    for (const result of results) {
+      if (result.status === "fulfilled" && result.value.ok) {
         sent++;
       } else {
         failed++;
       }
-    } catch {
-      failed++;
     }
   }
 
