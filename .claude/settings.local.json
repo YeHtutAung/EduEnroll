@@ -5,7 +5,16 @@
       "Bash(ls:*)",
       "Bash(cat:*)",
       "Bash(npm install:*)",
-      "Bash(ls C:\\\\YHA\\\\006_Claude_Workspace\\\\EduEnroll\\\\src\\\\app\\\\\\(public\\)\\\\enroll\\\\[slug]:*)"
+      "Bash(ls C:\\\\YHA\\\\006_Claude_Workspace\\\\EduEnroll\\\\src\\\\app\\\\\\(public\\)\\\\enroll\\\\[slug]:*)",
+      "Bash(cd \"C:/YHA/006_Claude_Workspace/EduEnroll\" && npx supabase db push 2>&1)",
+      "Bash(cd \"C:/YHA/006_Claude_Workspace/EduEnroll\" && npx supabase link --project-ref fnfvwzwrdsnmwxunciti 2>&1)",
+      "Bash(cd \"C:/YHA/006_Claude_Workspace/EduEnroll\" && npx tsc --noEmit --pretty 2>&1 | head -50)",
+      "Bash(cd \"C:/YHA/006_Claude_Workspace/EduEnroll\" && npx tsc --noEmit --pretty 2>&1 | head -60)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:docs.myanmyanpay.com)",
+      "Bash(npx supabase:*)",
+      "Bash(npx tsc:*)",
+      "Bash(wc -l /c/YHA/006_Claude_Workspace/EduEnroll/src/app/admin/intakes/\\\\\\\\[id\\\\\\\\]/page.tsx)"
     ]
   }
 }
