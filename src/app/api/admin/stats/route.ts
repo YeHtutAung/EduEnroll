@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api";
-import type { Class, EnrollmentStatus } from "@/types/database";
+import type { Class } from "@/types/database";
 
-type EnrollmentRow = { status: EnrollmentStatus };
-type PaymentRow    = { status: string; amount_mmk: number };
-type ClassRow      = Pick<Class, "level" | "seat_remaining" | "seat_total">;
+type PaymentRow = { amount_mmk: number };
+type ClassRow   = Pick<Class, "level" | "seat_remaining" | "seat_total">;
 
 // ─── GET /api/admin/stats ─────────────────────────────────────────────────────
 // Dashboard statistics for the authenticated admin's tenant.
@@ -22,27 +21,50 @@ export async function GET() {
   if (auth instanceof NextResponse) return auth;
   const { supabase, tenantId } = auth;
 
-  // Fetch all three datasets in parallel
-  const [enrollmentsRes, paymentsRes, classesRes] = await Promise.all([
-    supabase
-      .from("enrollments")
-      .select("status")
-      .eq("tenant_id", tenantId) as unknown as Promise<{ data: EnrollmentRow[] | null; error: unknown }>,
+  // Use COUNT queries for enrollment status — avoids the 1000-row PostgREST default limit
+  const [totalRes, confirmedRes, pendingRes, submittedRes, paymentsRes, classesRes] =
+    await Promise.all([
+      supabase
+        .from("enrollments")
+        .select("*", { count: "exact", head: true })
+        .eq("tenant_id", tenantId),
 
-    supabase
-      .from("payments")
-      .select("status, amount_mmk")
-      .eq("tenant_id", tenantId) as unknown as Promise<{ data: PaymentRow[] | null; error: unknown }>,
+      supabase
+        .from("enrollments")
+        .select("*", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .eq("status", "confirmed"),
 
-    supabase
-      .from("classes")
-      .select("level, seat_remaining, seat_total")
-      .eq("tenant_id", tenantId)
-      .order("level", { ascending: true }) as unknown as Promise<{ data: ClassRow[] | null; error: unknown }>,
-  ]);
+      supabase
+        .from("enrollments")
+        .select("*", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .eq("status", "pending_payment"),
 
-  if (enrollmentsRes.error) {
-    return NextResponse.json({ error: (enrollmentsRes.error as Error).message }, { status: 500 });
+      supabase
+        .from("enrollments")
+        .select("*", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .eq("status", "payment_submitted"),
+
+      supabase
+        .from("payments")
+        .select("amount_mmk")
+        .eq("tenant_id", tenantId)
+        .eq("status", "verified")
+        .limit(10000) as unknown as Promise<{ data: PaymentRow[] | null; error: unknown }>,
+
+      supabase
+        .from("classes")
+        .select("level, seat_remaining, seat_total")
+        .eq("tenant_id", tenantId)
+        .order("level", { ascending: true }) as unknown as Promise<{ data: ClassRow[] | null; error: unknown }>,
+    ]);
+
+  for (const res of [totalRes, confirmedRes, pendingRes, submittedRes]) {
+    if (res.error) {
+      return NextResponse.json({ error: (res.error as Error).message }, { status: 500 });
+    }
   }
   if (paymentsRes.error) {
     return NextResponse.json({ error: (paymentsRes.error as Error).message }, { status: 500 });
@@ -51,18 +73,10 @@ export async function GET() {
     return NextResponse.json({ error: (classesRes.error as Error).message }, { status: 500 });
   }
 
-  const enrollments = enrollmentsRes.data ?? [];
-  const payments    = paymentsRes.data ?? [];
-  const classes     = classesRes.data ?? [];
+  const payments = paymentsRes.data ?? [];
+  const classes  = classesRes.data ?? [];
 
-  const total_enrollments       = enrollments.length;
-  const confirmed_count         = enrollments.filter((e) => e.status === "confirmed").length;
-  const pending_payment_count   = enrollments.filter((e) => e.status === "pending_payment").length;
-  const payment_submitted_count = enrollments.filter((e) => e.status === "payment_submitted").length;
-
-  const total_revenue_mmk = payments
-    .filter((p) => p.status === "verified")
-    .reduce((sum, p) => sum + (p.amount_mmk ?? 0), 0);
+  const total_revenue_mmk = payments.reduce((sum, p) => sum + (p.amount_mmk ?? 0), 0);
 
   const seats_by_class: { level: string; seat_remaining: number; seat_total: number }[] =
     classes.map((c) => ({
@@ -72,10 +86,10 @@ export async function GET() {
     }));
 
   return NextResponse.json({
-    total_enrollments,
-    confirmed_count,
-    pending_payment_count,
-    payment_submitted_count,
+    total_enrollments:       totalRes.count ?? 0,
+    confirmed_count:         confirmedRes.count ?? 0,
+    pending_payment_count:   pendingRes.count ?? 0,
+    payment_submitted_count: submittedRes.count ?? 0,
     total_revenue_mmk,
     seats_by_class,
   });
