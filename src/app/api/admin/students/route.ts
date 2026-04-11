@@ -137,7 +137,7 @@ export async function GET(request: NextRequest) {
   // Free-text search: name (EN) OR phone OR telegram_phone OR form_data values
   if (search && search.trim() !== "") {
     const term = search.trim();
-    query = query.or(`student_name_en.ilike.%${term}%,phone.ilike.%${term}%,telegram_phone.ilike.%${term}%,form_data::text.ilike.%${term}%,enrollment_ref.ilike.%${term}%`);
+    query = query.or(`student_name_en.ilike.%${term}%,phone.ilike.%${term}%,telegram_phone.ilike.%${term}%,enrollment_ref.ilike.%${term}%`);
   }
 
   // ── Pagination ─────────────────────────────────────────────────────────────
