@@ -124,6 +124,26 @@ function fmtDate(isoStr: string | null | undefined): string {
   });
 }
 
+function fmtDateMMT(isoStr: string | null | undefined): string {
+  if (!isoStr) return "—";
+  return new Date(isoStr).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "Asia/Yangon",
+  });
+}
+
+function fmtTimeMMT(isoStr: string | null | undefined): string {
+  if (!isoStr) return "—";
+  return new Date(isoStr).toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: "Asia/Yangon",
+  });
+}
+
 function buildQS(filters: Filters, page: number): string {
   const p = new URLSearchParams({ page: String(page), page_size: "20" });
   if (filters.intakeId) p.set("intake_id", filters.intakeId);
@@ -814,6 +834,7 @@ export default function StudentsPage() {
         tl.intake,
         "Status",
         "Date",
+        "Time",
       ];
 
       const wsData: (string | number | null)[][] = [headers];
@@ -838,7 +859,8 @@ export default function StudentsPage() {
                 ci.subtotal_mmk,
                 s.intake_name,
                 s.status,
-                fmtDate(s.enrolled_at),
+                fmtDateMMT(s.enrolled_at),
+                fmtTimeMMT(s.enrolled_at),
               ]);
             } else {
               wsData.push([
@@ -846,7 +868,7 @@ export default function StudentsPage() {
                 ci.class_level,
                 ci.quantity,
                 ci.subtotal_mmk,
-                null, null, null,
+                null, null, null, null,
               ]);
             }
           });
@@ -860,7 +882,8 @@ export default function StudentsPage() {
             s.fee_mmk,
             s.intake_name,
             s.status,
-            fmtDate(s.enrolled_at),
+            fmtDateMMT(s.enrolled_at),
+            fmtTimeMMT(s.enrolled_at),
           ]);
         }
       }
@@ -878,6 +901,7 @@ export default function StudentsPage() {
         { wch: 16 }, // Intake
         { wch: 20 }, // Status
         { wch: 14 }, // Date
+        { wch: 10 }, // Time
       ];
 
       const wb = XLSX.utils.book_new();
