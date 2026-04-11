@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
-import { formatMMK, formatMMKSimple } from "@/lib/utils";
+import { formatMMK, formatMMKSimple, resolveEmailFromFormData } from "@/lib/utils";
 import { sendEmail, enrollmentConfirmationEmail } from "@/lib/email";
 import type { BankAccount, SubmitEnrollmentResult, SubmitCartEnrollmentResult } from "@/types/database";
 
@@ -181,14 +181,10 @@ export async function POST(request: NextRequest) {
     if (fd.nrc && fieldTypeMap.get("nrc") === "text")
       updatePayload.nrc_number = fd.nrc.trim();
 
-    // Also check custom email fields (e.g. custom_email_123456)
+    // Fallback: email_address or custom_email_* fields
     if (!updatePayload.email) {
-      for (const [key, val] of Object.entries(fd)) {
-        if (key.startsWith("custom_email_") && val && typeof val === "string") {
-          updatePayload.email = val.trim();
-          break;
-        }
-      }
+      const resolved = resolveEmailFromFormData(fd);
+      if (resolved) updatePayload.email = resolved;
     }
 
     // Store messenger PSID if enrollment came from chatbot
@@ -203,10 +199,7 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Send confirmation email (best-effort, non-blocking) ──────
-  // Find email from standard field or custom email field
-  const recipientEmail = fd?.email?.trim()
-    || (fd && Object.entries(fd).find(([k, v]) => k.startsWith("custom_email_") && v)?.[1]?.trim())
-    || null;
+  const recipientEmail = resolveEmailFromFormData(fd);
   if (recipientEmail) {
     const host = request.headers.get("host") ?? "localhost:3005";
     const proto = host.startsWith("localhost") ? "http" : "https";
@@ -411,14 +404,10 @@ async function handleCartEnrollment(
     if (fd.nrc && fieldTypeMap.get("nrc") === "text")
       updatePayload.nrc_number = fd.nrc.trim();
 
-    // Also check custom email fields (e.g. custom_email_123456)
+    // Fallback: email_address or custom_email_* fields
     if (!updatePayload.email) {
-      for (const [key, val] of Object.entries(fd)) {
-        if (key.startsWith("custom_email_") && val && typeof val === "string") {
-          updatePayload.email = val.trim();
-          break;
-        }
-      }
+      const resolved = resolveEmailFromFormData(fd);
+      if (resolved) updatePayload.email = resolved;
     }
 
     // Store messenger PSID if enrollment came from chatbot
@@ -430,9 +419,7 @@ async function handleCartEnrollment(
   }
 
   // ── Send confirmation email ────────────────────────────────────
-  const cartRecipientEmail = fd?.email?.trim()
-    || (fd && Object.entries(fd).find(([k, v]) => k.startsWith("custom_email_") && v)?.[1]?.trim())
-    || null;
+  const cartRecipientEmail = resolveEmailFromFormData(fd);
   if (cartRecipientEmail) {
     const host = request.headers.get("host") ?? "localhost:3005";
     const proto = host.startsWith("localhost") ? "http" : "https";

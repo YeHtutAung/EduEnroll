@@ -121,7 +121,27 @@ export function formatMyanmarPhone(phone: string): string {
   return usesIntlPrefix ? `+959-${formatted}` : `09-${formatted}`;
 }
 
-// ─── 5. Application config ───────────────────────────────────────────────────
+// ─── 5. Resolve email from form_data ─────────────────────────────────────────
+
+/**
+ * Extract recipient email from form_data, checking all known email field
+ * patterns: `email`, `email_address`, and `custom_email_*`.
+ */
+export function resolveEmailFromFormData(
+  fd: Record<string, string> | null | undefined,
+): string | null {
+  if (!fd) return null;
+  // 1. Standard field keys
+  const direct = fd.email?.trim() || fd.email_address?.trim();
+  if (direct) return direct;
+  // 2. Custom email fields (e.g. custom_email_123456)
+  const custom = Object.entries(fd).find(
+    ([k, v]) => k.startsWith("custom_email_") && v && typeof v === "string",
+  );
+  return custom?.[1]?.trim() || null;
+}
+
+// ─── 6. Application config ───────────────────────────────────────────────────
 
 export const NIHON_MOMENT_CONFIG = {
   schoolName:   "Nihon Moment",

@@ -10,6 +10,7 @@ import {
 import { sendStatusNotification } from "@/lib/messenger/notify";
 import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
+import { resolveEmailFromFormData } from "@/lib/utils";
 import type { Enrollment, Payment, PaymentStatus, EnrollmentStatus } from "@/types/database";
 
 type EnrollmentResult = { data: Enrollment | null; error: unknown };
@@ -82,11 +83,9 @@ export async function PATCH(
 
   if (enrollErr || !enrollment) return notFound("Enrollment");
 
-  // Resolve email: column first, then form_data custom email field
+  // Resolve email: column first, then form_data
   const fd = enrollment.form_data as Record<string, string> | null;
-  const enrollEmail = enrollment.email
-    || (fd && Object.entries(fd).find(([k]) => k === "email" || k.startsWith("custom_email_"))?.[1])
-    || null;
+  const enrollEmail = enrollment.email || resolveEmailFromFormData(fd);
 
   const now = new Date().toISOString();
   const admin = createAdminClient(); // bypasses RLS for class seat update

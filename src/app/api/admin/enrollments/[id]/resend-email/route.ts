@@ -8,6 +8,7 @@ import {
   partialPaymentEmail,
   enrollmentConfirmationEmail,
 } from "@/lib/email";
+import { resolveEmailFromFormData } from "@/lib/utils";
 import type { Enrollment, Payment } from "@/types/database";
 
 type EnrollmentResult = { data: Enrollment | null; error: unknown };
@@ -48,14 +49,7 @@ export async function POST(
 
   // Resolve email: override > column > form_data
   const fd = enrollment.form_data as Record<string, string> | null;
-  const enrollEmail =
-    overrideEmail ||
-    enrollment.email ||
-    (fd &&
-      Object.entries(fd).find(
-        ([k]) => k === "email" || k.startsWith("custom_email_"),
-      )?.[1]) ||
-    null;
+  const enrollEmail = overrideEmail || enrollment.email || resolveEmailFromFormData(fd);
 
   if (!enrollEmail) {
     return badRequest("No email address found for this enrollment. Provide one in the request body.");

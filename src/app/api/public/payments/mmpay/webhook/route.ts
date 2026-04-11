@@ -4,6 +4,7 @@ import mmpay from "@/lib/mmpay";
 import { sendEmail, enrollmentApprovedEmail } from "@/lib/email";
 import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
+import { resolveEmailFromFormData } from "@/lib/utils";
 
 // ─── POST /api/public/payments/mmqr/webhook ─────────────────────────────────
 // MyanMyanPay webhook callback handler.
@@ -101,10 +102,9 @@ export async function POST(request: NextRequest) {
     };
 
     if (enrollment) {
-      // Resolve email: column first, then form_data custom email field
+      // Resolve email: column first, then form_data
       const enrollEmail = enrollment.email
-        || (enrollment.form_data && Object.entries(enrollment.form_data).find(([k]) => k === "email" || k.startsWith("custom_email_"))?.[1])
-        || null;
+        || resolveEmailFromFormData(enrollment.form_data as Record<string, string> | null);
       const host = request.headers.get("host") ?? "localhost:3005";
       const proto = host.startsWith("localhost") ? "http" : "https";
       const statusUrl = `${proto}://${host}/status?ref=${enrollment.enrollment_ref}`;
