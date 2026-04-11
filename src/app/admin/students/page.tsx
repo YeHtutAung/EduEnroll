@@ -996,7 +996,7 @@ export default function StudentsPage() {
             </svg>
             <input
               type="text"
-              placeholder="Search name or phone…"
+              placeholder="Search name, phone, or ref…"
               value={searchInput}
               onChange={(e) => handleSearchChange(e.target.value)}
               className="w-full pl-9 pr-3 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
