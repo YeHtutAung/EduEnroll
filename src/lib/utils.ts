@@ -141,6 +141,22 @@ export function resolveEmailFromFormData(
   return custom?.[1]?.trim() || null;
 }
 
+/**
+ * Extract phone from form_data, checking all known phone field
+ * patterns: `phone`, `phone_number`, and `custom_phone_*`.
+ */
+export function resolvePhoneFromFormData(
+  fd: Record<string, string> | null | undefined,
+): string | null {
+  if (!fd) return null;
+  const direct = fd.phone?.trim() || fd.phone_number?.trim();
+  if (direct) return direct;
+  const custom = Object.entries(fd).find(
+    ([k, v]) => k.startsWith("custom_phone_") && v && typeof v === "string",
+  );
+  return custom?.[1]?.trim() || null;
+}
+
 // ─── 6. Application config ───────────────────────────────────────────────────
 
 export const NIHON_MOMENT_CONFIG = {
