@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
-import { formatMMK, formatMMKSimple, resolveEmailFromFormData } from "@/lib/utils";
+import { formatMMK, formatMMKSimple, resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils";
 import { sendEmail, enrollmentConfirmationEmail } from "@/lib/email";
 import type { BankAccount, SubmitEnrollmentResult, SubmitCartEnrollmentResult } from "@/types/database";
 
@@ -181,10 +181,16 @@ export async function POST(request: NextRequest) {
     if (fd.nrc && fieldTypeMap.get("nrc") === "text")
       updatePayload.nrc_number = fd.nrc.trim();
 
+    // Fallback: phone_number or custom_phone_* fields
+    if (!updatePayload.phone) {
+      const resolvedPhone = resolvePhoneFromFormData(fd);
+      if (resolvedPhone) updatePayload.phone = resolvedPhone;
+    }
+
     // Fallback: email_address or custom_email_* fields
     if (!updatePayload.email) {
-      const resolved = resolveEmailFromFormData(fd);
-      if (resolved) updatePayload.email = resolved;
+      const resolvedEmail = resolveEmailFromFormData(fd);
+      if (resolvedEmail) updatePayload.email = resolvedEmail;
     }
 
     // Store messenger PSID if enrollment came from chatbot
@@ -404,10 +410,16 @@ async function handleCartEnrollment(
     if (fd.nrc && fieldTypeMap.get("nrc") === "text")
       updatePayload.nrc_number = fd.nrc.trim();
 
+    // Fallback: phone_number or custom_phone_* fields
+    if (!updatePayload.phone) {
+      const resolvedPhone = resolvePhoneFromFormData(fd);
+      if (resolvedPhone) updatePayload.phone = resolvedPhone;
+    }
+
     // Fallback: email_address or custom_email_* fields
     if (!updatePayload.email) {
-      const resolved = resolveEmailFromFormData(fd);
-      if (resolved) updatePayload.email = resolved;
+      const resolvedEmail = resolveEmailFromFormData(fd);
+      if (resolvedEmail) updatePayload.email = resolvedEmail;
     }
 
     // Store messenger PSID if enrollment came from chatbot
