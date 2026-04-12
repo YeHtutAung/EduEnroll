@@ -46,7 +46,8 @@ export async function GET() {
         .eq("tenant_id", tenantId)
         .eq("status", "payment_submitted"),
 
-      (supabase.rpc as Function)("get_tenant_revenue", { p_tenant_id: tenantId }) as Promise<{ data: number | null; error: unknown }>,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (supabase.rpc as any)("get_tenant_revenue", { p_tenant_id: tenantId }) as Promise<{ data: number | null; error: unknown }>,
 
       supabase
         .from("classes")
