@@ -2,8 +2,7 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api";
 import type { Class } from "@/types/database";
 
-type PaymentRow = { amount_mmk: number };
-type ClassRow   = Pick<Class, "level" | "seat_remaining" | "seat_total">;
+type ClassRow = Pick<Class, "level" | "seat_remaining" | "seat_total">;
 
 // ─── GET /api/admin/stats ─────────────────────────────────────────────────────
 // Dashboard statistics for the authenticated admin's tenant.
@@ -47,12 +46,8 @@ export async function GET() {
         .eq("tenant_id", tenantId)
         .eq("status", "payment_submitted"),
 
-      supabase
-        .from("payments")
-        .select("amount_mmk")
-        .eq("tenant_id", tenantId)
-        .eq("status", "verified")
-        .limit(10000) as unknown as Promise<{ data: PaymentRow[] | null; error: unknown }>,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (supabase.rpc as any)("get_tenant_revenue", { p_tenant_id: tenantId }) as Promise<{ data: number | null; error: unknown }>,
 
       supabase
         .from("classes")
@@ -73,10 +68,8 @@ export async function GET() {
     return NextResponse.json({ error: (classesRes.error as Error).message }, { status: 500 });
   }
 
-  const payments = paymentsRes.data ?? [];
-  const classes  = classesRes.data ?? [];
-
-  const total_revenue_mmk = payments.reduce((sum, p) => sum + (p.amount_mmk ?? 0), 0);
+  const total_revenue_mmk = paymentsRes.data ?? 0;
+  const classes = classesRes.data ?? [];
 
   const seats_by_class: { level: string; seat_remaining: number; seat_total: number }[] =
     classes.map((c) => ({
