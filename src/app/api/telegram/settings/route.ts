@@ -136,14 +136,33 @@ export async function PATCH(request: NextRequest) {
 
     let webhookSecret: string | undefined;
 
-    // Enrollment bot uses [secret] URL pattern; support bot uses header-based secret
+    const host = request.headers.get("host") ?? "localhost:3005";
+    const proto = host.startsWith("localhost") ? "http" : "https";
+
     if (botType === "enrollment") {
+      // Enrollment bot: secret in the URL path, no header auth needed
       webhookSecret = randomUUID();
-      const host = request.headers.get("host") ?? "localhost:3005";
-      const proto = host.startsWith("localhost") ? "http" : "https";
       const webhookUrl = `${proto}://${host}/api/telegram/webhook/${webhookSecret}`;
 
       const webhookResult = await setWebhook(body.botToken, webhookUrl);
+      if (!webhookResult.ok) {
+        return NextResponse.json(
+          { error: `Failed to register webhook: ${webhookResult.description}` },
+          { status: 502 },
+        );
+      }
+    } else if (botType === "support") {
+      // Support bot: fixed URL, authenticated via X-Telegram-Bot-Api-Secret-Token header
+      const headerSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+      if (!headerSecret) {
+        return NextResponse.json(
+          { error: "TELEGRAM_WEBHOOK_SECRET is not configured on the server." },
+          { status: 500 },
+        );
+      }
+
+      const webhookUrl = `${proto}://${host}/api/webhook`;
+      const webhookResult = await setWebhook(body.botToken, webhookUrl, headerSecret);
       if (!webhookResult.ok) {
         return NextResponse.json(
           { error: `Failed to register webhook: ${webhookResult.description}` },
