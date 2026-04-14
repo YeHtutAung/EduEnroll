@@ -1,0 +1,131 @@
+import { NextRequest, NextResponse } from "next/server";
+import { requireOwner } from "@/lib/api";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { decryptToken } from "@/lib/telegram/crypto";
+import { sendTelegramMessage } from "@/lib/telegram";
+
+// ─── GET /api/telegram/admin-requests ────────────────────────────────────────
+// Returns all pending access requests for the tenant.
+
+export async function GET() {
+  const auth = await requireOwner();
+  if (auth instanceof NextResponse) return auth;
+  const { tenantId } = auth;
+
+  const supabase = createAdminClient();
+
+  const { data, error } = await supabase
+    .from("telegram_admin_requests")
+    .select("id, chat_id, name, username, status, created_at")
+    .eq("tenant_id", tenantId)
+    .eq("status", "pending")
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    console.error("[admin-requests] GET error:", error);
+    return NextResponse.json({ error: "Failed to fetch requests." }, { status: 500 });
+  }
+
+  return NextResponse.json({ requests: data ?? [] });
+}
+
+// ─── PATCH /api/telegram/admin-requests ──────────────────────────────────────
+// Approve or reject a pending request.
+// Body: { id: string, action: "approve" | "reject" }
+
+export async function PATCH(request: NextRequest) {
+  const auth = await requireOwner();
+  if (auth instanceof NextResponse) return auth;
+  const { tenantId } = auth;
+
+  let body: { id: string; action: "approve" | "reject" };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  if (!body.id || !["approve", "reject"].includes(body.action)) {
+    return NextResponse.json({ error: "Invalid request." }, { status: 400 });
+  }
+
+  const supabase = createAdminClient();
+
+  // Fetch the request — verify it belongs to this tenant
+  const { data: req } = (await supabase
+    .from("telegram_admin_requests")
+    .select("id, chat_id, name, tenant_id")
+    .eq("id", body.id)
+    .eq("tenant_id", tenantId)
+    .single()) as {
+    data: { id: string; chat_id: number; name: string; tenant_id: string } | null;
+    error: unknown;
+  };
+
+  if (!req) {
+    return NextResponse.json({ error: "Request not found." }, { status: 404 });
+  }
+
+  // Fetch bot token for notification
+  const { data: config } = (await supabase
+    .from("tenant_telegram_configs")
+    .select("bot_token, allowed_chat_ids")
+    .eq("tenant_id", tenantId)
+    .single()) as {
+    data: { bot_token: string | null; allowed_chat_ids: number[] | null } | null;
+    error: unknown;
+  };
+
+  let botToken: string | null = null;
+  if (config?.bot_token) {
+    try {
+      botToken = decryptToken(config.bot_token);
+    } catch {
+      console.error("[admin-requests] Failed to decrypt bot token");
+    }
+  }
+
+  if (body.action === "approve") {
+    // Append chat_id to allowed_chat_ids
+    const current = (config?.allowed_chat_ids ?? []).map(Number);
+    if (!current.includes(req.chat_id)) {
+      await supabase
+        .from("tenant_telegram_configs")
+        .update({ allowed_chat_ids: [...current, req.chat_id] } as never)
+        .eq("tenant_id", tenantId);
+    }
+
+    // Update request status
+    await supabase
+      .from("telegram_admin_requests")
+      .update({ status: "approved" } as never)
+      .eq("id", req.id);
+
+    // Notify user
+    if (botToken) {
+      await sendTelegramMessage(
+        req.chat_id,
+        "✅ Your request has been approved. You can now send messages to the admin bot.",
+        botToken,
+      );
+    }
+
+    return NextResponse.json({ success: true, action: "approved" });
+  }
+
+  // Reject
+  await supabase
+    .from("telegram_admin_requests")
+    .update({ status: "rejected" } as never)
+    .eq("id", req.id);
+
+  if (botToken) {
+    await sendTelegramMessage(
+      req.chat_id,
+      "❌ Your request was not approved. Please contact the admin directly.",
+      botToken,
+    );
+  }
+
+  return NextResponse.json({ success: true, action: "rejected" });
+}

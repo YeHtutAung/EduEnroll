@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { decryptToken } from "@/lib/messenger/crypto";
+import { decryptToken } from "@/lib/telegram/crypto";
 import { extractSubdomainFromHost } from "@/lib/tenant";
 import { askAgent } from "@/lib/agent-client";
 import { sendTelegramMessage } from "@/lib/telegram";
@@ -102,16 +102,56 @@ export async function POST(request: NextRequest) {
   }
 
   const chatId = message.chat.id;
-  const text = message.text;
+  const text = message.text.trim();
+  const from = message.from;
 
-  // ── 5. Check allowed_chat_ids whitelist ────────────────────────────────────
+  // ── 5. Handle /start ───────────────────────────────────────────────────────
+  if (text === "/start") {
+    const allowed = (config.allowed_chat_ids ?? []).map(Number);
+
+    // Already approved
+    if (allowed.includes(chatId)) {
+      await sendTelegramMessage(chatId, "✅ You already have access. Just send me a message!", botToken);
+      return NextResponse.json({ ok: true });
+    }
+
+    const name = from?.first_name ?? "User";
+    const username = from?.username ?? null;
+
+    // Upsert request — UNIQUE(tenant_id, chat_id) handles duplicates
+    const { error } = await supabase
+      .from("telegram_admin_requests")
+      .upsert(
+        { tenant_id: tenant.id, chat_id: chatId, name, username, status: "pending" } as never,
+        { onConflict: "tenant_id,chat_id", ignoreDuplicates: false },
+      );
+
+    if (error) {
+      // Already has an existing request (pending or otherwise)
+      await sendTelegramMessage(
+        chatId,
+        "⏳ Your request is already pending. Please wait for admin approval.",
+        botToken,
+      );
+    } else {
+      await sendTelegramMessage(
+        chatId,
+        "📩 Your access request has been sent to the admin. You'll be notified once approved.",
+        botToken,
+      );
+    }
+
+    return NextResponse.json({ ok: true });
+  }
+
+  // ── 6. Check allowed_chat_ids whitelist ────────────────────────────────────
   const allowed = (config.allowed_chat_ids ?? []).map(Number);
   if (!allowed.includes(chatId)) {
     // Not authorised — acknowledge silently, never 403
     return NextResponse.json({ ok: true });
   }
 
-  // ── 6. Process with agent + send reply ────────────────────────────────────
+  // ── 7. Forward to agent + send reply ──────────────────────────────────────
   try {
     const reply = await askAgent(text, String(chatId), tenant.subdomain);
     await sendTelegramMessage(chatId, reply, botToken);

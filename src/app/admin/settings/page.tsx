@@ -936,6 +936,21 @@ function SettingsContent() {
   const [tgConnecting, setTgConnecting] = useState(false);
   const [tgAutoSendInvite, setTgAutoSendInvite] = useState(false);
   const [tgAutoSendSaving, setTgAutoSendSaving] = useState(false);
+  const [tgAdminRequests, setTgAdminRequests] = useState<
+    { id: string; chat_id: number; name: string; username: string | null }[]
+  >([]);
+  const [tgRequestActioning, setTgRequestActioning] = useState<string | null>(null);
+
+  const fetchTelegramAdminRequests = useCallback(async () => {
+    try {
+      const res = await fetch("/api/telegram/admin-requests");
+      if (!res.ok) return;
+      const data = await res.json();
+      setTgAdminRequests(data.requests ?? []);
+    } catch {
+      // non-critical
+    }
+  }, []);
 
   const fetchTelegram = useCallback(async () => {
     setTgLoading(true);
@@ -1041,12 +1056,32 @@ function SettingsContent() {
     }
   }
 
+  async function handleTgAdminRequest(id: string, action: "approve" | "reject") {
+    setTgRequestActioning(id);
+    try {
+      const res = await fetch("/api/telegram/admin-requests", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, action }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `${res.status}`);
+      setTgAdminRequests((prev) => prev.filter((r) => r.id !== id));
+      toast.success(action === "approve" ? "Request approved." : "Request rejected.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to process request.");
+    } finally {
+      setTgRequestActioning(null);
+    }
+  }
+
   // ── Init ───────────────────────────────────────────────────────────────────
   useEffect(() => {
     fetchAccounts();
     fetchProfile();
     fetchMessenger();
     fetchTelegram();
+    fetchTelegramAdminRequests();
 
     // Show toast for OAuth callback results
     if (searchParams.get("connected") === "true") {
@@ -1060,7 +1095,7 @@ function SettingsContent() {
     if (pickPage) {
       fetchPagePickerPages(pickPage);
     }
-  }, [fetchAccounts, fetchProfile, fetchMessenger, fetchTelegram]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fetchAccounts, fetchProfile, fetchMessenger, fetchTelegram, fetchTelegramAdminRequests]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -2047,6 +2082,41 @@ function SettingsContent() {
                   onChange={handleTgAutoSendToggle}
                   disabled={tgAutoSendSaving}
                 />
+              </div>
+            )}
+
+            {/* Pending admin requests */}
+            {tgAdminRequests.length > 0 && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 space-y-2">
+                <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
+                  Pending Access Requests
+                </p>
+                {tgAdminRequests.map((req) => (
+                  <div key={req.id} className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-800 truncate">{req.name}</p>
+                      {req.username && (
+                        <p className="text-xs text-gray-500">@{req.username}</p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => handleTgAdminRequest(req.id, "approve")}
+                        disabled={tgRequestActioning === req.id}
+                        className="px-3 py-1.5 text-xs font-semibold bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 disabled:opacity-50 transition-colors"
+                      >
+                        Approve
+                      </button>
+                      <button
+                        onClick={() => handleTgAdminRequest(req.id, "reject")}
+                        disabled={tgRequestActioning === req.id}
+                        className="px-3 py-1.5 text-xs font-semibold bg-white text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
 

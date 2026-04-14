@@ -123,6 +123,16 @@ export interface Tenant {
   created_at: string;
 }
 
+export interface TelegramAdminRequest {
+  id: string;
+  tenant_id: string;
+  chat_id: number;       // bigint in DB
+  name: string;
+  username: string | null;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+}
+
 export interface TenantTelegramConfig {
   tenant_id: string;
   bot_token: string | null;        // AES-256-GCM encrypted
