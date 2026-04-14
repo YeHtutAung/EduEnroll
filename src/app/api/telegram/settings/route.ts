@@ -4,9 +4,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { encryptToken, decryptToken } from "@/lib/telegram/crypto";
 import { getMe, setWebhook, deleteWebhook } from "@/lib/telegram/send";
 import { randomUUID } from "crypto";
+import type { BotType } from "@/types/database";
 
-// ─── GET /api/telegram/settings ─────────────────────────────────────────────
-// Returns current Telegram config (bot token is never exposed).
+// ─── GET /api/telegram/settings ──────────────────────────────────────────────
+// Returns config for both enrollment and support bots.
 
 export async function GET() {
   const auth = await requireOwner();
@@ -15,20 +16,19 @@ export async function GET() {
 
   const supabase = createAdminClient();
 
-  const { data: config } = (await supabase
-    .from("tenant_telegram_configs")
-    .select("enabled, bot_username, webhook_secret")
-    .eq("tenant_id", tenantId)
-    .single()) as {
+  const { data: bots } = (await supabase
+    .from("tenant_bots")
+    .select("bot_type, bot_username, enabled, webhook_secret")
+    .eq("tenant_id", tenantId)) as {
     data: {
-      enabled: boolean;
+      bot_type: BotType;
       bot_username: string | null;
+      enabled: boolean;
       webhook_secret: string | null;
-    } | null;
+    }[] | null;
     error: unknown;
   };
 
-  // autoSendInvite stays on tenants
   const { data: tenant } = (await supabase
     .from("tenants")
     .select("telegram_auto_send_invite")
@@ -38,18 +38,28 @@ export async function GET() {
     error: unknown;
   };
 
+  const enrollment = bots?.find((b) => b.bot_type === "enrollment");
+  const support = bots?.find((b) => b.bot_type === "support");
+
   return NextResponse.json({
-    enabled: config?.enabled ?? false,
-    botUsername: config?.bot_username ?? null,
-    connected: !!config?.bot_username,
-    webhookConfigured: !!config?.webhook_secret,
+    enrollment: {
+      connected: !!enrollment?.bot_username,
+      enabled: enrollment?.enabled ?? false,
+      botUsername: enrollment?.bot_username ?? null,
+      webhookConfigured: !!enrollment?.webhook_secret,
+    },
+    support: {
+      connected: !!support?.bot_username,
+      enabled: support?.enabled ?? false,
+      botUsername: support?.bot_username ?? null,
+    },
     autoSendInvite: tenant?.telegram_auto_send_invite ?? false,
   });
 }
 
-// ─── PATCH /api/telegram/settings ───────────────────────────────────────────
-// Connect/disconnect Telegram bot, toggle enabled / autoSendInvite.
-// Body: { botToken?: string, enabled?: boolean, disconnect?: boolean, autoSendInvite?: boolean }
+// ─── PATCH /api/telegram/settings ────────────────────────────────────────────
+// Connect/disconnect/toggle a bot. botType identifies which bot.
+// Body: { botType: "enrollment" | "support", botToken?, enabled?, disconnect?, autoSendInvite? }
 
 export async function PATCH(request: NextRequest) {
   const auth = await requireOwner();
@@ -57,6 +67,7 @@ export async function PATCH(request: NextRequest) {
   const { tenantId } = auth;
 
   let body: {
+    botType?: BotType;
     botToken?: string;
     enabled?: boolean;
     disconnect?: boolean;
@@ -70,36 +81,47 @@ export async function PATCH(request: NextRequest) {
 
   const supabase = createAdminClient();
 
-  // ── Disconnect ──────────────────────────────────────────────────────────────
+  // ── Toggle autoSendInvite (tenant-level, no botType needed) ────────────────
+  if (body.autoSendInvite !== undefined) {
+    await supabase
+      .from("tenants")
+      .update({ telegram_auto_send_invite: body.autoSendInvite } as never)
+      .eq("id", tenantId);
+    return NextResponse.json({ success: true, autoSendInvite: body.autoSendInvite });
+  }
+
+  const botType = body.botType;
+  if (!botType || !["enrollment", "support"].includes(botType)) {
+    return NextResponse.json({ error: "botType must be 'enrollment' or 'support'." }, { status: 400 });
+  }
+
+  // ── Disconnect ─────────────────────────────────────────────────────────────
   if (body.disconnect) {
-    const { data: config } = (await supabase
-      .from("tenant_telegram_configs")
+    const { data: bot } = (await supabase
+      .from("tenant_bots")
       .select("bot_token")
       .eq("tenant_id", tenantId)
+      .eq("bot_type", botType)
       .single()) as { data: { bot_token: string | null } | null; error: unknown };
 
-    if (config?.bot_token) {
+    if (bot?.bot_token) {
       try {
-        await deleteWebhook(decryptToken(config.bot_token));
+        await deleteWebhook(decryptToken(bot.bot_token));
       } catch {
         // Ignore — token may already be invalid
       }
     }
 
     await supabase
-      .from("tenant_telegram_configs")
-      .update({
-        enabled: false,
-        bot_token: null,
-        bot_username: null,
-        webhook_secret: null,
-      } as never)
-      .eq("tenant_id", tenantId);
+      .from("tenant_bots")
+      .delete()
+      .eq("tenant_id", tenantId)
+      .eq("bot_type", botType);
 
-    return NextResponse.json({ success: true, message: "Telegram disconnected." });
+    return NextResponse.json({ success: true, message: `${botType} bot disconnected.` });
   }
 
-  // ── Connect with bot token ──────────────────────────────────────────────────
+  // ── Connect with bot token ─────────────────────────────────────────────────
   if (body.botToken) {
     const me = await getMe(body.botToken);
     if (!me.ok || !me.result?.username) {
@@ -111,28 +133,34 @@ export async function PATCH(request: NextRequest) {
 
     const botUsername = me.result.username;
     const encryptedToken = encryptToken(body.botToken);
-    const webhookSecret = randomUUID();
 
-    const host = request.headers.get("host") ?? "localhost:3005";
-    const proto = host.startsWith("localhost") ? "http" : "https";
-    const webhookUrl = `${proto}://${host}/api/telegram/webhook/${webhookSecret}`;
+    let webhookSecret: string | undefined;
 
-    const webhookResult = await setWebhook(body.botToken, webhookUrl);
-    if (!webhookResult.ok) {
-      return NextResponse.json(
-        { error: `Failed to register webhook: ${webhookResult.description}` },
-        { status: 502 },
-      );
+    // Enrollment bot uses [secret] URL pattern; support bot uses header-based secret
+    if (botType === "enrollment") {
+      webhookSecret = randomUUID();
+      const host = request.headers.get("host") ?? "localhost:3005";
+      const proto = host.startsWith("localhost") ? "http" : "https";
+      const webhookUrl = `${proto}://${host}/api/telegram/webhook/${webhookSecret}`;
+
+      const webhookResult = await setWebhook(body.botToken, webhookUrl);
+      if (!webhookResult.ok) {
+        return NextResponse.json(
+          { error: `Failed to register webhook: ${webhookResult.description}` },
+          { status: 502 },
+        );
+      }
     }
 
     await supabase
-      .from("tenant_telegram_configs")
+      .from("tenant_bots")
       .upsert({
         tenant_id: tenantId,
+        bot_type: botType,
         enabled: true,
         bot_token: encryptedToken,
         bot_username: botUsername,
-        webhook_secret: webhookSecret,
+        ...(webhookSecret ? { webhook_secret: webhookSecret } : {}),
       } as never);
 
     return NextResponse.json({
@@ -142,24 +170,15 @@ export async function PATCH(request: NextRequest) {
     });
   }
 
-  // ── Toggle enabled ──────────────────────────────────────────────────────────
+  // ── Toggle enabled ─────────────────────────────────────────────────────────
   if (body.enabled !== undefined) {
     await supabase
-      .from("tenant_telegram_configs")
+      .from("tenant_bots")
       .update({ enabled: body.enabled } as never)
-      .eq("tenant_id", tenantId);
+      .eq("tenant_id", tenantId)
+      .eq("bot_type", botType);
 
     return NextResponse.json({ success: true, enabled: body.enabled });
-  }
-
-  // ── Toggle autoSendInvite (stays on tenants) ────────────────────────────────
-  if (body.autoSendInvite !== undefined) {
-    await supabase
-      .from("tenants")
-      .update({ telegram_auto_send_invite: body.autoSendInvite } as never)
-      .eq("id", tenantId);
-
-    return NextResponse.json({ success: true, autoSendInvite: body.autoSendInvite });
   }
 
   return NextResponse.json({ error: "No action specified." }, { status: 400 });
