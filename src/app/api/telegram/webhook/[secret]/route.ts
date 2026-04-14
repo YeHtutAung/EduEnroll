@@ -6,10 +6,10 @@ import {
   processLanguageSchoolContact,
 } from "@/lib/telegram/language-school-processor";
 import { handleChatJoinRequest } from "@/lib/telegram/join-request-handler";
-import { decryptToken } from "@/lib/messenger/crypto";
+import { decryptToken } from "@/lib/telegram/crypto";
 
-// ─── POST /api/telegram/webhook/[secret] ────────────────────────────────────
-// Receives updates from Telegram. The [secret] path segment identifies the tenant.
+// ─── POST /api/telegram/webhook/[secret] ─────────────────────────────────────
+// Enrollment bot webhook. The [secret] path segment identifies the tenant bot.
 
 interface TelegramUpdate {
   message?: {
@@ -37,31 +37,37 @@ export async function POST(
 
   const supabase = createAdminClient();
 
-  // Look up tenant by webhook secret
-  const { data: tenant } = (await supabase
-    .from("tenants")
-    .select("id, telegram_bot_token, telegram_enabled, org_type")
-    .eq("telegram_webhook_secret", secret)
-    .eq("telegram_enabled", true)
+  // Look up enrollment bot by webhook_secret
+  const { data: bot } = (await supabase
+    .from("tenant_bots")
+    .select("tenant_id, bot_token, enabled")
+    .eq("webhook_secret", secret)
+    .eq("bot_type", "enrollment")
+    .eq("enabled", true)
     .single()) as {
-    data: {
-      id: string;
-      telegram_bot_token: string | null;
-      telegram_enabled: boolean;
-      org_type: string;
-    } | null;
+    data: { tenant_id: string; bot_token: string | null; enabled: boolean } | null;
     error: unknown;
   };
 
-  if (!tenant?.telegram_bot_token) {
+  if (!bot?.bot_token) {
     return NextResponse.json({ status: "ignored" }, { status: 200 });
   }
 
+  // Get feature flags from tenant_telegram_configs
+  const { data: config } = (await supabase
+    .from("tenant_telegram_configs")
+    .select("enable_join_requests, enable_phone_flow")
+    .eq("tenant_id", bot.tenant_id)
+    .single()) as {
+    data: { enable_join_requests: boolean; enable_phone_flow: boolean } | null;
+    error: unknown;
+  };
+
   let botToken: string;
   try {
-    botToken = decryptToken(tenant.telegram_bot_token);
+    botToken = decryptToken(bot.bot_token);
   } catch {
-    console.error("[telegram-webhook] Failed to decrypt bot token");
+    console.error("[enrollment-webhook] Failed to decrypt bot token");
     return NextResponse.json({ status: "ok" }, { status: 200 });
   }
 
@@ -72,19 +78,20 @@ export async function POST(
     return NextResponse.json({ status: "ok" }, { status: 200 });
   }
 
-  const isLanguageSchool = tenant.org_type === "language_school";
+  const enableJoinRequests = config?.enable_join_requests ?? false;
+  const enablePhoneFlow = config?.enable_phone_flow ?? false;
 
-  // ─── Handle chat_join_request (language_school only) ─────────────────────
-  if (isLanguageSchool && update.chat_join_request) {
+  // ─── Handle chat_join_request ─────────────────────────────────────────────
+  if (enableJoinRequests && update.chat_join_request) {
     try {
-      await handleChatJoinRequest(tenant.id, update.chat_join_request, botToken);
+      await handleChatJoinRequest(bot.tenant_id, update.chat_join_request, botToken);
     } catch (err) {
-      console.error("[telegram-webhook] Error handling join request:", err);
+      console.error("[enrollment-webhook] Error handling join request:", err);
     }
     return NextResponse.json({ status: "ok" }, { status: 200 });
   }
 
-  // ─── Handle message ────────────────────────────────────────────────────
+  // ─── Handle message ───────────────────────────────────────────────────────
   const message = update.message;
   if (!message?.chat?.id) {
     return NextResponse.json({ status: "ok" }, { status: 200 });
@@ -93,22 +100,16 @@ export async function POST(
   const chatId = String(message.chat.id);
 
   try {
-    // Language school: handle contact (phone verification)
-    if (isLanguageSchool && message.contact) {
-      await processLanguageSchoolContact(tenant.id, chatId, message.contact, botToken);
-    }
-    // Language school: handle text with phone verification flow
-    else if (isLanguageSchool && message.text) {
-      await processLanguageSchoolMessage(tenant.id, chatId, message.text, botToken);
-    }
-    // All other org_types: original processor (untouched)
-    else if (message.text) {
-      await processMessage(tenant.id, chatId, message.text, botToken);
+    if (enablePhoneFlow && message.contact) {
+      await processLanguageSchoolContact(bot.tenant_id, chatId, message.contact, botToken);
+    } else if (enablePhoneFlow && message.text) {
+      await processLanguageSchoolMessage(bot.tenant_id, chatId, message.text, botToken);
+    } else if (message.text) {
+      await processMessage(bot.tenant_id, chatId, message.text, botToken);
     }
   } catch (err) {
-    console.error("[telegram-webhook] Error processing message:", err);
+    console.error("[enrollment-webhook] Error processing message:", err);
   }
 
-  // Always return 200 — Telegram retries on non-200
   return NextResponse.json({ status: "ok" }, { status: 200 });
 }
