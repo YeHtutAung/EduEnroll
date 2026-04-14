@@ -1,8 +1,8 @@
 // ─── AI agent client (Google ADK) ────────────────────────────────────────────
-// POSTs to an external ADK agent service at AGENT_API_URL.
+// Talks to an external ADK agent service at AGENT_API_URL.
 //
-// Request:  POST /run  { appName, userId, sessionId, newMessage }
-// Response: Event[]    — array of ADK events; reply is in the last model event
+// ADK requires a session to exist before /run — this client ensures the session
+// is created (idempotent: ignores 409 if it already exists) then runs the agent.
 
 interface AdkPart {
   text?: string;
@@ -19,6 +19,23 @@ interface AdkEvent {
   turnComplete?: boolean | null;
 }
 
+const FALLBACK = "Sorry, I'm having trouble connecting to the agent. Please try again.";
+
+async function ensureSession(baseUrl: string, appName: string, userId: string, sessionId: string): Promise<void> {
+  const res = await fetch(
+    `${baseUrl}/apps/${appName}/users/${userId}/sessions/${sessionId}`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    },
+  );
+  // 200 = created, 409 = already exists — both are fine
+  if (!res.ok && res.status !== 409) {
+    throw new Error(`Failed to create session: ${res.status}`);
+  }
+}
+
 export async function askAgent(
   message: string,
   sessionId: string,
@@ -28,6 +45,13 @@ export async function askAgent(
   if (!baseUrl) throw new Error("AGENT_API_URL is not set");
 
   const appName = process.env.AGENT_APP_NAME ?? tenantSlug;
+  const userId = sessionId; // use chatId as both userId and sessionId for persistent memory
+
+  try {
+    await ensureSession(baseUrl, appName, userId, sessionId);
+  } catch {
+    return FALLBACK;
+  }
 
   let res: Response;
   try {
@@ -36,7 +60,7 @@ export async function askAgent(
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         appName,
-        userId: sessionId,
+        userId,
         sessionId,
         newMessage: {
           parts: [{ text: message }],
@@ -45,19 +69,15 @@ export async function askAgent(
       }),
     });
   } catch {
-    return "Sorry, I'm having trouble connecting to the agent. Please try again.";
+    return FALLBACK;
   }
 
-  if (!res.ok) {
-    return "Sorry, I'm having trouble connecting to the agent. Please try again.";
-  }
+  if (!res.ok) return FALLBACK;
 
   const events = (await res.json().catch(() => null)) as AdkEvent[] | null;
-  if (!Array.isArray(events)) {
-    return "Sorry, I'm having trouble connecting to the agent. Please try again.";
-  }
+  if (!Array.isArray(events)) return FALLBACK;
 
-  // Find the last model event that has text content
+  // Find the last non-user event with text content
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
     if (event.author !== "user" && event.content?.parts) {
@@ -69,5 +89,5 @@ export async function askAgent(
     }
   }
 
-  return "Sorry, I'm having trouble connecting to the agent. Please try again.";
+  return FALLBACK;
 }
