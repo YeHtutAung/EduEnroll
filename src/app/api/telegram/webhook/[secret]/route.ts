@@ -6,7 +6,7 @@ import {
   processLanguageSchoolContact,
 } from "@/lib/telegram/language-school-processor";
 import { handleChatJoinRequest } from "@/lib/telegram/join-request-handler";
-import { decryptToken } from "@/lib/messenger/crypto";
+import { decryptToken } from "@/lib/telegram/crypto";
 
 // ─── POST /api/telegram/webhook/[secret] ────────────────────────────────────
 // Receives updates from Telegram. The [secret] path segment identifies the tenant.
@@ -37,29 +37,43 @@ export async function POST(
 
   const supabase = createAdminClient();
 
-  // Look up tenant by webhook secret
-  const { data: tenant } = (await supabase
-    .from("tenants")
-    .select("id, telegram_bot_token, telegram_enabled, org_type")
-    .eq("telegram_webhook_secret", secret)
-    .eq("telegram_enabled", true)
+  // Look up telegram config by webhook secret, then join tenant for org_type
+  const { data: config } = (await supabase
+    .from("tenant_telegram_configs")
+    .select("tenant_id, bot_token, enabled, enable_join_requests, enable_phone_flow")
+    .eq("webhook_secret", secret)
+    .eq("enabled", true)
     .single()) as {
     data: {
-      id: string;
-      telegram_bot_token: string | null;
-      telegram_enabled: boolean;
-      org_type: string;
+      tenant_id: string;
+      bot_token: string | null;
+      enabled: boolean;
+      enable_join_requests: boolean;
+      enable_phone_flow: boolean;
     } | null;
     error: unknown;
   };
 
-  if (!tenant?.telegram_bot_token) {
+  if (!config?.bot_token) {
+    return NextResponse.json({ status: "ignored" }, { status: 200 });
+  }
+
+  const { data: tenant } = (await supabase
+    .from("tenants")
+    .select("id")
+    .eq("id", config.tenant_id)
+    .single()) as {
+    data: { id: string } | null;
+    error: unknown;
+  };
+
+  if (!tenant) {
     return NextResponse.json({ status: "ignored" }, { status: 200 });
   }
 
   let botToken: string;
   try {
-    botToken = decryptToken(tenant.telegram_bot_token);
+    botToken = decryptToken(config.bot_token);
   } catch {
     console.error("[telegram-webhook] Failed to decrypt bot token");
     return NextResponse.json({ status: "ok" }, { status: 200 });
@@ -72,10 +86,8 @@ export async function POST(
     return NextResponse.json({ status: "ok" }, { status: 200 });
   }
 
-  const isLanguageSchool = tenant.org_type === "language_school";
-
-  // ─── Handle chat_join_request (language_school only) ─────────────────────
-  if (isLanguageSchool && update.chat_join_request) {
+  // ─── Handle chat_join_request ────────────────────────────────────────────
+  if (config.enable_join_requests && update.chat_join_request) {
     try {
       await handleChatJoinRequest(tenant.id, update.chat_join_request, botToken);
     } catch (err) {
@@ -93,16 +105,11 @@ export async function POST(
   const chatId = String(message.chat.id);
 
   try {
-    // Language school: handle contact (phone verification)
-    if (isLanguageSchool && message.contact) {
+    if (config.enable_phone_flow && message.contact) {
       await processLanguageSchoolContact(tenant.id, chatId, message.contact, botToken);
-    }
-    // Language school: handle text with phone verification flow
-    else if (isLanguageSchool && message.text) {
+    } else if (config.enable_phone_flow && message.text) {
       await processLanguageSchoolMessage(tenant.id, chatId, message.text, botToken);
-    }
-    // All other org_types: original processor (untouched)
-    else if (message.text) {
+    } else if (message.text) {
       await processMessage(tenant.id, chatId, message.text, botToken);
     }
   } catch (err) {

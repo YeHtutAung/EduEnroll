@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireOwner } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { encryptToken, decryptToken } from "@/lib/messenger/crypto";
+import { encryptToken, decryptToken } from "@/lib/telegram/crypto";
 import { getMe, setWebhook, deleteWebhook } from "@/lib/telegram/send";
 import { randomUUID } from "crypto";
 
 // ─── GET /api/telegram/settings ─────────────────────────────────────────────
-// Returns current Telegram config (no token exposed).
+// Returns current Telegram config (bot token is never exposed).
 
 export async function GET() {
   const auth = await requireOwner();
@@ -14,39 +14,54 @@ export async function GET() {
   const { tenantId } = auth;
 
   const supabase = createAdminClient();
-  const { data } = (await supabase
-    .from("tenants")
-    .select("telegram_enabled, telegram_bot_username, telegram_webhook_secret, telegram_auto_send_invite")
-    .eq("id", tenantId)
+
+  const { data: config } = (await supabase
+    .from("tenant_telegram_configs")
+    .select("enabled, bot_username, webhook_secret")
+    .eq("tenant_id", tenantId)
     .single()) as {
     data: {
-      telegram_enabled: boolean;
-      telegram_bot_username: string | null;
-      telegram_webhook_secret: string | null;
-      telegram_auto_send_invite: boolean;
+      enabled: boolean;
+      bot_username: string | null;
+      webhook_secret: string | null;
     } | null;
     error: unknown;
   };
 
+  // autoSendInvite stays on tenants
+  const { data: tenant } = (await supabase
+    .from("tenants")
+    .select("telegram_auto_send_invite")
+    .eq("id", tenantId)
+    .single()) as {
+    data: { telegram_auto_send_invite: boolean } | null;
+    error: unknown;
+  };
+
   return NextResponse.json({
-    enabled: data?.telegram_enabled ?? false,
-    botUsername: data?.telegram_bot_username ?? null,
-    connected: !!data?.telegram_bot_username,
-    webhookConfigured: !!data?.telegram_webhook_secret,
-    autoSendInvite: data?.telegram_auto_send_invite ?? false,
+    enabled: config?.enabled ?? false,
+    botUsername: config?.bot_username ?? null,
+    connected: !!config?.bot_username,
+    webhookConfigured: !!config?.webhook_secret,
+    autoSendInvite: tenant?.telegram_auto_send_invite ?? false,
   });
 }
 
 // ─── PATCH /api/telegram/settings ───────────────────────────────────────────
-// Connect/disconnect Telegram bot, toggle enabled.
-// Body: { botToken?: string, enabled?: boolean, disconnect?: boolean }
+// Connect/disconnect Telegram bot, toggle enabled / autoSendInvite.
+// Body: { botToken?: string, enabled?: boolean, disconnect?: boolean, autoSendInvite?: boolean }
 
 export async function PATCH(request: NextRequest) {
   const auth = await requireOwner();
   if (auth instanceof NextResponse) return auth;
   const { tenantId } = auth;
 
-  let body: { botToken?: string; enabled?: boolean; disconnect?: boolean; autoSendInvite?: boolean };
+  let body: {
+    botToken?: string;
+    enabled?: boolean;
+    disconnect?: boolean;
+    autoSendInvite?: boolean;
+  };
   try {
     body = await request.json();
   } catch {
@@ -55,40 +70,37 @@ export async function PATCH(request: NextRequest) {
 
   const supabase = createAdminClient();
 
-  // ── Disconnect ──────────────────────────────────────────
+  // ── Disconnect ──────────────────────────────────────────────────────────────
   if (body.disconnect) {
-    // Try to delete webhook if token exists
-    const { data: tenant } = (await supabase
-      .from("tenants")
-      .select("telegram_bot_token")
-      .eq("id", tenantId)
-      .single()) as { data: { telegram_bot_token: string | null } | null; error: unknown };
+    const { data: config } = (await supabase
+      .from("tenant_telegram_configs")
+      .select("bot_token")
+      .eq("tenant_id", tenantId)
+      .single()) as { data: { bot_token: string | null } | null; error: unknown };
 
-    if (tenant?.telegram_bot_token) {
+    if (config?.bot_token) {
       try {
-        const token = decryptToken(tenant.telegram_bot_token);
-        await deleteWebhook(token);
+        await deleteWebhook(decryptToken(config.bot_token));
       } catch {
-        // Ignore — token might be invalid
+        // Ignore — token may already be invalid
       }
     }
 
     await supabase
-      .from("tenants")
+      .from("tenant_telegram_configs")
       .update({
-        telegram_enabled: false,
-        telegram_bot_token: null,
-        telegram_bot_username: null,
-        telegram_webhook_secret: null,
+        enabled: false,
+        bot_token: null,
+        bot_username: null,
+        webhook_secret: null,
       } as never)
-      .eq("id", tenantId);
+      .eq("tenant_id", tenantId);
 
     return NextResponse.json({ success: true, message: "Telegram disconnected." });
   }
 
-  // ── Connect with bot token ──────────────────────────────
+  // ── Connect with bot token ──────────────────────────────────────────────────
   if (body.botToken) {
-    // Validate token
     const me = await getMe(body.botToken);
     if (!me.ok || !me.result?.username) {
       return NextResponse.json(
@@ -101,12 +113,10 @@ export async function PATCH(request: NextRequest) {
     const encryptedToken = encryptToken(body.botToken);
     const webhookSecret = randomUUID();
 
-    // Build webhook URL
     const host = request.headers.get("host") ?? "localhost:3005";
     const proto = host.startsWith("localhost") ? "http" : "https";
     const webhookUrl = `${proto}://${host}/api/telegram/webhook/${webhookSecret}`;
 
-    // Register webhook with Telegram
     const webhookResult = await setWebhook(body.botToken, webhookUrl);
     if (!webhookResult.ok) {
       return NextResponse.json(
@@ -116,14 +126,14 @@ export async function PATCH(request: NextRequest) {
     }
 
     await supabase
-      .from("tenants")
-      .update({
-        telegram_enabled: true,
-        telegram_bot_token: encryptedToken,
-        telegram_bot_username: botUsername,
-        telegram_webhook_secret: webhookSecret,
-      } as never)
-      .eq("id", tenantId);
+      .from("tenant_telegram_configs")
+      .upsert({
+        tenant_id: tenantId,
+        enabled: true,
+        bot_token: encryptedToken,
+        bot_username: botUsername,
+        webhook_secret: webhookSecret,
+      } as never);
 
     return NextResponse.json({
       success: true,
@@ -132,17 +142,17 @@ export async function PATCH(request: NextRequest) {
     });
   }
 
-  // ── Toggle enabled ──────────────────────────────────────
+  // ── Toggle enabled ──────────────────────────────────────────────────────────
   if (body.enabled !== undefined) {
     await supabase
-      .from("tenants")
-      .update({ telegram_enabled: body.enabled } as never)
-      .eq("id", tenantId);
+      .from("tenant_telegram_configs")
+      .update({ enabled: body.enabled } as never)
+      .eq("tenant_id", tenantId);
 
     return NextResponse.json({ success: true, enabled: body.enabled });
   }
 
-  // ── Toggle auto-send invite (language_school only) ─────
+  // ── Toggle autoSendInvite (stays on tenants) ────────────────────────────────
   if (body.autoSendInvite !== undefined) {
     await supabase
       .from("tenants")

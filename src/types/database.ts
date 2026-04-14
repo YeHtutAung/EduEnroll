@@ -123,6 +123,19 @@ export interface Tenant {
   created_at: string;
 }
 
+export interface TenantTelegramConfig {
+  tenant_id: string;
+  bot_token: string | null;        // AES-256-GCM encrypted
+  bot_username: string | null;
+  webhook_secret: string | null;
+  allowed_chat_ids: number[] | null;  // bigint[] — whitelisted admin chat IDs
+  enabled: boolean;
+  enable_join_requests: boolean;
+  enable_phone_flow: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface User {
   id: string;                   // matches auth.users.id
   tenant_id: string;
