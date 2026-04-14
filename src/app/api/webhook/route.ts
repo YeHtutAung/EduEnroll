@@ -23,7 +23,7 @@ export async function GET() {
 }
 
 // ─── POST /api/webhook ────────────────────────────────────────────────────────
-// Receives Telegram updates. Always returns 200 — Telegram retries on non-200.
+// Support bot webhook. Always returns 200 — Telegram retries on non-200.
 
 export async function POST(request: NextRequest) {
   // ── 1. Verify webhook secret header ────────────────────────────────────────
@@ -40,11 +40,11 @@ export async function POST(request: NextRequest) {
     request.headers.get("x-tenant-slug") ?? extractSubdomainFromHost(host);
 
   if (!tenantSlug) {
-    console.warn("[webhook] Could not resolve tenant slug from host:", host);
+    console.warn("[support-webhook] Could not resolve tenant slug from host:", host);
     return NextResponse.json({ ok: true });
   }
 
-  // ── 3. Look up tenant + telegram config ────────────────────────────────────
+  // ── 3. Look up tenant ──────────────────────────────────────────────────────
   const supabase = createAdminClient();
 
   const { data: tenant } = (await supabase
@@ -57,38 +57,46 @@ export async function POST(request: NextRequest) {
   };
 
   if (!tenant) {
-    console.warn("[webhook] Tenant not found:", tenantSlug);
+    console.warn("[support-webhook] Tenant not found:", tenantSlug);
     return NextResponse.json({ ok: true });
   }
 
-  const { data: config } = (await supabase
-    .from("tenant_telegram_configs")
-    .select("bot_token, allowed_chat_ids, enabled")
+  // ── 4. Look up support bot ─────────────────────────────────────────────────
+  const { data: bot } = (await supabase
+    .from("tenant_bots")
+    .select("bot_token, enabled")
     .eq("tenant_id", tenant.id)
+    .eq("bot_type", "support")
     .eq("enabled", true)
     .single()) as {
-    data: {
-      bot_token: string | null;
-      allowed_chat_ids: number[] | null;
-      enabled: boolean;
-    } | null;
+    data: { bot_token: string | null; enabled: boolean } | null;
     error: unknown;
   };
 
-  if (!config?.bot_token) {
-    console.warn("[webhook] Telegram not configured or disabled for tenant:", tenantSlug);
+  if (!bot?.bot_token) {
+    console.warn("[support-webhook] Support bot not configured or disabled for tenant:", tenantSlug);
     return NextResponse.json({ ok: true });
   }
 
   let botToken: string;
   try {
-    botToken = decryptToken(config.bot_token);
+    botToken = decryptToken(bot.bot_token);
   } catch (err) {
-    console.error("[webhook] Failed to decrypt bot token for tenant:", tenantSlug, err);
+    console.error("[support-webhook] Failed to decrypt bot token for tenant:", tenantSlug, err);
     return NextResponse.json({ ok: true });
   }
 
-  // ── 4. Parse Telegram update ───────────────────────────────────────────────
+  // ── 5. Look up allowed_chat_ids from telegram config ──────────────────────
+  const { data: config } = (await supabase
+    .from("tenant_telegram_configs")
+    .select("allowed_chat_ids")
+    .eq("tenant_id", tenant.id)
+    .single()) as {
+    data: { allowed_chat_ids: number[] | null } | null;
+    error: unknown;
+  };
+
+  // ── 6. Parse Telegram update ───────────────────────────────────────────────
   let update: TelegramUpdate;
   try {
     update = (await request.json()) as TelegramUpdate;
@@ -105,11 +113,10 @@ export async function POST(request: NextRequest) {
   const text = message.text.trim();
   const from = message.from;
 
-  // ── 5. Handle /start ───────────────────────────────────────────────────────
+  // ── 7. Handle /start ───────────────────────────────────────────────────────
   if (text === "/start") {
-    const allowed = (config.allowed_chat_ids ?? []).map(Number);
+    const allowed = (config?.allowed_chat_ids ?? []).map(Number);
 
-    // Already approved
     if (allowed.includes(chatId)) {
       await sendTelegramMessage(chatId, "✅ You already have access. Just send me a message!", botToken);
       return NextResponse.json({ ok: true });
@@ -118,7 +125,6 @@ export async function POST(request: NextRequest) {
     const name = from?.first_name ?? "User";
     const username = from?.username ?? null;
 
-    // Upsert request — UNIQUE(tenant_id, chat_id) handles duplicates
     const { error } = await supabase
       .from("telegram_admin_requests")
       .upsert(
@@ -127,7 +133,6 @@ export async function POST(request: NextRequest) {
       );
 
     if (error) {
-      // Already has an existing request (pending or otherwise)
       await sendTelegramMessage(
         chatId,
         "⏳ Your request is already pending. Please wait for admin approval.",
@@ -144,19 +149,18 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  // ── 6. Check allowed_chat_ids whitelist ────────────────────────────────────
-  const allowed = (config.allowed_chat_ids ?? []).map(Number);
+  // ── 8. Check allowed_chat_ids whitelist ────────────────────────────────────
+  const allowed = (config?.allowed_chat_ids ?? []).map(Number);
   if (!allowed.includes(chatId)) {
-    // Not authorised — acknowledge silently, never 403
     return NextResponse.json({ ok: true });
   }
 
-  // ── 7. Forward to agent + send reply ──────────────────────────────────────
+  // ── 9. Forward to agent + send reply ──────────────────────────────────────
   try {
     const reply = await askAgent(text, String(chatId), tenant.subdomain);
     await sendTelegramMessage(chatId, reply, botToken);
   } catch (err) {
-    console.error("[webhook] Error processing message for tenant:", tenantSlug, err);
+    console.error("[support-webhook] Error processing message for tenant:", tenantSlug, err);
     await sendTelegramMessage(chatId, "Sorry, something went wrong. Please try again.", botToken);
   }
 

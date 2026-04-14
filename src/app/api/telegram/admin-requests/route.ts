@@ -5,7 +5,7 @@ import { decryptToken } from "@/lib/telegram/crypto";
 import { sendTelegramMessage } from "@/lib/telegram";
 
 // ─── GET /api/telegram/admin-requests ────────────────────────────────────────
-// Returns all pending access requests for the tenant.
+// Returns all pending support bot access requests for the tenant.
 
 export async function GET() {
   const auth = await requireOwner();
@@ -66,22 +66,33 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ error: "Request not found." }, { status: 404 });
   }
 
-  // Fetch bot token for notification
+  // Fetch support bot token for notification
+  const { data: bot } = (await supabase
+    .from("tenant_bots")
+    .select("bot_token")
+    .eq("tenant_id", tenantId)
+    .eq("bot_type", "support")
+    .single()) as {
+    data: { bot_token: string | null } | null;
+    error: unknown;
+  };
+
+  // Fetch current allowed_chat_ids
   const { data: config } = (await supabase
     .from("tenant_telegram_configs")
-    .select("bot_token, allowed_chat_ids")
+    .select("allowed_chat_ids")
     .eq("tenant_id", tenantId)
     .single()) as {
-    data: { bot_token: string | null; allowed_chat_ids: number[] | null } | null;
+    data: { allowed_chat_ids: number[] | null } | null;
     error: unknown;
   };
 
   let botToken: string | null = null;
-  if (config?.bot_token) {
+  if (bot?.bot_token) {
     try {
-      botToken = decryptToken(config.bot_token);
+      botToken = decryptToken(bot.bot_token);
     } catch {
-      console.error("[admin-requests] Failed to decrypt bot token");
+      console.error("[admin-requests] Failed to decrypt support bot token");
     }
   }
 
@@ -95,17 +106,15 @@ export async function PATCH(request: NextRequest) {
         .eq("tenant_id", tenantId);
     }
 
-    // Update request status
     await supabase
       .from("telegram_admin_requests")
       .update({ status: "approved" } as never)
       .eq("id", req.id);
 
-    // Notify user
     if (botToken) {
       await sendTelegramMessage(
         req.chat_id,
-        "✅ Your request has been approved. You can now send messages to the admin bot.",
+        "✅ Your request has been approved. You can now send messages to the support bot.",
         botToken,
       );
     }
