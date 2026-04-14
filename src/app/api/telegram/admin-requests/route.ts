@@ -97,13 +97,15 @@ export async function PATCH(request: NextRequest) {
   }
 
   if (body.action === "approve") {
-    // Append chat_id to allowed_chat_ids
+    // Append chat_id to allowed_chat_ids — upsert so the row is created if missing
     const current = (config?.allowed_chat_ids ?? []).map(Number);
     if (!current.includes(req.chat_id)) {
       await supabase
         .from("tenant_telegram_configs")
-        .update({ allowed_chat_ids: [...current, req.chat_id] } as never)
-        .eq("tenant_id", tenantId);
+        .upsert(
+          { tenant_id: tenantId, allowed_chat_ids: [...current, req.chat_id] } as never,
+          { onConflict: "tenant_id" },
+        );
     }
 
     await supabase
