@@ -22,6 +22,59 @@ export interface AuthContext {
  */
 export async function requireAuth(): Promise<AuthContext | NextResponse> {
   const headersList = headers();
+
+  // ── Agent secret auth ────────────────────────────────────────────────────────
+  // Agent tool calls authenticate with x-agent-secret + x-tenant-slug instead
+  // of a Supabase session. The agent is granted owner-level access.
+  const agentSecret = headersList.get("x-agent-secret");
+  if (agentSecret) {
+    const expectedSecret = process.env.AGENT_SECRET;
+    if (!expectedSecret || agentSecret !== expectedSecret) {
+      return NextResponse.json(
+        { error: "Unauthorized", message: "Invalid agent secret." },
+        { status: 401 },
+      );
+    }
+
+    const slug =
+      headersList.get("x-tenant-slug") ||
+      extractSubdomainFromHost(headersList.get("host") ?? "");
+
+    if (!slug) {
+      return NextResponse.json(
+        { error: "Bad Request", message: "x-tenant-slug header is required for agent auth." },
+        { status: 400 },
+      );
+    }
+
+    const adminSupabase = createAdminClient();
+    const { data: tenant } = (await adminSupabase
+      .from("tenants")
+      .select("id")
+      .eq("subdomain", slug)
+      .single()) as { data: { id: string } | null; error: unknown };
+
+    if (!tenant) {
+      return NextResponse.json(
+        { error: "Not Found", message: "Tenant not found." },
+        { status: 404 },
+      );
+    }
+
+    const agentUser: User = {
+      id: "agent",
+      tenant_id: tenant.id,
+      email: "agent@kuunyi.com",
+      role: "owner",
+      full_name: "KuuNyi Agent",
+      phone: null,
+      created_at: new Date().toISOString(),
+    };
+
+    return { supabase: adminSupabase, user: agentUser, tenantId: tenant.id };
+  }
+
+  // ── Supabase session auth (browser / Bearer token) ───────────────────────────
   // Prefer x-supabase-auth over Authorization:
   // Vercel Deployment Protection intercepts the Authorization header and returns
   // an HTML challenge page, even when x-vercel-protection-bypass is present.
