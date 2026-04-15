@@ -948,6 +948,9 @@ function SettingsContent() {
   const [tgAdminRequests, setTgAdminRequests] = useState<
     { id: string; chat_id: number; name: string; username: string | null }[]
   >([]);
+  const [tgApprovedUsers, setTgApprovedUsers] = useState<
+    { id: string; chat_id: number; name: string; username: string | null }[]
+  >([]);
   const [tgRequestActioning, setTgRequestActioning] = useState<string | null>(null);
 
   const fetchTelegramAdminRequests = useCallback(async () => {
@@ -956,6 +959,7 @@ function SettingsContent() {
       if (!res.ok) return;
       const data = await res.json();
       setTgAdminRequests(data.requests ?? []);
+      setTgApprovedUsers(data.approved ?? []);
     } catch {
       // non-critical
     }
@@ -1143,10 +1147,33 @@ function SettingsContent() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `${res.status}`);
+      if (action === "approve") {
+        const approved = tgAdminRequests.find((r) => r.id === id);
+        if (approved) setTgApprovedUsers((prev) => [...prev, approved]);
+      }
       setTgAdminRequests((prev) => prev.filter((r) => r.id !== id));
       toast.success(action === "approve" ? "Request approved." : "Request rejected.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to process request.");
+    } finally {
+      setTgRequestActioning(null);
+    }
+  }
+
+  async function handleTgRevokeUser(id: string) {
+    setTgRequestActioning(id);
+    try {
+      const res = await fetch("/api/telegram/admin-requests", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, action: "revoke" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `${res.status}`);
+      setTgApprovedUsers((prev) => prev.filter((u) => u.id !== id));
+      toast.success("Access revoked.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to revoke access.");
     } finally {
       setTgRequestActioning(null);
     }
@@ -2251,6 +2278,32 @@ function SettingsContent() {
               </div>
               <Toggle checked={spEnabled} onChange={handleSpToggle} disabled={spSaving} />
             </div>
+
+            {/* Approved users */}
+            {tgApprovedUsers.length > 0 && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 space-y-2">
+                <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wide">
+                  Approved Access
+                </p>
+                {tgApprovedUsers.map((user) => (
+                  <div key={user.id} className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-800 truncate">{user.name}</p>
+                      <p className="text-xs text-gray-500">
+                        {user.username ? `@${user.username} · ` : ""}ID: {user.chat_id}
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => handleTgRevokeUser(user.id)}
+                      disabled={tgRequestActioning === user.id}
+                      className="px-3 py-1.5 text-xs font-semibold bg-white text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors shrink-0"
+                    >
+                      Revoke
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Pending access requests */}
             {tgAdminRequests.length > 0 && (
