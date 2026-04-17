@@ -1152,7 +1152,7 @@ function SettingsContent() {
       if (!res.ok) throw new Error(data.error ?? `${res.status}`);
       if (action === "approve") {
         const approved = tgAdminRequests.find((r) => r.id === id);
-        if (approved) setTgApprovedUsers((prev) => [...prev, approved]);
+        if (approved) setTgApprovedUsers((prev) => [...prev, { ...approved }]);
       }
       setTgAdminRequests((prev) => prev.filter((r) => r.id !== id));
       toast.success(action === "approve" ? "Request approved." : "Request rejected.");
@@ -2328,20 +2328,22 @@ function SettingsContent() {
                   Approved Access
                 </p>
                 {tgApprovedUsers.map((user) => (
-                  <div key={user.id} className="flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium text-gray-800 truncate">{user.name}</p>
-                      <p className="text-xs text-gray-500">
-                        {user.username ? `@${user.username} · ` : ""}ID: {user.chat_id}
-                      </p>
+                  <div key={user.id} className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-800 truncate">{user.name}</p>
+                        <p className="text-xs text-gray-500">
+                          {user.username ? `@${user.username} · ` : ""}ID: {user.chat_id}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleTgRevokeUser(user.id)}
+                        disabled={tgRequestActioning === user.id}
+                        className="px-3 py-1.5 text-xs font-semibold bg-white text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors shrink-0"
+                      >
+                        Revoke
+                      </button>
                     </div>
-                    <button
-                      onClick={() => handleTgRevokeUser(user.id)}
-                      disabled={tgRequestActioning === user.id}
-                      className="px-3 py-1.5 text-xs font-semibold bg-white text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors shrink-0"
-                    >
-                      Revoke
-                    </button>
                   </div>
                 ))}
               </div>

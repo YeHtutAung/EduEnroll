@@ -121,7 +121,7 @@ export async function PATCH(request: NextRequest) {
     if (botToken) {
       await sendTelegramMessage(
         req.chat_id,
-        "✅ Your request has been approved. You can now send messages to the support bot.",
+        `✅ Your access request has been approved. You can now use the KuuNyi admin bot.`,
         botToken,
       );
     }
@@ -129,7 +129,7 @@ export async function PATCH(request: NextRequest) {
     return NextResponse.json({ success: true, action: "approved" });
   }
 
-  // Revoke — remove from allowed_chat_ids and mark as rejected
+  // Revoke — remove from allowed_chat_ids, delete agent key, and mark as rejected
   if (body.action === "revoke") {
     const current = (config?.allowed_chat_ids ?? []).map(Number);
     const updated = current.filter((id) => id !== req.chat_id);
@@ -139,6 +139,13 @@ export async function PATCH(request: NextRequest) {
         { tenant_id: tenantId, allowed_chat_ids: updated } as never,
         { onConflict: "tenant_id" },
       );
+
+    // Invalidate the agent key so it can no longer call admin endpoints
+    await supabase
+      .from("tenant_agents")
+      .delete()
+      .eq("tenant_id", tenantId)
+      .eq("chat_id", req.chat_id);
 
     await supabase
       .from("telegram_admin_requests")
