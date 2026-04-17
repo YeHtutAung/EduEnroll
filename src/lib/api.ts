@@ -4,12 +4,15 @@ import { createClient } from "@/lib/supabase/server";
 import { createClient as createBareClient, type SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { extractSubdomainFromHost } from "@/lib/tenant";
+import { verifyAgentSignature } from "@/lib/agent-auth";
 import type { User, Database } from "@/types/database";
 
 export interface AuthContext {
   supabase: SupabaseClient<Database>;
   user: User;
   tenantId: string;
+  isAgent: boolean;
+  agentChatId: number | null;
 }
 
 /**
@@ -20,34 +23,50 @@ export interface AuthContext {
  *   const auth = await requireAuth();
  *   if (auth instanceof NextResponse) return auth;
  */
-export async function requireAuth(): Promise<AuthContext | NextResponse> {
+// rawBody: pass the pre-read request body text for POST/PATCH agent requests.
+// For GET agent requests omit it (defaults to "").
+export async function requireAuth(rawBody = ""): Promise<AuthContext | NextResponse> {
   const headersList = headers();
 
-  // ── Agent secret auth ────────────────────────────────────────────────────────
-  // Agent tool calls authenticate with x-agent-secret + x-tenant-slug instead
-  // of a Supabase session. The agent is granted owner-level access.
-  const agentSecret = headersList.get("x-agent-secret");
-  if (agentSecret) {
-    const expectedSecret = process.env.AGENT_SECRET;
-    if (!expectedSecret || agentSecret !== expectedSecret) {
+  // ── Agent HMAC auth ───────────────────────────────────────────────────────────
+  // KuuNyi's bot service signs every request with:
+  //   HMAC-SHA256(chatId + "." + rawBody, AGENT_SECRET)
+  // chatId is included in the signed payload so it cannot be swapped in transit.
+  const agentSignature = headersList.get("x-agent-signature");
+  if (agentSignature) {
+    const chatIdHeader = headersList.get("x-chat-id");
+    if (!chatIdHeader) {
       return NextResponse.json(
-        { error: "Unauthorized", message: "Invalid agent secret." },
+        { error: "Bad Request", message: "x-chat-id header required." },
+        { status: 400 },
+      );
+    }
+
+    if (!verifyAgentSignature(chatIdHeader, rawBody, agentSignature)) {
+      return NextResponse.json(
+        { error: "Unauthorized", message: "Invalid agent signature." },
         { status: 401 },
       );
     }
 
-    const slug =
-      headersList.get("x-tenant-slug") ||
-      extractSubdomainFromHost(headersList.get("host") ?? "");
+    const chatId = Number(chatIdHeader);
+    if (!Number.isFinite(chatId)) {
+      return NextResponse.json(
+        { error: "Bad Request", message: "x-chat-id must be a number." },
+        { status: 400 },
+      );
+    }
 
+    const slug = headersList.get("x-tenant-slug");
     if (!slug) {
       return NextResponse.json(
-        { error: "Bad Request", message: "x-tenant-slug header is required for agent auth." },
+        { error: "Bad Request", message: "x-tenant-slug header required." },
         { status: 400 },
       );
     }
 
     const adminSupabase = createAdminClient();
+
     const { data: tenant } = (await adminSupabase
       .from("tenants")
       .select("id")
@@ -55,14 +74,26 @@ export async function requireAuth(): Promise<AuthContext | NextResponse> {
       .single()) as { data: { id: string } | null; error: unknown };
 
     if (!tenant) {
+      return NextResponse.json({ error: "Not Found", message: "Tenant not found." }, { status: 404 });
+    }
+
+    // Verify chat_id is still in allowed_chat_ids (revocation check)
+    const { data: config } = (await adminSupabase
+      .from("tenant_telegram_configs")
+      .select("allowed_chat_ids")
+      .eq("tenant_id", tenant.id)
+      .single()) as { data: { allowed_chat_ids: number[] | null } | null; error: unknown };
+
+    const allowed = (config?.allowed_chat_ids ?? []).map(Number);
+    if (!allowed.includes(chatId)) {
       return NextResponse.json(
-        { error: "Not Found", message: "Tenant not found." },
-        { status: 404 },
+        { error: "Forbidden", message: "Agent access has been revoked." },
+        { status: 403 },
       );
     }
 
     const agentUser: User = {
-      id: "agent",
+      id: "00000000-0000-0000-0000-000000000000",
       tenant_id: tenant.id,
       email: "agent@kuunyi.com",
       role: "owner",
@@ -71,7 +102,13 @@ export async function requireAuth(): Promise<AuthContext | NextResponse> {
       created_at: new Date().toISOString(),
     };
 
-    return { supabase: adminSupabase, user: agentUser, tenantId: tenant.id };
+    return {
+      supabase: adminSupabase,
+      user: agentUser,
+      tenantId: tenant.id,
+      isAgent: true,
+      agentChatId: chatId,
+    };
   }
 
   // ── Supabase session auth (browser / Bearer token) ───────────────────────────
@@ -130,7 +167,7 @@ export async function requireAuth(): Promise<AuthContext | NextResponse> {
     );
   }
 
-  return { supabase, user: profile, tenantId: profile.tenant_id };
+  return { supabase, user: profile, tenantId: profile.tenant_id, isAgent: false, agentChatId: null };
 }
 
 /**

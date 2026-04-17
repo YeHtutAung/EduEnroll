@@ -16,6 +16,12 @@ import type { Enrollment, Payment, PaymentStatus, EnrollmentStatus } from "@/typ
 type EnrollmentResult = { data: Enrollment | null; error: unknown };
 type PaymentResult    = { data: Payment    | null; error: unknown };
 
+function dbError(label: string, err: unknown) {
+  const e = err as { message?: string; details?: string; hint?: string; code?: string };
+  console.error(`[verify] ${label}:`, JSON.stringify({ message: e.message, details: e.details, hint: e.hint, code: e.code }));
+  return NextResponse.json({ error: e.message, details: e.details, hint: e.hint, code: e.code }, { status: 500 });
+}
+
 // ─── PATCH /api/admin/payments/[id]/verify ────────────────────────────────────
 // [id] = payment id
 // Body: { action: 'approve' | 'reject' | 'request_remaining',
@@ -27,14 +33,23 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: { id: string } },
 ) {
-  const auth = await requireAuth();
+  // Pre-read raw body for agent requests — HMAC verification requires the raw text.
+  // For human requests we parse normally below.
+  const isAgentRequest = !!request.headers.get("x-agent-signature");
+  const rawBody = isAgentRequest ? await request.text() : undefined;
+
+  const auth = await requireAuth(rawBody ?? "");
   if (auth instanceof NextResponse) return auth;
-  const { supabase, tenantId, user } = auth;
+  const { supabase, tenantId, user, isAgent, agentChatId } = auth;
+
+  // For audit: human verifiers use verified_by (uuid), agents use verified_by_agent (chat_id)
+  const verifiedByHuman = isAgent ? null : user.id;
+  const verifiedByAgent = isAgent ? agentChatId : null;
 
   // ── Parse body ──────────────────────────────────────────────────────────────
   let body: unknown;
   try {
-    body = await request.json();
+    body = rawBody ? JSON.parse(rawBody) : await request.json();
   } catch {
     return badRequest("Request body must be valid JSON.");
   }
@@ -188,10 +203,10 @@ export async function PATCH(
 
     const { error: pe } = await admin
       .from("payments")
-      .update({ status: newPaymentStatus, verified_by: user.id, verified_at: now } as never)
+      .update({ status: newPaymentStatus, verified_by: verifiedByHuman, verified_by_agent: verifiedByAgent, verified_at: now } as never)
       .eq("id", payment.id);
 
-    if (pe) return NextResponse.json({ error: (pe as Error).message }, { status: 500 });
+    if (pe) return dbError(`${action} payment update`, pe);
 
     const { data: updatedEnrollment, error: ee } = await admin
       .from("enrollments")
@@ -200,7 +215,7 @@ export async function PATCH(
       .select()
       .single() as EnrollmentResult;
 
-    if (ee) return NextResponse.json({ error: (ee as Error).message }, { status: 500 });
+    if (ee) return dbError(`${action} enrollment update`, ee);
 
     // Send notifications (best-effort, non-blocking)
     const { classLevel, statusUrl, paymentUrl, feeFormatted } = await getClassAndUrls();
@@ -274,7 +289,7 @@ export async function PATCH(
 
     return NextResponse.json({
       enrollment: updatedEnrollment,
-      payment: { ...payment, status: newPaymentStatus, verified_by: user.id, verified_at: now },
+      payment: { ...payment, status: newPaymentStatus, verified_by: verifiedByHuman, verified_by_agent: verifiedByAgent, verified_at: now },
     });
   }
 
@@ -297,7 +312,7 @@ export async function PATCH(
       .update(paymentUpdate as never)
       .eq("id", payment.id);
 
-    if (pe) return NextResponse.json({ error: (pe as Error).message }, { status: 500 });
+    if (pe) return dbError(`${action} payment update`, pe);
 
     const { data: updatedEnrollment, error: ee } = await admin
       .from("enrollments")
@@ -306,7 +321,7 @@ export async function PATCH(
       .select()
       .single() as EnrollmentResult;
 
-    if (ee) return NextResponse.json({ error: (ee as Error).message }, { status: 500 });
+    if (ee) return dbError(`${action} enrollment update`, ee);
 
     // Send notifications (best-effort, non-blocking)
     const { classLevel, paymentUrl, statusUrl } = await getClassAndUrls();
@@ -395,7 +410,7 @@ export async function PATCH(
     .update({ status: newPaymentStatus, verified_by: user.id, verified_at: now } as never)
     .eq("id", payment.id);
 
-  if (pe) return NextResponse.json({ error: (pe as Error).message }, { status: 500 });
+  if (pe) return dbError("reject payment update", pe);
 
   const enrollUpdatePayload: Record<string, unknown> = { status: newEnrollStatus };
   if (typeof rejection_reason === "string") {
@@ -409,7 +424,7 @@ export async function PATCH(
     .select()
     .single() as EnrollmentResult;
 
-  if (ee) return NextResponse.json({ error: (ee as Error).message }, { status: 500 });
+  if (ee) return dbError("reject enrollment update", ee);
 
   // Restore seats only if enrollment wasn't already rejected (prevents double-restore)
   if (enrollment.status !== "rejected") {
@@ -479,7 +494,7 @@ export async function PATCH(
 
   const responseBody: Record<string, unknown> = {
     enrollment: updatedEnrollment,
-    payment: { ...payment, status: newPaymentStatus, verified_by: user.id, verified_at: now },
+    payment: { ...payment, status: newPaymentStatus, verified_by: verifiedByHuman, verified_by_agent: verifiedByAgent, verified_at: now },
   };
   if (typeof rejection_reason === "string") responseBody.rejection_reason = rejection_reason;
 

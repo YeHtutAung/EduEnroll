@@ -2,26 +2,151 @@
 
 ## Agent Configuration
 
-Configure these three variables in the agent service:
+### Environment variables
 
 ```
 API_BASE_URL  = <see table below>
-TENANT_SLUG   = <school subdomain, e.g. nihon-moment>
-AGENT_SECRET  = <shared secret — must match AGENT_SECRET on the Next.js server>
+AGENT_SECRET  = <shared secret — must match KuuNyi server's AGENT_SECRET env var>
+TENANT_SLUG   = nihon-moment
 ```
 
-Each tool constructs the full URL as:
-```
-{API_BASE_URL}/api/admin/stats?tenant={TENANT_SLUG}
-{API_BASE_URL}/api/admin/payments/pending?tenant={TENANT_SLUG}
-{API_BASE_URL}/api/intakes?tenant={TENANT_SLUG}
+### Migration from `x-agent-key`
+
+If your agent service previously used the `x-agent-key` header:
+
+```diff
+- AGENT_KEY = <old per-user key>
++ AGENT_SECRET = <shared secret from KuuNyi team>
++ TENANT_SLUG  = nihon-moment
 ```
 
-And passes these headers on every request:
+Replace the auth header logic — see the new signing helper below.
+
+---
+
+### How agent auth works
+
+Every request is signed with HMAC-SHA256, mirroring Messenger's `X-Hub-Signature-256` approach.
+The secret is never transmitted — only the signature is sent.
+
+**Required headers on every request:**
+
 ```
-x-agent-secret: {AGENT_SECRET}
-x-tenant-slug:  {TENANT_SLUG}
+x-agent-signature: sha256=<HMAC-SHA256(chatId + "." + rawBody, AGENT_SECRET)>
+x-tenant-slug:     nihon-moment
+x-chat-id:         <Telegram chat_id of the admin who issued the command>
 ```
+
+- For GET requests `rawBody` is `""` (empty string).
+- For POST/PATCH requests `rawBody` is the exact JSON body string passed to `fetch`.
+- `chat_id` is baked into the HMAC — it cannot be swapped in transit without breaking the signature.
+- `chat_id` must come from the Telegram update (e.g. `ctx.from.id`) — never hardcode it.
+
+---
+
+### Signing helper (TypeScript)
+
+```ts
+import crypto from "crypto";
+
+function agentHeaders(chatId: number, rawBody = ""): Record<string, string> {
+  const payload = `${chatId}.${rawBody}`;
+  const sig = "sha256=" + crypto
+    .createHmac("sha256", process.env.AGENT_SECRET!)
+    .update(payload)
+    .digest("hex");
+
+  return {
+    "x-agent-signature": sig,
+    "x-tenant-slug":     process.env.TENANT_SLUG!,
+    "x-chat-id":         String(chatId),
+    "Content-Type":      "application/json",
+  };
+}
+```
+
+**GET request:**
+```ts
+// chatId = whoever sent the Telegram command (from ctx.from.id)
+fetch(`${API_BASE_URL}/api/admin/payments/pending`, {
+  headers: agentHeaders(chatId),
+});
+```
+
+**POST / PATCH request:**
+```ts
+// IMPORTANT: call JSON.stringify once and reuse the same string for both
+// agentHeaders() and the fetch body. Stringifying twice may produce different
+// output and the HMAC will not match.
+const body = JSON.stringify({ action: "approve" });
+
+fetch(`${API_BASE_URL}/api/admin/payments/${paymentId}/verify`, {
+  method: "PATCH",
+  headers: agentHeaders(chatId, body),
+  body,  // same string — not JSON.stringify(...) again
+});
+```
+
+---
+
+### End-to-end Telegram command handler example
+
+```ts
+bot.command("approve", async (ctx) => {
+  const chatId = ctx.from!.id;           // always from Telegram update
+  const paymentId = ctx.message!.text.split(" ")[1];
+
+  if (!paymentId) {
+    return ctx.reply("Usage: /approve <payment_id>");
+  }
+
+  const body = JSON.stringify({ action: "approve" });
+  const res = await fetch(`${process.env.API_BASE_URL}/api/admin/payments/${paymentId}/verify`, {
+    method: "PATCH",
+    headers: agentHeaders(chatId, body),
+    body,
+  });
+
+  if (!res.ok) {
+    const err = await res.json();
+    return ctx.reply(`❌ Failed: ${err.message ?? res.status}`);
+  }
+
+  return ctx.reply("✅ Payment approved.");
+});
+```
+
+---
+
+### Error responses
+
+All errors return JSON with this shape:
+
+```json
+{ "error": "Unauthorized", "message": "Invalid agent signature." }
+```
+
+| Status | Cause |
+|--------|-------|
+| `400` | Missing `x-chat-id` or `x-tenant-slug` header |
+| `401` | HMAC signature does not match (wrong secret or body mismatch) |
+| `403` | `chat_id` is not in `allowed_chat_ids` (not approved or revoked) |
+| `404` | Tenant slug not found |
+| `409` | Business logic conflict (e.g. payment already verified) |
+
+---
+
+### Access control
+
+The school owner controls who can call admin endpoints:
+
+1. Admin sends `/start` to the KuuNyi support bot on Telegram
+2. School owner approves the request in admin settings
+3. The admin's `chat_id` is added to the tenant's `allowed_chat_ids` list
+4. Any request with a `chat_id` not in that list is rejected with `403`
+5. Owner can revoke access at any time — takes effect immediately on the next request
+
+---
 
 ### API_BASE_URL by environment
 
@@ -29,9 +154,9 @@ x-tenant-slug:  {TENANT_SLUG}
 |-------------|-------------|
 | Production  | `https://nihon-moment.kuunyi.com` |
 | Staging     | `https://nihon-moment.edu-enroll-git-staging-yehtutaungs-projects.vercel.app` |
-| Dev (local) | `http://localhost:3005` |
+| Dev (local) | `http://localhost:3005?tenant=nihon-moment` |
 
-> **Note:** On production and staging the tenant is inferred from the subdomain, so `?tenant=` is not strictly required. On dev (localhost) there is no subdomain, so `?tenant={TENANT_SLUG}` **must** be appended to every request.
+> **Note:** On production and staging the tenant is inferred from the subdomain automatically — no extra headers needed. On dev (localhost) append `?tenant={TENANT_SLUG}` to every request since there is no subdomain.
 
 All admin endpoints require authentication. Public endpoints are listed separately at the bottom.
 
@@ -205,9 +330,16 @@ Triggers email + Telegram + Messenger notifications to the student automatically
 ```json
 {
   "enrollment": { "...updated enrollment..." },
-  "payment": { "...updated payment..." }
+  "payment": {
+    "...updated payment...",
+    "verified_by": "uuid or null",
+    "verified_by_agent": 123456789,
+    "verified_at": "2026-04-16T10:00:00Z"
+  }
 }
 ```
+
+> **Audit fields:** `verified_by` is the UUID of the human admin who verified (null when agent verified). `verified_by_agent` is the Telegram chat ID of the agent (null when human verified). Exactly one will be set.
 
 ---
 
