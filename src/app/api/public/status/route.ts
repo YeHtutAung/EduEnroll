@@ -190,9 +190,9 @@ export async function GET(request: NextRequest) {
   // ── Fetch tenant org_type ─────────────────────────────────────
   const { data: tenantInfo } = await supabase
     .from("tenants")
-    .select("org_type, auto_cancel_hours, payment_mode, mmqr_provider")
+    .select("org_type, currency, auto_cancel_hours, payment_mode, mmqr_provider")
     .eq("id", tenantId)
-    .single() as { data: { org_type: string; auto_cancel_hours: number; payment_mode: string; mmqr_provider: string } | null; error: unknown };
+    .single() as { data: { org_type: string; currency: string; auto_cancel_hours: number; payment_mode: string; mmqr_provider: string } | null; error: unknown };
 
   // Telegram config lives in tenant_telegram_configs (moved in migration 068)
   const { data: tgConfig } = await supabase
@@ -210,7 +210,8 @@ export async function GET(request: NextRequest) {
                         ? cartItems.map((i) => i.class_level).join(", ")
                         : (enrollment.classes?.level ?? null),
     fee_mmk:          displayFee,
-    fee_formatted:    displayFee != null ? formatMMK(displayFee) : null,
+    fee_formatted:    displayFee != null ? formatMMK(displayFee, tenantInfo?.currency || "MMK") : null,
+    currency:         tenantInfo?.currency || "MMK",
     quantity:          enrollment.quantity ?? 1,
     intake_slug:      intakeSlug,
     status:           enrollment.status,

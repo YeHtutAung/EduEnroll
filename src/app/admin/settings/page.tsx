@@ -516,7 +516,8 @@ function SettingsContent() {
   const [emailOnEnroll, setEmailOnEnroll] = useState(false);
   const [savingEmailToggle, setSavingEmailToggle] = useState(false);
 
-  // ── Payment mode ──────────────────────────────────────────────────────────
+  // ── Currency & Payment mode ──────────────────────────────────────────────
+  const [currency, setCurrency] = useState("MMK");
   const [paymentMode, setPaymentMode] = useState<"bank_transfer" | "mmqr" | "stripe">("bank_transfer");
   const [mmqrProvider, setMmqrProvider] = useState<"abank" | "mmpay">("abank");
   const [savingPaymentMode, setSavingPaymentMode] = useState(false);
@@ -543,13 +544,14 @@ function SettingsContent() {
       // Fetch tenant name + logo + org labels
       const { data: tenant } = await supabase
         .from("tenants")
-        .select("name, logo_url, org_type, label_intake, label_class, label_student, label_seat, label_fee, auto_cancel_hours, email_on_enroll, payment_mode, mmqr_provider")
+        .select("name, logo_url, org_type, currency, label_intake, label_class, label_student, label_seat, label_fee, auto_cancel_hours, email_on_enroll, payment_mode, mmqr_provider")
         .eq("id", profile.tenant_id)
         .single() as {
         data: {
           name: string;
           logo_url: string | null;
           org_type: string;
+          currency: string;
           label_intake: string;
           label_class: string;
           label_student: string;
@@ -575,6 +577,7 @@ function SettingsContent() {
         });
         setAutoCancelHours(tenant.auto_cancel_hours ?? 4320);
         setEmailOnEnroll(tenant.email_on_enroll ?? false);
+        setCurrency(tenant.currency || "MMK");
         setPaymentMode((tenant.payment_mode as "bank_transfer" | "mmqr" | "stripe") ?? "bank_transfer");
         setMmqrProvider((tenant.mmqr_provider as "abank" | "mmpay") ?? "abank");
       }
@@ -767,7 +770,7 @@ function SettingsContent() {
     try {
       const { error } = await supabase
         .from("tenants")
-        .update({ payment_mode: paymentMode, mmqr_provider: mmqrProvider } as never)
+        .update({ currency, payment_mode: paymentMode, mmqr_provider: mmqrProvider } as never)
         .eq("id", tenantId);
       if (error) throw new Error((error as Error).message);
       toast.success("Payment mode saved.");
@@ -1197,6 +1200,23 @@ function SettingsContent() {
         subtitle="Choose how students pay for enrollments."
       >
         <div className="space-y-4">
+          {/* Currency */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Currency</label>
+            <select
+              value={currency}
+              onChange={(e) => setCurrency(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
+            >
+              <option value="MMK">MMK — Myanmar Kyat</option>
+              <option value="SGD">SGD — Singapore Dollar</option>
+              <option value="USD">USD — US Dollar</option>
+              <option value="THB">THB — Thai Baht</option>
+              <option value="JPY">JPY — Japanese Yen</option>
+            </select>
+            <p className="mt-1 text-xs text-gray-400">This currency is used for all class fees and payment displays.</p>
+          </div>
+
           {/* Mode toggle */}
           <div className="flex gap-3">
             <button

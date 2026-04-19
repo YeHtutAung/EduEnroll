@@ -268,7 +268,7 @@ function EditClassModal({
           {/* Fee + Seats row */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className={labelClass}>Fee (MMK)</label>
+              <label className={labelClass}>Fee ({tl.currency})</label>
               <input
                 type="number"
                 value={form.fee_mmk}
@@ -280,7 +280,7 @@ function EditClassModal({
               />
               {form.fee_mmk && Number(form.fee_mmk) > 0 && (
                 <p className="mt-1 text-xs text-gray-400">
-                  = {formatMMKSimple(Number(form.fee_mmk))}
+                  = {formatMMKSimple(Number(form.fee_mmk), tl.currency)}
                 </p>
               )}
             </div>
@@ -648,7 +648,7 @@ function AddCustomClassModal({
 
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className={labelClass}>Fee (MMK)</label>
+              <label className={labelClass}>Fee ({tl.currency})</label>
               <input
                 type="number"
                 value={form.fee_mmk}
@@ -660,7 +660,7 @@ function AddCustomClassModal({
               />
               {form.fee_mmk && Number(form.fee_mmk) > 0 && (
                 <p className="mt-1 text-xs text-gray-400">
-                  = {formatMMKSimple(Number(form.fee_mmk))}
+                  = {formatMMKSimple(Number(form.fee_mmk), tl.currency)}
                 </p>
               )}
             </div>
@@ -1354,7 +1354,7 @@ export default function IntakeDetailPage({
 
                       {/* Fee */}
                       <td className="px-5 py-4 tabular-nums text-gray-700 font-medium">
-                        {formatMMKSimple(cls.fee_mmk)}
+                        {formatMMKSimple(cls.fee_mmk, tl.currency)}
                       </td>
 
                       {/* Seats */}
@@ -1477,7 +1477,7 @@ export default function IntakeDetailPage({
         <ConfirmModal
           variant="success"
           title="Add Default Classes (N5–N1)?"
-          message="This will create N5, N4, N3, N2, N1 classes with default fees (300,000 – 500,000 MMK) and 30 seats each. Any levels that already exist will be skipped."
+          message={`This will create N5, N4, N3, N2, N1 classes with default fees (300,000 – 500,000 ${tl.currency}) and 30 seats each. Any levels that already exist will be skipped.`}
           confirmLabel="Add Classes"
           onConfirm={handleAddAllClasses}
           onCancel={() => setConfirmAddAll(false)}
