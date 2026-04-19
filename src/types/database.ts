@@ -117,7 +117,7 @@ export interface Tenant {
   menu_buttons: MenuButton[] | null;
   auto_cancel_hours: number;        // default 72, 0 = disabled
   email_on_enroll: boolean;         // default false — send confirmation email on enrollment
-  payment_mode: "bank_transfer" | "mmqr";
+  payment_mode: "bank_transfer" | "mmqr" | "stripe";
   mmqr_provider: "abank" | "mmpay";
   telegram_auto_send_invite: boolean;
   created_at: string;
@@ -233,6 +233,12 @@ export interface Payment {
   bank_reference: string | null;
   admin_note: string | null;
   received_amount_mmk: number | null;
+  payment_method: string | null;        // 'manual_upload' | 'abank_mmqr' | 'mmqr' | 'stripe'
+  payment_ref: string | null;
+  mmqr_status: string | null;
+  paid_at: string | null;
+  stripe_session_id: string | null;
+  stripe_payment_intent_id: string | null;
   payer_institution: string | null;
   status: PaymentStatus;
   verified_by: string | null;   // references users.id

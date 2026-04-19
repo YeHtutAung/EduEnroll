@@ -517,7 +517,7 @@ function SettingsContent() {
   const [savingEmailToggle, setSavingEmailToggle] = useState(false);
 
   // ── Payment mode ──────────────────────────────────────────────────────────
-  const [paymentMode, setPaymentMode] = useState<"bank_transfer" | "mmqr">("bank_transfer");
+  const [paymentMode, setPaymentMode] = useState<"bank_transfer" | "mmqr" | "stripe">("bank_transfer");
   const [mmqrProvider, setMmqrProvider] = useState<"abank" | "mmpay">("abank");
   const [savingPaymentMode, setSavingPaymentMode] = useState(false);
 
@@ -575,7 +575,7 @@ function SettingsContent() {
         });
         setAutoCancelHours(tenant.auto_cancel_hours ?? 4320);
         setEmailOnEnroll(tenant.email_on_enroll ?? false);
-        setPaymentMode((tenant.payment_mode as "bank_transfer" | "mmqr") ?? "bank_transfer");
+        setPaymentMode((tenant.payment_mode as "bank_transfer" | "mmqr" | "stripe") ?? "bank_transfer");
         setMmqrProvider((tenant.mmqr_provider as "abank" | "mmpay") ?? "abank");
       }
     } catch {
@@ -1235,6 +1235,17 @@ function SettingsContent() {
                 </div>
               </div>
             </button>
+            <button
+              onClick={() => setPaymentMode("stripe")}
+              className={`flex-1 rounded-xl border-2 px-4 py-3 text-left transition-colors ${
+                paymentMode === "stripe"
+                  ? "border-[#1a3f8a] bg-[#1a3f8a]/5"
+                  : "border-gray-200 hover:border-gray-300"
+              }`}
+            >
+              <p className="font-semibold text-sm">Stripe</p>
+              <p className="text-xs text-gray-500 mt-0.5">Card Payment (SGD, USD, etc.)</p>
+            </button>
           </div>
 
           {/* Provider selector (only when MMQR) */}
@@ -1260,6 +1271,17 @@ function SettingsContent() {
               </svg>
               <p className="text-xs text-blue-700">
                 Bank accounts and receipt upload will be hidden from students. Only the MMQR payment button will be shown.
+              </p>
+            </div>
+          )}
+
+          {paymentMode === "stripe" && (
+            <div className="flex items-start gap-2 rounded-lg bg-purple-50 px-3 py-2.5">
+              <svg className="mt-0.5 h-4 w-4 shrink-0 text-purple-500" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
+              </svg>
+              <p className="text-xs text-purple-700">
+                Students will be redirected to Stripe Checkout to pay by card. Payment is auto-confirmed — no manual verification needed.
               </p>
             </div>
           )}
