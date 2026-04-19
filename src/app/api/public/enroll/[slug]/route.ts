@@ -71,10 +71,10 @@ export async function GET(
   // ── Fetch tenant labels ────────────────────────────────────────
   const { data: tenantRow } = (await supabase
     .from("tenants")
-    .select("org_type, label_intake, label_class, label_student, label_seat, label_fee")
+    .select("org_type, currency, label_intake, label_class, label_student, label_seat, label_fee")
     .eq("id", tenantId)
     .single()) as {
-    data: { org_type: string; label_intake: string; label_class: string; label_student: string; label_seat: string; label_fee: string } | null;
+    data: { org_type: string; currency: string; label_intake: string; label_class: string; label_student: string; label_seat: string; label_fee: string } | null;
     error: unknown;
   };
   const labels: TenantLabelsView = {
@@ -85,6 +85,7 @@ export async function GET(
     fee:     tenantRow?.label_fee     || "Fee",
     orgType: tenantRow?.org_type      || "language_school",
   };
+  const tenantCurrency = tenantRow?.currency || "MMK";
 
   // ── Find the matching intake by slug column ────────────────────
   const { data: intakes, error: intakeError } = await supabase
@@ -117,7 +118,7 @@ export async function GET(
       .order("level") as { data: Class[] | null; error: unknown };
 
     const closedPublicClasses: PublicClassView[] = (closedClasses ?? []).map((c) => ({
-      id: c.id, level: c.level, fee_mmk: c.fee_mmk, fee_formatted: formatMMKSimple(c.fee_mmk),
+      id: c.id, level: c.level, fee_mmk: c.fee_mmk, fee_formatted: formatMMKSimple(c.fee_mmk, tenantCurrency),
       seat_remaining: c.seat_remaining, seat_total: c.seat_total,
       enrollment_open_at: c.enrollment_open_at, enrollment_close_at: c.enrollment_close_at,
       status: c.status, mode: c.mode ?? "offline",
@@ -172,7 +173,7 @@ export async function GET(
     id:                   c.id,
     level:                c.level,
     fee_mmk:              c.fee_mmk,
-    fee_formatted:        formatMMKSimple(c.fee_mmk),
+    fee_formatted:        formatMMKSimple(c.fee_mmk, tenantCurrency),
     seat_remaining:       c.seat_remaining,
     seat_total:           c.seat_total,
     enrollment_open_at:   c.enrollment_open_at,

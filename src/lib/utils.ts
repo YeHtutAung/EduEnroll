@@ -22,20 +22,22 @@ function toMyanmarNumerals(str: string): string {
 // ─── 1. Currency formatters ───────────────────────────────────────────────────
 
 /**
- * Formats an amount in Myanmar Kyat using Myanmar numerals.
+ * Formats an amount using Myanmar numerals.
  * formatMMK(300000) → "၃၀၀,၀၀၀ MMK"
+ * formatMMK(50, "SGD") → "၅၀ SGD"
  */
-export function formatMMK(amount: number): string {
+export function formatMMK(amount: number, currency = "MMK"): string {
   const withCommas = amount.toLocaleString("en-US"); // "300,000"
-  return `${toMyanmarNumerals(withCommas)} MMK`;
+  return `${toMyanmarNumerals(withCommas)} ${currency}`;
 }
 
 /**
- * Formats an amount in Myanmar Kyat using standard (Arabic) numerals.
+ * Formats an amount using standard (Arabic) numerals.
  * formatMMKSimple(300000) → "300,000 MMK"
+ * formatMMKSimple(50, "SGD") → "50 SGD"
  */
-export function formatMMKSimple(amount: number): string {
-  return `${amount.toLocaleString("en-US")} MMK`;
+export function formatMMKSimple(amount: number, currency = "MMK"): string {
+  return `${amount.toLocaleString("en-US")} ${currency}`;
 }
 
 // ─── 2. Enrollment reference generator ───────────────────────────────────────
