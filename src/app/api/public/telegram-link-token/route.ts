@@ -62,20 +62,20 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // ── Fetch bot username from tenant ────────────────────────────
-  const { data: tenant } = (await supabase
-    .from("tenants")
-    .select("telegram_enabled, telegram_bot_username")
-    .eq("id", enrollment.tenant_id)
+  // ── Fetch bot username from tenant_telegram_configs ────────────
+  const { data: tgConfig } = (await supabase
+    .from("tenant_telegram_configs")
+    .select("enabled, bot_username")
+    .eq("tenant_id", enrollment.tenant_id)
     .single()) as {
     data: {
-      telegram_enabled: boolean;
-      telegram_bot_username: string | null;
+      enabled: boolean;
+      bot_username: string | null;
     } | null;
     error: unknown;
   };
 
-  if (!tenant?.telegram_enabled || !tenant.telegram_bot_username) {
+  if (!tgConfig?.enabled || !tgConfig.bot_username) {
     return NextResponse.json(
       { error: "Telegram is not configured for this school." },
       { status: 400 },
@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
     } as never)
     .eq("id", enrollment.id);
 
-  const deepLink = `https://t.me/${tenant.telegram_bot_username}?start=${token}`;
+  const deepLink = `https://t.me/${tgConfig.bot_username}?start=${token}`;
 
   return NextResponse.json({ deepLink, expiresIn: TOKEN_EXPIRY_MINUTES * 60 });
 }

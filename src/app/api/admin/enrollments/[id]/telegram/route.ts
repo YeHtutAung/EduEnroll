@@ -95,17 +95,17 @@ export async function DELETE(
   if (enrollment.telegram_chat_id && enrollment.class_id) {
     try {
       // Get bot token
-      const { data: tenant } = (await supabase
-        .from("tenants")
-        .select("telegram_bot_token, telegram_enabled")
-        .eq("id", tenantId)
+      const { data: tgConfig } = (await supabase
+        .from("tenant_telegram_configs")
+        .select("bot_token, enabled")
+        .eq("tenant_id", tenantId)
         .single()) as {
-        data: { telegram_bot_token: string | null; telegram_enabled: boolean } | null;
+        data: { bot_token: string | null; enabled: boolean } | null;
         error: unknown;
       };
 
-      if (tenant?.telegram_enabled && tenant.telegram_bot_token) {
-        const botToken = decryptToken(tenant.telegram_bot_token);
+      if (tgConfig?.enabled && tgConfig.bot_token) {
+        const botToken = decryptToken(tgConfig.bot_token);
 
         // Find all channels for this class
         const { data: channels } = (await supabase

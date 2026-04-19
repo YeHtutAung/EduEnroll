@@ -78,31 +78,30 @@ export async function POST(request: NextRequest) {
 
   const supabase = createAdminClient();
 
-  // Get tenant's bot token
-  const { data: tenant } = (await supabase
-    .from("tenants")
-    .select("telegram_bot_token, telegram_enabled, org_type")
-    .eq("id", tenantId)
-    .single()) as {
-    data: {
-      telegram_bot_token: string | null;
-      telegram_enabled: boolean;
-      org_type: string;
-    } | null;
-    error: unknown;
-  };
+  // Get tenant info and telegram config
+  const [{ data: tenant }, { data: tgConfig }] = (await Promise.all([
+    supabase.from("tenants").select("org_type").eq("id", tenantId).single(),
+    supabase
+      .from("tenant_telegram_configs")
+      .select("bot_token, enabled")
+      .eq("tenant_id", tenantId)
+      .single(),
+  ])) as unknown as [
+    { data: { org_type: string } | null; error: unknown },
+    { data: { bot_token: string | null; enabled: boolean } | null; error: unknown },
+  ];
 
-  if (!tenant?.telegram_bot_token || !tenant.telegram_enabled) {
+  if (!tgConfig?.bot_token || !tgConfig.enabled) {
     return badRequest("Telegram bot is not connected or not enabled.");
   }
 
-  if (tenant.org_type !== "language_school") {
+  if (tenant?.org_type !== "language_school") {
     return badRequest("Channel management is only available for language schools.");
   }
 
   let botToken: string;
   try {
-    botToken = decryptToken(tenant.telegram_bot_token);
+    botToken = decryptToken(tgConfig.bot_token);
   } catch {
     return NextResponse.json({ error: "Failed to decrypt bot token." }, { status: 500 });
   }

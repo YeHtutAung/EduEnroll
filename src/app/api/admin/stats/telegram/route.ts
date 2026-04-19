@@ -13,16 +13,15 @@ export async function GET() {
   const supabase = createAdminClient();
 
   // Verify this is a language_school with telegram enabled
-  const { data: tenant } = (await supabase
-    .from("tenants")
-    .select("org_type, telegram_enabled")
-    .eq("id", tenantId)
-    .single()) as {
-    data: { org_type: string; telegram_enabled: boolean } | null;
-    error: unknown;
-  };
+  const [{ data: tenant }, { data: tgConfig }] = (await Promise.all([
+    supabase.from("tenants").select("org_type").eq("id", tenantId).single(),
+    supabase.from("tenant_telegram_configs").select("enabled").eq("tenant_id", tenantId).single(),
+  ])) as unknown as [
+    { data: { org_type: string } | null; error: unknown },
+    { data: { enabled: boolean } | null; error: unknown },
+  ];
 
-  if (!tenant || tenant.org_type !== "language_school" || !tenant.telegram_enabled) {
+  if (!tenant || tenant.org_type !== "language_school" || !tgConfig?.enabled) {
     return NextResponse.json({ linked: 0, pending: 0, channels: 0 });
   }
 
