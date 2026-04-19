@@ -27,24 +27,26 @@ export async function sendChannelInviteIfEligible(
   const supabase = createAdminClient();
 
   // Check tenant settings
-  const { data: tenant } = (await supabase
-    .from("tenants")
-    .select("org_type, telegram_auto_send_invite, telegram_bot_token, telegram_enabled")
-    .eq("id", tenantId)
-    .single()) as {
-    data: {
-      org_type: string;
-      telegram_auto_send_invite: boolean;
-      telegram_bot_token: string | null;
-      telegram_enabled: boolean;
-    } | null;
-    error: unknown;
-  };
+  const [{ data: tenant }, { data: tgConfig }] = (await Promise.all([
+    supabase
+      .from("tenants")
+      .select("org_type, telegram_auto_send_invite")
+      .eq("id", tenantId)
+      .single(),
+    supabase
+      .from("tenant_telegram_configs")
+      .select("bot_token, enabled")
+      .eq("tenant_id", tenantId)
+      .single(),
+  ])) as unknown as [
+    { data: { org_type: string; telegram_auto_send_invite: boolean } | null; error: unknown },
+    { data: { bot_token: string | null; enabled: boolean } | null; error: unknown },
+  ];
 
   if (!tenant) return false;
   if (tenant.org_type !== "language_school") return false;
   if (!tenant.telegram_auto_send_invite) return false;
-  if (!tenant.telegram_enabled || !tenant.telegram_bot_token) return false;
+  if (!tgConfig?.enabled || !tgConfig.bot_token) return false;
 
   // Find channel for this class
   const { data: channel } = (await supabase
@@ -66,7 +68,7 @@ export async function sendChannelInviteIfEligible(
   // Decrypt bot token and send invite
   let botToken: string;
   try {
-    botToken = decryptToken(tenant.telegram_bot_token);
+    botToken = decryptToken(tgConfig.bot_token);
   } catch {
     console.error("[channel-invite] Failed to decrypt bot token");
     return false;

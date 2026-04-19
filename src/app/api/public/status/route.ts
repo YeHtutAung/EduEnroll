@@ -190,9 +190,16 @@ export async function GET(request: NextRequest) {
   // ── Fetch tenant org_type ─────────────────────────────────────
   const { data: tenantInfo } = await supabase
     .from("tenants")
-    .select("org_type, auto_cancel_hours, telegram_bot_username, telegram_enabled, payment_mode, mmqr_provider")
+    .select("org_type, auto_cancel_hours, payment_mode, mmqr_provider")
     .eq("id", tenantId)
-    .single() as { data: { org_type: string; auto_cancel_hours: number; telegram_bot_username: string | null; telegram_enabled: boolean; payment_mode: string; mmqr_provider: string } | null; error: unknown };
+    .single() as { data: { org_type: string; auto_cancel_hours: number; payment_mode: string; mmqr_provider: string } | null; error: unknown };
+
+  // Telegram config lives in tenant_telegram_configs (moved in migration 068)
+  const { data: tgConfig } = await supabase
+    .from("tenant_telegram_configs")
+    .select("bot_username, enabled")
+    .eq("tenant_id", tenantId)
+    .single() as { data: { bot_username: string | null; enabled: boolean } | null; error: unknown };
 
   return NextResponse.json({
     enrollment_ref:   enrollment.enrollment_ref,
@@ -215,7 +222,7 @@ export async function GET(request: NextRequest) {
     org_type:         tenantInfo?.org_type ?? "language_school",
     enrolled_at:      enrollment.enrolled_at,
     auto_cancel_minutes: tenantInfo?.auto_cancel_hours ?? 4320,
-    telegram_bot_username: tenantInfo?.telegram_enabled ? (tenantInfo.telegram_bot_username ?? null) : null,
+    telegram_bot_username: tgConfig?.enabled ? (tgConfig.bot_username ?? null) : null,
     payment_mode: tenantInfo?.payment_mode ?? "bank_transfer",
     mmqr_provider: tenantInfo?.mmqr_provider ?? "abank",
   });
