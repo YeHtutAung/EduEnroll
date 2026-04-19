@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
-import { stripe } from "@/lib/stripe";
+import { getStripe } from "@/lib/stripe";
 
 // ─── POST /api/public/payments/stripe ─────────────────────────────────────────
 // Creates a Stripe Checkout Session and returns the URL.
@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
 
   if (existingPayment?.stripe_session_id) {
     try {
-      const existingSession = await stripe.checkout.sessions.retrieve(existingPayment.stripe_session_id);
+      const existingSession = await getStripe().checkout.sessions.retrieve(existingPayment.stripe_session_id);
       if (existingSession.status === "open" && existingSession.url) {
         return NextResponse.json({ url: existingSession.url });
       }
@@ -191,7 +191,7 @@ export async function POST(request: NextRequest) {
 
   try {
     // ── 9. Create Stripe Checkout Session ─────────────────────
-    const session = await stripe.checkout.sessions.create({
+    const session = await getStripe().checkout.sessions.create({
       mode: "payment",
       line_items: lineItems,
       success_url: `${baseUrl}/enroll/payment/${enrollment.enrollment_ref}?stripe=success`,
