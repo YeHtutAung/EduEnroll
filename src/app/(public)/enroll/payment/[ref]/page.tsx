@@ -32,7 +32,7 @@ interface EnrollmentInfo {
   enrolled_at?: string;
   auto_cancel_minutes?: number;
   telegram_bot_username?: string | null;
-  payment_mode?: "bank_transfer" | "mmqr";
+  payment_mode?: "bank_transfer" | "mmqr" | "stripe";
   mmqr_provider?: "abank" | "mmpay";
   class_image_url?: string | null;
   items?: CartItem[] | null;
@@ -996,8 +996,21 @@ export default function PaymentInstructionsPage() {
   const [error, setError] = useState<string | null>(null);
   const [showQRModal, setShowQRModal] = useState(false);
   const [timerExpired, setTimerExpired] = useState(false);
+  const [stripeLoading, setStripeLoading] = useState(false);
+  const [stripeError, setStripeError] = useState<string | null>(null);
+  const [stripeReturn, setStripeReturn] = useState<"success" | "cancelled" | null>(null);
 
   useEffect(() => {
+    // Handle Stripe return
+    const stripeParam = new URLSearchParams(window.location.search).get("stripe");
+    if (stripeParam === "success") {
+      setStripeReturn("success");
+      window.history.replaceState({}, "", window.location.pathname);
+    } else if (stripeParam === "cancelled") {
+      setStripeReturn("cancelled");
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
     async function fetchData() {
       try {
         const [statusRes, banksRes] = await Promise.all([
@@ -1049,6 +1062,31 @@ export default function PaymentInstructionsPage() {
     }
     fetchData();
   }, [params.ref]);
+
+  async function handleStripeCheckout() {
+    if (!enrollment) return;
+    setStripeLoading(true);
+    setStripeError(null);
+    try {
+      const res = await fetch("/api/public/payments/stripe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enrollmentRef: enrollment.enrollment_ref }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setStripeError(data.message || "Failed to create payment session.");
+        return;
+      }
+      if (data.url) {
+        window.location.href = data.url;
+      }
+    } catch {
+      setStripeError("Something went wrong. Please try again.");
+    } finally {
+      setStripeLoading(false);
+    }
+  }
 
   const handleUploadSuccess = useCallback(() => {
     fetch(`/api/public/status?ref=${encodeURIComponent(params.ref)}`)
@@ -1362,6 +1400,52 @@ export default function PaymentInstructionsPage() {
               </div>
             </div>
           </div>
+
+          {/* ── Pay via Stripe ─────────────────────────────────────── */}
+            {enrollment.payment_mode === "stripe" && (enrollment.status === "pending_payment" || enrollment.status === "partial_payment") && (
+              <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+                {stripeReturn === "success" ? (
+                  <div className="text-center py-4">
+                    <div className="mx-auto mb-3 h-10 w-10 animate-spin rounded-full border-4 border-gray-200 border-t-[#635bff]" />
+                    <h3 className="text-base font-bold text-gray-900 mb-1">Verifying Payment...</h3>
+                    <p className="text-sm text-gray-500">Your payment is being confirmed. This usually takes a few seconds.</p>
+                  </div>
+                ) : (
+                  <>
+                    <h3 className="text-base font-bold text-gray-900 mb-1">
+                      Pay with Card
+                    </h3>
+                    <p className="text-sm text-gray-500 mb-4">
+                      You will be redirected to a secure payment page.
+                    </p>
+
+                    {stripeReturn === "cancelled" && (
+                      <div className="mb-3 rounded-lg bg-yellow-50 px-3 py-2 text-sm text-yellow-700">
+                        Payment was cancelled. You can try again below.
+                      </div>
+                    )}
+
+                    {stripeError && (
+                      <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+                        {stripeError}
+                      </div>
+                    )}
+
+                    <button
+                      onClick={handleStripeCheckout}
+                      disabled={stripeLoading}
+                      className="w-full rounded-xl bg-[#635bff] px-4 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#5347d9] disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {stripeLoading ? "Redirecting..." : "Pay Now"}
+                    </button>
+
+                    <p className="mt-2 text-center text-xs text-gray-400">
+                      Powered by Stripe — secure card payment
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
 
           {/* ── Pay via MMQR (high priority for owner) ────────────── */}
           {showUpload && paymentMode === "mmqr" && (
