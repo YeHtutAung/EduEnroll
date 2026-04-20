@@ -247,12 +247,12 @@ test_classes() {
     local FEE="${FEES[$LEVEL]}"
     local RESP
     RESP=$(admin_post "/api/intakes/${INTAKE_ID}/classes" \
-      "{\"level\":\"${LEVEL}\",\"fee_mmk\":${FEE},\"seat_total\":30,\"status\":\"open\"}" \
+      "{\"level\":\"${LEVEL}\",\"fee_amount\":${FEE},\"seat_total\":30,\"status\":\"open\"}" \
       ) || RESP=""
 
     if echo "$RESP" | jq -e '.id' &>/dev/null; then
       CLASS_IDS[$LEVEL]=$(echo "$RESP" | jq -r '.id')
-      local RETURNED_FEE; RETURNED_FEE=$(echo "$RESP" | jq '.fee_mmk')
+      local RETURNED_FEE; RETURNED_FEE=$(echo "$RESP" | jq '.fee_amount')
       if [[ "$RETURNED_FEE" == "$FEE" ]]; then
         pass "POST classes — ${LEVEL} created, fee=${FEE} MMK, seats=30"
       else
@@ -282,7 +282,7 @@ test_classes() {
   # Duplicate level should return 409
   local CODE
   CODE=$(http_code "${AUTH_H[@]}" -X POST -H "Content-Type: application/json" \
-    -d "{\"level\":\"N3\",\"fee_mmk\":400000,\"seat_total\":30}" \
+    -d "{\"level\":\"N3\",\"fee_amount\":400000,\"seat_total\":30}" \
     "$BASE_URL/api/intakes/${INTAKE_ID}/classes")
   if [[ "$CODE" == "409" ]]; then
     pass "POST classes — 409 on duplicate N3"
@@ -308,7 +308,7 @@ test_public_intake() {
     pass "GET /api/public/enroll/${INTAKE_SLUG} — intake open, ${COUNT} class(es) listed"
 
     # Confirm N3 class is present with the right fee
-    local N3_FEE; N3_FEE=$(echo "$RESP" | jq '.classes[] | select(.level=="N3") | .fee_mmk')
+    local N3_FEE; N3_FEE=$(echo "$RESP" | jq '.classes[] | select(.level=="N3") | .fee_amount')
     if [[ "$N3_FEE" == "400000" ]]; then
       pass "GET /api/public/enroll/${INTAKE_SLUG} — N3 fee correct (400,000 MMK)"
     else
@@ -360,7 +360,7 @@ test_submit_enrollment() {
 
   if echo "$RESP" | jq -e '.enrollment_ref' &>/dev/null; then
     ENROLLMENT_REF=$(echo "$RESP" | jq -r '.enrollment_ref')
-    local FEE; FEE=$(echo "$RESP" | jq '.fee_mmk')
+    local FEE; FEE=$(echo "$RESP" | jq '.fee_amount')
     local LEVEL; LEVEL=$(echo "$RESP" | jq -r '.class_level')
     pass "POST /api/public/enroll — enrolled, ref=${ENROLLMENT_REF}, level=${LEVEL}, fee=${FEE}"
 
@@ -428,7 +428,7 @@ test_submit_cart_enrollment() {
 
   if echo "$RESP" | jq -e '.enrollment_ref' &>/dev/null; then
     CART_ENROLLMENT_REF=$(echo "$RESP" | jq -r '.enrollment_ref')
-    local TOTAL_FEE; TOTAL_FEE=$(echo "$RESP" | jq '.total_fee_mmk')
+    local TOTAL_FEE; TOTAL_FEE=$(echo "$RESP" | jq '.total_fee')
     local QTY; QTY=$(echo "$RESP" | jq '.quantity')
     local ITEMS_COUNT; ITEMS_COUNT=$(echo "$RESP" | jq '.items | length')
     pass "POST /api/public/enroll (cart) — ref=${CART_ENROLLMENT_REF}, total=${TOTAL_FEE}, qty=${QTY}"
@@ -529,10 +529,10 @@ test_cart_enrollment_status() {
       fail "GET /api/public/status (cart) — expected comma-separated class_level, got: ${CLASS_LEVEL}"
     fi
 
-    # fee_mmk should be cart total (950000)
-    local FEE; FEE=$(echo "$RESP" | jq '.fee_mmk // 0')
+    # fee_amount should be cart total (950000)
+    local FEE; FEE=$(echo "$RESP" | jq '.fee_amount // 0')
     if [[ "$FEE" == "950000" ]]; then
-      pass "GET /api/public/status (cart) — fee_mmk is cart total (950,000)"
+      pass "GET /api/public/status (cart) — fee_amount is cart total (950,000)"
     else
       fail "GET /api/public/status (cart) — expected fee 950000, got ${FEE}"
     fi
@@ -618,11 +618,11 @@ test_receipt_upload() {
   if [[ "$STATUS" == "201" ]]; then
     pass "POST /api/public/payments/upload (single) — 201 created"
 
-    if echo "$BODY" | jq -e '.amount_mmk' &>/dev/null; then
-      local AMT; AMT=$(echo "$BODY" | jq '.amount_mmk')
-      pass "POST /api/public/payments/upload (single) — amount_mmk=${AMT}"
+    if echo "$BODY" | jq -e '.amount' &>/dev/null; then
+      local AMT; AMT=$(echo "$BODY" | jq '.amount')
+      pass "POST /api/public/payments/upload (single) — amount=${AMT}"
     else
-      fail "POST /api/public/payments/upload (single) — missing amount_mmk" "$BODY"
+      fail "POST /api/public/payments/upload (single) — missing amount" "$BODY"
     fi
 
     if echo "$BODY" | jq -e '.payment_id' &>/dev/null; then
@@ -697,9 +697,9 @@ test_cart_receipt_upload() {
     pass "POST /api/public/payments/upload (cart) — 201 created"
 
     # Cart total should be 950000 (N5×2 + N4×1 = 600000 + 350000)
-    local AMT; AMT=$(echo "$BODY" | jq '.amount_mmk')
+    local AMT; AMT=$(echo "$BODY" | jq '.amount')
     if [[ "$AMT" == "950000" ]]; then
-      pass "POST /api/public/payments/upload (cart) — amount_mmk=950000 (correct cart total)"
+      pass "POST /api/public/payments/upload (cart) — amount=950000 (correct cart total)"
     else
       fail "POST /api/public/payments/upload (cart) — expected 950000, got ${AMT}"
     fi
@@ -1042,14 +1042,14 @@ test_bank_accounts() {
     fail "PATCH /api/admin/bank-accounts/{id} — account_holder update failed" "$RESP"
   fi
 
-  # POST: invalid bank_name should 400
-  local CODE; CODE=$(http_code "${AUTH_H[@]}" -X POST -H "Content-Type: application/json" \
-    -d '{"bank_name":"FAKEBOOK","account_number":"123","account_holder":"Test"}' \
+  # POST: flexible bank_name now accepted (any non-empty string is valid)
+  local FLEX_CODE; FLEX_CODE=$(http_code "${AUTH_H[@]}" -X POST -H "Content-Type: application/json" \
+    -d '{"bank_name":"CustomBank","account_number":"123","account_holder":"Test"}' \
     "$BASE_URL/api/admin/bank-accounts")
-  if [[ "$CODE" == "400" ]]; then
-    pass "POST /api/admin/bank-accounts — 400 on invalid bank_name"
+  if [[ "$FLEX_CODE" == "201" ]]; then
+    pass "POST /api/admin/bank-accounts — 201 with flexible bank_name (CustomBank)"
   else
-    fail "POST /api/admin/bank-accounts — expected 400 for invalid bank_name, got ${CODE}"
+    fail "POST /api/admin/bank-accounts — expected 201 for flexible bank_name, got ${FLEX_CODE}"
   fi
 
   # DELETE test account
