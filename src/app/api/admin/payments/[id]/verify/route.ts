@@ -129,25 +129,25 @@ export async function PATCH(
       // Cart enrollment: get levels from enrollment_items
       const { data: items } = await admin
         .from("enrollment_items")
-        .select("quantity, fee_mmk, classes(level)")
+        .select("quantity, fee_amount, classes(level)")
         .eq("enrollment_id", enrollment!.id) as {
-        data: { quantity: number; fee_mmk: number; classes: { level: string } | null }[] | null;
+        data: { quantity: number; fee_amount: number; classes: { level: string } | null }[] | null;
         error: unknown;
       };
       if (items && items.length > 0) {
         classLevel = items
           .map((i) => i.quantity > 1 ? `${i.classes?.level ?? "?"} x${i.quantity}` : (i.classes?.level ?? "?"))
           .join(", ");
-        totalFee = items.reduce((sum, i) => sum + i.fee_mmk * i.quantity, 0);
+        totalFee = items.reduce((sum, i) => sum + i.fee_amount * i.quantity, 0);
       }
     } else {
       const { data: cls } = await admin
         .from("classes")
-        .select("level, fee_mmk")
+        .select("level, fee_amount")
         .eq("id", enrollment!.class_id!)
-        .single() as { data: { level: string; fee_mmk: number } | null; error: unknown };
+        .single() as { data: { level: string; fee_amount: number } | null; error: unknown };
       classLevel = cls?.level ?? "";
-      totalFee = (cls?.fee_mmk ?? 0) * (enrollment!.quantity ?? 1);
+      totalFee = (cls?.fee_amount ?? 0) * (enrollment!.quantity ?? 1);
     }
 
     const host = request.headers.get("host") ?? "localhost:3005";
@@ -307,7 +307,7 @@ export async function PATCH(
       verified_at: now,
     };
     if (typeof received_amount === "number") {
-      paymentUpdate.received_amount_mmk = received_amount;
+      paymentUpdate.received_amount = received_amount;
     }
 
     const { error: pe } = await admin
@@ -329,7 +329,7 @@ export async function PATCH(
     // Send notifications (best-effort, non-blocking)
     const { classLevel, paymentUrl, statusUrl } = await getClassAndUrls();
     const remainingAmount = typeof received_amount === "number"
-      ? payment.amount_mmk - received_amount
+      ? payment.amount - received_amount
       : null;
 
     // Messenger notification (if enrolled via chatbot)
@@ -378,7 +378,7 @@ export async function PATCH(
         studentName: enrollment.student_name_en || "Student",
         enrollmentRef: enrollment.enrollment_ref,
         classLevel,
-        totalAmount: payment.amount_mmk,
+        totalAmount: payment.amount,
         receivedAmount: typeof received_amount === "number" ? received_amount : null,
         remainingAmount,
         adminNote: (admin_note as string).trim(),

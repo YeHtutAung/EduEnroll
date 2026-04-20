@@ -100,27 +100,27 @@ export async function GET(request: NextRequest) {
       if (isCart) {
         const { data: items } = (await supabase
           .from("enrollment_items")
-          .select("quantity, fee_mmk, classes(level)")
+          .select("quantity, fee_amount, classes(level)")
           .eq("enrollment_id", payment.enrollment_id)) as {
-          data: { quantity: number; fee_mmk: number; classes: { level: string } | null }[] | null;
+          data: { quantity: number; fee_amount: number; classes: { level: string } | null }[] | null;
           error: unknown;
         };
         if (items && items.length > 0) {
           classLevel = items
             .map((i) => (i.quantity > 1 ? `${i.classes?.level ?? "?"} x${i.quantity}` : (i.classes?.level ?? "?")))
             .join(", ");
-          const total = items.reduce((s, i) => s + i.fee_mmk * i.quantity, 0);
+          const total = items.reduce((s, i) => s + i.fee_amount * i.quantity, 0);
           feeFormatted = String(total).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
         }
       } else {
         const { data: cls } = (await supabase
           .from("classes")
-          .select("level, fee_mmk")
+          .select("level, fee_amount")
           .eq("id", enrollment.class_id!)
-          .single()) as { data: { level: string; fee_mmk: number } | null; error: unknown };
+          .single()) as { data: { level: string; fee_amount: number } | null; error: unknown };
         if (cls) {
           classLevel = cls.level;
-          const total = cls.fee_mmk * (enrollment.quantity ?? 1);
+          const total = cls.fee_amount * (enrollment.quantity ?? 1);
           feeFormatted = String(total).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
         }
       }

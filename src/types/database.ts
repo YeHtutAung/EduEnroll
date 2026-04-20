@@ -31,14 +31,14 @@ export type SubmitCartEnrollmentResult =
       enrollment_ref: string;
       enrollment_id: string;
       tenant_id: string;
-      total_fee_mmk: number;
+      total_fee: number;
       quantity: number;
       items: Array<{
         class_id: string;
         class_level: string;
         quantity: number;
-        fee_mmk: number;
-        subtotal_mmk: number;
+        fee_amount: number;
+        subtotal: number;
       }>;
     }
   | {
@@ -58,7 +58,7 @@ export type SubmitEnrollmentResult =
       enrollment_ref: string;
       enrollment_id: string;
       class_level: JlptLevel;
-      fee_mmk: number;
+      fee_amount: number;
       tenant_id: string;
       seat_remaining: number;
       quantity: number;
@@ -185,7 +185,7 @@ export interface Class {
   intake_id: string;
   tenant_id: string;
   level: string;
-  fee_mmk: number;
+  fee_amount: number;
   seat_total: number;
   seat_remaining: number;
   enrollment_open_at: string | null;
@@ -227,12 +227,12 @@ export interface Payment {
   id: string;
   enrollment_id: string;
   tenant_id: string;
-  amount_mmk: number;
+  amount: number;
   proof_image_url: string | null;
   proof_image_urls: string[];
   bank_reference: string | null;
   admin_note: string | null;
-  received_amount_mmk: number | null;
+  received_amount: number | null;
   payment_method: string | null;        // 'manual_upload' | 'abank_mmqr' | 'mmqr' | 'stripe'
   payment_ref: string | null;
   mmqr_status: string | null;
@@ -252,7 +252,7 @@ export interface EnrollmentItem {
   class_id: string;
   tenant_id: string;
   quantity: number;
-  fee_mmk: number;
+  fee_amount: number;
   created_at: string;
 }
 

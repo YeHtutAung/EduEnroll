@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
   // ── 2. Look up enrollment ──────────────────────────────────
   const { data: enrollment, error: enrollmentError } = (await supabase
     .from("enrollments")
-    .select("*, classes(id, fee_mmk, level), enrollment_items(class_id, quantity, fee_mmk)")
+    .select("*, classes(id, fee_amount, level), enrollment_items(class_id, quantity, fee_amount)")
     .eq("enrollment_ref", enrollmentRef.trim())
     .eq("tenant_id", tenantId)
     .single()) as {
@@ -50,8 +50,8 @@ export async function POST(request: NextRequest) {
       quantity: number | null;
       status: string;
       student_name_en: string;
-      classes: { id: string; fee_mmk: number; level: string } | null;
-      enrollment_items: { class_id: string; quantity: number; fee_mmk: number }[] | null;
+      classes: { id: string; fee_amount: number; level: string } | null;
+      enrollment_items: { class_id: string; quantity: number; fee_amount: number }[] | null;
     } | null;
     error: unknown;
   };
@@ -82,21 +82,21 @@ export async function POST(request: NextRequest) {
 
   if (isCart) {
     totalFee = enrollment.enrollment_items!.reduce(
-      (sum, item) => sum + item.fee_mmk * item.quantity,
+      (sum, item) => sum + item.fee_amount * item.quantity,
       0,
     );
     items = enrollment.enrollment_items!.map((item) => ({
       name: `Enrollment item`,
-      amount: item.fee_mmk,
+      amount: item.fee_amount,
       quantity: item.quantity,
     }));
   } else if (enrollment.classes) {
     const qty = enrollment.quantity ?? 1;
-    totalFee = enrollment.classes.fee_mmk * qty;
+    totalFee = enrollment.classes.fee_amount * qty;
     items = [
       {
         name: enrollment.classes.level,
-        amount: enrollment.classes.fee_mmk,
+        amount: enrollment.classes.fee_amount,
         quantity: qty,
       },
     ];
@@ -111,14 +111,14 @@ export async function POST(request: NextRequest) {
   if (enrollment.status === "partial_payment") {
     const { data: existingPayment } = (await supabase
       .from("payments")
-      .select("received_amount_mmk")
+      .select("received_amount")
       .eq("enrollment_id", enrollment.id)
       .order("created_at", { ascending: false })
       .limit(1)
-      .single()) as { data: { received_amount_mmk: number | null } | null; error: unknown };
+      .single()) as { data: { received_amount: number | null } | null; error: unknown };
 
-    if (existingPayment?.received_amount_mmk) {
-      totalFee = totalFee - existingPayment.received_amount_mmk;
+    if (existingPayment?.received_amount) {
+      totalFee = totalFee - existingPayment.received_amount;
     }
   }
 
@@ -148,7 +148,7 @@ export async function POST(request: NextRequest) {
     await supabase.from("payments").insert({
       enrollment_id: enrollment.id,
       tenant_id: enrollment.tenant_id,
-      amount_mmk: totalFee,
+      amount: totalFee,
       payment_ref: orderId,
       payment_method: "mmqr",
       mmqr_status: "PENDING",

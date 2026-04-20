@@ -10,7 +10,7 @@ import type { JlptLevel, ClassStatus } from "@/types/database";
 interface ClassInfo {
   id: string;
   level: JlptLevel;
-  fee_mmk: number;
+  fee_amount: number;
   fee_formatted: string;
   seat_remaining: number;
   seat_total: number;
@@ -373,7 +373,7 @@ function EnrollmentFormPage() {
 
   // Cart state
   const [cartItems, setCartItems] = useState<
-    { class_id: string; level: string; quantity: number; fee_mmk: number; image_url: string | null }[] | null
+    { class_id: string; level: string; quantity: number; fee_amount: number; image_url: string | null }[] | null
   >(null);
 
   // Data state
@@ -410,7 +410,7 @@ function EnrollmentFormPage() {
   // Cart mode detection
   const isCartMode = cartItems !== null && cartItems.length > 0;
   const cartTotalFee = isCartMode
-    ? cartItems.reduce((sum, item) => sum + item.fee_mmk * item.quantity, 0)
+    ? cartItems.reduce((sum, item) => sum + item.fee_amount * item.quantity, 0)
     : 0;
   const cartTotalQty = isCartMode
     ? cartItems.reduce((sum, item) => sum + item.quantity, 0)
@@ -636,7 +636,7 @@ function EnrollmentFormPage() {
                     </span>
                     <span className="text-gray-600">x{item.quantity}</span>
                   </div>
-                  <span className="font-medium text-gray-900">{formatCurrencySimple(item.fee_mmk * item.quantity, labels?.currency ?? "MMK")}</span>
+                  <span className="font-medium text-gray-900">{formatCurrencySimple(item.fee_amount * item.quantity, labels?.currency ?? "MMK")}</span>
                 </div>
               ))}
               <div className="border-t pt-2 flex justify-between font-semibold text-gray-900">
@@ -738,7 +738,7 @@ function EnrollmentFormPage() {
             {cartItems.map((item, i) => (
               <div key={i} className="flex justify-between text-sm text-gray-700">
                 <span>{item.level} &times; {item.quantity}</span>
-                <span className="font-medium text-gray-900">{formatCurrencySimple(item.fee_mmk * item.quantity, labels?.currency ?? "MMK")}</span>
+                <span className="font-medium text-gray-900">{formatCurrencySimple(item.fee_amount * item.quantity, labels?.currency ?? "MMK")}</span>
               </div>
             ))}
             <div className="border-t pt-2 mt-2 flex justify-between font-semibold text-gray-900">
@@ -759,7 +759,7 @@ function EnrollmentFormPage() {
             <div>
               <p className="font-myanmar text-xl font-bold text-gray-900">
                 {quantity > 1
-                  ? <>{classInfo.fee_formatted} &times; {quantity} = <span className="text-[#1a6b3c]">{formatCurrency(classInfo.fee_mmk * quantity, labels?.currency ?? "MMK")}</span></>
+                  ? <>{classInfo.fee_formatted} &times; {quantity} = <span className="text-[#1a6b3c]">{formatCurrency(classInfo.fee_amount * quantity, labels?.currency ?? "MMK")}</span></>
                   : classInfo.fee_formatted}
               </p>
               {quantity > 1 && (

@@ -223,8 +223,8 @@ export async function POST(request: NextRequest) {
         studentName: fd?.name_en?.trim() || "Student",
         enrollmentRef: payload.enrollment_ref,
         classLevel: payload.class_level,
-        feeMmk: payload.fee_mmk,
-        feeFormatted: formatMMKSimple(payload.fee_mmk),
+        feeAmount: payload.fee_amount,
+        feeFormatted: formatMMKSimple(payload.fee_amount),
         paymentUrl: `${baseUrl}/enroll/payment/${payload.enrollment_ref}`,
         statusUrl: `${baseUrl}/status?ref=${payload.enrollment_ref}`,
         orgType: tenantInfo?.org_type,
@@ -248,15 +248,15 @@ export async function POST(request: NextRequest) {
 
   // ── Return success response ───────────────────────────────────
   const enrolledQty = payload.quantity ?? 1;
-  const totalFee = payload.fee_mmk * enrolledQty;
+  const totalFee = payload.fee_amount * enrolledQty;
 
   return NextResponse.json(
     {
       enrollment_ref: payload.enrollment_ref,
       class_level:    payload.class_level,
-      fee_mmk:        payload.fee_mmk,
+      fee_amount:        payload.fee_amount,
       quantity:        enrolledQty,
-      total_fee_mmk:   totalFee,
+      total_fee:   totalFee,
       fee_formatted:  formatMMK(totalFee),
       payment: {
         instructions_en:
@@ -452,8 +452,8 @@ async function handleCartEnrollment(
         studentName: fd?.name_en?.trim() || "Student",
         enrollmentRef: payload.enrollment_ref,
         classLevel: itemsSummary,
-        feeMmk: payload.total_fee_mmk,
-        feeFormatted: formatMMKSimple(payload.total_fee_mmk),
+        feeAmount: payload.total_fee,
+        feeFormatted: formatMMKSimple(payload.total_fee),
         paymentUrl: `${baseUrl}/enroll/payment/${payload.enrollment_ref}`,
         statusUrl: `${baseUrl}/status?ref=${payload.enrollment_ref}`,
         orgType: tenantInfo?.org_type,
@@ -482,14 +482,14 @@ async function handleCartEnrollment(
       enrollment_ref: payload.enrollment_ref,
       items: payload.items,
       quantity: payload.quantity,
-      total_fee_mmk: payload.total_fee_mmk,
-      fee_formatted: formatMMK(payload.total_fee_mmk),
+      total_fee: payload.total_fee,
+      fee_formatted: formatMMK(payload.total_fee),
       payment: {
         instructions_en:
-          `Please transfer ${formatMMK(payload.total_fee_mmk)} to one of the bank accounts below ` +
+          `Please transfer ${formatMMK(payload.total_fee)} to one of the bank accounts below ` +
           `and quote your enrollment reference "${payload.enrollment_ref}" as the payment remark.`,
         instructions_mm:
-          `ကျောင်းလခ ${formatMMK(payload.total_fee_mmk)} ကို အောက်ပါ ဘဏ်အကောင့်များသို့ လွှဲပြောင်းပေးပြီး ` +
+          `ကျောင်းလခ ${formatMMK(payload.total_fee)} ကို အောက်ပါ ဘဏ်အကောင့်များသို့ လွှဲပြောင်းပေးပြီး ` +
           `"${payload.enrollment_ref}" ကို ငွေလွှဲမှတ်ချက်တွင် ထည့်သွင်းရေးသားပေးပါ။`,
         bank_accounts: bankAccounts ?? [],
       },

@@ -25,9 +25,9 @@ export interface StudentRow {
   enrolled_at:     string;
   class_level:     JlptLevel;
   intake_name:     string;
-  fee_mmk:         number;
+  fee_amount:         number;
   quantity:        number;
-  items?:          { class_level: string; quantity: number; fee_mmk: number; subtotal_mmk: number }[] | null;
+  items?:          { class_level: string; quantity: number; fee_amount: number; subtotal: number }[] | null;
   telegram_linked: boolean;
   telegram_phone:  string | null;
   telegram_channel_name: string | null;
@@ -90,11 +90,11 @@ export async function GET(request: NextRequest) {
       telegram_phone,
       classes (
         level,
-        fee_mmk,
+        fee_amount,
         intake_id,
         intakes ( name )
       ),
-      enrollment_items ( quantity, fee_mmk, classes ( level, intake_id, intakes ( name ) ) )
+      enrollment_items ( quantity, fee_amount, classes ( level, intake_id, intakes ( name ) ) )
     `,
       { count: "exact" },
     )
@@ -162,13 +162,13 @@ export async function GET(request: NextRequest) {
       telegram_phone:  string | null;
       classes: {
         level:     JlptLevel;
-        fee_mmk:   number;
+        fee_amount:   number;
         intake_id: string;
         intakes:   { name: string } | null;
       } | null;
       enrollment_items: {
         quantity: number;
-        fee_mmk: number;
+        fee_amount: number;
         classes: { level: string; intake_id: string; intakes: { name: string } | null } | null;
       }[];
     }[]
@@ -208,7 +208,7 @@ export async function GET(request: NextRequest) {
       ? row.enrollment_items.map((ei) => ei.classes?.level ?? "").join(", ")
       : null;
     const cartFee = isCart
-      ? row.enrollment_items.reduce((sum, ei) => sum + ei.fee_mmk * ei.quantity, 0)
+      ? row.enrollment_items.reduce((sum, ei) => sum + ei.fee_amount * ei.quantity, 0)
       : null;
     const cartIntake = isCart
       ? row.enrollment_items[0]?.classes?.intakes?.name ?? ""
@@ -217,8 +217,8 @@ export async function GET(request: NextRequest) {
       ? row.enrollment_items.map((ei) => ({
           class_level: ei.classes?.level ?? "",
           quantity: ei.quantity,
-          fee_mmk: ei.fee_mmk,
-          subtotal_mmk: ei.fee_mmk * ei.quantity,
+          fee_amount: ei.fee_amount,
+          subtotal: ei.fee_amount * ei.quantity,
         }))
       : null;
 
@@ -233,7 +233,7 @@ export async function GET(request: NextRequest) {
       enrolled_at:     row.enrolled_at,
       class_level:     (cartLevels ?? row.classes?.level ?? "") as JlptLevel,
       intake_name:     cartIntake ?? row.classes?.intakes?.name ?? "",
-      fee_mmk:         cartFee ?? (row.classes?.fee_mmk ?? 0) * (row.quantity ?? 1),
+      fee_amount:         cartFee ?? (row.classes?.fee_amount ?? 0) * (row.quantity ?? 1),
       quantity:        isCart
         ? cartItems!.reduce((sum, ci) => sum + ci.quantity, 0)
         : (row.quantity ?? 1),

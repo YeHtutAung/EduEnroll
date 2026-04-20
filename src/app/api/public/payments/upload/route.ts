@@ -26,11 +26,11 @@ const UPLOADABLE_STATUSES = ["pending_payment", "partial_payment"] as const;
 interface EnrollmentItem {
   class_id: string;
   quantity: number;
-  fee_mmk: number;
+  fee_amount: number;
 }
 
 interface EnrollmentWithClass extends Enrollment {
-  classes: Pick<Class, "id" | "fee_mmk"> | null;
+  classes: Pick<Class, "id" | "fee_amount"> | null;
   enrollment_items: EnrollmentItem[] | null;
 }
 
@@ -112,7 +112,7 @@ export async function POST(request: NextRequest) {
   // ── 3. Look up enrollment with class fee ──────────────────────
   const { data: enrollment, error: enrollmentError } = await supabase
     .from("enrollments")
-    .select("*, classes(id, fee_mmk), enrollment_items(class_id, quantity, fee_mmk)")
+    .select("*, classes(id, fee_amount), enrollment_items(class_id, quantity, fee_amount)")
     .eq("enrollment_ref", enrollmentRef.trim())
     .eq("tenant_id", tenantId)
     .single() as EnrollmentResult;
@@ -155,9 +155,9 @@ export async function POST(request: NextRequest) {
   let totalFee: number;
 
   if (isCart) {
-    totalFee = enrollment.enrollment_items!.reduce((sum, item) => sum + item.fee_mmk * item.quantity, 0);
+    totalFee = enrollment.enrollment_items!.reduce((sum, item) => sum + item.fee_amount * item.quantity, 0);
   } else if (enrollment.classes) {
-    totalFee = enrollment.classes.fee_mmk * (enrollment.quantity ?? 1);
+    totalFee = enrollment.classes.fee_amount * (enrollment.quantity ?? 1);
   } else {
     return NextResponse.json(
       { error: "Internal Server Error", message: "Class data not found." },
@@ -246,8 +246,8 @@ export async function POST(request: NextRequest) {
       {
         payment_id:       existingPayment.id,
         enrollment_ref:   enrollmentRef.trim(),
-        amount_mmk:       existingPayment.amount_mmk,
-        amount_formatted: formatMMK(existingPayment.amount_mmk),
+        amount:       existingPayment.amount,
+        amount_formatted: formatMMK(existingPayment.amount),
         proof_count:      allUrls.length,
         status:           "pending",
         message_en:       "Additional payment proof submitted. Our team will review it shortly.",
@@ -263,7 +263,7 @@ export async function POST(request: NextRequest) {
     .insert({
       enrollment_id:    enrollment.id,
       tenant_id:        enrollment.tenant_id,
-      amount_mmk:       totalFee,
+      amount:       totalFee,
       proof_image_url:  uploadedPaths[0],   // legacy field — first image
       proof_image_urls: uploadedPaths,       // all images
       status:           "pending",
@@ -286,7 +286,7 @@ export async function POST(request: NextRequest) {
     {
       payment_id:       payment.id,
       enrollment_ref:   enrollmentRef.trim(),
-      amount_mmk:       totalFee,
+      amount:       totalFee,
       amount_formatted: formatMMK(totalFee),
       proof_count:      uploadedPaths.length,
       status:           "pending",

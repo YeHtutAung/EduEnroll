@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
   // ── 2. Look up enrollment ──────────────────────────────────
   const { data: enrollment, error: enrollmentError } = (await supabase
     .from("enrollments")
-    .select("*, classes(id, fee_mmk, level, intakes(name, slug)), enrollment_items(class_id, quantity, fee_mmk, classes(level))")
+    .select("*, classes(id, fee_amount, level, intakes(name, slug)), enrollment_items(class_id, quantity, fee_amount, classes(level))")
     .eq("enrollment_ref", enrollmentRef.trim())
     .eq("tenant_id", tenantId)
     .single()) as {
@@ -48,8 +48,8 @@ export async function POST(request: NextRequest) {
       quantity: number | null;
       status: string;
       student_name_en: string;
-      classes: { id: string; fee_mmk: number; level: string; intakes: { name: string; slug: string } | null } | null;
-      enrollment_items: { class_id: string; quantity: number; fee_mmk: number; classes: { level: string } | null }[] | null;
+      classes: { id: string; fee_amount: number; level: string; intakes: { name: string; slug: string } | null } | null;
+      enrollment_items: { class_id: string; quantity: number; fee_amount: number; classes: { level: string } | null }[] | null;
     } | null;
     error: unknown;
   };
@@ -122,7 +122,7 @@ export async function POST(request: NextRequest) {
     lineItems = enrollment.enrollment_items!.map((item) => ({
       price_data: {
         currency,
-        unit_amount: item.fee_mmk * 100, // convert to smallest unit (cents)
+        unit_amount: item.fee_amount * 100, // convert to smallest unit (cents)
         product_data: {
           name: item.classes?.level ?? "Class",
         },
@@ -130,17 +130,17 @@ export async function POST(request: NextRequest) {
       quantity: item.quantity,
     }));
     totalFee = enrollment.enrollment_items!.reduce(
-      (sum, item) => sum + item.fee_mmk * item.quantity,
+      (sum, item) => sum + item.fee_amount * item.quantity,
       0,
     );
   } else if (enrollment.classes) {
     const qty = enrollment.quantity ?? 1;
-    totalFee = enrollment.classes.fee_mmk * qty;
+    totalFee = enrollment.classes.fee_amount * qty;
     lineItems = [
       {
         price_data: {
           currency,
-          unit_amount: enrollment.classes.fee_mmk * 100,
+          unit_amount: enrollment.classes.fee_amount * 100,
           product_data: {
             name: `${enrollment.classes.level}${enrollment.classes.intakes ? ` — ${enrollment.classes.intakes.name}` : ""}`,
           },
@@ -159,14 +159,14 @@ export async function POST(request: NextRequest) {
   if (enrollment.status === "partial_payment") {
     const { data: prevPayment } = (await supabase
       .from("payments")
-      .select("received_amount_mmk")
+      .select("received_amount")
       .eq("enrollment_id", enrollment.id)
       .order("created_at", { ascending: false })
       .limit(1)
-      .single()) as { data: { received_amount_mmk: number | null } | null; error: unknown };
+      .single()) as { data: { received_amount: number | null } | null; error: unknown };
 
-    if (prevPayment?.received_amount_mmk) {
-      const remaining = totalFee - prevPayment.received_amount_mmk;
+    if (prevPayment?.received_amount) {
+      const remaining = totalFee - prevPayment.received_amount;
       totalFee = remaining;
       // Replace line items with single remaining balance item
       lineItems = [
@@ -207,7 +207,7 @@ export async function POST(request: NextRequest) {
     await supabase.from("payments").insert({
       enrollment_id: enrollment.id,
       tenant_id: enrollment.tenant_id,
-      amount_mmk: totalFee,
+      amount: totalFee,
       payment_method: "stripe",
       status: "awaiting_payment",
       stripe_session_id: session.id,

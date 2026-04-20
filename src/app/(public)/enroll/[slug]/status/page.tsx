@@ -12,7 +12,7 @@ interface StatusInfo {
   student_name_en: string;
   student_name_mm: string | null;
   class_level: string | null;
-  fee_mmk: number | null;
+  fee_amount: number | null;
   fee_formatted: string | null;
   currency: string;
   status: EnrollmentStatus;
@@ -238,8 +238,8 @@ function StatusPage() {
   const isConfirmed = data.status === "confirmed";
 
   const currency = data.currency || "MMK";
-  const feeEn = data.fee_mmk != null ? formatCurrencySimple(data.fee_mmk, currency) : null;
-  const feeMm = data.fee_mmk != null && currency === "MMK" ? formatAmount(data.fee_mmk) : null;
+  const feeEn = data.fee_amount != null ? formatCurrencySimple(data.fee_amount, currency) : null;
+  const feeMm = data.fee_amount != null && currency === "MMK" ? formatAmount(data.fee_amount) : null;
 
   return (
     <div className="mx-auto max-w-lg">

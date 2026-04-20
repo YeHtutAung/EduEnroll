@@ -22,7 +22,7 @@ interface StatsData {
   confirmed_count: number;
   pending_payment_count: number;
   payment_submitted_count: number;
-  total_revenue_mmk: number;
+  total_revenue: number;
   seats_by_class: SeatRow[];
 }
 
@@ -278,7 +278,7 @@ export default function DashboardPage() {
             </div>
             <StatsCard
               title="Total Revenue"
-              value={formatCurrencySimple(stats?.total_revenue_mmk ?? 0, tl.currency)}
+              value={formatCurrencySimple(stats?.total_revenue ?? 0, tl.currency)}
               subtitle="Verified payments"
               colorAccent="#0891b2"
             />

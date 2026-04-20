@@ -11,8 +11,8 @@ import { jsPDF } from "jspdf";
 interface CartItem {
   class_level: string;
   quantity: number;
-  fee_mmk: number;
-  subtotal_mmk: number;
+  fee_amount: number;
+  subtotal: number;
   image_url?: string | null;
 }
 
@@ -22,7 +22,7 @@ interface EnrollmentInfo {
   student_name_mm: string | null;
   class_id: string | null;
   class_level: string | null;
-  fee_mmk: number | null;
+  fee_amount: number | null;
   fee_formatted: string | null;
   currency?: string;
   quantity: number;
@@ -39,16 +39,16 @@ interface EnrollmentInfo {
   items?: CartItem[] | null;
   payment?: {
     admin_note?: string | null;
-    received_amount_mmk?: number | null;
-    total_amount_mmk?: number | null;
-    remaining_amount_mmk?: number | null;
+    received_amount?: number | null;
+    total_amount?: number | null;
+    remaining_amount?: number | null;
   } | null;
 }
 
 interface AvailableClass {
   id: string;
   level: string;
-  fee_mmk: number;
+  fee_amount: number;
   fee_formatted: string;
   seat_remaining: number;
   status: string;
@@ -699,8 +699,8 @@ function PartialPaymentBanner({ enrollment }: { enrollment: EnrollmentInfo }) {
   if (!payment) return null;
 
   const currency = enrollment.currency ?? "MMK";
-  const received = payment.received_amount_mmk;
-  const remaining = payment.remaining_amount_mmk;
+  const received = payment.received_amount;
+  const remaining = payment.remaining_amount;
   const adminNote = payment.admin_note;
 
   return (
@@ -798,7 +798,7 @@ function DownloadReceiptButton({
   const qty = enrollment.quantity ?? 1;
   const curr = enrollment.currency ?? "MMK";
   const ticketItems = isCart && enrollment.items
-    ? enrollment.items.map((i) => ({ label: i.class_level, qty: i.quantity, subtotal: formatCurrencySimple(i.subtotal_mmk, curr) }))
+    ? enrollment.items.map((i) => ({ label: i.class_level, qty: i.quantity, subtotal: formatCurrencySimple(i.subtotal, curr) }))
     : [{ label: enrollment.class_level ?? "", qty, subtotal: formatCurrencySimple(totalFee, curr) }];
 
   async function handleDownload() {
@@ -1166,8 +1166,8 @@ export default function PaymentInstructionsPage() {
   const currency = enrollment.currency ?? "MMK";
   const isCart = enrollment.items != null && enrollment.items.length > 0;
   const totalFee = isCart
-    ? enrollment.items!.reduce((sum, i) => sum + i.subtotal_mmk, 0)
-    : (enrollment.fee_mmk ?? 0) * qty;
+    ? enrollment.items!.reduce((sum, i) => sum + i.subtotal, 0)
+    : (enrollment.fee_amount ?? 0) * qty;
   const feeEn = formatCurrencySimple(totalFee, currency);
   const feeMm = currency === "MMK" ? formatAmount(totalFee) : null;
   const showUpload = enrollment.status === "pending_payment" || enrollment.status === "partial_payment";
@@ -1296,7 +1296,7 @@ export default function PaymentInstructionsPage() {
                         </div>
                       </div>
                       <span className="text-sm font-semibold text-gray-900">
-                        {formatCurrencySimple(item.subtotal_mmk, currency)}
+                        {formatCurrencySimple(item.subtotal, currency)}
                       </span>
                     </div>
                   ))
@@ -1398,7 +1398,7 @@ export default function PaymentInstructionsPage() {
                       {item.class_level} &times; {item.quantity}
                     </span>
                     <span className="font-medium text-gray-900">
-                      {formatCurrencySimple(item.subtotal_mmk, currency)}
+                      {formatCurrencySimple(item.subtotal, currency)}
                     </span>
                   </div>
                 ))
@@ -1478,7 +1478,7 @@ export default function PaymentInstructionsPage() {
                   : (orgType === "event" ? "Pay to complete your order" : <>Pay to complete your enrollment / <span className="font-myanmar">ငွေပေးချေပြီး အပြီးသတ်ပါ</span></>)}
               </p>
               <p className="mt-1 text-3xl font-bold font-mono text-white">
-                {isPartialReUpload && enrollment.payment?.remaining_amount_mmk ? formatCurrencySimple(enrollment.payment.remaining_amount_mmk, currency) : formatCurrencySimple(totalFee, currency)}
+                {isPartialReUpload && enrollment.payment?.remaining_amount ? formatCurrencySimple(enrollment.payment.remaining_amount, currency) : formatCurrencySimple(totalFee, currency)}
               </p>
               <button
                 onClick={() => setShowQRModal(true)}
@@ -1566,8 +1566,8 @@ export default function PaymentInstructionsPage() {
                 <p>
                   Transfer{" "}
                   <span className="font-semibold text-gray-900">
-                    {isPartialReUpload && enrollment.payment?.remaining_amount_mmk
-                      ? formatCurrencySimple(enrollment.payment.remaining_amount_mmk, currency)
+                    {isPartialReUpload && enrollment.payment?.remaining_amount
+                      ? formatCurrencySimple(enrollment.payment.remaining_amount, currency)
                       : feeEn}
                   </span>{" "}
                   to one of the accounts below
@@ -1576,8 +1576,8 @@ export default function PaymentInstructionsPage() {
                   <p className="font-myanmar mt-1 text-gray-500">
                     အောက်ပါ အကောင့်များသို့{" "}
                     <span className="font-semibold text-gray-700">
-                      {isPartialReUpload && enrollment.payment?.remaining_amount_mmk
-                        ? formatAmount(enrollment.payment.remaining_amount_mmk) + " ကျပ်"
+                      {isPartialReUpload && enrollment.payment?.remaining_amount
+                        ? formatAmount(enrollment.payment.remaining_amount) + " ကျပ်"
                         : feeMm ? feeMm + " ကျပ်" : feeEn}
                     </span>{" "}
                     လွှဲပါ
@@ -1641,8 +1641,8 @@ export default function PaymentInstructionsPage() {
       {showQRModal && enrollment && (
         <QRPaymentModal
           enrollmentRef={enrollment.enrollment_ref}
-          amount={isPartialReUpload && enrollment.payment?.remaining_amount_mmk
-            ? enrollment.payment.remaining_amount_mmk
+          amount={isPartialReUpload && enrollment.payment?.remaining_amount
+            ? enrollment.payment.remaining_amount
             : totalFee}
           studentName={enrollment.student_name_en}
           provider={mmqrProvider}

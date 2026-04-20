@@ -12,7 +12,7 @@ interface EnrollmentInfo {
   student_name_en: string;
   student_name_mm: string | null;
   class_level: string | null;
-  fee_mmk: number | null;
+  fee_amount: number | null;
   fee_formatted: string | null;
   status: string;
   status_label_en: string;
@@ -29,7 +29,7 @@ interface BankAccountInfo {
 interface PublicClass {
   id: string;
   level: string;
-  fee_mmk: number;
+  fee_amount: number;
   fee_formatted: string;
   seat_remaining: number;
   status: ClassStatus;
@@ -234,8 +234,8 @@ function SuccessPage() {
     );
   }
 
-  const feeEn = enrollment.fee_mmk != null ? formatCurrencySimple(enrollment.fee_mmk, currency) : null;
-  const feeMm = enrollment.fee_mmk != null && currency === "MMK" ? formatAmount(enrollment.fee_mmk) : null;
+  const feeEn = enrollment.fee_amount != null ? formatCurrencySimple(enrollment.fee_amount, currency) : null;
+  const feeMm = enrollment.fee_amount != null && currency === "MMK" ? formatAmount(enrollment.fee_amount) : null;
 
   return (
     <div className="mx-auto max-w-lg">

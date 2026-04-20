@@ -8,7 +8,7 @@ const PROOF_BUCKET = "payment-proofs";
 
 type EnrollmentJoined = Enrollment & {
   classes:
-    | (Pick<Class, "level" | "fee_mmk"> & {
+    | (Pick<Class, "level" | "fee_amount"> & {
         intakes: Pick<Intake, "name"> | null;
       })
     | null;
@@ -35,7 +35,7 @@ export async function GET(
       *,
       classes (
         level,
-        fee_mmk,
+        fee_amount,
         intakes ( name )
       )
     `,
@@ -66,7 +66,7 @@ export async function GET(
   }
 
   // ── Cart enrollment: fetch items + intake from enrollment_items ──
-  let cartItems: { class_level: string; quantity: number; fee_mmk: number; subtotal_mmk: number }[] | null = null;
+  let cartItems: { class_level: string; quantity: number; fee_amount: number; subtotal: number }[] | null = null;
   let cartIntakeName: string | null = null;
   let cartIntakeId: string | null = null;
   let cartTotalFee: number | null = null;
@@ -74,9 +74,9 @@ export async function GET(
   if (row.class_id === null) {
     const { data: items } = await supabase
       .from("enrollment_items")
-      .select("quantity, fee_mmk, classes(level, intake_id, intakes(name))")
+      .select("quantity, fee_amount, classes(level, intake_id, intakes(name))")
       .eq("enrollment_id", row.id) as {
-      data: { quantity: number; fee_mmk: number; classes: { level: string; intake_id: string; intakes: { name: string } | null } | null }[] | null;
+      data: { quantity: number; fee_amount: number; classes: { level: string; intake_id: string; intakes: { name: string } | null } | null }[] | null;
       error: unknown;
     };
 
@@ -84,10 +84,10 @@ export async function GET(
       cartItems = items.map((i) => ({
         class_level: i.classes?.level ?? "Unknown",
         quantity: i.quantity,
-        fee_mmk: i.fee_mmk,
-        subtotal_mmk: i.fee_mmk * i.quantity,
+        fee_amount: i.fee_amount,
+        subtotal: i.fee_amount * i.quantity,
       }));
-      cartTotalFee = cartItems.reduce((sum, i) => sum + i.subtotal_mmk, 0);
+      cartTotalFee = cartItems.reduce((sum, i) => sum + i.subtotal, 0);
       cartIntakeName = items[0]?.classes?.intakes?.name ?? null;
       cartIntakeId = items[0]?.classes?.intake_id ?? null;
     }
@@ -126,8 +126,8 @@ export async function GET(
 
   const intakeName = row.classes?.intakes?.name ?? cartIntakeName;
 
-  const feeMmk = cartTotalFee ?? (row.classes?.fee_mmk != null
-    ? row.classes.fee_mmk * (row.quantity ?? 1)
+  const feeAmount = cartTotalFee ?? (row.classes?.fee_amount != null
+    ? row.classes.fee_amount * (row.quantity ?? 1)
     : null);
 
   return NextResponse.json({
@@ -144,13 +144,13 @@ export async function GET(
     enrolled_at:     row.enrolled_at,
     class_level:     classLevel,
     intake_name:     intakeName,
-    fee_mmk:         feeMmk,
+    fee_amount:         feeAmount,
     items:           cartItems,
     payment: payment
       ? {
           id:               payment.id,
           status:           payment.status,
-          amount_mmk:       payment.amount_mmk,
+          amount:       payment.amount,
           bank_reference:      payment.bank_reference ?? null,
           payer_institution:   payment.payer_institution ?? null,
           submitted_at:        payment.created_at,

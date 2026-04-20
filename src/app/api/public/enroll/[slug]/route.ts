@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 interface PublicClassView {
   id: string;
   level: Class["level"];
-  fee_mmk: number;
+  fee_amount: number;
   fee_formatted: string;   // e.g. "၃၀၀,၀၀၀ MMK"
   seat_remaining: number;
   seat_total: number;
@@ -113,14 +113,14 @@ export async function GET(
     // Still fetch classes so payment page can show promotions
     const { data: closedClasses } = await supabase
       .from("classes")
-      .select("id, level, fee_mmk, seat_remaining, seat_total, enrollment_open_at, enrollment_close_at, status, mode, event_date, start_time, end_time, venue, image_url, max_tickets_per_person")
+      .select("id, level, fee_amount, seat_remaining, seat_total, enrollment_open_at, enrollment_close_at, status, mode, event_date, start_time, end_time, venue, image_url, max_tickets_per_person")
       .eq("intake_id", intake.id)
       .eq("tenant_id", tenantId)
       .in("status", ["open", "full"])
       .order("level") as { data: Class[] | null; error: unknown };
 
     const closedPublicClasses: PublicClassView[] = (closedClasses ?? []).map((c) => ({
-      id: c.id, level: c.level, fee_mmk: c.fee_mmk, fee_formatted: formatMMKSimple(c.fee_mmk, tenantCurrency),
+      id: c.id, level: c.level, fee_amount: c.fee_amount, fee_formatted: formatMMKSimple(c.fee_amount, tenantCurrency),
       seat_remaining: c.seat_remaining, seat_total: c.seat_total,
       enrollment_open_at: c.enrollment_open_at, enrollment_close_at: c.enrollment_close_at,
       status: c.status, mode: c.mode ?? "offline",
@@ -155,7 +155,7 @@ export async function GET(
   // ── Fetch all visible classes (open + full) ──────────────────
   const { data: classes, error: classError } = await supabase
     .from("classes")
-    .select("id, level, fee_mmk, seat_remaining, seat_total, enrollment_open_at, enrollment_close_at, status, mode, event_date, start_time, end_time, venue, image_url, max_tickets_per_person")
+    .select("id, level, fee_amount, seat_remaining, seat_total, enrollment_open_at, enrollment_close_at, status, mode, event_date, start_time, end_time, venue, image_url, max_tickets_per_person")
     .eq("intake_id", intake.id)
     .eq("tenant_id", tenantId)
     .in("status", ["open", "full"])
@@ -174,8 +174,8 @@ export async function GET(
   const publicClasses: PublicClassView[] = sorted.map((c) => ({
     id:                   c.id,
     level:                c.level,
-    fee_mmk:              c.fee_mmk,
-    fee_formatted:        formatMMKSimple(c.fee_mmk, tenantCurrency),
+    fee_amount:              c.fee_amount,
+    fee_formatted:        formatMMKSimple(c.fee_amount, tenantCurrency),
     seat_remaining:       c.seat_remaining,
     seat_total:           c.seat_total,
     enrollment_open_at:   c.enrollment_open_at,

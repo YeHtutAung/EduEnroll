@@ -52,13 +52,13 @@ const PAYMENT_STATUS_LABELS: Record<PaymentStatus, { en: string; mm: string }> =
 // ─── Joined row types ─────────────────────────────────────────────────────────
 
 interface EnrollmentWithClass extends Enrollment {
-  classes: Pick<Class, "id" | "level" | "fee_mmk" | "image_url"> & {
+  classes: Pick<Class, "id" | "level" | "fee_amount" | "image_url"> & {
     intakes: Pick<Intake, "name" | "year" | "slug"> | null;
   } | null;
 }
 
 type EnrollmentResult = { data: EnrollmentWithClass | null; error: unknown };
-type PaymentResult    = { data: Pick<Payment, "id" | "status" | "created_at" | "admin_note" | "received_amount_mmk" | "amount_mmk"> | null; error: unknown };
+type PaymentResult    = { data: Pick<Payment, "id" | "status" | "created_at" | "admin_note" | "received_amount" | "amount"> | null; error: unknown };
 
 // ─── GET /api/public/status?ref=NM-2026-XXXXX ─────────────────────────────────
 // Public — no authentication required.
@@ -72,7 +72,7 @@ type PaymentResult    = { data: Pick<Payment, "id" | "status" | "created_at" | "
 //   student_name_en:    "Mg Mg"
 //   student_name_mm:    "မောင်မောင်" | null
 //   class_level:        "N5"
-//   fee_mmk:            300000
+//   fee_amount:            300000
 //   fee_formatted:      "၃၀၀,၀၀၀ MMK"
 //   status:             "payment_submitted"
 //   status_label_en:    "Payment Under Review"
@@ -104,7 +104,7 @@ export async function GET(request: NextRequest) {
   // ── Fetch enrollment with class info ─────────────────────────────
   const { data: enrollment, error: enrollmentError } = await supabase
     .from("enrollments")
-    .select("*, classes(id, level, fee_mmk, image_url, intakes(name, year, slug))")
+    .select("*, classes(id, level, fee_amount, image_url, intakes(name, year, slug))")
     .eq("enrollment_ref", ref)
     .eq("tenant_id", tenantId)
     .single() as EnrollmentResult;
@@ -119,23 +119,23 @@ export async function GET(request: NextRequest) {
   // ── Fetch most recent payment (if any) ───────────────────────────
   const { data: payment } = await supabase
     .from("payments")
-    .select("id, status, created_at, admin_note, received_amount_mmk, amount_mmk")
+    .select("id, status, created_at, admin_note, received_amount, amount")
     .eq("enrollment_id", enrollment.id)
     .order("created_at", { ascending: false })
     .limit(1)
     .single() as PaymentResult;
 
   // ── Fetch enrollment items for cart enrollments ──────────────────
-  let cartItems: { class_level: string; quantity: number; fee_mmk: number; subtotal_mmk: number; image_url: string | null }[] | null = null;
+  let cartItems: { class_level: string; quantity: number; fee_amount: number; subtotal: number; image_url: string | null }[] | null = null;
   let cartTotalFee: number | null = null;
   let cartIntakeInfo: Pick<Intake, "name" | "year" | "slug"> | null = null;
 
   if (enrollment.class_id === null) {
     const { data: items } = await supabase
       .from("enrollment_items")
-      .select("quantity, fee_mmk, classes(level, image_url, intakes(name, year, slug))")
+      .select("quantity, fee_amount, classes(level, image_url, intakes(name, year, slug))")
       .eq("enrollment_id", enrollment.id) as {
-      data: { quantity: number; fee_mmk: number; classes: { level: string; image_url: string | null; intakes: Pick<Intake, "name" | "year" | "slug"> | null } | null }[] | null;
+      data: { quantity: number; fee_amount: number; classes: { level: string; image_url: string | null; intakes: Pick<Intake, "name" | "year" | "slug"> | null } | null }[] | null;
       error: unknown;
     };
 
@@ -143,11 +143,11 @@ export async function GET(request: NextRequest) {
       cartItems = items.map((i) => ({
         class_level: i.classes?.level ?? "Unknown",
         quantity: i.quantity,
-        fee_mmk: i.fee_mmk,
-        subtotal_mmk: i.fee_mmk * i.quantity,
+        fee_amount: i.fee_amount,
+        subtotal: i.fee_amount * i.quantity,
         image_url: i.classes?.image_url ?? null,
       }));
-      cartTotalFee = cartItems.reduce((sum, i) => sum + i.subtotal_mmk, 0);
+      cartTotalFee = cartItems.reduce((sum, i) => sum + i.subtotal, 0);
 
       // Get intake info from first cart item (all items share the same intake)
       const firstIntake = items[0]?.classes?.intakes;
@@ -168,10 +168,10 @@ export async function GET(request: NextRequest) {
         status_label_mm:     PAYMENT_STATUS_LABELS[payment.status].mm,
         submitted_at:        payment.created_at,
         admin_note:          payment.admin_note ?? null,
-        received_amount_mmk: payment.received_amount_mmk ?? null,
-        total_amount_mmk:    payment.amount_mmk,
-        remaining_amount_mmk: payment.received_amount_mmk != null
-          ? payment.amount_mmk - payment.received_amount_mmk
+        received_amount: payment.received_amount ?? null,
+        total_amount:    payment.amount,
+        remaining_amount: payment.received_amount != null
+          ? payment.amount - payment.received_amount
           : null,
       }
     : null;
@@ -183,8 +183,8 @@ export async function GET(request: NextRequest) {
     : null;
 
   // For cart enrollments, use cart total; for single, use class fee * qty
-  const displayFee = cartTotalFee ?? (enrollment.classes?.fee_mmk != null
-    ? enrollment.classes.fee_mmk * (enrollment.quantity ?? 1)
+  const displayFee = cartTotalFee ?? (enrollment.classes?.fee_amount != null
+    ? enrollment.classes.fee_amount * (enrollment.quantity ?? 1)
     : null);
 
   // ── Fetch tenant org_type ─────────────────────────────────────
@@ -209,7 +209,7 @@ export async function GET(request: NextRequest) {
     class_level:      cartItems
                         ? cartItems.map((i) => i.class_level).join(", ")
                         : (enrollment.classes?.level ?? null),
-    fee_mmk:          displayFee,
+    fee_amount:          displayFee,
     fee_formatted:    displayFee != null ? formatMMK(displayFee, tenantInfo?.currency || "MMK") : null,
     currency:         tenantInfo?.currency || "MMK",
     quantity:          enrollment.quantity ?? 1,

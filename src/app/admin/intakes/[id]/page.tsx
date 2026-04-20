@@ -95,7 +95,7 @@ function ClassRowSkeleton() {
 // ── Edit Class Modal ──────────────────────────────────────────────────────────
 
 interface EditForm {
-  fee_mmk: string;
+  fee_amount: string;
   seat_total: string;
   enrollment_open_at: string;
   enrollment_close_at: string;
@@ -110,7 +110,7 @@ interface EditForm {
 
 function classToForm(cls: Class): EditForm {
   return {
-    fee_mmk: String(cls.fee_mmk),
+    fee_amount: String(cls.fee_amount),
     seat_total: String(cls.seat_total),
     enrollment_open_at: toDatetimeLocal(cls.enrollment_open_at),
     enrollment_close_at: toDatetimeLocal(cls.enrollment_close_at),
@@ -166,7 +166,7 @@ function EditClassModal({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (savingRef.current) return;
-    const fee = Number(form.fee_mmk);
+    const fee = Number(form.fee_amount);
     const seats = Number(form.seat_total);
     if (!fee || fee <= 0) { toast.error("Fee must be a positive number."); return; }
     if (!seats || seats < 1 || !Number.isInteger(seats)) { toast.error("Seats must be a positive integer."); return; }
@@ -194,7 +194,7 @@ function EditClassModal({
 
       const maxTix = Number(form.max_tickets_per_person);
       const payload: Record<string, unknown> = {
-        fee_mmk: fee,
+        fee_amount: fee,
         seat_total: seats,
         status: form.status,
         mode: form.mode,
@@ -271,16 +271,16 @@ function EditClassModal({
               <label className={labelClass}>Fee ({tl.currency})</label>
               <input
                 type="number"
-                value={form.fee_mmk}
-                onChange={(e) => set("fee_mmk", e.target.value)}
+                value={form.fee_amount}
+                onChange={(e) => set("fee_amount", e.target.value)}
                 min={1}
                 required
                 className={inputClass}
                 placeholder="300000"
               />
-              {form.fee_mmk && Number(form.fee_mmk) > 0 && (
+              {form.fee_amount && Number(form.fee_amount) > 0 && (
                 <p className="mt-1 text-xs text-gray-400">
-                  = {formatMMKSimple(Number(form.fee_mmk), tl.currency)}
+                  = {formatMMKSimple(Number(form.fee_amount), tl.currency)}
                 </p>
               )}
             </div>
@@ -483,7 +483,7 @@ function EditClassModal({
 
 interface AddCustomForm {
   level: string;
-  fee_mmk: string;
+  fee_amount: string;
   seat_total: string;
   mode: ClassMode;
   event_date: string;
@@ -507,7 +507,7 @@ function AddCustomClassModal({
   const tl = useTenantLabels();
   const [form, setForm] = useState<AddCustomForm>({
     level: "",
-    fee_mmk: "",
+    fee_amount: "",
     seat_total: "30",
     mode: "offline",
     event_date: "",
@@ -539,7 +539,7 @@ function AddCustomClassModal({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const level = form.level.trim();
-    const fee = Number(form.fee_mmk);
+    const fee = Number(form.fee_amount);
     const seats = Number(form.seat_total);
     if (!level) { toast.error("Level name is required."); return; }
     if (!fee || fee <= 0) { toast.error("Fee must be a positive number."); return; }
@@ -568,7 +568,7 @@ function AddCustomClassModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           level,
-          fee_mmk: fee,
+          fee_amount: fee,
           seat_total: seats,
           status: "draft",
           mode: form.mode,
@@ -651,16 +651,16 @@ function AddCustomClassModal({
               <label className={labelClass}>Fee ({tl.currency})</label>
               <input
                 type="number"
-                value={form.fee_mmk}
-                onChange={(e) => set("fee_mmk", e.target.value)}
+                value={form.fee_amount}
+                onChange={(e) => set("fee_amount", e.target.value)}
                 min={1}
                 required
                 className={inputClass}
                 placeholder="300000"
               />
-              {form.fee_mmk && Number(form.fee_mmk) > 0 && (
+              {form.fee_amount && Number(form.fee_amount) > 0 && (
                 <p className="mt-1 text-xs text-gray-400">
-                  = {formatMMKSimple(Number(form.fee_mmk), tl.currency)}
+                  = {formatMMKSimple(Number(form.fee_amount), tl.currency)}
                 </p>
               )}
             </div>
@@ -947,7 +947,7 @@ export default function IntakeDetailPage({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             level,
-            fee_mmk: DEFAULT_FEES[level],
+            fee_amount: DEFAULT_FEES[level],
             seat_total: 30,
             status: "draft",
           }),
@@ -1354,7 +1354,7 @@ export default function IntakeDetailPage({
 
                       {/* Fee */}
                       <td className="px-5 py-4 tabular-nums text-gray-700 font-medium">
-                        {formatMMKSimple(cls.fee_mmk, tl.currency)}
+                        {formatMMKSimple(cls.fee_amount, tl.currency)}
                       </td>
 
                       {/* Seats */}

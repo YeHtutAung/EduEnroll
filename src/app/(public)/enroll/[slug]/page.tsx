@@ -10,7 +10,7 @@ import type { ClassStatus } from "@/types/database";
 interface PublicClass {
   id: string;
   level: string;
-  fee_mmk: number;
+  fee_amount: number;
   fee_formatted: string;
   seat_remaining: number;
   seat_total: number;
@@ -279,7 +279,7 @@ function ClassCard({ cls, onSelect, labels }: { cls: PublicClass; onSelect: (id:
               {cls.fee_formatted}
             </p>
             <p className="font-myanmar mb-3 text-sm text-gray-500">
-              {labels.currency === "MMK" ? `${formatAmount(cls.fee_mmk)} ကျပ်` : formatCurrency(cls.fee_mmk, labels.currency)}
+              {labels.currency === "MMK" ? `${formatAmount(cls.fee_amount)} ကျပ်` : formatCurrency(cls.fee_amount, labels.currency)}
             </p>
 
             {/* Enrollment window info */}
@@ -571,7 +571,7 @@ function EventTicketCard({
 
   const overlayState = isFull ? "full" : notYetOpen ? "not_open" : alreadyClosed ? "closed" : null;
 
-  const priceNum = cls.fee_mmk.toLocaleString();
+  const priceNum = cls.fee_amount.toLocaleString();
 
   return (
     <div
@@ -678,7 +678,7 @@ function EventTicketCard({
             {priceNum}
           </div>
           <div className="font-myanmar text-base tracking-wider" style={{ color: "#888880" }}>
-            {currency === "MMK" ? `${formatAmount(cls.fee_mmk)} ကျပ် · MMK` : formatCurrency(cls.fee_mmk, currency)}
+            {currency === "MMK" ? `${formatAmount(cls.fee_amount)} ကျပ် · MMK` : formatCurrency(cls.fee_amount, currency)}
           </div>
         </div>
 
@@ -733,7 +733,7 @@ function EventTicketCard({
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onCartChange?.(cls.id, cls.level, 1, cls.fee_mmk, cls.image_url ?? null);
+                  onCartChange?.(cls.id, cls.level, 1, cls.fee_amount, cls.image_url ?? null);
                 }}
                 className={`px-4 py-2 rounded-sm text-[11px] font-medium tracking-[1.5px] uppercase border transition-all duration-300 ${
                   isHighestTier
@@ -749,7 +749,7 @@ function EventTicketCard({
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    onCartChange?.(cls.id, cls.level, effectiveQty - 1, cls.fee_mmk, cls.image_url ?? null);
+                    onCartChange?.(cls.id, cls.level, effectiveQty - 1, cls.fee_amount, cls.image_url ?? null);
                   }}
                   className="w-8 h-8 rounded-sm border border-white/15 text-white/70 hover:border-white/30 hover:text-white flex items-center justify-center transition-colors text-lg"
                 >
@@ -767,7 +767,7 @@ function EventTicketCard({
                     e.stopPropagation();
                     const max = Math.min(maxTix, cls.seat_remaining);
                     if (effectiveQty < max) {
-                      onCartChange?.(cls.id, cls.level, effectiveQty + 1, cls.fee_mmk, cls.image_url ?? null);
+                      onCartChange?.(cls.id, cls.level, effectiveQty + 1, cls.fee_amount, cls.image_url ?? null);
                     }
                   }}
                   className="w-8 h-8 rounded-sm border border-white/15 text-white/70 hover:border-white/30 hover:text-white flex items-center justify-center transition-colors text-lg"
@@ -813,14 +813,14 @@ function EventTicketCard({
         {/* Total price for cart mode */}
         {!isDisabled && cartMode && effectiveQty > 1 && (
           <div className="mb-6 text-right text-[13px]" style={{ color: "#888880" }}>
-            Total: <span style={{ color: isHighestTier ? GOLD_LIGHT : "#F8F4EE" }} className="font-semibold">{formatCurrency(cls.fee_mmk * effectiveQty, currency)}</span>
+            Total: <span style={{ color: isHighestTier ? GOLD_LIGHT : "#F8F4EE" }} className="font-semibold">{formatCurrency(cls.fee_amount * effectiveQty, currency)}</span>
           </div>
         )}
 
         {/* Total price for non-cart multi-ticket */}
         {!isDisabled && !cartMode && maxTix > 1 && qty > 1 && (
           <div className="mb-6 text-right text-[13px]" style={{ color: "#888880" }}>
-            Total: <span style={{ color: isHighestTier ? GOLD_LIGHT : "#F8F4EE" }} className="font-semibold">{formatCurrency(cls.fee_mmk * qty, currency)}</span>
+            Total: <span style={{ color: isHighestTier ? GOLD_LIGHT : "#F8F4EE" }} className="font-semibold">{formatCurrency(cls.fee_amount * qty, currency)}</span>
           </div>
         )}
 
@@ -858,7 +858,7 @@ function EventEnrollmentPage({
   classes: PublicClass[];
   slug: string;
   onSelect: (id: string, quantity: number) => void;
-  onCartCheckout: (cartItems: { class_id: string; level: string; quantity: number; fee_mmk: number; image_url: string | null }[]) => void;
+  onCartCheckout: (cartItems: { class_id: string; level: string; quantity: number; fee_amount: number; image_url: string | null }[]) => void;
   currency?: string;
 }) {
   // Cart state
@@ -886,7 +886,7 @@ function EventEnrollmentPage({
       class_id: item.classId,
       level: item.level,
       quantity: item.qty,
-      fee_mmk: item.fee,
+      fee_amount: item.fee,
       image_url: item.imageUrl,
     }));
     onCartCheckout(items);
@@ -904,7 +904,7 @@ function EventEnrollmentPage({
   const venue = firstWithEvent?.venue ?? null;
 
   // Find the highest priced tier for special styling
-  const maxFee = Math.max(...classes.map((c) => c.fee_mmk));
+  const maxFee = Math.max(...classes.map((c) => c.fee_amount));
 
   // Parse event name — split into title words
   const nameParts = intake.name.split(" ");
@@ -1107,7 +1107,7 @@ function EventEnrollmentPage({
                   key={cls.id}
                   cls={cls}
                   onSelect={onSelect}
-                  isHighestTier={cls.fee_mmk === maxFee && classes.length > 1}
+                  isHighestTier={cls.fee_amount === maxFee && classes.length > 1}
                   index={i}
                   cartMode={hasMultipleTickets}
                   cartQty={cart.get(cls.id)?.qty ?? 0}
@@ -1163,7 +1163,7 @@ function EventEnrollmentPage({
                 {classes.filter((c) => c.seat_remaining > 0).length} ticket{classes.filter((c) => c.seat_remaining > 0).length !== 1 ? "s" : ""} available
               </div>
               <div className="text-[13px] text-white/60">
-                From {formatCurrency(Math.min(...classes.filter((c) => c.seat_remaining > 0).map((c) => c.fee_mmk)), currency)}
+                From {formatCurrency(Math.min(...classes.filter((c) => c.seat_remaining > 0).map((c) => c.fee_amount)), currency)}
               </div>
             </div>
             <a href="#tickets" className="px-5 py-2.5 rounded-sm text-[12px] font-semibold tracking-[1.5px] uppercase transition-all"
@@ -1181,7 +1181,7 @@ function EventEnrollmentPage({
                 {classes.filter((c) => c.seat_remaining > 0).length} ticket{classes.filter((c) => c.seat_remaining > 0).length !== 1 ? "s" : ""} available
               </div>
               <div className="text-[13px] text-white/60">
-                From {formatCurrency(Math.min(...classes.filter((c) => c.seat_remaining > 0).map((c) => c.fee_mmk)), currency)}
+                From {formatCurrency(Math.min(...classes.filter((c) => c.seat_remaining > 0).map((c) => c.fee_amount)), currency)}
               </div>
             </div>
             <a href="#tickets" className="px-5 py-2.5 rounded-sm text-[12px] font-semibold tracking-[1.5px] uppercase transition-all"
@@ -1250,7 +1250,7 @@ function IntakeLandingContent() {
     router.push(`/enroll/form?class_id=${classId}&slug=${params.slug}${qParam}${psidParam}`);
   }
 
-  function handleCartCheckout(cartItems: { class_id: string; level: string; quantity: number; fee_mmk: number; image_url: string | null }[]) {
+  function handleCartCheckout(cartItems: { class_id: string; level: string; quantity: number; fee_amount: number; image_url: string | null }[]) {
     const cartKey = `cart_${Date.now()}`;
     sessionStorage.setItem(cartKey, JSON.stringify(cartItems));
     const psidParam = psid ? `&psid=${psid}` : "";

@@ -35,7 +35,7 @@ interface AnalyticsData {
   avg_payment_hours: number;
   total_enrolled: number;
   confirmed_count: number;
-  total_revenue_mmk: number;
+  total_revenue: number;
 }
 
 type RangeKey = "intake" | "30d" | "90d" | "all";
@@ -189,7 +189,7 @@ function AnalyticsContent() {
         <StatCard
           label="Total Revenue"
           labelMm="စုစုပေါင်းဝင်ငွေ"
-          value={formatCurrency(data.total_revenue_mmk, tl.currency)}
+          value={formatCurrency(data.total_revenue, tl.currency)}
         />
         <StatCard
           label="Avg Payment Time"

@@ -37,7 +37,7 @@ interface SchoolDetail {
   owner: Owner | null;
   intakes: Intake[];
   total_students: number;
-  total_revenue_mmk: number;
+  total_revenue: number;
   last_activity: string | null;
 }
 
@@ -107,7 +107,7 @@ export default function SchoolDetailPage() {
     );
   }
 
-  const { tenant, owner, intakes, total_students, total_revenue_mmk, last_activity } = data;
+  const { tenant, owner, intakes, total_students, total_revenue, last_activity } = data;
   const isSuspended = tenant.plan === "suspended";
 
   const statusBadge = isSuspended ? (
@@ -195,7 +195,7 @@ export default function SchoolDetailPage() {
         <div className="bg-white rounded-xl border border-gray-200 p-4">
           <p className="text-xs text-gray-500">Total Revenue</p>
           <p className="text-xl font-bold text-gray-900 mt-1">
-            {formatMMK(total_revenue_mmk)}
+            {formatMMK(total_revenue)}
           </p>
         </div>
         <div className="bg-white rounded-xl border border-gray-200 p-4">
