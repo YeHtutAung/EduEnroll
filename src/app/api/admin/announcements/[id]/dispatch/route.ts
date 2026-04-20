@@ -48,23 +48,23 @@ export async function POST(
   }
 
   // ── Check tenant has Telegram configured ───────────────────────────────────
-  const { data: tenant } = (await supabase
-    .from("tenants")
-    .select("telegram_enabled, telegram_bot_token")
-    .eq("id", tenantId)
+  const { data: tgConfig } = (await supabase
+    .from("tenant_telegram_configs")
+    .select("enabled, bot_token")
+    .eq("tenant_id", tenantId)
     .single()) as {
-    data: { telegram_enabled: boolean; telegram_bot_token: string | null } | null;
+    data: { enabled: boolean; bot_token: string | null } | null;
     error: unknown;
   };
 
-  if (!tenant?.telegram_enabled || !tenant.telegram_bot_token) {
+  if (!tgConfig?.enabled || !tgConfig.bot_token) {
     return NextResponse.json(
       { error: "Telegram bot is not connected or enabled." },
       { status: 400 },
     );
   }
 
-  const botToken = decryptToken(tenant.telegram_bot_token);
+  const botToken = decryptToken(tgConfig.bot_token);
 
   // ── Find target enrollments with telegram_chat_id ──────────────────────────
   let query = supabase

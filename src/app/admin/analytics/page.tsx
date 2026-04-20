@@ -15,7 +15,7 @@ import {
   Legend,
 } from "recharts";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
-import { formatMMK } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
 import { mm } from "@/lib/mm-labels";
 
@@ -35,7 +35,7 @@ interface AnalyticsData {
   avg_payment_hours: number;
   total_enrolled: number;
   confirmed_count: number;
-  total_revenue_mmk: number;
+  total_revenue: number;
 }
 
 type RangeKey = "intake" | "30d" | "90d" | "all";
@@ -189,7 +189,7 @@ function AnalyticsContent() {
         <StatCard
           label="Total Revenue"
           labelMm="စုစုပေါင်းဝင်ငွေ"
-          value={formatMMK(data.total_revenue_mmk)}
+          value={formatCurrency(data.total_revenue, tl.currency)}
         />
         <StatCard
           label="Avg Payment Time"
@@ -284,7 +284,7 @@ function AnalyticsContent() {
                 }}
                 /* eslint-disable @typescript-eslint/no-explicit-any */
                 formatter={((value: any, name: any) =>
-                  name === "Revenue" ? formatMMK(value ?? 0) : (value ?? 0)
+                  name === "Revenue" ? formatCurrency(value ?? 0, tl.currency) : (value ?? 0)
                 ) as any}
                 /* eslint-enable @typescript-eslint/no-explicit-any */
               />

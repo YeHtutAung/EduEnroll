@@ -9,8 +9,8 @@ import Link from "next/link";
 interface CartItem {
   class_level: string;
   quantity: number;
-  fee_mmk: number;
-  subtotal_mmk: number;
+  fee_amount: number;
+  subtotal: number;
 }
 
 interface StatusResponse {
@@ -18,7 +18,7 @@ interface StatusResponse {
   student_name_en: string;
   student_name_mm: string | null;
   class_level: string | null;
-  fee_mmk: number | null;
+  fee_amount: number | null;
   fee_formatted: string | null;
   status: string;
   status_label_en: string;

@@ -516,8 +516,9 @@ function SettingsContent() {
   const [emailOnEnroll, setEmailOnEnroll] = useState(false);
   const [savingEmailToggle, setSavingEmailToggle] = useState(false);
 
-  // ── Payment mode ──────────────────────────────────────────────────────────
-  const [paymentMode, setPaymentMode] = useState<"bank_transfer" | "mmqr">("bank_transfer");
+  // ── Currency & Payment mode ──────────────────────────────────────────────
+  const [currency, setCurrency] = useState("MMK");
+  const [paymentMode, setPaymentMode] = useState<"bank_transfer" | "mmqr" | "stripe">("bank_transfer");
   const [mmqrProvider, setMmqrProvider] = useState<"abank" | "mmpay">("abank");
   const [savingPaymentMode, setSavingPaymentMode] = useState(false);
 
@@ -543,13 +544,14 @@ function SettingsContent() {
       // Fetch tenant name + logo + org labels
       const { data: tenant } = await supabase
         .from("tenants")
-        .select("name, logo_url, org_type, label_intake, label_class, label_student, label_seat, label_fee, auto_cancel_hours, email_on_enroll, payment_mode, mmqr_provider")
+        .select("name, logo_url, org_type, currency, label_intake, label_class, label_student, label_seat, label_fee, auto_cancel_hours, email_on_enroll, payment_mode, mmqr_provider")
         .eq("id", profile.tenant_id)
         .single() as {
         data: {
           name: string;
           logo_url: string | null;
           org_type: string;
+          currency: string;
           label_intake: string;
           label_class: string;
           label_student: string;
@@ -575,7 +577,8 @@ function SettingsContent() {
         });
         setAutoCancelHours(tenant.auto_cancel_hours ?? 4320);
         setEmailOnEnroll(tenant.email_on_enroll ?? false);
-        setPaymentMode((tenant.payment_mode as "bank_transfer" | "mmqr") ?? "bank_transfer");
+        setCurrency(tenant.currency || "MMK");
+        setPaymentMode((tenant.payment_mode as "bank_transfer" | "mmqr" | "stripe") ?? "bank_transfer");
         setMmqrProvider((tenant.mmqr_provider as "abank" | "mmpay") ?? "abank");
       }
     } catch {
@@ -767,7 +770,7 @@ function SettingsContent() {
     try {
       const { error } = await supabase
         .from("tenants")
-        .update({ payment_mode: paymentMode, mmqr_provider: mmqrProvider } as never)
+        .update({ currency, payment_mode: paymentMode, mmqr_provider: mmqrProvider } as never)
         .eq("id", tenantId);
       if (error) throw new Error((error as Error).message);
       toast.success("Payment mode saved.");
@@ -925,7 +928,7 @@ function SettingsContent() {
     }
   }
 
-  // ── Telegram Bot ─────────────────────────────────────────────────────────
+  // ── Telegram — Enrollment Bot ─────────────────────────────────────────────
   const [tgLoading, setTgLoading] = useState(true);
   const [tgConnected, setTgConnected] = useState(false);
   const [tgEnabled, setTgEnabled] = useState(false);
@@ -937,16 +940,49 @@ function SettingsContent() {
   const [tgAutoSendInvite, setTgAutoSendInvite] = useState(false);
   const [tgAutoSendSaving, setTgAutoSendSaving] = useState(false);
 
+  // ── Telegram — Support Bot ────────────────────────────────────────────────
+  const [spConnected, setSpConnected] = useState(false);
+  const [spEnabled, setSpEnabled] = useState(false);
+  const [spBotUsername, setSpBotUsername] = useState<string | null>(null);
+  const [spSaving, setSpSaving] = useState(false);
+  const [spDisconnecting, setSpDisconnecting] = useState(false);
+  const [spTokenInput, setSpTokenInput] = useState("");
+  const [spConnecting, setSpConnecting] = useState(false);
+  const [tgAdminRequests, setTgAdminRequests] = useState<
+    { id: string; chat_id: number; name: string; username: string | null }[]
+  >([]);
+  const [tgApprovedUsers, setTgApprovedUsers] = useState<
+    { id: string; chat_id: number; name: string; username: string | null }[]
+  >([]);
+  const [tgRequestActioning, setTgRequestActioning] = useState<string | null>(null);
+
+  const fetchTelegramAdminRequests = useCallback(async () => {
+    try {
+      const res = await fetch("/api/telegram/admin-requests");
+      if (!res.ok) return;
+      const data = await res.json();
+      setTgAdminRequests(data.requests ?? []);
+      setTgApprovedUsers(data.approved ?? []);
+    } catch {
+      // non-critical
+    }
+  }, []);
+
   const fetchTelegram = useCallback(async () => {
     setTgLoading(true);
     try {
       const res = await fetch("/api/telegram/settings");
       if (!res.ok) throw new Error(`${res.status}`);
       const data = await res.json();
-      setTgConnected(data.connected);
-      setTgEnabled(data.enabled);
-      setTgBotUsername(data.botUsername);
+      // Enrollment bot
+      setTgConnected(data.enrollment?.connected ?? false);
+      setTgEnabled(data.enrollment?.enabled ?? false);
+      setTgBotUsername(data.enrollment?.botUsername ?? null);
       setTgAutoSendInvite(data.autoSendInvite ?? false);
+      // Support bot
+      setSpConnected(data.support?.connected ?? false);
+      setSpEnabled(data.support?.enabled ?? false);
+      setSpBotUsername(data.support?.botUsername ?? null);
     } catch {
       // non-critical
     } finally {
@@ -954,18 +990,17 @@ function SettingsContent() {
     }
   }, []);
 
+  // ── Enrollment bot handlers ───────────────────────────────────────────────
+
   async function handleTgConnect() {
     const token = tgTokenInput.trim();
-    if (!token) {
-      toast.error("Please enter a bot token.");
-      return;
-    }
+    if (!token) { toast.error("Please enter a bot token."); return; }
     setTgConnecting(true);
     try {
       const res = await fetch("/api/telegram/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ botToken: token }),
+        body: JSON.stringify({ botType: "enrollment", botToken: token }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? `${res.status}`);
@@ -973,7 +1008,7 @@ function SettingsContent() {
       setTgEnabled(true);
       setTgBotUsername(data.botUsername);
       setTgTokenInput("");
-      toast.success(data.message ?? "Telegram bot connected!");
+      toast.success(data.message ?? "Enrollment bot connected!");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to connect bot.");
     } finally {
@@ -987,13 +1022,13 @@ function SettingsContent() {
       const res = await fetch("/api/telegram/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: !tgEnabled }),
+        body: JSON.stringify({ botType: "enrollment", enabled: !tgEnabled }),
       });
       if (!res.ok) throw new Error(`${res.status}`);
       setTgEnabled(!tgEnabled);
-      toast.success(tgEnabled ? "Telegram bot disabled." : "Telegram bot enabled!");
+      toast.success(tgEnabled ? "Enrollment bot disabled." : "Enrollment bot enabled!");
     } catch {
-      toast.error("Failed to update Telegram settings.");
+      toast.error("Failed to update settings.");
     } finally {
       setTgSaving(false);
     }
@@ -1005,17 +1040,81 @@ function SettingsContent() {
       const res = await fetch("/api/telegram/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ disconnect: true }),
+        body: JSON.stringify({ botType: "enrollment", disconnect: true }),
       });
       if (!res.ok) throw new Error(`${res.status}`);
       setTgConnected(false);
       setTgEnabled(false);
       setTgBotUsername(null);
-      toast.success("Telegram bot disconnected.");
+      toast.success("Enrollment bot disconnected.");
     } catch {
       toast.error("Failed to disconnect.");
     } finally {
       setTgDisconnecting(false);
+    }
+  }
+
+  // ── Support bot handlers ──────────────────────────────────────────────────
+
+  async function handleSpConnect() {
+    const token = spTokenInput.trim();
+    if (!token) { toast.error("Please enter a bot token."); return; }
+    setSpConnecting(true);
+    try {
+      const res = await fetch("/api/telegram/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ botType: "support", botToken: token }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `${res.status}`);
+      setSpConnected(true);
+      setSpEnabled(true);
+      setSpBotUsername(data.botUsername);
+      setSpTokenInput("");
+      toast.success(data.message ?? "Support bot connected!");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to connect bot.");
+    } finally {
+      setSpConnecting(false);
+    }
+  }
+
+  async function handleSpToggle() {
+    setSpSaving(true);
+    try {
+      const res = await fetch("/api/telegram/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ botType: "support", enabled: !spEnabled }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      setSpEnabled(!spEnabled);
+      toast.success(spEnabled ? "Support bot disabled." : "Support bot enabled!");
+    } catch {
+      toast.error("Failed to update settings.");
+    } finally {
+      setSpSaving(false);
+    }
+  }
+
+  async function handleSpDisconnect() {
+    setSpDisconnecting(true);
+    try {
+      const res = await fetch("/api/telegram/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ botType: "support", disconnect: true }),
+      });
+      if (!res.ok) throw new Error(`${res.status}`);
+      setSpConnected(false);
+      setSpEnabled(false);
+      setSpBotUsername(null);
+      toast.success("Support bot disconnected.");
+    } catch {
+      toast.error("Failed to disconnect.");
+    } finally {
+      setSpDisconnecting(false);
     }
   }
 
@@ -1041,12 +1140,55 @@ function SettingsContent() {
     }
   }
 
+  async function handleTgAdminRequest(id: string, action: "approve" | "reject") {
+    setTgRequestActioning(id);
+    try {
+      const res = await fetch("/api/telegram/admin-requests", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, action }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `${res.status}`);
+      if (action === "approve") {
+        const approved = tgAdminRequests.find((r) => r.id === id);
+        if (approved) setTgApprovedUsers((prev) => [...prev, { ...approved }]);
+      }
+      setTgAdminRequests((prev) => prev.filter((r) => r.id !== id));
+      toast.success(action === "approve" ? "Request approved." : "Request rejected.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to process request.");
+    } finally {
+      setTgRequestActioning(null);
+    }
+  }
+
+  async function handleTgRevokeUser(id: string) {
+    setTgRequestActioning(id);
+    try {
+      const res = await fetch("/api/telegram/admin-requests", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, action: "revoke" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? `${res.status}`);
+      setTgApprovedUsers((prev) => prev.filter((u) => u.id !== id));
+      toast.success("Access revoked.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to revoke access.");
+    } finally {
+      setTgRequestActioning(null);
+    }
+  }
+
   // ── Init ───────────────────────────────────────────────────────────────────
   useEffect(() => {
     fetchAccounts();
     fetchProfile();
     fetchMessenger();
     fetchTelegram();
+    fetchTelegramAdminRequests();
 
     // Show toast for OAuth callback results
     if (searchParams.get("connected") === "true") {
@@ -1060,7 +1202,7 @@ function SettingsContent() {
     if (pickPage) {
       fetchPagePickerPages(pickPage);
     }
-  }, [fetchAccounts, fetchProfile, fetchMessenger, fetchTelegram]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [fetchAccounts, fetchProfile, fetchMessenger, fetchTelegram, fetchTelegramAdminRequests]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -1085,6 +1227,23 @@ function SettingsContent() {
         subtitle="Choose how students pay for enrollments."
       >
         <div className="space-y-4">
+          {/* Currency */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Currency</label>
+            <select
+              value={currency}
+              onChange={(e) => setCurrency(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
+            >
+              <option value="MMK">MMK — Myanmar Kyat</option>
+              <option value="SGD">SGD — Singapore Dollar</option>
+              <option value="USD">USD — US Dollar</option>
+              <option value="THB">THB — Thai Baht</option>
+              <option value="JPY">JPY — Japanese Yen</option>
+            </select>
+            <p className="mt-1 text-xs text-gray-400">This currency is used for all class fees and payment displays.</p>
+          </div>
+
           {/* Mode toggle */}
           <div className="flex gap-3">
             <button
@@ -1123,6 +1282,17 @@ function SettingsContent() {
                 </div>
               </div>
             </button>
+            <button
+              onClick={() => setPaymentMode("stripe")}
+              className={`flex-1 rounded-xl border-2 px-4 py-3 text-left transition-colors ${
+                paymentMode === "stripe"
+                  ? "border-[#1a3f8a] bg-[#1a3f8a]/5"
+                  : "border-gray-200 hover:border-gray-300"
+              }`}
+            >
+              <p className="font-semibold text-sm">Stripe</p>
+              <p className="text-xs text-gray-500 mt-0.5">Card Payment (SGD, USD, etc.)</p>
+            </button>
           </div>
 
           {/* Provider selector (only when MMQR) */}
@@ -1148,6 +1318,17 @@ function SettingsContent() {
               </svg>
               <p className="text-xs text-blue-700">
                 Bank accounts and receipt upload will be hidden from students. Only the MMQR payment button will be shown.
+              </p>
+            </div>
+          )}
+
+          {paymentMode === "stripe" && (
+            <div className="flex items-start gap-2 rounded-lg bg-purple-50 px-3 py-2.5">
+              <svg className="mt-0.5 h-4 w-4 shrink-0 text-purple-500" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
+              </svg>
+              <p className="text-xs text-purple-700">
+                Students will be redirected to Stripe Checkout to pay by card. Payment is auto-confirmed — no manual verification needed.
               </p>
             </div>
           )}
@@ -1923,8 +2104,8 @@ function SettingsContent() {
         )}
       </SectionCard>
 
-      {/* ── Section 5: Telegram Bot ───────────────────────────────────── */}
-      <SectionCard title="Telegram Bot" subtitle={orgType === "event" ? "Auto-reply bot for your organization's Telegram." : "Auto-reply bot for your school's Telegram."}>
+      {/* ── Section 5: Enrollment Bot ─────────────────────────────────── */}
+      <SectionCard title="Enrollment Bot" subtitle="Telegram bot for student enrollment notifications, phone verification, and channel invites.">
         {tgLoading ? (
           <div className="space-y-3">
             <Pulse className="h-6 w-48" />
@@ -2058,6 +2239,157 @@ function SettingsContent() {
                 className="px-4 py-2 text-sm font-medium text-[#c0392b] hover:bg-red-50 rounded-xl disabled:opacity-50 transition-colors"
               >
                 {tgDisconnecting ? "Disconnecting…" : "Disconnect"}
+              </button>
+            </div>
+          </div>
+        )}
+      </SectionCard>
+
+      {/* ── Section 6: Support Bot ────────────────────────────────────── */}
+      <SectionCard title="Support Bot" subtitle="Telegram bot for admin AI agent — approve access and answer questions.">
+        {tgLoading ? (
+          <div className="space-y-3">
+            <Pulse className="h-6 w-48" />
+            <Pulse className="h-10 w-full rounded-xl" />
+          </div>
+        ) : !spConnected ? (
+          /* ── Not connected ────────────────────────────────────── */
+          <div className="text-center py-8">
+            <div className="inline-flex items-center justify-center w-14 h-14 rounded-full bg-violet-50 mb-4">
+              <svg className="w-7 h-7 text-violet-500" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
+              </svg>
+            </div>
+            <p className="text-sm text-gray-600 mb-5">
+              Connect a separate Telegram bot for admin support and AI agent access.
+            </p>
+            <div className="max-w-sm mx-auto space-y-3">
+              <input
+                type="text"
+                value={spTokenInput}
+                onChange={(e) => setSpTokenInput(e.target.value)}
+                placeholder="Paste bot token from @BotFather"
+                className="w-full border border-gray-300 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400 focus:border-transparent"
+              />
+              <button
+                onClick={handleSpConnect}
+                disabled={spConnecting || !spTokenInput.trim()}
+                className="inline-flex items-center gap-2 px-5 py-2.5 bg-violet-500 text-white text-sm font-semibold rounded-xl hover:bg-violet-600 transition-colors disabled:opacity-50"
+              >
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
+                </svg>
+                {spConnecting ? "Connecting…" : "Connect Support Bot"}
+              </button>
+              <p className="text-xs text-gray-400">
+                Create a separate bot via{" "}
+                <a href="https://t.me/BotFather" target="_blank" rel="noopener noreferrer" className="text-violet-500 hover:underline">
+                  @BotFather
+                </a>{" "}
+                and paste its token here.
+              </p>
+            </div>
+          </div>
+        ) : (
+          /* ── Connected ────────────────────────────────────────── */
+          <div className="space-y-5">
+            {/* Status + toggle */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                {spEnabled ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    Bot is Live
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-gray-100 text-gray-600">
+                    <span className="w-2 h-2 rounded-full bg-gray-400" />
+                    Bot Disabled
+                  </span>
+                )}
+                {spBotUsername && (
+                  <a
+                    href={`https://t.me/${spBotUsername}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-violet-500 hover:underline"
+                  >
+                    @{spBotUsername}
+                  </a>
+                )}
+              </div>
+              <Toggle checked={spEnabled} onChange={handleSpToggle} disabled={spSaving} />
+            </div>
+
+            {/* Approved users */}
+            {tgApprovedUsers.length > 0 && (
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 space-y-2">
+                <p className="text-xs font-semibold text-emerald-700 uppercase tracking-wide">
+                  Approved Access
+                </p>
+                {tgApprovedUsers.map((user) => (
+                  <div key={user.id} className="space-y-1.5">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-gray-800 truncate">{user.name}</p>
+                        <p className="text-xs text-gray-500">
+                          {user.username ? `@${user.username} · ` : ""}ID: {user.chat_id}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleTgRevokeUser(user.id)}
+                        disabled={tgRequestActioning === user.id}
+                        className="px-3 py-1.5 text-xs font-semibold bg-white text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors shrink-0"
+                      >
+                        Revoke
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Pending access requests */}
+            {tgAdminRequests.length > 0 && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 space-y-2">
+                <p className="text-xs font-semibold text-amber-700 uppercase tracking-wide">
+                  Pending Access Requests
+                </p>
+                {tgAdminRequests.map((req) => (
+                  <div key={req.id} className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-800 truncate">{req.name}</p>
+                      {req.username && <p className="text-xs text-gray-500">@{req.username}</p>}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={() => handleTgAdminRequest(req.id, "approve")}
+                        disabled={tgRequestActioning === req.id}
+                        className="px-3 py-1.5 text-xs font-semibold bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 disabled:opacity-50 transition-colors"
+                      >
+                        Approve
+                      </button>
+                      <button
+                        onClick={() => handleTgAdminRequest(req.id, "reject")}
+                        disabled={tgRequestActioning === req.id}
+                        className="px-3 py-1.5 text-xs font-semibold bg-white text-red-600 border border-red-200 rounded-lg hover:bg-red-50 disabled:opacity-50 transition-colors"
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex items-center gap-3 pt-2 border-t border-gray-100">
+              <button
+                onClick={handleSpDisconnect}
+                disabled={spDisconnecting}
+                className="px-4 py-2 text-sm font-medium text-[#c0392b] hover:bg-red-50 rounded-xl disabled:opacity-50 transition-colors"
+              >
+                {spDisconnecting ? "Disconnecting…" : "Disconnect"}
               </button>
             </div>
           </div>

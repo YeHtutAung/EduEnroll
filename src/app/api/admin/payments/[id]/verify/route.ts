@@ -16,6 +16,12 @@ import type { Enrollment, Payment, PaymentStatus, EnrollmentStatus } from "@/typ
 type EnrollmentResult = { data: Enrollment | null; error: unknown };
 type PaymentResult    = { data: Payment    | null; error: unknown };
 
+function dbError(label: string, err: unknown) {
+  const e = err as { message?: string; details?: string; hint?: string; code?: string };
+  console.error(`[verify] ${label}:`, JSON.stringify({ message: e.message, details: e.details, hint: e.hint, code: e.code }));
+  return NextResponse.json({ error: e.message, details: e.details, hint: e.hint, code: e.code }, { status: 500 });
+}
+
 // ─── PATCH /api/admin/payments/[id]/verify ────────────────────────────────────
 // [id] = payment id
 // Body: { action: 'approve' | 'reject' | 'request_remaining',
@@ -27,14 +33,23 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: { id: string } },
 ) {
-  const auth = await requireAuth();
+  // Pre-read raw body for agent requests — HMAC verification requires the raw text.
+  // For human requests we parse normally below.
+  const isAgentRequest = !!request.headers.get("x-agent-signature");
+  const rawBody = isAgentRequest ? await request.text() : undefined;
+
+  const auth = await requireAuth(rawBody ?? "");
   if (auth instanceof NextResponse) return auth;
-  const { supabase, tenantId, user } = auth;
+  const { supabase, tenantId, user, isAgent, agentChatId } = auth;
+
+  // For audit: human verifiers use verified_by (uuid), agents use verified_by_agent (chat_id)
+  const verifiedByHuman = isAgent ? null : user.id;
+  const verifiedByAgent = isAgent ? agentChatId : null;
 
   // ── Parse body ──────────────────────────────────────────────────────────────
   let body: unknown;
   try {
-    body = await request.json();
+    body = rawBody ? JSON.parse(rawBody) : await request.json();
   } catch {
     return badRequest("Request body must be valid JSON.");
   }
@@ -93,13 +108,14 @@ export async function PATCH(
   // ── Fetch tenant info for email branding ───────────────────────────────────
   const { data: tenantInfo } = await admin
     .from("tenants")
-    .select("name, org_type, logo_url")
+    .select("name, org_type, logo_url, currency")
     .eq("id", tenantId)
-    .single() as { data: { name: string; org_type: string; logo_url: string | null } | null; error: unknown };
+    .single() as { data: { name: string; org_type: string; logo_url: string | null; currency: string } | null; error: unknown };
 
   const orgType = tenantInfo?.org_type;
   const tenantName = tenantInfo?.name;
   const logoUrl = tenantInfo?.logo_url ?? undefined;
+  const currency = tenantInfo?.currency ?? "MMK";
 
   // ── Is this a cart enrollment? ───────────────────────────────────────────────
   const isCart = enrollment.class_id === null;
@@ -113,25 +129,25 @@ export async function PATCH(
       // Cart enrollment: get levels from enrollment_items
       const { data: items } = await admin
         .from("enrollment_items")
-        .select("quantity, fee_mmk, classes(level)")
+        .select("quantity, fee_amount, classes(level)")
         .eq("enrollment_id", enrollment!.id) as {
-        data: { quantity: number; fee_mmk: number; classes: { level: string } | null }[] | null;
+        data: { quantity: number; fee_amount: number; classes: { level: string } | null }[] | null;
         error: unknown;
       };
       if (items && items.length > 0) {
         classLevel = items
           .map((i) => i.quantity > 1 ? `${i.classes?.level ?? "?"} x${i.quantity}` : (i.classes?.level ?? "?"))
           .join(", ");
-        totalFee = items.reduce((sum, i) => sum + i.fee_mmk * i.quantity, 0);
+        totalFee = items.reduce((sum, i) => sum + i.fee_amount * i.quantity, 0);
       }
     } else {
       const { data: cls } = await admin
         .from("classes")
-        .select("level, fee_mmk")
+        .select("level, fee_amount")
         .eq("id", enrollment!.class_id!)
-        .single() as { data: { level: string; fee_mmk: number } | null; error: unknown };
+        .single() as { data: { level: string; fee_amount: number } | null; error: unknown };
       classLevel = cls?.level ?? "";
-      totalFee = (cls?.fee_mmk ?? 0) * (enrollment!.quantity ?? 1);
+      totalFee = (cls?.fee_amount ?? 0) * (enrollment!.quantity ?? 1);
     }
 
     const host = request.headers.get("host") ?? "localhost:3005";
@@ -140,7 +156,7 @@ export async function PATCH(
     const paymentUrl = `${proto}://${host}/enroll/payment/${enrollment!.enrollment_ref}`;
 
     const feeFormatted = totalFee > 0
-      ? `${String(totalFee).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} MMK`
+      ? `${String(totalFee).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} ${currency}`
       : undefined;
 
     return { classLevel, statusUrl, paymentUrl, feeFormatted };
@@ -188,10 +204,10 @@ export async function PATCH(
 
     const { error: pe } = await admin
       .from("payments")
-      .update({ status: newPaymentStatus, verified_by: user.id, verified_at: now } as never)
+      .update({ status: newPaymentStatus, verified_by: verifiedByHuman, verified_by_agent: verifiedByAgent, verified_at: now } as never)
       .eq("id", payment.id);
 
-    if (pe) return NextResponse.json({ error: (pe as Error).message }, { status: 500 });
+    if (pe) return dbError(`${action} payment update`, pe);
 
     const { data: updatedEnrollment, error: ee } = await admin
       .from("enrollments")
@@ -200,7 +216,7 @@ export async function PATCH(
       .select()
       .single() as EnrollmentResult;
 
-    if (ee) return NextResponse.json({ error: (ee as Error).message }, { status: 500 });
+    if (ee) return dbError(`${action} enrollment update`, ee);
 
     // Send notifications (best-effort, non-blocking)
     const { classLevel, statusUrl, paymentUrl, feeFormatted } = await getClassAndUrls();
@@ -216,6 +232,7 @@ export async function PATCH(
         classLevel,
         statusUrl,
         paymentUrl,
+        currency,
       }).catch((err) => {
         console.error("[verify] Messenger approval notification failed:", err);
       });
@@ -232,6 +249,7 @@ export async function PATCH(
         classLevel,
         statusUrl,
         paymentUrl,
+        currency,
       }).catch((err) => {
         console.error("[verify] Telegram approval notification failed:", err);
       });
@@ -274,7 +292,7 @@ export async function PATCH(
 
     return NextResponse.json({
       enrollment: updatedEnrollment,
-      payment: { ...payment, status: newPaymentStatus, verified_by: user.id, verified_at: now },
+      payment: { ...payment, status: newPaymentStatus, verified_by: verifiedByHuman, verified_by_agent: verifiedByAgent, verified_at: now },
     });
   }
 
@@ -289,7 +307,7 @@ export async function PATCH(
       verified_at: now,
     };
     if (typeof received_amount === "number") {
-      paymentUpdate.received_amount_mmk = received_amount;
+      paymentUpdate.received_amount = received_amount;
     }
 
     const { error: pe } = await admin
@@ -297,7 +315,7 @@ export async function PATCH(
       .update(paymentUpdate as never)
       .eq("id", payment.id);
 
-    if (pe) return NextResponse.json({ error: (pe as Error).message }, { status: 500 });
+    if (pe) return dbError(`${action} payment update`, pe);
 
     const { data: updatedEnrollment, error: ee } = await admin
       .from("enrollments")
@@ -306,12 +324,12 @@ export async function PATCH(
       .select()
       .single() as EnrollmentResult;
 
-    if (ee) return NextResponse.json({ error: (ee as Error).message }, { status: 500 });
+    if (ee) return dbError(`${action} enrollment update`, ee);
 
     // Send notifications (best-effort, non-blocking)
     const { classLevel, paymentUrl, statusUrl } = await getClassAndUrls();
     const remainingAmount = typeof received_amount === "number"
-      ? payment.amount_mmk - received_amount
+      ? payment.amount - received_amount
       : null;
 
     // Messenger notification (if enrolled via chatbot)
@@ -328,6 +346,7 @@ export async function PATCH(
         adminNote: (admin_note as string).trim(),
         receivedAmount: typeof received_amount === "number" ? received_amount : null,
         remainingAmount,
+        currency,
       }).catch((err) => {
         console.error("[verify] Messenger partial notification failed:", err);
       });
@@ -347,6 +366,7 @@ export async function PATCH(
         adminNote: (admin_note as string).trim(),
         receivedAmount: typeof received_amount === "number" ? received_amount : null,
         remainingAmount,
+        currency,
       }).catch((err) => {
         console.error("[verify] Telegram partial notification failed:", err);
       });
@@ -358,7 +378,7 @@ export async function PATCH(
         studentName: enrollment.student_name_en || "Student",
         enrollmentRef: enrollment.enrollment_ref,
         classLevel,
-        totalAmount: payment.amount_mmk,
+        totalAmount: payment.amount,
         receivedAmount: typeof received_amount === "number" ? received_amount : null,
         remainingAmount,
         adminNote: (admin_note as string).trim(),
@@ -395,7 +415,7 @@ export async function PATCH(
     .update({ status: newPaymentStatus, verified_by: user.id, verified_at: now } as never)
     .eq("id", payment.id);
 
-  if (pe) return NextResponse.json({ error: (pe as Error).message }, { status: 500 });
+  if (pe) return dbError("reject payment update", pe);
 
   const enrollUpdatePayload: Record<string, unknown> = { status: newEnrollStatus };
   if (typeof rejection_reason === "string") {
@@ -409,7 +429,7 @@ export async function PATCH(
     .select()
     .single() as EnrollmentResult;
 
-  if (ee) return NextResponse.json({ error: (ee as Error).message }, { status: 500 });
+  if (ee) return dbError("reject enrollment update", ee);
 
   // Restore seats only if enrollment wasn't already rejected (prevents double-restore)
   if (enrollment.status !== "rejected") {
@@ -431,6 +451,7 @@ export async function PATCH(
       statusUrl: rejStatusUrl,
       paymentUrl: rejPaymentUrl,
       rejectionReason: typeof rejection_reason === "string" ? rejection_reason : null,
+      currency,
     }).catch((err) => {
       console.error("[verify] Messenger rejection notification failed:", err);
     });
@@ -448,6 +469,7 @@ export async function PATCH(
       statusUrl: rejStatusUrl,
       paymentUrl: rejPaymentUrl,
       rejectionReason: typeof rejection_reason === "string" ? rejection_reason : null,
+      currency,
     }).catch((err) => {
       console.error("[verify] Telegram rejection notification failed:", err);
     });
@@ -479,7 +501,7 @@ export async function PATCH(
 
   const responseBody: Record<string, unknown> = {
     enrollment: updatedEnrollment,
-    payment: { ...payment, status: newPaymentStatus, verified_by: user.id, verified_at: now },
+    payment: { ...payment, status: newPaymentStatus, verified_by: verifiedByHuman, verified_by_agent: verifiedByAgent, verified_at: now },
   };
   if (typeof rejection_reason === "string") responseBody.rejection_reason = rejection_reason;
 

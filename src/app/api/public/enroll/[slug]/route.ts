@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
-import { formatMMKSimple } from "@/lib/utils";
+import { formatCurrencySimple } from "@/lib/utils";
 import type { Intake, Class } from "@/types/database";
 
 // Always fetch live data — intake/class availability changes in real time
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 interface PublicClassView {
   id: string;
   level: Class["level"];
-  fee_mmk: number;
+  fee_amount: number;
   fee_formatted: string;   // e.g. "၃၀၀,၀၀၀ MMK"
   seat_remaining: number;
   seat_total: number;
@@ -35,6 +35,7 @@ interface TenantLabelsView {
   seat: string;
   fee: string;
   orgType: string;
+  currency: string;
 }
 
 interface PublicIntakeResponse {
@@ -71,20 +72,22 @@ export async function GET(
   // ── Fetch tenant labels ────────────────────────────────────────
   const { data: tenantRow } = (await supabase
     .from("tenants")
-    .select("org_type, label_intake, label_class, label_student, label_seat, label_fee")
+    .select("org_type, currency, label_intake, label_class, label_student, label_seat, label_fee")
     .eq("id", tenantId)
     .single()) as {
-    data: { org_type: string; label_intake: string; label_class: string; label_student: string; label_seat: string; label_fee: string } | null;
+    data: { org_type: string; currency: string; label_intake: string; label_class: string; label_student: string; label_seat: string; label_fee: string } | null;
     error: unknown;
   };
   const labels: TenantLabelsView = {
-    intake:  tenantRow?.label_intake  || "Intake",
-    class:   tenantRow?.label_class   || "Level",
-    student: tenantRow?.label_student || "Student",
-    seat:    tenantRow?.label_seat    || "Seat",
-    fee:     tenantRow?.label_fee     || "Fee",
-    orgType: tenantRow?.org_type      || "language_school",
+    intake:   tenantRow?.label_intake  || "Intake",
+    class:    tenantRow?.label_class   || "Level",
+    student:  tenantRow?.label_student || "Student",
+    seat:     tenantRow?.label_seat    || "Seat",
+    fee:      tenantRow?.label_fee     || "Fee",
+    orgType:  tenantRow?.org_type      || "language_school",
+    currency: tenantRow?.currency      || "MMK",
   };
+  const tenantCurrency = tenantRow?.currency || "MMK";
 
   // ── Find the matching intake by slug column ────────────────────
   const { data: intakes, error: intakeError } = await supabase
@@ -110,14 +113,14 @@ export async function GET(
     // Still fetch classes so payment page can show promotions
     const { data: closedClasses } = await supabase
       .from("classes")
-      .select("id, level, fee_mmk, seat_remaining, seat_total, enrollment_open_at, enrollment_close_at, status, mode, event_date, start_time, end_time, venue, image_url, max_tickets_per_person")
+      .select("id, level, fee_amount, seat_remaining, seat_total, enrollment_open_at, enrollment_close_at, status, mode, event_date, start_time, end_time, venue, image_url, max_tickets_per_person")
       .eq("intake_id", intake.id)
       .eq("tenant_id", tenantId)
       .in("status", ["open", "full"])
       .order("level") as { data: Class[] | null; error: unknown };
 
     const closedPublicClasses: PublicClassView[] = (closedClasses ?? []).map((c) => ({
-      id: c.id, level: c.level, fee_mmk: c.fee_mmk, fee_formatted: formatMMKSimple(c.fee_mmk),
+      id: c.id, level: c.level, fee_amount: c.fee_amount, fee_formatted: formatCurrencySimple(c.fee_amount, tenantCurrency),
       seat_remaining: c.seat_remaining, seat_total: c.seat_total,
       enrollment_open_at: c.enrollment_open_at, enrollment_close_at: c.enrollment_close_at,
       status: c.status, mode: c.mode ?? "offline",
@@ -152,7 +155,7 @@ export async function GET(
   // ── Fetch all visible classes (open + full) ──────────────────
   const { data: classes, error: classError } = await supabase
     .from("classes")
-    .select("id, level, fee_mmk, seat_remaining, seat_total, enrollment_open_at, enrollment_close_at, status, mode, event_date, start_time, end_time, venue, image_url, max_tickets_per_person")
+    .select("id, level, fee_amount, seat_remaining, seat_total, enrollment_open_at, enrollment_close_at, status, mode, event_date, start_time, end_time, venue, image_url, max_tickets_per_person")
     .eq("intake_id", intake.id)
     .eq("tenant_id", tenantId)
     .in("status", ["open", "full"])
@@ -171,8 +174,8 @@ export async function GET(
   const publicClasses: PublicClassView[] = sorted.map((c) => ({
     id:                   c.id,
     level:                c.level,
-    fee_mmk:              c.fee_mmk,
-    fee_formatted:        formatMMKSimple(c.fee_mmk),
+    fee_amount:              c.fee_amount,
+    fee_formatted:        formatCurrencySimple(c.fee_amount, tenantCurrency),
     seat_remaining:       c.seat_remaining,
     seat_total:           c.seat_total,
     enrollment_open_at:   c.enrollment_open_at,
