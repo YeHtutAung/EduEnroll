@@ -4,7 +4,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendMessageWithButtons } from "./send";
 import { decryptToken } from "@/lib/messenger/crypto";
-import { formatMMK } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -21,6 +21,7 @@ interface NotifyParams {
   adminNote?: string | null;
   receivedAmount?: number | null;
   remainingAmount?: number | null;
+  currency?: string;
 }
 
 // ─── Main function ──────────────────────────────────────────────────────────
@@ -39,6 +40,7 @@ export async function sendTelegramStatusNotification(params: NotifyParams): Prom
     adminNote,
     receivedAmount,
     remainingAmount,
+    currency = "MMK",
   } = params;
 
   try {
@@ -89,10 +91,10 @@ export async function sendTelegramStatusNotification(params: NotifyParams): Prom
           `💰 <b>Partial Payment Received</b>\nငွေတစ်စိတ်တစ်ပိုင်း လက်ခံရရှိပြီး\n\n` +
           `Hi ${studentName}, we received partial payment for ${enrollmentRef}.`;
         if (receivedAmount != null) {
-          text += `\nReceived / လက်ခံရရှိ: ${formatMMK(receivedAmount)}`;
+          text += `\nReceived / လက်ခံရရှိ: ${formatCurrency(receivedAmount, currency)}`;
         }
         if (remainingAmount != null && remainingAmount > 0) {
-          text += `\nRemaining / ကျန်ငွေ: ${formatMMK(remainingAmount)}`;
+          text += `\nRemaining / ကျန်ငွေ: ${formatCurrency(remainingAmount, currency)}`;
         }
         if (adminNote) {
           text += `\n\n${adminNote}`;

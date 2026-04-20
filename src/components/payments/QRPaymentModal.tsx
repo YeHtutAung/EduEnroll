@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import QRCode from "qrcode";
-import { formatMMKSimple } from "@/lib/utils";
+import { formatCurrencySimple } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -11,6 +11,7 @@ type QRProvider = "mmpay" | "abank";
 interface QRPaymentModalProps {
   enrollmentRef: string;
   amount: number;
+  currency?: string;
   studentName: string;
   onSuccess: () => void;
   onClose: () => void;
@@ -24,6 +25,7 @@ type ModalState = "loading" | "qr" | "success" | "error";
 export default function QRPaymentModal({
   enrollmentRef,
   amount,
+  currency = "MMK",
   studentName,
   onSuccess,
   onClose,
@@ -236,7 +238,7 @@ export default function QRPaymentModal({
             {/* Amount */}
             <div className="mt-3 rounded-lg bg-gray-50 px-4 py-2 text-center">
               <p className="text-xs text-gray-500">Amount / <span className="font-myanmar">ပမာဏ</span></p>
-              <p className="text-xl font-bold text-gray-900">{formatMMKSimple(amount)}</p>
+              <p className="text-xl font-bold text-gray-900">{formatCurrencySimple(amount, currency)}</p>
             </div>
 
             {/* Student name */}
@@ -354,7 +356,7 @@ export default function QRPaymentModal({
             </div>
             <h3 className="text-xl font-bold text-green-800">Payment Successful!</h3>
             <p className="font-myanmar mt-1 text-sm text-green-700">ငွေပေးချေမှု အောင်မြင်ပါပြီ</p>
-            <p className="mt-2 text-sm text-gray-600">{formatMMKSimple(amount)}</p>
+            <p className="mt-2 text-sm text-gray-600">{formatCurrencySimple(amount, currency)}</p>
             <button
               onClick={onClose}
               className="mt-6 w-full rounded-lg bg-[#1a6b3c] py-3 text-sm font-semibold text-white hover:bg-[#155d33] transition-colors"

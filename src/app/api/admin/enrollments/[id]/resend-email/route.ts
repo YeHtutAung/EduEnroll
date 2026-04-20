@@ -79,9 +79,9 @@ export async function POST(
   if (isCart) {
     const { data: items } = await admin
       .from("enrollment_items")
-      .select("quantity, fee_mmk, classes(level)")
+      .select("quantity, fee_amount, classes(level)")
       .eq("enrollment_id", enrollment.id) as {
-      data: { quantity: number; fee_mmk: number; classes: { level: string } | null }[] | null;
+      data: { quantity: number; fee_amount: number; classes: { level: string } | null }[] | null;
       error: unknown;
     };
     if (items && items.length > 0) {
@@ -92,16 +92,16 @@ export async function POST(
             : (i.classes?.level ?? "?"),
         )
         .join(", ");
-      totalFee = items.reduce((sum, i) => sum + i.fee_mmk * i.quantity, 0);
+      totalFee = items.reduce((sum, i) => sum + i.fee_amount * i.quantity, 0);
     }
   } else {
     const { data: cls } = await admin
       .from("classes")
-      .select("level, fee_mmk")
+      .select("level, fee_amount")
       .eq("id", enrollment.class_id!)
-      .single() as { data: { level: string; fee_mmk: number } | null; error: unknown };
+      .single() as { data: { level: string; fee_amount: number } | null; error: unknown };
     classLevel = cls?.level ?? "";
-    totalFee = (cls?.fee_mmk ?? 0) * (enrollment.quantity ?? 1);
+    totalFee = (cls?.fee_amount ?? 0) * (enrollment.quantity ?? 1);
   }
 
   const host = request.headers.get("host") ?? "localhost:3005";
@@ -152,8 +152,8 @@ export async function POST(
     const receivedAmount = (payment as unknown as Record<string, unknown>)?.received_amount as number | null;
     const adminNote = (payment as unknown as Record<string, unknown>)?.admin_note as string | null;
     const remainingAmount =
-      receivedAmount != null && payment?.amount_mmk != null
-        ? payment.amount_mmk - receivedAmount
+      receivedAmount != null && payment?.amount != null
+        ? payment.amount - receivedAmount
         : null;
 
     emailContent = partialPaymentEmail({
@@ -176,7 +176,7 @@ export async function POST(
       studentName: enrollment.student_name_en,
       enrollmentRef: enrollment.enrollment_ref,
       classLevel,
-      feeMmk: totalFee,
+      feeAmount: totalFee,
       feeFormatted: feeFormatted ?? "",
       paymentUrl,
       statusUrl,

@@ -14,7 +14,7 @@ export async function GET() {
 
   const supabase = createAdminClient();
 
-  const { data, error } = await supabase
+  const { data: pending, error } = await supabase
     .from("telegram_admin_requests")
     .select("id, chat_id, name, username, status, created_at")
     .eq("tenant_id", tenantId)
@@ -26,7 +26,14 @@ export async function GET() {
     return NextResponse.json({ error: "Failed to fetch requests." }, { status: 500 });
   }
 
-  return NextResponse.json({ requests: data ?? [] });
+  const { data: approved } = await supabase
+    .from("telegram_admin_requests")
+    .select("id, chat_id, name, username, created_at")
+    .eq("tenant_id", tenantId)
+    .eq("status", "approved")
+    .order("created_at", { ascending: true });
+
+  return NextResponse.json({ requests: pending ?? [], approved: approved ?? [] });
 }
 
 // ─── PATCH /api/telegram/admin-requests ──────────────────────────────────────
@@ -38,14 +45,14 @@ export async function PATCH(request: NextRequest) {
   if (auth instanceof NextResponse) return auth;
   const { tenantId } = auth;
 
-  let body: { id: string; action: "approve" | "reject" };
+  let body: { id: string; action: "approve" | "reject" | "revoke" };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  if (!body.id || !["approve", "reject"].includes(body.action)) {
+  if (!body.id || !["approve", "reject", "revoke"].includes(body.action)) {
     return NextResponse.json({ error: "Invalid request." }, { status: 400 });
   }
 
@@ -116,12 +123,46 @@ export async function PATCH(request: NextRequest) {
     if (botToken) {
       await sendTelegramMessage(
         req.chat_id,
-        "✅ Your request has been approved. You can now send messages to the support bot.",
+        `✅ Your access request has been approved. You can now use the KuuNyi admin bot.`,
         botToken,
       );
     }
 
     return NextResponse.json({ success: true, action: "approved" });
+  }
+
+  // Revoke — remove from allowed_chat_ids, delete agent key, and mark as rejected
+  if (body.action === "revoke") {
+    const current = (config?.allowed_chat_ids ?? []).map(Number);
+    const updated = current.filter((id) => id !== req.chat_id);
+    await supabase
+      .from("tenant_telegram_configs")
+      .upsert(
+        { tenant_id: tenantId, allowed_chat_ids: updated } as never,
+        { onConflict: "tenant_id" },
+      );
+
+    // Invalidate the agent key so it can no longer call admin endpoints
+    await supabase
+      .from("tenant_agents")
+      .delete()
+      .eq("tenant_id", tenantId)
+      .eq("chat_id", req.chat_id);
+
+    await supabase
+      .from("telegram_admin_requests")
+      .update({ status: "rejected" } as never)
+      .eq("id", req.id);
+
+    if (botToken) {
+      await sendTelegramMessage(
+        req.chat_id,
+        "🚫 Your support bot access has been revoked by the admin.",
+        botToken,
+      );
+    }
+
+    return NextResponse.json({ success: true, action: "revoked" });
   }
 
   // Reject

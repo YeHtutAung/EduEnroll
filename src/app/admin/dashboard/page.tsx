@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import StatsCard from "@/components/ui/StatsCard";
 import StatusBadge from "@/components/ui/StatusBadge";
-import { formatMMKSimple } from "@/lib/utils";
+import { formatCurrencySimple } from "@/lib/utils";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
 import { mm } from "@/lib/mm-labels";
 import type { EnrollmentStatus, JlptLevel } from "@/types/database";
@@ -22,7 +22,7 @@ interface StatsData {
   confirmed_count: number;
   pending_payment_count: number;
   payment_submitted_count: number;
-  total_revenue_mmk: number;
+  total_revenue: number;
   seats_by_class: SeatRow[];
 }
 
@@ -278,7 +278,7 @@ export default function DashboardPage() {
             </div>
             <StatsCard
               title="Total Revenue"
-              value={formatMMKSimple(stats?.total_revenue_mmk ?? 0)}
+              value={formatCurrencySimple(stats?.total_revenue ?? 0, tl.currency)}
               subtitle="Verified payments"
               colorAccent="#0891b2"
             />

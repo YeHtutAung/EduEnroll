@@ -5,7 +5,8 @@ import ConfirmModal from "@/components/ui/ConfirmModal";
 import EmptyState from "@/components/ui/EmptyState";
 import StatusBadge from "@/components/ui/StatusBadge";
 import { useToast } from "@/components/ui/Toast";
-import { formatMMKSimple } from "@/lib/utils";
+import { formatCurrencySimple } from "@/lib/utils";
+import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
 import type { Enrollment, Payment } from "@/types/database";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -13,8 +14,8 @@ import type { Enrollment, Payment } from "@/types/database";
 interface CartItem {
   class_level: string;
   quantity: number;
-  fee_mmk: number;
-  subtotal_mmk: number;
+  fee_amount: number;
+  subtotal: number;
 }
 
 interface PendingItem {
@@ -26,7 +27,7 @@ interface PendingItem {
   proof_signed_url: string | null;
   proof_signed_urls: string[];
   items: CartItem[] | null;
-  total_fee_mmk: number;
+  total_fee: number;
 }
 
 interface FormFieldDef {
@@ -99,6 +100,7 @@ function PaymentCard({
   item: PendingItem;
   onClick: () => void;
 }) {
+  const tl = useTenantLabels();
   const { enrollment, payment, class_level, proof_signed_url, proof_signed_urls, items } = item;
   const submitted = payment?.created_at ?? enrollment.enrolled_at;
   const imageCount = proof_signed_urls?.length ?? (proof_signed_url ? 1 : 0);
@@ -195,7 +197,7 @@ function PaymentCard({
 
         {/* Amount */}
         <p className="text-xl font-bold" style={{ color: "#b07d2a" }}>
-          {payment ? formatMMKSimple(payment.amount_mmk) : "—"}
+          {payment ? formatCurrencySimple(payment.amount, tl.currency) : "—"}
         </p>
       </div>
 
@@ -330,6 +332,7 @@ function RequestRemainingModal({
   onClose: () => void;
   onDone: (id: string) => void;
 }) {
+  const tl = useTenantLabels();
   const toast = useToast();
   const [note, setNote] = useState("");
   const [receivedAmount, setReceivedAmount] = useState("");
@@ -341,7 +344,7 @@ function RequestRemainingModal({
     textareaRef.current?.focus();
   }, []);
 
-  const totalAmount = item.payment?.amount_mmk ?? 0;
+  const totalAmount = item.payment?.amount ?? 0;
   const parsedReceived = parseInt(receivedAmount.replace(/,/g, ""), 10);
   const remainingAmount = !isNaN(parsedReceived) ? totalAmount - parsedReceived : null;
 
@@ -407,14 +410,14 @@ function RequestRemainingModal({
           <div className="rounded-xl bg-gray-50 border border-gray-200 p-3">
             <div className="flex justify-between text-sm">
               <span className="text-gray-500">Total amount</span>
-              <span className="font-semibold text-gray-900">{formatMMKSimple(totalAmount)}</span>
+              <span className="font-semibold text-gray-900">{formatCurrencySimple(totalAmount, tl.currency)}</span>
             </div>
           </div>
 
           {/* Received amount */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1.5">
-              Amount Received (MMK)
+              Amount Received ({tl.currency})
             </label>
             <input
               type="text"
@@ -426,7 +429,7 @@ function RequestRemainingModal({
             />
             {remainingAmount != null && remainingAmount > 0 && (
               <p className="mt-1 text-xs text-[#c0392b] font-medium">
-                Remaining: {formatMMKSimple(remainingAmount)}
+                Remaining: {formatCurrencySimple(remainingAmount, tl.currency)}
               </p>
             )}
           </div>
@@ -559,9 +562,10 @@ function ReviewModal({
   onReject: () => void;
   onRequestRemaining: () => void;
 }) {
+  const tl = useTenantLabels();
   const [fullscreenImgIndex, setFullscreenImgIndex] = useState<number | null>(null);
   const [formFields, setFormFields] = useState<FormFieldDef[]>([]);
-  const { enrollment, payment, class_level, intake_name, proof_signed_urls, items, total_fee_mmk } = item;
+  const { enrollment, payment, class_level, intake_name, proof_signed_urls, items, total_fee } = item;
   const isCart = items != null && items.length > 0;
   const submitted = payment?.created_at ?? enrollment.enrolled_at;
   const imageUrls = proof_signed_urls?.length ? proof_signed_urls : item.proof_signed_url ? [item.proof_signed_url] : [];
@@ -703,14 +707,14 @@ function ReviewModal({
                           </span>
                           &times; {ci.quantity}
                         </span>
-                        <span className="text-white font-medium">{formatMMKSimple(ci.subtotal_mmk)}</span>
+                        <span className="text-white font-medium">{formatCurrencySimple(ci.subtotal, tl.currency)}</span>
                       </div>
                     ))}
                     <div className="border-t border-white/10 pt-1.5 flex justify-between text-sm font-semibold">
                       <span className="text-white/50">
                         Total ({items.reduce((s, i) => s + i.quantity, 0)} tickets)
                       </span>
-                      <span style={{ color: "#b07d2a" }}>{formatMMKSimple(total_fee_mmk)}</span>
+                      <span style={{ color: "#b07d2a" }}>{formatCurrencySimple(total_fee, tl.currency)}</span>
                     </div>
                   </div>
                 </div>
@@ -737,7 +741,7 @@ function ReviewModal({
               <div className="border-t border-white/10 pt-4 space-y-4">
                 <InfoRow label="Amount">
                   <span className="text-2xl font-bold" style={{ color: "#b07d2a" }}>
-                    {formatMMKSimple(payment.amount_mmk)}
+                    {formatCurrencySimple(payment.amount, tl.currency)}
                   </span>
                 </InfoRow>
                 {payment.payer_institution && (
@@ -866,6 +870,7 @@ function InfoRow({ label, children }: { label: string; children: React.ReactNode
 // ── Payments Page ─────────────────────────────────────────────────────────────
 
 export default function PaymentsPage() {
+  const tl = useTenantLabels();
   const toast = useToast();
   const [queue, setQueue] = useState<PendingItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1039,7 +1044,7 @@ export default function PaymentsPage() {
         <ConfirmModal
           variant="success"
           title="Approve this payment?"
-          message={`Confirm approval for ${approvingItem.enrollment.student_name_en} — ${approvingItem.payment ? formatMMKSimple(approvingItem.payment.amount_mmk) : "unknown amount"}. This will set their enrollment to Confirmed.`}
+          message={`Confirm approval for ${approvingItem.enrollment.student_name_en} — ${approvingItem.payment ? formatCurrencySimple(approvingItem.payment.amount, tl.currency) : "unknown amount"}. This will set their enrollment to Confirmed.`}
           confirmLabel={approving ? "Approving…" : "✓ Approve"}
           onConfirm={handleApprove}
           onCancel={() => setApprovingItem(null)}

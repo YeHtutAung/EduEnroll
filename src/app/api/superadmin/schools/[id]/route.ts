@@ -45,7 +45,7 @@ export async function GET(
     admin.from("users").select("*").eq("tenant_id", tenantId).eq("role", "owner").maybeSingle() as unknown as Promise<AnyResult>,
     admin.from("intakes").select("*").eq("tenant_id", tenantId).order("year", { ascending: false }) as unknown as Promise<AnyResult>,
     admin.from("enrollments").select("id, status, enrolled_at").eq("tenant_id", tenantId) as unknown as Promise<AnyResult>,
-    admin.from("payments").select("amount_mmk, status, created_at").eq("tenant_id", tenantId) as unknown as Promise<AnyResult>,
+    admin.from("payments").select("amount, status, created_at").eq("tenant_id", tenantId) as unknown as Promise<AnyResult>,
   ]);
 
   if (tenantRes.error || !tenantRes.data) {
@@ -53,11 +53,11 @@ export async function GET(
   }
 
   const enrollments = ((enrollRes.data ?? []) as unknown as { id: string; status: string; enrolled_at: string }[]);
-  const payments = ((paymentsRes.data ?? []) as unknown as { amount_mmk: number; status: string; created_at: string }[]);
+  const payments = ((paymentsRes.data ?? []) as unknown as { amount: number; status: string; created_at: string }[]);
 
   const totalRevenue = payments
     .filter((p) => p.status === "verified")
-    .reduce((s, p) => s + (p.amount_mmk ?? 0), 0);
+    .reduce((s, p) => s + (p.amount ?? 0), 0);
 
   // Last activity = most recent enrollment or payment
   const allDates = [
@@ -73,7 +73,7 @@ export async function GET(
     owner: ownerRes.data,
     intakes: intakesRes.data ?? [],
     total_students: enrollments.length,
-    total_revenue_mmk: totalRevenue,
+    total_revenue: totalRevenue,
     last_activity: lastActivity,
   });
 }

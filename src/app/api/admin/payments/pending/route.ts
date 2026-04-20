@@ -9,8 +9,8 @@ const PROOF_BUCKET = "payment-proofs";
 type CartItem = {
   class_level: string;
   quantity: number;
-  fee_mmk: number;
-  subtotal_mmk: number;
+  fee_amount: number;
+  subtotal: number;
 };
 
 type PendingRow = {
@@ -22,12 +22,12 @@ type PendingRow = {
   proof_signed_url: string | null;
   proof_signed_urls: string[];
   items: CartItem[] | null;
-  total_fee_mmk: number;
+  total_fee: number;
 };
 
 // ─── GET /api/admin/payments/pending ──────────────────────────────────────────
 // Returns all enrollments with status='payment_submitted', joined with student
-// info, class level, intake name, amount_mmk, and signed URLs for all proof
+// info, class level, intake name, amount, and signed URLs for all proof
 // images. Ordered by enrolled_at ascending (oldest first).
 
 export async function GET() {
@@ -42,8 +42,8 @@ export async function GET() {
       `
       *,
       payments ( * ),
-      classes ( level, intake_id, fee_mmk, intakes ( name ) ),
-      enrollment_items ( quantity, fee_mmk, classes ( level, intake_id, intakes ( name ) ) )
+      classes ( level, intake_id, fee_amount, intakes ( name ) ),
+      enrollment_items ( quantity, fee_amount, classes ( level, intake_id, intakes ( name ) ) )
     `,
     )
     .eq("tenant_id", tenantId)
@@ -52,8 +52,8 @@ export async function GET() {
     data:
       | (Enrollment & {
           payments: Payment[];
-          classes: (Pick<Class, "level" | "intake_id" | "fee_mmk"> & { intakes: Pick<Intake, "name"> | null }) | null;
-          enrollment_items: { quantity: number; fee_mmk: number; classes: { level: string; intake_id: string; intakes: { name: string } | null } | null }[];
+          classes: (Pick<Class, "level" | "intake_id" | "fee_amount"> & { intakes: Pick<Intake, "name"> | null }) | null;
+          enrollment_items: { quantity: number; fee_amount: number; classes: { level: string; intake_id: string; intakes: { name: string } | null } | null }[];
         })[]
       | null;
     error: unknown;
@@ -101,8 +101,8 @@ export async function GET() {
         ? row.enrollment_items.map((ei) => ({
             class_level: ei.classes?.level ?? "",
             quantity: ei.quantity,
-            fee_mmk: ei.fee_mmk,
-            subtotal_mmk: ei.fee_mmk * ei.quantity,
+            fee_amount: ei.fee_amount,
+            subtotal: ei.fee_amount * ei.quantity,
           }))
         : null;
 
@@ -116,8 +116,8 @@ export async function GET() {
 
       // Total fee: from cart items or single class
       const totalFee = isCart
-        ? (cartItems ?? []).reduce((sum, i) => sum + i.subtotal_mmk, 0)
-        : (classes?.fee_mmk ?? 0) * (enrollment.quantity ?? 1);
+        ? (cartItems ?? []).reduce((sum, i) => sum + i.subtotal, 0)
+        : (classes?.fee_amount ?? 0) * (enrollment.quantity ?? 1);
 
       return {
         enrollment,
@@ -128,7 +128,7 @@ export async function GET() {
         proof_signed_url,
         proof_signed_urls,
         items: cartItems,
-        total_fee_mmk: totalFee,
+        total_fee: totalFee,
       };
     }),
   );

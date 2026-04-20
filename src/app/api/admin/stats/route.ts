@@ -12,7 +12,7 @@ type ClassRow = Pick<Class, "level" | "seat_remaining" | "seat_total">;
 //   confirmed_count        — enrollments with status='confirmed'
 //   pending_payment_count  — enrollments with status='pending_payment'
 //   payment_submitted_count— enrollments with status='payment_submitted'
-//   total_revenue_mmk      — sum of verified payments
+//   total_revenue      — sum of verified payments
 //   seats_by_class         — [{ level, seat_remaining, seat_total }, ...]
 
 export async function GET() {
@@ -68,7 +68,7 @@ export async function GET() {
     return NextResponse.json({ error: (classesRes.error as Error).message }, { status: 500 });
   }
 
-  const total_revenue_mmk = paymentsRes.data ?? 0;
+  const total_revenue = paymentsRes.data ?? 0;
   const classes = classesRes.data ?? [];
 
   const seats_by_class: { level: string; seat_remaining: number; seat_total: number }[] =
@@ -83,7 +83,7 @@ export async function GET() {
     confirmed_count:         confirmedRes.count ?? 0,
     pending_payment_count:   pendingRes.count ?? 0,
     payment_submitted_count: submittedRes.count ?? 0,
-    total_revenue_mmk,
+    total_revenue,
     seats_by_class,
   });
 }

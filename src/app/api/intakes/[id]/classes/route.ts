@@ -61,7 +61,7 @@ export async function GET(
 //
 // Body: {
 //   level:                 JlptLevel    (required)
-//   fee_mmk?:              number       (auto from level: N5=300k … N1=500k MMK)
+//   fee_amount?:              number       (auto from level: N5=300k … N1=500k MMK)
 //   seat_total?:           number       (default 30; seat_remaining set equal)
 //   enrollment_open_at?:   string       ISO 8601
 //   enrollment_close_at?:  string       ISO 8601
@@ -95,7 +95,7 @@ export async function POST(
 
   const {
     level,
-    fee_mmk,
+    fee_amount,
     seat_total = DEFAULT_SEAT_TOTAL,
     enrollment_open_at,
     enrollment_close_at,
@@ -115,12 +115,12 @@ export async function POST(
 
   // Auto-populate fee from level if not provided (only for standard JLPT levels)
   const resolvedFee =
-    fee_mmk !== undefined
-      ? fee_mmk
+    fee_amount !== undefined
+      ? fee_amount
       : DEFAULT_CLASS_FEES[level as JlptLevel] ?? undefined;
 
   if (resolvedFee === undefined || typeof resolvedFee !== "number" || resolvedFee <= 0) {
-    return badRequest("fee_mmk must be a positive number.");
+    return badRequest("fee_amount must be a positive number.");
   }
   if (typeof seat_total !== "number" || !Number.isInteger(seat_total) || seat_total < 1) {
     return badRequest("seat_total must be a positive integer.");
@@ -144,7 +144,7 @@ export async function POST(
       intake_id: params.id,
       tenant_id: tenantId,
       level: (level as string).trim(),
-      fee_mmk: resolvedFee,
+      fee_amount: resolvedFee,
       seat_total: seat_total as number,
       seat_remaining: seat_total as number,   // always starts fully available
       enrollment_open_at: (enrollment_open_at as string | null) ?? null,

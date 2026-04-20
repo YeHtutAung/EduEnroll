@@ -11,7 +11,7 @@ type ClassResult = { data: Class | null; error: unknown };
 // Update a class. All fields are optional.
 //
 // Allowed fields:
-//   fee_mmk              — tuition fee in MMK
+//   fee_amount              — tuition fee in MMK
 //   seat_total           — total capacity; seat_remaining is adjusted to preserve taken seats
 //   enrollment_open_at   — ISO 8601 datetime (pass null to clear)
 //   enrollment_close_at  — ISO 8601 datetime (pass null to clear)
@@ -43,7 +43,7 @@ export async function PATCH(
   }
 
   const {
-    fee_mmk,
+    fee_amount,
     seat_total,
     enrollment_open_at,
     enrollment_close_at,
@@ -59,12 +59,12 @@ export async function PATCH(
 
   const update: Partial<Omit<Class, "id" | "created_at">> = {};
 
-  // fee_mmk
-  if (fee_mmk !== undefined) {
-    if (typeof fee_mmk !== "number" || fee_mmk <= 0) {
-      return badRequest("fee_mmk must be a positive number.");
+  // fee_amount
+  if (fee_amount !== undefined) {
+    if (typeof fee_amount !== "number" || fee_amount <= 0) {
+      return badRequest("fee_amount must be a positive number.");
     }
-    update.fee_mmk = fee_mmk;
+    update.fee_amount = fee_amount;
   }
 
   // seat_total — keep taken seats constant, recalculate seat_remaining

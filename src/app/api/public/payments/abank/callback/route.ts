@@ -100,40 +100,42 @@ export async function GET(request: NextRequest) {
       if (isCart) {
         const { data: items } = (await supabase
           .from("enrollment_items")
-          .select("quantity, fee_mmk, classes(level)")
+          .select("quantity, fee_amount, classes(level)")
           .eq("enrollment_id", payment.enrollment_id)) as {
-          data: { quantity: number; fee_mmk: number; classes: { level: string } | null }[] | null;
+          data: { quantity: number; fee_amount: number; classes: { level: string } | null }[] | null;
           error: unknown;
         };
         if (items && items.length > 0) {
           classLevel = items
             .map((i) => (i.quantity > 1 ? `${i.classes?.level ?? "?"} x${i.quantity}` : (i.classes?.level ?? "?")))
             .join(", ");
-          const total = items.reduce((s, i) => s + i.fee_mmk * i.quantity, 0);
-          feeFormatted = `${String(total).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} MMK`;
+          const total = items.reduce((s, i) => s + i.fee_amount * i.quantity, 0);
+          feeFormatted = String(total).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
         }
       } else {
         const { data: cls } = (await supabase
           .from("classes")
-          .select("level, fee_mmk")
+          .select("level, fee_amount")
           .eq("id", enrollment.class_id!)
-          .single()) as { data: { level: string; fee_mmk: number } | null; error: unknown };
+          .single()) as { data: { level: string; fee_amount: number } | null; error: unknown };
         if (cls) {
           classLevel = cls.level;
-          const total = cls.fee_mmk * (enrollment.quantity ?? 1);
-          feeFormatted = `${String(total).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} MMK`;
+          const total = cls.fee_amount * (enrollment.quantity ?? 1);
+          feeFormatted = String(total).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
         }
       }
 
       // Fetch tenant info for email branding
       const { data: tenantInfo } = (await supabase
         .from("tenants")
-        .select("name, org_type, logo_url")
+        .select("name, org_type, logo_url, currency")
         .eq("id", enrollment.tenant_id)
         .single()) as {
-        data: { name: string; org_type: string; logo_url: string | null } | null;
+        data: { name: string; org_type: string; logo_url: string | null; currency: string } | null;
         error: unknown;
       };
+      const tenantCurrency = tenantInfo?.currency ?? "MMK";
+      if (feeFormatted) feeFormatted = `${feeFormatted} ${tenantCurrency}`;
 
       // Collect notification promises — must await before returning
       // so Vercel serverless doesn't kill the function prematurely
@@ -151,6 +153,7 @@ export async function GET(request: NextRequest) {
             classLevel,
             statusUrl,
             paymentUrl: statusUrl,
+            currency: tenantCurrency,
           }).catch((err) => {
             console.error("[abank-callback] Telegram notification failed:", err);
           }),
