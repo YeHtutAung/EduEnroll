@@ -35,6 +35,7 @@ interface TenantLabelsView {
   seat: string;
   fee: string;
   orgType: string;
+  currency: string;
 }
 
 interface PublicIntakeResponse {
@@ -78,12 +79,13 @@ export async function GET(
     error: unknown;
   };
   const labels: TenantLabelsView = {
-    intake:  tenantRow?.label_intake  || "Intake",
-    class:   tenantRow?.label_class   || "Level",
-    student: tenantRow?.label_student || "Student",
-    seat:    tenantRow?.label_seat    || "Seat",
-    fee:     tenantRow?.label_fee     || "Fee",
-    orgType: tenantRow?.org_type      || "language_school",
+    intake:   tenantRow?.label_intake  || "Intake",
+    class:    tenantRow?.label_class   || "Level",
+    student:  tenantRow?.label_student || "Student",
+    seat:     tenantRow?.label_seat    || "Seat",
+    fee:      tenantRow?.label_fee     || "Fee",
+    orgType:  tenantRow?.org_type      || "language_school",
+    currency: tenantRow?.currency      || "MMK",
   };
   const tenantCurrency = tenantRow?.currency || "MMK";
 

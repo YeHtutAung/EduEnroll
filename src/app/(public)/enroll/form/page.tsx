@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { formatMMK, formatMMKSimple } from "@/lib/utils";
+import { formatCurrency, formatCurrencySimple } from "@/lib/utils";
 import type { JlptLevel, ClassStatus } from "@/types/database";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -32,6 +32,7 @@ interface TenantLabels {
   seat: string;
   fee: string;
   orgType: string;
+  currency: string;
 }
 
 interface FormFieldDef {
@@ -635,12 +636,12 @@ function EnrollmentFormPage() {
                     </span>
                     <span className="text-gray-600">x{item.quantity}</span>
                   </div>
-                  <span className="font-medium text-gray-900">{formatMMKSimple(item.fee_mmk * item.quantity)}</span>
+                  <span className="font-medium text-gray-900">{formatCurrencySimple(item.fee_mmk * item.quantity, labels?.currency ?? "MMK")}</span>
                 </div>
               ))}
               <div className="border-t pt-2 flex justify-between font-semibold text-gray-900">
                 <span>Total ({cartTotalQty} tickets)</span>
-                <span>{formatMMKSimple(cartTotalFee)}</span>
+                <span>{formatCurrencySimple(cartTotalFee, labels?.currency ?? "MMK")}</span>
               </div>
             </div>
           </div>
@@ -737,12 +738,12 @@ function EnrollmentFormPage() {
             {cartItems.map((item, i) => (
               <div key={i} className="flex justify-between text-sm text-gray-700">
                 <span>{item.level} &times; {item.quantity}</span>
-                <span className="font-medium text-gray-900">{formatMMKSimple(item.fee_mmk * item.quantity)}</span>
+                <span className="font-medium text-gray-900">{formatCurrencySimple(item.fee_mmk * item.quantity, labels?.currency ?? "MMK")}</span>
               </div>
             ))}
             <div className="border-t pt-2 mt-2 flex justify-between font-semibold text-gray-900">
               <span>Total ({cartTotalQty} tickets)</span>
-              <span>{formatMMKSimple(cartTotalFee)}</span>
+              <span>{formatCurrencySimple(cartTotalFee, labels?.currency ?? "MMK")}</span>
             </div>
           </div>
         </div>
@@ -758,7 +759,7 @@ function EnrollmentFormPage() {
             <div>
               <p className="font-myanmar text-xl font-bold text-gray-900">
                 {quantity > 1
-                  ? <>{classInfo.fee_formatted} &times; {quantity} = <span className="text-[#1a6b3c]">{formatMMK(classInfo.fee_mmk * quantity)}</span></>
+                  ? <>{classInfo.fee_formatted} &times; {quantity} = <span className="text-[#1a6b3c]">{formatCurrency(classInfo.fee_mmk * quantity, labels?.currency ?? "MMK")}</span></>
                   : classInfo.fee_formatted}
               </p>
               {quantity > 1 && (

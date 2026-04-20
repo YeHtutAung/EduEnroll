@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { formatMMK } from "@/lib/utils";
+import { formatCurrency, formatAmount } from "@/lib/utils";
 import type { ClassStatus } from "@/types/database";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -41,11 +41,12 @@ interface TenantLabels {
   seat: string;
   fee: string;
   orgType: string;
+  currency: string;
 }
 
 const DEFAULT_LABELS: TenantLabels = {
   intake: "Intake", class: "Level", student: "Student",
-  seat: "Seat", fee: "Fee", orgType: "language_school",
+  seat: "Seat", fee: "Fee", orgType: "language_school", currency: "MMK",
 };
 
 interface ApiResponse {
@@ -278,7 +279,7 @@ function ClassCard({ cls, onSelect, labels }: { cls: PublicClass; onSelect: (id:
               {cls.fee_formatted}
             </p>
             <p className="font-myanmar mb-3 text-sm text-gray-500">
-              {formatMMK(cls.fee_mmk).replace(" MMK", "")} ကျပ်
+              {labels.currency === "MMK" ? `${formatAmount(cls.fee_mmk)} ကျပ်` : formatCurrency(cls.fee_mmk, labels.currency)}
             </p>
 
             {/* Enrollment window info */}
@@ -540,6 +541,7 @@ function EventTicketCard({
   cartMode,
   cartQty,
   onCartChange,
+  currency = "MMK",
 }: {
   cls: PublicClass;
   onSelect: (id: string, quantity: number) => void;
@@ -548,6 +550,7 @@ function EventTicketCard({
   cartMode?: boolean;
   cartQty?: number;
   onCartChange?: (classId: string, level: string, qty: number, fee: number, imageUrl: string | null) => void;
+  currency?: string;
 }) {
   const maxTix = cls.max_tickets_per_person ?? 1;
   const [qty, setQty] = useState(1);
@@ -675,7 +678,7 @@ function EventTicketCard({
             {priceNum}
           </div>
           <div className="font-myanmar text-base tracking-wider" style={{ color: "#888880" }}>
-            {formatMMK(cls.fee_mmk).replace(" MMK", "")} ကျပ် · MMK
+            {currency === "MMK" ? `${formatAmount(cls.fee_mmk)} ကျပ် · MMK` : formatCurrency(cls.fee_mmk, currency)}
           </div>
         </div>
 
@@ -810,14 +813,14 @@ function EventTicketCard({
         {/* Total price for cart mode */}
         {!isDisabled && cartMode && effectiveQty > 1 && (
           <div className="mb-6 text-right text-[13px]" style={{ color: "#888880" }}>
-            Total: <span style={{ color: isHighestTier ? GOLD_LIGHT : "#F8F4EE" }} className="font-semibold">{formatMMK(cls.fee_mmk * effectiveQty)}</span>
+            Total: <span style={{ color: isHighestTier ? GOLD_LIGHT : "#F8F4EE" }} className="font-semibold">{formatCurrency(cls.fee_mmk * effectiveQty, currency)}</span>
           </div>
         )}
 
         {/* Total price for non-cart multi-ticket */}
         {!isDisabled && !cartMode && maxTix > 1 && qty > 1 && (
           <div className="mb-6 text-right text-[13px]" style={{ color: "#888880" }}>
-            Total: <span style={{ color: isHighestTier ? GOLD_LIGHT : "#F8F4EE" }} className="font-semibold">{formatMMK(cls.fee_mmk * qty)}</span>
+            Total: <span style={{ color: isHighestTier ? GOLD_LIGHT : "#F8F4EE" }} className="font-semibold">{formatCurrency(cls.fee_mmk * qty, currency)}</span>
           </div>
         )}
 
@@ -849,12 +852,14 @@ function EventEnrollmentPage({
   slug,
   onSelect,
   onCartCheckout,
+  currency = "MMK",
 }: {
   intake: PublicIntake;
   classes: PublicClass[];
   slug: string;
   onSelect: (id: string, quantity: number) => void;
   onCartCheckout: (cartItems: { class_id: string; level: string; quantity: number; fee_mmk: number; image_url: string | null }[]) => void;
+  currency?: string;
 }) {
   // Cart state
   const [cart, setCart] = useState<Map<string, { classId: string; level: string; qty: number; fee: number; imageUrl: string | null }>>(new Map());
@@ -1107,6 +1112,7 @@ function EventEnrollmentPage({
                   cartMode={hasMultipleTickets}
                   cartQty={cart.get(cls.id)?.qty ?? 0}
                   onCartChange={handleAddToCart}
+                  currency={currency}
                 />
               ))}
             </div>
@@ -1139,7 +1145,7 @@ function EventEnrollmentPage({
                 {cartItemCount} ticket{cartItemCount !== 1 ? "s" : ""} in cart
               </div>
               <div className="text-[15px] font-semibold" style={{ color: "#F8F4EE" }}>
-                {formatMMK(cartTotal)}
+                {formatCurrency(cartTotal, currency)}
               </div>
             </div>
             <button onClick={handleCartCheckout} className="px-6 py-2.5 rounded-sm text-[12px] font-semibold tracking-[1.5px] uppercase transition-all"
@@ -1157,7 +1163,7 @@ function EventEnrollmentPage({
                 {classes.filter((c) => c.seat_remaining > 0).length} ticket{classes.filter((c) => c.seat_remaining > 0).length !== 1 ? "s" : ""} available
               </div>
               <div className="text-[13px] text-white/60">
-                From {formatMMK(Math.min(...classes.filter((c) => c.seat_remaining > 0).map((c) => c.fee_mmk)))}
+                From {formatCurrency(Math.min(...classes.filter((c) => c.seat_remaining > 0).map((c) => c.fee_mmk)), currency)}
               </div>
             </div>
             <a href="#tickets" className="px-5 py-2.5 rounded-sm text-[12px] font-semibold tracking-[1.5px] uppercase transition-all"
@@ -1175,7 +1181,7 @@ function EventEnrollmentPage({
                 {classes.filter((c) => c.seat_remaining > 0).length} ticket{classes.filter((c) => c.seat_remaining > 0).length !== 1 ? "s" : ""} available
               </div>
               <div className="text-[13px] text-white/60">
-                From {formatMMK(Math.min(...classes.filter((c) => c.seat_remaining > 0).map((c) => c.fee_mmk)))}
+                From {formatCurrency(Math.min(...classes.filter((c) => c.seat_remaining > 0).map((c) => c.fee_mmk)), currency)}
               </div>
             </div>
             <a href="#tickets" className="px-5 py-2.5 rounded-sm text-[12px] font-semibold tracking-[1.5px] uppercase transition-all"
@@ -1289,6 +1295,7 @@ function IntakeLandingContent() {
         slug={params.slug}
         onSelect={handleSelectClass}
         onCartCheckout={handleCartCheckout}
+        currency={tl.currency}
       />
     );
   }

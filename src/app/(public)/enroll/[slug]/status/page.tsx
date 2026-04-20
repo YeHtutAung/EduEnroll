@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
-import { formatMMK, formatMMKSimple } from "@/lib/utils";
+import { formatCurrencySimple, formatAmount } from "@/lib/utils";
 import type { EnrollmentStatus, PaymentStatus } from "@/types/database";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -14,6 +14,7 @@ interface StatusInfo {
   class_level: string | null;
   fee_mmk: number | null;
   fee_formatted: string | null;
+  currency: string;
   status: EnrollmentStatus;
   status_label_en: string;
   status_label_mm: string;
@@ -236,8 +237,9 @@ function StatusPage() {
   const isRejected = data.status === "rejected";
   const isConfirmed = data.status === "confirmed";
 
-  const feeEn = data.fee_mmk != null ? formatMMKSimple(data.fee_mmk) : null;
-  const feeMm = data.fee_mmk != null ? formatMMK(data.fee_mmk).replace(" MMK", "") : null;
+  const currency = data.currency || "MMK";
+  const feeEn = data.fee_mmk != null ? formatCurrencySimple(data.fee_mmk, currency) : null;
+  const feeMm = data.fee_mmk != null && currency === "MMK" ? formatAmount(data.fee_mmk) : null;
 
   return (
     <div className="mx-auto max-w-lg">

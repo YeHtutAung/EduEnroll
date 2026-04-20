@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
-import { formatMMK, formatMMKSimple } from "@/lib/utils";
+import { formatCurrencySimple, formatAmount } from "@/lib/utils";
 import type { ClassStatus } from "@/types/database";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -168,6 +168,7 @@ function SuccessPage() {
   const [bankAccounts, setBankAccounts] = useState<BankAccountInfo[]>([]);
   const [otherClasses, setOtherClasses] = useState<PublicClass[]>([]);
   const [orgType, setOrgType] = useState<string>("language_school");
+  const [currency, setCurrency] = useState<string>("MMK");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -201,6 +202,7 @@ function SuccessPage() {
         if (intakeRes.ok) {
           const intakeData = await intakeRes.json();
           if (intakeData.labels?.orgType) setOrgType(intakeData.labels.orgType);
+          if (intakeData.labels?.currency) setCurrency(intakeData.labels.currency);
           const available = (intakeData.classes ?? []).filter(
             (c: PublicClass) => c.status === "open" && c.seat_remaining > 0,
           );
@@ -232,8 +234,8 @@ function SuccessPage() {
     );
   }
 
-  const feeEn = enrollment.fee_mmk != null ? formatMMKSimple(enrollment.fee_mmk) : null;
-  const feeMm = enrollment.fee_mmk != null ? formatMMK(enrollment.fee_mmk).replace(" MMK", "") : null;
+  const feeEn = enrollment.fee_mmk != null ? formatCurrencySimple(enrollment.fee_mmk, currency) : null;
+  const feeMm = enrollment.fee_mmk != null && currency === "MMK" ? formatAmount(enrollment.fee_mmk) : null;
 
   return (
     <div className="mx-auto max-w-lg">

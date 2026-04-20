@@ -6,7 +6,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendTextMessage } from "./send";
 import { decryptToken } from "./crypto";
-import { formatMMK } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -23,6 +23,7 @@ interface NotifyParams {
   adminNote?: string | null;
   receivedAmount?: number | null;
   remainingAmount?: number | null;
+  currency?: string;
 }
 
 // ─── Main function ──────────────────────────────────────────────────────────
@@ -41,6 +42,7 @@ export async function sendStatusNotification(params: NotifyParams): Promise<bool
     adminNote,
     receivedAmount,
     remainingAmount,
+    currency = "MMK",
   } = params;
 
   try {
@@ -61,7 +63,7 @@ export async function sendStatusNotification(params: NotifyParams): Promise<bool
     }
 
     const pageToken = decryptToken(tenant.messenger_page_token);
-    const msg = composeMessage(action, {
+    const msg = composeMessage(action, currency, {
       studentName,
       enrollmentRef,
       classLevel,
@@ -85,6 +87,7 @@ export async function sendStatusNotification(params: NotifyParams): Promise<bool
 
 function composeMessage(
   action: "approve" | "reject" | "request_remaining",
+  currency: string,
   p: {
     studentName: string;
     enrollmentRef: string;
@@ -127,10 +130,10 @@ function composeMessage(
         `💰 Partial Payment Received / ငွေတစ်စိတ်တစ်ပိုင်း လက်ခံရရှိပြီး\n\n` +
         `Hi ${p.studentName}, we received partial payment for ${p.enrollmentRef}.`;
       if (p.receivedAmount != null) {
-        msg += `\nReceived / လက်ခံရရှိ: ${formatMMK(p.receivedAmount)}`;
+        msg += `\nReceived / လက်ခံရရှိ: ${formatCurrency(p.receivedAmount, currency)}`;
       }
       if (p.remainingAmount != null && p.remainingAmount > 0) {
-        msg += `\nRemaining / ကျန်ငွေ: ${formatMMK(p.remainingAmount)}`;
+        msg += `\nRemaining / ကျန်ငွေ: ${formatCurrency(p.remainingAmount, currency)}`;
       }
       if (p.adminNote) {
         msg += `\n\nAdmin: ${p.adminNote}`;
