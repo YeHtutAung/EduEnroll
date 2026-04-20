@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import StatusBadge from "@/components/ui/StatusBadge";
 import ConfirmModal from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
-import { formatMMKSimple } from "@/lib/utils";
+import { formatCurrencySimple } from "@/lib/utils";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
 import { useRole } from "@/components/admin/RoleContext";
 import { createClient } from "@/lib/supabase/client";
@@ -280,7 +280,7 @@ function EditClassModal({
               />
               {form.fee_amount && Number(form.fee_amount) > 0 && (
                 <p className="mt-1 text-xs text-gray-400">
-                  = {formatMMKSimple(Number(form.fee_amount), tl.currency)}
+                  = {formatCurrencySimple(Number(form.fee_amount), tl.currency)}
                 </p>
               )}
             </div>
@@ -660,7 +660,7 @@ function AddCustomClassModal({
               />
               {form.fee_amount && Number(form.fee_amount) > 0 && (
                 <p className="mt-1 text-xs text-gray-400">
-                  = {formatMMKSimple(Number(form.fee_amount), tl.currency)}
+                  = {formatCurrencySimple(Number(form.fee_amount), tl.currency)}
                 </p>
               )}
             </div>
@@ -1354,7 +1354,7 @@ export default function IntakeDetailPage({
 
                       {/* Fee */}
                       <td className="px-5 py-4 tabular-nums text-gray-700 font-medium">
-                        {formatMMKSimple(cls.fee_amount, tl.currency)}
+                        {formatCurrencySimple(cls.fee_amount, tl.currency)}
                       </td>
 
                       {/* Seats */}

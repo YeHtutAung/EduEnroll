@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
-import { formatMMK } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import type { Enrollment, Class, Intake, Payment } from "@/types/database";
 import type { EnrollmentStatus, PaymentStatus } from "@/types/database";
 
@@ -210,7 +210,7 @@ export async function GET(request: NextRequest) {
                         ? cartItems.map((i) => i.class_level).join(", ")
                         : (enrollment.classes?.level ?? null),
     fee_amount:          displayFee,
-    fee_formatted:    displayFee != null ? formatMMK(displayFee, tenantInfo?.currency || "MMK") : null,
+    fee_formatted:    displayFee != null ? formatCurrency(displayFee, tenantInfo?.currency || "MMK") : null,
     currency:         tenantInfo?.currency || "MMK",
     quantity:          enrollment.quantity ?? 1,
     intake_slug:      intakeSlug,

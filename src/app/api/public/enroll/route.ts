@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
-import { formatMMK, formatMMKSimple, resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils";
+import { formatCurrency, formatCurrencySimple, resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils";
 import { sendEmail, enrollmentConfirmationEmail } from "@/lib/email";
 import type { BankAccount, SubmitEnrollmentResult, SubmitCartEnrollmentResult } from "@/types/database";
 
@@ -204,38 +204,38 @@ export async function POST(request: NextRequest) {
       .eq("id", payload.enrollment_id);
   }
 
+  // ── Fetch tenant info for currency + email branding ──────────
+  const { data: tenantInfo } = await supabase
+    .from("tenants")
+    .select("name, org_type, logo_url, email_on_enroll, currency")
+    .eq("id", payload.tenant_id)
+    .single() as { data: { name: string; org_type: string; logo_url: string | null; email_on_enroll: boolean; currency: string } | null; error: unknown };
+
+  const currency = tenantInfo?.currency ?? "MMK";
+
   // ── Send confirmation email (best-effort, non-blocking) ──────
   const recipientEmail = resolveEmailFromFormData(fd);
-  if (recipientEmail) {
+  if (recipientEmail && tenantInfo?.email_on_enroll) {
     const host = request.headers.get("host") ?? "localhost:3005";
     const proto = host.startsWith("localhost") ? "http" : "https";
     const baseUrl = `${proto}://${host}`;
 
-    // Fetch tenant info for email branding + email_on_enroll toggle
-    const { data: tenantInfo } = await supabase
-      .from("tenants")
-      .select("name, org_type, logo_url, email_on_enroll")
-      .eq("id", payload.tenant_id)
-      .single() as { data: { name: string; org_type: string; logo_url: string | null; email_on_enroll: boolean } | null; error: unknown };
+    const emailData = enrollmentConfirmationEmail({
+      studentName: fd?.name_en?.trim() || "Student",
+      enrollmentRef: payload.enrollment_ref,
+      classLevel: payload.class_level,
+      feeAmount: payload.fee_amount,
+      feeFormatted: formatCurrencySimple(payload.fee_amount, currency),
+      paymentUrl: `${baseUrl}/enroll/payment/${payload.enrollment_ref}`,
+      statusUrl: `${baseUrl}/status?ref=${payload.enrollment_ref}`,
+      orgType: tenantInfo?.org_type,
+      tenantName: tenantInfo?.name,
+      logoUrl: tenantInfo?.logo_url ?? undefined,
+    });
 
-    if (tenantInfo?.email_on_enroll) {
-      const emailData = enrollmentConfirmationEmail({
-        studentName: fd?.name_en?.trim() || "Student",
-        enrollmentRef: payload.enrollment_ref,
-        classLevel: payload.class_level,
-        feeAmount: payload.fee_amount,
-        feeFormatted: formatMMKSimple(payload.fee_amount),
-        paymentUrl: `${baseUrl}/enroll/payment/${payload.enrollment_ref}`,
-        statusUrl: `${baseUrl}/status?ref=${payload.enrollment_ref}`,
-        orgType: tenantInfo?.org_type,
-        tenantName: tenantInfo?.name,
-        logoUrl: tenantInfo?.logo_url ?? undefined,
-      });
-
-      sendEmail({ to: recipientEmail!, ...emailData }).catch((err) => {
-        console.error("[enroll] Email send failed:", err);
-      });
-    }
+    sendEmail({ to: recipientEmail!, ...emailData }).catch((err) => {
+      console.error("[enroll] Email send failed:", err);
+    });
   }
 
   // ── Fetch active bank accounts for payment instructions ───────
@@ -254,16 +254,16 @@ export async function POST(request: NextRequest) {
     {
       enrollment_ref: payload.enrollment_ref,
       class_level:    payload.class_level,
-      fee_amount:        payload.fee_amount,
-      quantity:        enrolledQty,
-      total_fee:   totalFee,
-      fee_formatted:  formatMMK(totalFee),
+      fee_amount:     payload.fee_amount,
+      quantity:       enrolledQty,
+      total_fee:      totalFee,
+      fee_formatted:  formatCurrency(totalFee, currency),
       payment: {
         instructions_en:
-          `Please transfer ${formatMMK(totalFee)} to one of the bank accounts below ` +
+          `Please transfer ${formatCurrency(totalFee, currency)} to one of the bank accounts below ` +
           `and quote your enrollment reference "${payload.enrollment_ref}" as the payment remark.`,
         instructions_mm:
-          `ကျောင်းလခ ${formatMMK(totalFee)} ကို အောက်ပါ ဘဏ်အကောင့်များသို့ လွှဲပြောင်းပေးပြီး ` +
+          `ကျောင်းလခ ${formatCurrency(totalFee, currency)} ကို အောက်ပါ ဘဏ်အကောင့်များသို့ လွှဲပြောင်းပေးပြီး ` +
           `"${payload.enrollment_ref}" ကို ငွေလွှဲမှတ်ချက်တွင် ထည့်သွင်းရေးသားပေးပါ။`,
         bank_accounts: bankAccounts ?? [],
       },
@@ -430,41 +430,41 @@ async function handleCartEnrollment(
     await supabase.from("enrollments").update(updatePayload as never).eq("id", payload.enrollment_id);
   }
 
+  // ── Fetch tenant info for currency + email branding ──────────
+  const { data: cartTenantInfo } = await supabase
+    .from("tenants")
+    .select("name, org_type, logo_url, email_on_enroll, currency")
+    .eq("id", payload.tenant_id)
+    .single() as { data: { name: string; org_type: string; logo_url: string | null; email_on_enroll: boolean; currency: string } | null; error: unknown };
+
+  const cartCurrency = cartTenantInfo?.currency ?? "MMK";
+
   // ── Send confirmation email ────────────────────────────────────
   const cartRecipientEmail = resolveEmailFromFormData(fd);
-  if (cartRecipientEmail) {
+  if (cartRecipientEmail && cartTenantInfo?.email_on_enroll) {
     const host = request.headers.get("host") ?? "localhost:3005";
     const proto = host.startsWith("localhost") ? "http" : "https";
     const baseUrl = `${proto}://${host}`;
 
-    // Fetch tenant info for email branding + email_on_enroll toggle
-    const { data: tenantInfo } = await supabase
-      .from("tenants")
-      .select("name, org_type, logo_url, email_on_enroll")
-      .eq("id", payload.tenant_id)
-      .single() as { data: { name: string; org_type: string; logo_url: string | null; email_on_enroll: boolean } | null; error: unknown };
+    const itemsSummary = payload.items
+      .map((i) => i.quantity > 1 ? `${i.class_level} x${i.quantity}` : i.class_level)
+      .join(", ");
+    const emailData = enrollmentConfirmationEmail({
+      studentName: fd?.name_en?.trim() || "Student",
+      enrollmentRef: payload.enrollment_ref,
+      classLevel: itemsSummary,
+      feeAmount: payload.total_fee,
+      feeFormatted: formatCurrencySimple(payload.total_fee, cartCurrency),
+      paymentUrl: `${baseUrl}/enroll/payment/${payload.enrollment_ref}`,
+      statusUrl: `${baseUrl}/status?ref=${payload.enrollment_ref}`,
+      orgType: cartTenantInfo?.org_type,
+      tenantName: cartTenantInfo?.name,
+      logoUrl: cartTenantInfo?.logo_url ?? undefined,
+    });
 
-    if (tenantInfo?.email_on_enroll) {
-      const itemsSummary = payload.items
-        .map((i) => i.quantity > 1 ? `${i.class_level} x${i.quantity}` : i.class_level)
-        .join(", ");
-      const emailData = enrollmentConfirmationEmail({
-        studentName: fd?.name_en?.trim() || "Student",
-        enrollmentRef: payload.enrollment_ref,
-        classLevel: itemsSummary,
-        feeAmount: payload.total_fee,
-        feeFormatted: formatMMKSimple(payload.total_fee),
-        paymentUrl: `${baseUrl}/enroll/payment/${payload.enrollment_ref}`,
-        statusUrl: `${baseUrl}/status?ref=${payload.enrollment_ref}`,
-        orgType: tenantInfo?.org_type,
-        tenantName: tenantInfo?.name,
-        logoUrl: tenantInfo?.logo_url ?? undefined,
-      });
-
-      sendEmail({ to: cartRecipientEmail!, ...emailData }).catch((err) => {
-        console.error("[enroll/cart] Email send failed:", err);
-      });
-    }
+    sendEmail({ to: cartRecipientEmail!, ...emailData }).catch((err) => {
+      console.error("[enroll/cart] Email send failed:", err);
+    });
   }
 
   // ── Fetch bank accounts ────────────────────────────────────────
@@ -483,13 +483,13 @@ async function handleCartEnrollment(
       items: payload.items,
       quantity: payload.quantity,
       total_fee: payload.total_fee,
-      fee_formatted: formatMMK(payload.total_fee),
+      fee_formatted: formatCurrency(payload.total_fee, cartCurrency),
       payment: {
         instructions_en:
-          `Please transfer ${formatMMK(payload.total_fee)} to one of the bank accounts below ` +
+          `Please transfer ${formatCurrency(payload.total_fee, cartCurrency)} to one of the bank accounts below ` +
           `and quote your enrollment reference "${payload.enrollment_ref}" as the payment remark.`,
         instructions_mm:
-          `ကျောင်းလခ ${formatMMK(payload.total_fee)} ကို အောက်ပါ ဘဏ်အကောင့်များသို့ လွှဲပြောင်းပေးပြီး ` +
+          `ကျောင်းလခ ${formatCurrency(payload.total_fee, cartCurrency)} ကို အောက်ပါ ဘဏ်အကောင့်များသို့ လွှဲပြောင်းပေးပြီး ` +
           `"${payload.enrollment_ref}" ကို ငွေလွှဲမှတ်ချက်တွင် ထည့်သွင်းရေးသားပေးပါ။`,
         bank_accounts: bankAccounts ?? [],
       },

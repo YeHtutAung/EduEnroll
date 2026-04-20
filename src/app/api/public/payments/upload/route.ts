@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
-import { formatMMK } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import type { Enrollment, Class, Payment } from "@/types/database";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -150,6 +150,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // ── Fetch tenant currency ──────────────────────────────────────
+  const { data: tenantInfo } = await supabase
+    .from("tenants")
+    .select("currency")
+    .eq("id", tenantId)
+    .single() as { data: { currency: string } | null; error: unknown };
+  const currency = tenantInfo?.currency ?? "MMK";
+
   // Calculate total fee: from enrollment_items for cart, or from class for single
   const isCart = !enrollment.class_id && enrollment.enrollment_items && enrollment.enrollment_items.length > 0;
   let totalFee: number;
@@ -247,7 +255,7 @@ export async function POST(request: NextRequest) {
         payment_id:       existingPayment.id,
         enrollment_ref:   enrollmentRef.trim(),
         amount:       existingPayment.amount,
-        amount_formatted: formatMMK(existingPayment.amount),
+        amount_formatted: formatCurrency(existingPayment.amount, currency),
         proof_count:      allUrls.length,
         status:           "pending",
         message_en:       "Additional payment proof submitted. Our team will review it shortly.",
@@ -286,8 +294,8 @@ export async function POST(request: NextRequest) {
     {
       payment_id:       payment.id,
       enrollment_ref:   enrollmentRef.trim(),
-      amount:       totalFee,
-      amount_formatted: formatMMK(totalFee),
+      amount:           totalFee,
+      amount_formatted: formatCurrency(totalFee, currency),
       proof_count:      uploadedPaths.length,
       status:           "pending",
       message_en:       "Payment proof submitted. Our team will verify it within 1 business day.",

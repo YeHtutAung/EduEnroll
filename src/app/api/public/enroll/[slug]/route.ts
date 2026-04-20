@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
-import { formatMMKSimple } from "@/lib/utils";
+import { formatCurrencySimple } from "@/lib/utils";
 import type { Intake, Class } from "@/types/database";
 
 // Always fetch live data — intake/class availability changes in real time
@@ -120,7 +120,7 @@ export async function GET(
       .order("level") as { data: Class[] | null; error: unknown };
 
     const closedPublicClasses: PublicClassView[] = (closedClasses ?? []).map((c) => ({
-      id: c.id, level: c.level, fee_amount: c.fee_amount, fee_formatted: formatMMKSimple(c.fee_amount, tenantCurrency),
+      id: c.id, level: c.level, fee_amount: c.fee_amount, fee_formatted: formatCurrencySimple(c.fee_amount, tenantCurrency),
       seat_remaining: c.seat_remaining, seat_total: c.seat_total,
       enrollment_open_at: c.enrollment_open_at, enrollment_close_at: c.enrollment_close_at,
       status: c.status, mode: c.mode ?? "offline",
@@ -175,7 +175,7 @@ export async function GET(
     id:                   c.id,
     level:                c.level,
     fee_amount:              c.fee_amount,
-    fee_formatted:        formatMMKSimple(c.fee_amount, tenantCurrency),
+    fee_formatted:        formatCurrencySimple(c.fee_amount, tenantCurrency),
     seat_remaining:       c.seat_remaining,
     seat_total:           c.seat_total,
     enrollment_open_at:   c.enrollment_open_at,
