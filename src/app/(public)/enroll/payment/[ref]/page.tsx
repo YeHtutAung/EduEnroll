@@ -1002,10 +1002,24 @@ export default function PaymentInstructionsPage() {
 
   useEffect(() => {
     // Handle Stripe return
-    const stripeParam = new URLSearchParams(window.location.search).get("stripe");
-    if (stripeParam === "success") {
+    const params_ = new URLSearchParams(window.location.search);
+    const stripeParam = params_.get("stripe");
+    const sessionId = params_.get("session_id");
+
+    if (stripeParam === "success" && sessionId) {
       setStripeReturn("success");
       window.history.replaceState({}, "", window.location.pathname);
+
+      // Verify payment with Stripe directly — one call, no polling
+      fetch(`/api/public/payments/stripe/verify?session_id=${encodeURIComponent(sessionId)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.status && data.status !== "pending") {
+            setEnrollment((prev) => prev ? { ...prev, status: data.status } : prev);
+            setStripeReturn(null);
+          }
+        })
+        .catch(() => {});
     } else if (stripeParam === "cancelled") {
       setStripeReturn("cancelled");
       window.history.replaceState({}, "", window.location.pathname);

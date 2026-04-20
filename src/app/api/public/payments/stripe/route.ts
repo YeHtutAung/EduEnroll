@@ -194,7 +194,7 @@ export async function POST(request: NextRequest) {
     const session = await getStripe().checkout.sessions.create({
       mode: "payment",
       line_items: lineItems,
-      success_url: `${baseUrl}/enroll/payment/${enrollment.enrollment_ref}?stripe=success`,
+      success_url: `${baseUrl}/enroll/payment/${enrollment.enrollment_ref}?stripe=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${baseUrl}/enroll/payment/${enrollment.enrollment_ref}?stripe=cancelled`,
       metadata: {
         tenant_id: enrollment.tenant_id,

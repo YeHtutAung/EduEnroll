@@ -123,10 +123,18 @@ export async function middleware(request: NextRequest) {
   if (user && pathname === "/login") {
     // Check x-user-role cookie (set by LoginForm after auth) for superadmin redirect
     const userRole = request.cookies.get("x-user-role")?.value;
-    if (userRole === "superadmin") {
-      return NextResponse.redirect(new URL("/superadmin", request.url));
+    const dest = userRole === "superadmin" ? "/superadmin" : "/admin/dashboard";
+    const loginRedirect = NextResponse.redirect(new URL(dest, request.url));
+    // Persist the tenant slug cookie so the admin layout has tenant context after redirect
+    if (tenantSlug) {
+      loginRedirect.cookies.set("x-tenant-slug", tenantSlug, {
+        path: "/",
+        httpOnly: false,
+        sameSite: "lax",
+        maxAge: 60 * 60 * 24,
+      });
     }
-    return NextResponse.redirect(new URL("/admin/dashboard", request.url));
+    return loginRedirect;
   }
 
   if (!user && pathname.startsWith("/admin")) {
