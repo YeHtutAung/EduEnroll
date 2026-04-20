@@ -22,23 +22,45 @@ function toMyanmarNumerals(str: string): string {
 // ─── 1. Currency formatters ───────────────────────────────────────────────────
 
 /**
- * Formats an amount using Myanmar numerals.
- * formatMMK(300000) → "၃၀၀,၀၀၀ MMK"
- * formatMMK(50, "SGD") → "၅၀ SGD"
+ * Formats an amount with currency suffix.
+ * For MMK: uses Myanmar numerals. For all other currencies: uses Arabic numerals.
+ *
+ * formatCurrency(300000)        → "၃၀၀,၀၀၀ MMK"
+ * formatCurrency(300000, "MMK") → "၃၀၀,၀၀၀ MMK"
+ * formatCurrency(50, "SGD")     → "50 SGD"
  */
-export function formatMMK(amount: number, currency = "MMK"): string {
-  const withCommas = amount.toLocaleString("en-US"); // "300,000"
-  return `${toMyanmarNumerals(withCommas)} ${currency}`;
+export function formatCurrency(amount: number, currency = "MMK"): string {
+  const withCommas = amount.toLocaleString("en-US");
+  const formatted = currency === "MMK" ? toMyanmarNumerals(withCommas) : withCommas;
+  return `${formatted} ${currency}`;
 }
 
 /**
- * Formats an amount using standard (Arabic) numerals.
- * formatMMKSimple(300000) → "300,000 MMK"
- * formatMMKSimple(50, "SGD") → "50 SGD"
+ * Formats an amount with currency suffix, always using Arabic numerals.
+ *
+ * formatCurrencySimple(300000)        → "300,000 MMK"
+ * formatCurrencySimple(300000, "MMK") → "300,000 MMK"
+ * formatCurrencySimple(50, "SGD")     → "50 SGD"
  */
-export function formatMMKSimple(amount: number, currency = "MMK"): string {
+export function formatCurrencySimple(amount: number, currency = "MMK"): string {
   return `${amount.toLocaleString("en-US")} ${currency}`;
 }
+
+/**
+ * Formats an amount without a currency suffix, using Arabic numerals.
+ * Use this where the currency label is shown separately in the UI.
+ *
+ * formatAmount(300000) → "300,000"
+ */
+export function formatAmount(amount: number): string {
+  return amount.toLocaleString("en-US");
+}
+
+/** @deprecated use formatCurrency */
+export const formatMMK = formatCurrency;
+
+/** @deprecated use formatCurrencySimple */
+export const formatMMKSimple = formatCurrencySimple;
 
 // ─── 2. Enrollment reference generator ───────────────────────────────────────
 
@@ -160,6 +182,8 @@ export function resolvePhoneFromFormData(
 }
 
 // ─── 6. Application config ───────────────────────────────────────────────────
+
+export const DEFAULT_CURRENCY = "MMK";
 
 export const NIHON_MOMENT_CONFIG = {
   schoolName:   "Nihon Moment",
