@@ -108,13 +108,14 @@ export async function PATCH(
   // ── Fetch tenant info for email branding ───────────────────────────────────
   const { data: tenantInfo } = await admin
     .from("tenants")
-    .select("name, org_type, logo_url")
+    .select("name, org_type, logo_url, currency")
     .eq("id", tenantId)
-    .single() as { data: { name: string; org_type: string; logo_url: string | null } | null; error: unknown };
+    .single() as { data: { name: string; org_type: string; logo_url: string | null; currency: string } | null; error: unknown };
 
   const orgType = tenantInfo?.org_type;
   const tenantName = tenantInfo?.name;
   const logoUrl = tenantInfo?.logo_url ?? undefined;
+  const currency = tenantInfo?.currency ?? "MMK";
 
   // ── Is this a cart enrollment? ───────────────────────────────────────────────
   const isCart = enrollment.class_id === null;
@@ -155,7 +156,7 @@ export async function PATCH(
     const paymentUrl = `${proto}://${host}/enroll/payment/${enrollment!.enrollment_ref}`;
 
     const feeFormatted = totalFee > 0
-      ? `${String(totalFee).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} MMK`
+      ? `${String(totalFee).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} ${currency}`
       : undefined;
 
     return { classLevel, statusUrl, paymentUrl, feeFormatted };
@@ -231,6 +232,7 @@ export async function PATCH(
         classLevel,
         statusUrl,
         paymentUrl,
+        currency,
       }).catch((err) => {
         console.error("[verify] Messenger approval notification failed:", err);
       });
@@ -247,6 +249,7 @@ export async function PATCH(
         classLevel,
         statusUrl,
         paymentUrl,
+        currency,
       }).catch((err) => {
         console.error("[verify] Telegram approval notification failed:", err);
       });
@@ -343,6 +346,7 @@ export async function PATCH(
         adminNote: (admin_note as string).trim(),
         receivedAmount: typeof received_amount === "number" ? received_amount : null,
         remainingAmount,
+        currency,
       }).catch((err) => {
         console.error("[verify] Messenger partial notification failed:", err);
       });
@@ -362,6 +366,7 @@ export async function PATCH(
         adminNote: (admin_note as string).trim(),
         receivedAmount: typeof received_amount === "number" ? received_amount : null,
         remainingAmount,
+        currency,
       }).catch((err) => {
         console.error("[verify] Telegram partial notification failed:", err);
       });
@@ -446,6 +451,7 @@ export async function PATCH(
       statusUrl: rejStatusUrl,
       paymentUrl: rejPaymentUrl,
       rejectionReason: typeof rejection_reason === "string" ? rejection_reason : null,
+      currency,
     }).catch((err) => {
       console.error("[verify] Messenger rejection notification failed:", err);
     });
@@ -463,6 +469,7 @@ export async function PATCH(
       statusUrl: rejStatusUrl,
       paymentUrl: rejPaymentUrl,
       rejectionReason: typeof rejection_reason === "string" ? rejection_reason : null,
+      currency,
     }).catch((err) => {
       console.error("[verify] Telegram rejection notification failed:", err);
     });

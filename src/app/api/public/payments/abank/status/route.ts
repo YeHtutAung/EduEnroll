@@ -120,7 +120,7 @@ export async function GET(request: NextRequest) {
               .map((i) => (i.quantity > 1 ? `${i.classes?.level ?? "?"} x${i.quantity}` : (i.classes?.level ?? "?")))
               .join(", ");
             const total = items.reduce((s, i) => s + i.fee_mmk * i.quantity, 0);
-            feeFormatted = `${String(total).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} MMK`;
+            feeFormatted = String(total).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
           }
         } else {
           const { data: cls } = (await supabase
@@ -131,19 +131,21 @@ export async function GET(request: NextRequest) {
           if (cls) {
             classLevel = cls.level;
             const total = cls.fee_mmk * (enrollment.quantity ?? 1);
-            feeFormatted = `${String(total).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} MMK`;
+            feeFormatted = String(total).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
           }
         }
 
         // Fetch tenant info for email branding
         const { data: tenantInfo } = (await supabase
           .from("tenants")
-          .select("name, org_type, logo_url")
+          .select("name, org_type, logo_url, currency")
           .eq("id", enrollment.tenant_id)
           .single()) as {
-          data: { name: string; org_type: string; logo_url: string | null } | null;
+          data: { name: string; org_type: string; logo_url: string | null; currency: string } | null;
           error: unknown;
         };
+        const tenantCurrency = tenantInfo?.currency ?? "MMK";
+        if (feeFormatted) feeFormatted = `${feeFormatted} ${tenantCurrency}`;
 
         // Collect notification promises — must await before returning
         // so Vercel serverless doesn't kill the function prematurely
@@ -161,6 +163,7 @@ export async function GET(request: NextRequest) {
               classLevel,
               statusUrl,
               paymentUrl: statusUrl,
+              currency: tenantCurrency,
             }).catch((err) => {
               console.error("[abank-status] Telegram notification failed:", err);
             }),

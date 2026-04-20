@@ -162,6 +162,7 @@ export async function POST(request: NextRequest) {
             classLevel,
             statusUrl,
             paymentUrl: statusUrl,
+            currency: tenantInfo?.currency ?? "MMK",
           }).catch((err) => {
             console.error("[stripe-webhook] Telegram notification failed:", err);
           }),
