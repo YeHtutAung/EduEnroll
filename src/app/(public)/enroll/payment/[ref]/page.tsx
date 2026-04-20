@@ -1018,7 +1018,18 @@ export default function PaymentInstructionsPage() {
         .then((res) => res.json())
         .then((data) => {
           if (data.status && data.status !== "pending") {
-            setEnrollment((prev) => prev ? { ...prev, status: data.status } : prev);
+            const STATUS_LABELS: Record<string, { en: string; mm: string }> = {
+              confirmed:       { en: "Enrollment Confirmed",       mm: "စာရင်းသွင်းမှု အတည်ပြုပြီး" },
+              payment_submitted: { en: "Payment Under Review",     mm: "ငွေပေးချေမှု စစ်ဆေးနေဆဲ" },
+              partial_payment: { en: "Partial Payment — Please Complete", mm: "ငွေတစ်စိတ်တစ်ပိုင်း — ကျန်ငွေ ပေးချေပါ" },
+              rejected:        { en: "Enrollment Rejected",        mm: "စာရင်းသွင်းမှု ငြင်းဆိုထားသည်" },
+            };
+            const label = STATUS_LABELS[data.status];
+            setEnrollment((prev) => prev ? {
+              ...prev,
+              status: data.status,
+              ...(label ? { status_label_en: label.en, status_label_mm: label.mm } : {}),
+            } : prev);
             setStripeReturn(null);
           }
         })
