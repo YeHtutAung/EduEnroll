@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
-import { formatCurrency, formatCurrencySimple, formatAmount } from "@/lib/utils";
+import { formatCurrencySimple, formatAmount } from "@/lib/utils";
 import QRPaymentModal from "@/components/payments/QRPaymentModal";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
