@@ -416,6 +416,27 @@ test_submit_cart_enrollment() {
     return
   fi
 
+  # Increase max_tickets_per_person before cart test (default=1, test needs ×2 for N5)
+  local PATCH_CODE
+  PATCH_CODE=$(http_code "${AUTH_H[@]}" -X PATCH \
+    -H "Content-Type: application/json" \
+    -d '{"max_tickets_per_person":5}' \
+    "$BASE_URL/api/classes/${CLASS_N5_ID}")
+  if [[ "$PATCH_CODE" == "200" ]]; then
+    pass "PATCH /api/classes/{N5} — max_tickets_per_person set to 5"
+  else
+    fail "PATCH /api/classes/{N5} — expected 200, got ${PATCH_CODE}"
+    return
+  fi
+  PATCH_CODE=$(http_code "${AUTH_H[@]}" -X PATCH \
+    -H "Content-Type: application/json" \
+    -d '{"max_tickets_per_person":5}' \
+    "$BASE_URL/api/classes/${CLASS_N4_ID}")
+  if [[ "$PATCH_CODE" != "200" ]]; then
+    fail "PATCH /api/classes/{N4} — expected 200, got ${PATCH_CODE}"
+    return
+  fi
+
   # Cart body with items array
   local BODY
   BODY=$(jq -n \
@@ -744,30 +765,30 @@ test_mmqr_payment() {
   fi
 
   # ── Test 1: Create MMQR payment with valid enrollment ─────
-  RESP=$(pub_post "/api/public/payments/mmqr" \
+  RESP=$(pub_post "/api/public/payments/mmpay" \
     "{\"enrollmentRef\":\"${MMQR_ENROLLMENT_REF}\"}") || RESP=""
 
   if echo "$RESP" | jq -e '.orderId' &>/dev/null; then
     MMQR_ORDER_ID=$(echo "$RESP" | jq -r '.orderId')
     local QR; QR=$(echo "$RESP" | jq -r '.qr // empty')
     local AMT; AMT=$(echo "$RESP" | jq '.amount')
-    pass "POST /api/public/payments/mmqr — QR generated (orderId=${MMQR_ORDER_ID:0:20}…)"
+    pass "POST /api/public/payments/mmpay — QR generated (orderId=${MMQR_ORDER_ID:0:20}…)"
 
     # QR string should be present (EMVCo format)
     if [[ -n "$QR" ]]; then
-      pass "POST /api/public/payments/mmqr — QR payload present (${#QR} chars)"
+      pass "POST /api/public/payments/mmpay — QR payload present (${#QR} chars)"
     else
-      fail "POST /api/public/payments/mmqr — QR payload is empty"
+      fail "POST /api/public/payments/mmpay — QR payload is empty"
     fi
 
     # Amount should match N2 fee (450000)
     if [[ "$AMT" == "450000" ]]; then
-      pass "POST /api/public/payments/mmqr — amount correct (450,000 MMK)"
+      pass "POST /api/public/payments/mmpay — amount correct (450,000 MMK)"
     else
-      fail "POST /api/public/payments/mmqr — expected amount 450000, got ${AMT}"
+      fail "POST /api/public/payments/mmpay — expected amount 450000, got ${AMT}"
     fi
   else
-    fail "POST /api/public/payments/mmqr — failed to create payment" "$RESP"
+    fail "POST /api/public/payments/mmpay — failed to create payment" "$RESP"
     # Don't return — continue with other tests that don't depend on orderId
   fi
 
@@ -775,52 +796,52 @@ test_mmqr_payment() {
   local CODE
   CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
     -d '{"enrollmentRef":"NM-0000-99999"}' \
-    "$BASE_URL/api/public/payments/mmqr")
+    "$BASE_URL/api/public/payments/mmpay")
   if [[ "$CODE" == "404" ]]; then
-    pass "POST /api/public/payments/mmqr — 404 on non-existent enrollment"
+    pass "POST /api/public/payments/mmpay — 404 on non-existent enrollment"
   else
-    fail "POST /api/public/payments/mmqr — expected 404 for bad ref, got ${CODE}"
+    fail "POST /api/public/payments/mmpay — expected 404 for bad ref, got ${CODE}"
   fi
 
   # ── Test 3: Missing enrollmentRef should 400 ──────────────
   CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
     -d '{}' \
-    "$BASE_URL/api/public/payments/mmqr")
+    "$BASE_URL/api/public/payments/mmpay")
   if [[ "$CODE" == "400" ]]; then
-    pass "POST /api/public/payments/mmqr — 400 on missing enrollmentRef"
+    pass "POST /api/public/payments/mmpay — 400 on missing enrollmentRef"
   else
-    fail "POST /api/public/payments/mmqr — expected 400 for missing ref, got ${CODE}"
+    fail "POST /api/public/payments/mmpay — expected 400 for missing ref, got ${CODE}"
   fi
 
   # ── Test 4: Poll status — should be PENDING ──────────────
   if [[ -n "$MMQR_ORDER_ID" ]]; then
-    RESP=$(pub_get "/api/public/payments/mmqr/status?ref=${MMQR_ORDER_ID}") || RESP=""
+    RESP=$(pub_get "/api/public/payments/mmpay/status?ref=${MMQR_ORDER_ID}") || RESP=""
 
     local STATUS; STATUS=$(echo "$RESP" | jq -r '.mmqr_status // empty')
     if [[ "$STATUS" == "PENDING" ]]; then
-      pass "GET /api/public/payments/mmqr/status — status is PENDING"
+      pass "GET /api/public/payments/mmpay/status — status is PENDING"
     else
-      fail "GET /api/public/payments/mmqr/status — expected PENDING, got ${STATUS}" "$RESP"
+      fail "GET /api/public/payments/mmpay/status — expected PENDING, got ${STATUS}" "$RESP"
     fi
   else
-    skip "GET /api/public/payments/mmqr/status — no orderId available"
+    skip "GET /api/public/payments/mmpay/status — no orderId available"
   fi
 
   # ── Test 5: Poll status with unknown ref — returns PENDING (fallback) ──
-  RESP=$(pub_get "/api/public/payments/mmqr/status?ref=KNY-unknown-ref-999") || RESP=""
+  RESP=$(pub_get "/api/public/payments/mmpay/status?ref=KNY-unknown-ref-999") || RESP=""
   local UNK_STATUS; UNK_STATUS=$(echo "$RESP" | jq -r '.mmqr_status // empty')
   if [[ "$UNK_STATUS" == "PENDING" ]]; then
-    pass "GET /api/public/payments/mmqr/status — PENDING fallback for unknown ref"
+    pass "GET /api/public/payments/mmpay/status — PENDING fallback for unknown ref"
   else
-    fail "GET /api/public/payments/mmqr/status — expected PENDING fallback, got ${UNK_STATUS}"
+    fail "GET /api/public/payments/mmpay/status — expected PENDING fallback, got ${UNK_STATUS}"
   fi
 
   # ── Test 6: Poll status with missing ref — should 400 ────
-  CODE=$(http_code_pub "$BASE_URL/api/public/payments/mmqr/status")
+  CODE=$(http_code_pub "$BASE_URL/api/public/payments/mmpay/status")
   if [[ "$CODE" == "400" ]]; then
-    pass "GET /api/public/payments/mmqr/status — 400 on missing ref param"
+    pass "GET /api/public/payments/mmpay/status — 400 on missing ref param"
   else
-    fail "GET /api/public/payments/mmqr/status — expected 400, got ${CODE}"
+    fail "GET /api/public/payments/mmpay/status — expected 400, got ${CODE}"
   fi
 
   # ── Test 7: Webhook with invalid signature — should 403 ──
@@ -828,11 +849,11 @@ test_mmqr_payment() {
     -H "x-mmpay-signature: invalidsignature" \
     -H "x-mmpay-nonce: 1234567890" \
     -d '{"orderId":"fake","status":"SUCCESS"}' \
-    "$BASE_URL/api/public/payments/mmqr/webhook")
+    "$BASE_URL/api/public/payments/mmpay/webhook")
   if [[ "$CODE" == "403" ]]; then
-    pass "POST /api/public/payments/mmqr/webhook — 403 on invalid signature"
+    pass "POST /api/public/payments/mmpay/webhook — 403 on invalid signature"
   else
-    fail "POST /api/public/payments/mmqr/webhook — expected 403, got ${CODE}"
+    fail "POST /api/public/payments/mmpay/webhook — expected 403, got ${CODE}"
   fi
 
   # ── Test 8: Non-pending enrollment should 409 ─────────────
@@ -849,17 +870,17 @@ test_mmqr_payment() {
     if [[ "$ENROLL_STATUS" != "pending_payment" && "$ENROLL_STATUS" != "partial_payment" ]]; then
       CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
         -d "{\"enrollmentRef\":\"${ENROLLMENT_REF}\"}" \
-        "$BASE_URL/api/public/payments/mmqr")
+        "$BASE_URL/api/public/payments/mmpay")
       if [[ "$CODE" == "409" ]]; then
-        pass "POST /api/public/payments/mmqr — 409 on non-pending enrollment"
+        pass "POST /api/public/payments/mmpay — 409 on non-pending enrollment"
       else
-        fail "POST /api/public/payments/mmqr — expected 409 for non-pending, got ${CODE}"
+        fail "POST /api/public/payments/mmpay — expected 409 for non-pending, got ${CODE}"
       fi
     else
-      skip "POST /api/public/payments/mmqr — 409 test: enrollment still pending_payment"
+      skip "POST /api/public/payments/mmpay — 409 test: enrollment still pending_payment"
     fi
   else
-    skip "POST /api/public/payments/mmqr — 409 test: no ENROLLMENT_REF available"
+    skip "POST /api/public/payments/mmpay — 409 test: no ENROLLMENT_REF available"
   fi
 }
 

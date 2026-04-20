@@ -101,9 +101,23 @@ export async function GET(request: NextRequest) {
     .eq("tenant_id", tenantId);
 
   // ── Filters ────────────────────────────────────────────────────────────────
-  if (status)      query = query.eq("status", status);
-  if (class_level) query = query.eq("classes.level", class_level);
-  if (intake_id)   query = query.eq("classes.intake_id", intake_id);
+  if (status) query = query.eq("status", status);
+
+  // class_level / intake_id: filter via class_id lookup to avoid PostgREST
+  // ambiguity — the select has two "classes" embeds (top-level and inside
+  // enrollment_items) and eq("classes.level", …) may resolve to the wrong one.
+  if (class_level || intake_id) {
+    let clsQ = supabase.from("classes").select("id").eq("tenant_id", tenantId);
+    if (class_level) clsQ = clsQ.eq("level", class_level);
+    if (intake_id)   clsQ = clsQ.eq("intake_id", intake_id);
+    const { data: cls } = (await clsQ) as { data: { id: string }[] | null; error: unknown };
+    const ids = (cls ?? []).map((c) => c.id);
+    if (ids.length > 0) {
+      query = query.in("class_id", ids);
+    } else {
+      query = query.eq("class_id", "00000000-0000-0000-0000-000000000000");
+    }
+  }
   if (telegram === "linked")     query = query.not("telegram_chat_id", "is", null);
   if (telegram === "not_linked") query = query.is("telegram_chat_id", null);
 
