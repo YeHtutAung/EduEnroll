@@ -23,7 +23,7 @@ export async function GET(
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://kuunyi.com";
   const redirectUri = `${appUrl}/api/messenger/callback`;
-  const scope = "pages_messaging,pages_show_list,pages_manage_metadata,business_management";
+  const scope = "pages_messaging,pages_show_list,pages_manage_metadata";
   const state = params.slug;
 
   const oauthUrl = new URL("https://www.facebook.com/v19.0/dialog/oauth");
