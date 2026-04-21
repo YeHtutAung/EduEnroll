@@ -14,11 +14,20 @@ export async function GET() {
   // Actually query the DB to see what tenants exist
   let tenants: string[] = [];
   let dbError: string | null = null;
+  let ideaproCheck: { data: unknown; error: unknown } = { data: null, error: null };
   try {
     const supabase = createAdminClient();
     const { data, error } = await supabase.from("tenants").select("subdomain");
     if (error) dbError = error.message;
     else tenants = (data ?? []).map((t: { subdomain: string }) => t.subdomain);
+
+    // Exact same query as check-subdomain endpoint
+    const result = await supabase
+      .from("tenants")
+      .select("id")
+      .eq("subdomain", "ideapro")
+      .maybeSingle();
+    ideaproCheck = { data: result.data, error: result.error?.message ?? null };
   } catch (e) {
     dbError = String(e);
   }
@@ -32,6 +41,7 @@ export async function GET() {
     node_env: process.env.NODE_ENV,
     vercel_env: process.env.VERCEL_ENV,
     tenants_in_db: tenants,
+    ideapro_check: ideaproCheck,
     db_error: dbError,
   });
 }
