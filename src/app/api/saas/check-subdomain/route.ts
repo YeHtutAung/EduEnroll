@@ -35,10 +35,10 @@ export async function GET(request: NextRequest) {
 
   if (error) {
     return NextResponse.json(
-      { error: "Failed to check subdomain." },
+      { error: "Failed to check subdomain.", detail: error.message, code: error.code },
       { status: 500 },
     );
   }
 
-  return NextResponse.json({ available: data === null });
+  return NextResponse.json({ available: data === null, debug_data: data, slug });
 }
