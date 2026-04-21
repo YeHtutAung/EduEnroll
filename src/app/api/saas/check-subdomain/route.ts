@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
 
@@ -25,20 +24,36 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const supabase = createAdminClient();
+  // Use raw fetch to PostgREST to avoid Supabase JS client caching issues
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-  const { data, error } = await supabase
-    .from("tenants")
-    .select("id")
-    .eq("subdomain", slug)
-    .maybeSingle();
+  try {
+    const res = await fetch(
+      `${supabaseUrl}/rest/v1/tenants?subdomain=eq.${encodeURIComponent(slug)}&select=id&limit=1`,
+      {
+        headers: {
+          apikey: anonKey,
+          Authorization: `Bearer ${serviceKey}`,
+        },
+        cache: "no-store",
+      },
+    );
 
-  if (error) {
+    if (!res.ok) {
+      return NextResponse.json(
+        { error: "Failed to check subdomain." },
+        { status: 500 },
+      );
+    }
+
+    const data = await res.json();
+    return NextResponse.json({ available: data.length === 0 });
+  } catch {
     return NextResponse.json(
-      { error: "Failed to check subdomain.", detail: error.message, code: error.code },
+      { error: "Failed to check subdomain." },
       { status: 500 },
     );
   }
-
-  return NextResponse.json({ available: data === null, debug_data: data, slug });
 }
