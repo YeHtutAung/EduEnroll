@@ -263,21 +263,22 @@ export default function AppearancePage() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    Promise.all([
-      fetch("/api/admin/appearance").then((r) => r.json()),
-      fetch("/api/admin/org").then((r) => r.json()).catch(() => ({})),
-    ]).then(([appr, org]) => {
-      setConfig({
-        admin_theme: appr.admin_theme ?? "professional",
-        template_id: appr.template_id ?? "ls-classic",
-        primary_color: appr.primary_color ?? "#2563eb",
-        tagline: appr.tagline ?? "",
-        cta_button_text: appr.cta_button_text ?? "Enroll Now",
-        logo_url: appr.logo_url ?? "",
-        hero_url: appr.hero_url ?? "",
-      });
-      if (org.org_type) setOrgType(org.org_type);
-    }).catch(() => {}).finally(() => setLoading(false));
+    fetch("/api/admin/appearance")
+      .then((r) => r.json())
+      .then((data) => {
+        setConfig({
+          admin_theme: data.admin_theme ?? "professional",
+          template_id: data.template_id ?? "ls-classic",
+          primary_color: data.primary_color ?? "#2563eb",
+          tagline: data.tagline ?? "",
+          cta_button_text: data.cta_button_text ?? "Enroll Now",
+          logo_url: data.logo_url ?? "",
+          hero_url: data.hero_url ?? "",
+        });
+        if (data.org_type) setOrgType(data.org_type);
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false));
   }, []);
 
   async function handleSave() {

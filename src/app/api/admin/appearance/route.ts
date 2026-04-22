@@ -7,15 +7,15 @@ export async function GET() {
   if (auth instanceof NextResponse) return auth;
   const { supabase, tenantId } = auth;
 
-  const { data, error } = (await supabase
-    .from("tenant_appearance")
-    .select("*")
-    .eq("tenant_id", tenantId)
-    .maybeSingle()) as { data: Record<string, unknown> | null; error: unknown };
+  const [appearanceResult, tenantResult] = await Promise.all([
+    supabase.from("tenant_appearance").select("*").eq("tenant_id", tenantId).maybeSingle() as unknown as Promise<{ data: Record<string, unknown> | null; error: unknown }>,
+    supabase.from("tenants").select("org_type").eq("id", tenantId).maybeSingle() as unknown as Promise<{ data: { org_type: string } | null; error: unknown }>,
+  ]);
 
-  if (error) return NextResponse.json({ error: "Failed to fetch appearance." }, { status: 500 });
+  if (appearanceResult.error) return NextResponse.json({ error: "Failed to fetch appearance." }, { status: 500 });
 
-  return NextResponse.json(data ?? { tenant_id: tenantId, ...DEFAULT_APPEARANCE });
+  const appearance = appearanceResult.data ?? { tenant_id: tenantId, ...DEFAULT_APPEARANCE };
+  return NextResponse.json({ ...appearance, org_type: tenantResult.data?.org_type ?? "language_school" });
 }
 
 export async function PUT(request: Request) {
