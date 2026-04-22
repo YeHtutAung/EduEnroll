@@ -4,6 +4,7 @@ import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { formatCurrency, formatCurrencySimple } from "@/lib/utils";
 import type { JlptLevel, ClassStatus } from "@/types/database";
+import BrandHeader from "@/components/enrollment/BrandHeader";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -97,15 +98,16 @@ const DEFAULT_LEVEL_CLASS = "bg-gray-100 text-gray-800";
 
 // ─── Step indicator ──────────────────────────────────────────────────────────
 
-function StepIndicator({ step }: { step: 1 | 2 }) {
+function StepIndicator({ step, color }: { step: 1 | 2; color?: string }) {
+  const c = color ?? "#1a6b3c";
   return (
     <div className="mb-8 text-center">
       <p className="text-sm font-medium text-gray-500">
         Step {step} of 2 / <span className="font-myanmar">အဆင့် {toMM(String(step))}/၂</span>
       </p>
       <div className="mx-auto mt-3 flex max-w-xs gap-2">
-        <div className={`h-1.5 flex-1 rounded-full ${step >= 1 ? "bg-[#1a6b3c]" : "bg-gray-200"}`} />
-        <div className={`h-1.5 flex-1 rounded-full ${step >= 2 ? "bg-[#1a6b3c]" : "bg-gray-200"}`} />
+        <div className="h-1.5 flex-1 rounded-full" style={{ backgroundColor: step >= 1 ? c : "#e5e7eb" }} />
+        <div className="h-1.5 flex-1 rounded-full" style={{ backgroundColor: step >= 2 ? c : "#e5e7eb" }} />
       </div>
     </div>
   );
@@ -383,6 +385,9 @@ function EnrollmentFormPage() {
   const [labels, setLabels] = useState<TenantLabels | null>(null);
   const [pageLoading, setPageLoading] = useState(true);
   const [pageError, setPageError] = useState<string | null>(null);
+  const [primaryColor, setPrimaryColor] = useState("#1a6b3c");
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [schoolName, setSchoolName] = useState("");
 
   // Form state
   const [step, setStep] = useState<1 | 2>(1);
@@ -435,6 +440,9 @@ function EnrollmentFormPage() {
         const json = await res.json();
         setIntake(json.intake);
         if (json.labels) setLabels(json.labels);
+        if (json.appearance?.primary_color) setPrimaryColor(json.appearance.primary_color);
+        if (json.appearance?.logo_url) setLogoUrl(json.appearance.logo_url);
+        if (json.school_name) setSchoolName(json.school_name);
 
         // For single-class mode, find the selected class
         if (classId && !cartKey) {
@@ -601,15 +609,27 @@ function EnrollmentFormPage() {
     }
   }
 
+  // ── Shared wrapper ───────────────────────────────────────────
+  function PageWrapper({ children }: { children: React.ReactNode }) {
+    return (
+      <div className="min-h-screen bg-white">
+        {schoolName && <BrandHeader schoolName={schoolName} primaryColor={primaryColor} logoUrl={logoUrl} />}
+        <main className="mx-auto max-w-xl px-4 py-8 sm:px-6">{children}</main>
+      </div>
+    );
+  }
+
   // ── Render guards ────────────────────────────────────────────
-  if (pageLoading) return <LoadingSkeleton />;
+  if (pageLoading) return <PageWrapper><LoadingSkeleton /></PageWrapper>;
 
   if (pageError) {
     return (
-      <ErrorPage
-        message={pageError}
-        onBack={slug ? () => router.push(`/enroll/${slug}`) : undefined}
-      />
+      <PageWrapper>
+        <ErrorPage
+          message={pageError}
+          onBack={slug ? () => router.push(`/enroll/${slug}`) : undefined}
+        />
+      </PageWrapper>
     );
   }
 
@@ -621,8 +641,9 @@ function EnrollmentFormPage() {
   // ── Step 1: Personal Information ─────────────────────────────
   if (step === 1) {
     return (
+      <PageWrapper>
       <div className="mx-auto max-w-md">
-        <StepIndicator step={1} />
+        <StepIndicator step={1} color={primaryColor} />
 
         {/* Selected class/cart summary */}
         {isCartMode ? (
@@ -713,18 +734,21 @@ function EnrollmentFormPage() {
 
         <button
           onClick={handleNext}
-          className="mt-2 w-full rounded-lg bg-[#1a6b3c] py-3 text-sm font-semibold text-white hover:bg-[#155d33] transition-colors"
+          className="mt-2 w-full rounded-lg py-3 text-sm font-semibold text-white transition-colors"
+          style={{ backgroundColor: primaryColor }}
         >
           Next &rarr;
         </button>
       </div>
+      </PageWrapper>
     );
   }
 
   // ── Step 2: Review & Confirm ─────────────────────────────────
   return (
+    <PageWrapper>
     <div className="mx-auto max-w-md">
-      <StepIndicator step={2} />
+      <StepIndicator step={2} color={primaryColor} />
 
       <h2 className="mb-6 text-lg font-semibold text-gray-900">
         Review & Confirm / <span className="font-myanmar">ပြန်လည်စစ်ဆေးပြီး အတည်ပြုပါ</span>
@@ -816,7 +840,8 @@ function EnrollmentFormPage() {
         <button
           onClick={handleSubmit}
           disabled={submitting}
-          className="flex-1 rounded-lg bg-[#1a6b3c] py-3 text-sm font-semibold text-white hover:bg-[#155d33] transition-colors disabled:opacity-50"
+          className="flex-1 rounded-lg py-3 text-sm font-semibold text-white transition-colors disabled:opacity-50"
+          style={{ backgroundColor: primaryColor }}
         >
           {submitting ? (
             <span className="inline-flex items-center gap-2">
@@ -832,5 +857,6 @@ function EnrollmentFormPage() {
         </button>
       </div>
     </div>
+    </PageWrapper>
   );
 }

@@ -48,74 +48,26 @@ export default function Sidebar({ displayName, displayEmail, displayRole, school
   const intakeMm = INTAKE_MM[tl.orgType] ?? INTAKE_MM.language_school;
   const studentMm = STUDENT_MM[tl.orgType] ?? STUDENT_MM.language_school;
 
-  // Simple English pluralization: "Type" → "Types", "Class" → "Classes"
   const plural = (s: string) =>
     s.endsWith("s") || s.endsWith("x") || s.endsWith("sh") || s.endsWith("ch") ? s + "es" : s + "s";
 
   const NAV_LINKS: NavLink[] = [
-    {
-      href: "/admin/dashboard",
-      labelEn: "Dashboard",
-      labelMm: "ဒက်ရှ်ဘုတ်",
-      emoji: "📊",
-    },
-    {
-      href: "/admin/intakes",
-      labelEn: `${plural(tl.intake)} & ${plural(tl.class)}`,
-      labelMm: intakeMm,
-      emoji: "🏫",
-    },
-    {
-      href: "/admin/students",
-      labelEn: plural(tl.student),
-      labelMm: studentMm,
-      emoji: "👥",
-    },
-    {
-      href: "/admin/analytics",
-      labelEn: "Analytics",
-      labelMm: "စာရင်းအင်း",
-      emoji: "📈",
-    },
-    {
-      href: "/admin/payments",
-      labelEn: "Payments",
-      labelMm: "ငွေပေးချေမှု",
-      emoji: "💳",
-    },
-    {
-      href: "/admin/announcements",
-      labelEn: "Announcements",
-      labelMm: "ကြေညာချက်",
-      emoji: "📢",
-    },
-    {
-      href: "/admin/guide",
-      labelEn: "User Guide",
-      labelMm: "လမ်းညွှန်",
-      emoji: "📖",
-    },
-    {
-      href: "/admin/appearance",
-      labelEn: "Appearance",
-      labelMm: "ပုံစံထိန်းသိမ်း",
-      emoji: "🎨",
-      ownerOnly: true,
-    },
-    {
-      href: "/admin/settings",
-      labelEn: "Settings",
-      labelMm: "ဆက်တင်",
-      emoji: "⚙️",
-      ownerOnly: true,
-    },
+    { href: "/admin/dashboard",     labelEn: "Dashboard",                          labelMm: "ဒက်ရှ်ဘုတ်",        emoji: "📊" },
+    { href: "/admin/intakes",       labelEn: `${plural(tl.intake)} & ${plural(tl.class)}`, labelMm: intakeMm,   emoji: "🏫" },
+    { href: "/admin/students",      labelEn: plural(tl.student),                   labelMm: studentMm,           emoji: "👥" },
+    { href: "/admin/analytics",     labelEn: "Analytics",                          labelMm: "စာရင်းအင်း",       emoji: "📈" },
+    { href: "/admin/payments",      labelEn: "Payments",                           labelMm: "ငွေပေးချေမှု",     emoji: "💳" },
+    { href: "/admin/announcements", labelEn: "Announcements",                      labelMm: "ကြေညာချက်",        emoji: "📢" },
+    { href: "/admin/guide",         labelEn: "User Guide",                         labelMm: "လမ်းညွှန်",        emoji: "📖" },
+    { href: "/admin/appearance",    labelEn: "Appearance",                         labelMm: "ပုံစံထိန်းသိမ်း",  emoji: "🎨", ownerOnly: true },
+    { href: "/admin/settings",      labelEn: "Settings",                           labelMm: "ဆက်တင်",           emoji: "⚙️", ownerOnly: true },
   ];
+
   const [open, setOpen] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
   const [pendingStudentCount, setPendingStudentCount] = useState(0);
   const pathname = usePathname();
 
-  // Fetch pending counts on mount + poll every 30s
   useEffect(() => {
     function fetchCounts() {
       fetch("/api/admin/stats")
@@ -142,28 +94,38 @@ export default function Sidebar({ displayName, displayEmail, displayRole, school
   }
 
   const isOwnerOrAbove = displayRole === "owner" || displayRole === "superadmin";
-  const visibleLinks = NAV_LINKS.filter(
-    (link) => !link.ownerOnly || isOwnerOrAbove,
-  );
+  const visibleLinks = NAV_LINKS.filter((link) => !link.ownerOnly || isOwnerOrAbove);
   const avatarLetter = displayName.charAt(0).toUpperCase();
   const schoolLetter = schoolName.charAt(0).toUpperCase();
+
+  // ─── CSS variable helpers ──────────────────────────────────────────────────
+  const sidebarStyle: React.CSSProperties = { backgroundColor: "var(--sidebar-bg)", color: "var(--sidebar-text)" };
+  const borderStyle: React.CSSProperties = { borderColor: "var(--sidebar-border)" };
+  const mutedStyle: React.CSSProperties = { color: "var(--sidebar-text-muted)" };
+
+  function linkStyle(active: boolean): React.CSSProperties {
+    return active
+      ? { backgroundColor: "var(--sidebar-active-bg)", color: "var(--sidebar-active-text)" }
+      : { color: "var(--sidebar-text-muted)" };
+  }
+
+  function linkMutedLabelStyle(active: boolean): React.CSSProperties {
+    return active ? { color: "var(--sidebar-active-text)", opacity: 0.7 } : { color: "var(--sidebar-text-muted)", opacity: 0.6 };
+  }
 
   return (
     <>
       {/* ── Mobile top bar ─────────────────────────────────── */}
-      <header className="lg:hidden fixed top-0 inset-x-0 z-40 flex items-center gap-3 px-4 h-14 bg-[#0f1225] text-white shadow-md">
+      <header className="lg:hidden fixed top-0 inset-x-0 z-40 flex items-center gap-3 px-4 h-14 shadow-md" style={sidebarStyle}>
         <button
           onClick={() => setOpen(true)}
-          className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+          className="p-1.5 rounded-lg transition-colors"
+          style={{ backgroundColor: "transparent" }}
+          onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "var(--sidebar-hover-bg)")}
+          onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
           aria-label="Open menu"
         >
-          <svg
-            className="w-5 h-5"
-            fill="none"
-            viewBox="0 0 24 24"
-            strokeWidth={2}
-            stroke="currentColor"
-          >
+          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
           </svg>
         </button>
@@ -172,8 +134,8 @@ export default function Sidebar({ displayName, displayEmail, displayRole, school
             // eslint-disable-next-line @next/next/no-img-element
             <img src={schoolLogoUrl} alt="" className="w-7 h-7 rounded-md object-contain shrink-0" />
           ) : (
-            <div className="w-7 h-7 rounded-md bg-[#1a3f8a] flex items-center justify-center shrink-0">
-              <span className="text-white font-bold text-sm select-none">{schoolLetter}</span>
+            <div className="w-7 h-7 rounded-md flex items-center justify-center shrink-0" style={{ backgroundColor: "var(--sidebar-active-bg)" }}>
+              <span className="font-bold text-sm select-none" style={{ color: "var(--sidebar-active-text)" }}>{schoolLetter}</span>
             </div>
           )}
           <span className="text-sm font-bold truncate">{schoolName}</span>
@@ -192,30 +154,30 @@ export default function Sidebar({ displayName, displayEmail, displayRole, school
       {/* ── Sidebar panel ──────────────────────────────────── */}
       <aside
         className={[
-          "fixed inset-y-0 left-0 z-50 w-60 flex flex-col bg-[#0f1225] text-white transition-transform duration-300 ease-in-out",
+          "fixed inset-y-0 left-0 z-50 w-60 flex flex-col transition-transform duration-300 ease-in-out",
           "lg:static lg:translate-x-0 lg:w-60 lg:shrink-0",
           open ? "translate-x-0" : "-translate-x-full",
         ].join(" ")}
+        style={sidebarStyle}
       >
         {/* School name */}
-        <div className="flex items-center gap-3 px-5 py-5 border-b border-white/10">
+        <div className="flex items-center gap-3 px-5 py-5 border-b" style={borderStyle}>
           {schoolLogoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={schoolLogoUrl} alt="" className="w-9 h-9 rounded-lg object-contain shrink-0" />
           ) : (
-            <div className="w-9 h-9 rounded-lg bg-[#1a3f8a] flex items-center justify-center shrink-0">
-              <span className="text-white font-bold text-base select-none">{schoolLetter}</span>
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0" style={{ backgroundColor: "var(--sidebar-active-bg)" }}>
+              <span className="font-bold text-base select-none" style={{ color: "var(--sidebar-active-text)" }}>{schoolLetter}</span>
             </div>
           )}
           <div className="min-w-0">
-            <p className="text-sm font-bold text-white truncate leading-tight">
-              {schoolName}
-            </p>
+            <p className="text-sm font-bold truncate leading-tight">{schoolName}</p>
           </div>
           {/* Close button — mobile only */}
           <button
             onClick={closeSidebar}
-            className="ml-auto lg:hidden p-1 rounded hover:bg-white/10 text-white/60 hover:text-white transition-colors"
+            className="ml-auto lg:hidden p-1 rounded transition-colors"
+            style={mutedStyle}
             aria-label="Close menu"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -233,32 +195,31 @@ export default function Sidebar({ displayName, displayEmail, displayRole, school
                 key={link.href}
                 href={link.href}
                 onClick={closeSidebar}
-                className={[
-                  "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors group",
-                  active
-                    ? "bg-[#1a3f8a] text-white"
-                    : "text-white/60 hover:text-white hover:bg-white/10",
-                ].join(" ")}
+                className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors"
+                style={linkStyle(active)}
+                onMouseEnter={(e) => {
+                  if (!active) e.currentTarget.style.backgroundColor = "var(--sidebar-hover-bg)";
+                  if (!active) e.currentTarget.style.color = "var(--sidebar-text)";
+                }}
+                onMouseLeave={(e) => {
+                  if (!active) e.currentTarget.style.backgroundColor = "transparent";
+                  if (!active) e.currentTarget.style.color = "var(--sidebar-text-muted)";
+                }}
               >
                 <span className="text-base leading-none shrink-0">{link.emoji}</span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate font-medium">{link.labelEn}</span>
-                  <span
-                    className={[
-                      "block truncate text-xs font-myanmar leading-tight mt-0.5",
-                      active ? "text-white/70" : "text-white/35 group-hover:text-white/50",
-                    ].join(" ")}
-                  >
+                  <span className="block truncate text-xs font-myanmar leading-tight mt-0.5" style={linkMutedLabelStyle(active)}>
                     {link.labelMm}
                   </span>
                 </span>
                 {link.href === "/admin/payments" && pendingCount > 0 && (
-                  <span className="ml-1 shrink-0 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-[#b07d2a] text-white text-xs font-bold leading-none">
+                  <span className="ml-1 shrink-0 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-white text-xs font-bold leading-none" style={{ backgroundColor: "var(--sidebar-badge-bg)" }}>
                     {pendingCount > 99 ? "99+" : pendingCount}
                   </span>
                 )}
                 {link.href === "/admin/students" && pendingStudentCount > 0 && (
-                  <span className="ml-1 shrink-0 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-[#b07d2a] text-white text-xs font-bold leading-none">
+                  <span className="ml-1 shrink-0 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full text-white text-xs font-bold leading-none" style={{ backgroundColor: "var(--sidebar-badge-bg)" }}>
                     {pendingStudentCount > 99 ? "99+" : pendingStudentCount}
                   </span>
                 )}
@@ -268,21 +229,15 @@ export default function Sidebar({ displayName, displayEmail, displayRole, school
         </nav>
 
         {/* User + logout */}
-        <div className="px-3 py-4 border-t border-white/10 space-y-1">
+        <div className="px-3 py-4 border-t space-y-1" style={borderStyle}>
           <div className="flex items-center gap-3 px-3 py-2">
-            <div className="w-8 h-8 rounded-full bg-[#1a3f8a] flex items-center justify-center shrink-0 text-white text-xs font-bold uppercase">
+            <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-xs font-bold uppercase" style={{ backgroundColor: "var(--sidebar-active-bg)", color: "var(--sidebar-active-text)" }}>
               {avatarLetter}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-white truncate leading-tight">
-                {displayName}
-              </p>
-              <p className="text-xs text-white/40 truncate leading-tight mt-0.5">
-                {displayEmail}
-              </p>
-              <p className="text-xs text-white/30 capitalize leading-tight">
-                {displayRole}
-              </p>
+              <p className="text-sm font-medium truncate leading-tight">{displayName}</p>
+              <p className="text-xs truncate leading-tight mt-0.5" style={mutedStyle}>{displayEmail}</p>
+              <p className="text-xs capitalize leading-tight" style={{ color: "var(--sidebar-text-muted)", opacity: 0.6 }}>{displayRole}</p>
             </div>
           </div>
           <LogoutButton />

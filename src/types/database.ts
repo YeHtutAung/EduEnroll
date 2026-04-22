@@ -123,11 +123,20 @@ export interface Tenant {
   created_at: string;
 }
 
-export type TemplateId = "minimal" | "bold" | "warm" | "professional";
+export type AdminTheme = "minimal" | "bold" | "warm" | "professional";
+
+export type TemplateId =
+  | "ls-classic"
+  | "ls-modern"
+  | "ls-warm"
+  | "ev-luxury"
+  | "ev-festival"
+  | "ev-corporate";
 
 export interface TenantAppearance {
   id: string;
   tenant_id: string;
+  admin_theme: AdminTheme;
   template_id: TemplateId;
   primary_color: string;
   tagline: string | null;
@@ -138,7 +147,8 @@ export interface TenantAppearance {
 }
 
 export const DEFAULT_APPEARANCE: Omit<TenantAppearance, "id" | "tenant_id" | "updated_at"> = {
-  template_id: "minimal",
+  admin_theme: "professional",
+  template_id: "ls-classic",
   primary_color: "#2563eb",
   tagline: null,
   cta_button_text: "Enroll Now",

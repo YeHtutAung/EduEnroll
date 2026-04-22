@@ -16,6 +16,7 @@ export interface TemplateClass {
   end_time?: string | null;
   venue?: string | null;
   image_url?: string | null;
+  max_tickets_per_person?: number;
 }
 
 export interface TemplateIntake {
@@ -43,6 +44,17 @@ export interface TemplateProps {
   labels: TemplateLabels;
   slug: string;
   onSelectClass: (classId: string) => void;
+}
+
+export interface EventTemplateProps {
+  appearance: Omit<TenantAppearance, "id" | "tenant_id" | "updated_at">;
+  intake: TemplateIntake;
+  classes: TemplateClass[];
+  labels: TemplateLabels;
+  slug: string;
+  currency: string;
+  onSelect: (classId: string, quantity: number) => void;
+  onCartCheckout: (cartItems: { class_id: string; level: string; quantity: number; fee_amount: number; image_url: string | null }[]) => void;
 }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────

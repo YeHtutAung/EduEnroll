@@ -26,13 +26,18 @@ export async function PUT(request: Request) {
   const body = await request.json().catch(() => null);
   if (!body) return NextResponse.json({ error: "Invalid JSON." }, { status: 400 });
 
-  const VALID_TEMPLATES = ["minimal", "bold", "warm", "professional"];
+  const VALID_TEMPLATES = ["ls-classic", "ls-modern", "ls-warm", "ev-luxury", "ev-festival", "ev-corporate"];
   if (body.template_id && !VALID_TEMPLATES.includes(body.template_id)) {
     return NextResponse.json({ error: "Invalid template_id." }, { status: 400 });
   }
 
+  const VALID_ADMIN_THEMES = ["minimal", "bold", "warm", "professional"];
+  if (body.admin_theme && !VALID_ADMIN_THEMES.includes(body.admin_theme)) {
+    return NextResponse.json({ error: "Invalid admin_theme." }, { status: 400 });
+  }
+
   const patch: Record<string, unknown> = { tenant_id: tenantId, updated_at: new Date().toISOString() };
-  const allowed = ["template_id", "primary_color", "tagline", "cta_button_text", "logo_url", "hero_url"];
+  const allowed = ["admin_theme", "template_id", "primary_color", "tagline", "cta_button_text", "logo_url", "hero_url"];
   for (const key of allowed) {
     if (key in body) patch[key] = body[key];
   }

@@ -44,6 +44,7 @@ interface PublicIntakeResponse {
   classes: PublicClassView[];
   labels: TenantLabelsView;
   appearance: Omit<TenantAppearance, "id" | "tenant_id" | "updated_at">;
+  school_name: string;
 }
 
 // ─── Slug validation ─────────────────────────────────────────────────────────
@@ -83,10 +84,10 @@ export async function GET(
   // ── Fetch tenant labels ────────────────────────────────────────
   const { data: tenantRow } = (await supabase
     .from("tenants")
-    .select("org_type, currency, label_intake, label_class, label_student, label_seat, label_fee")
+    .select("name, org_type, currency, label_intake, label_class, label_student, label_seat, label_fee")
     .eq("id", tenantId)
     .single()) as {
-    data: { org_type: string; currency: string; label_intake: string; label_class: string; label_student: string; label_seat: string; label_fee: string } | null;
+    data: { name: string; org_type: string; currency: string; label_intake: string; label_class: string; label_student: string; label_seat: string; label_fee: string } | null;
     error: unknown;
   };
   const labels: TenantLabelsView = {
@@ -140,7 +141,7 @@ export async function GET(
     }));
 
     return NextResponse.json(
-      { error: "Enrollment for this intake is closed.", code: "INTAKE_CLOSED", intake, classes: closedPublicClasses, labels, appearance },
+      { error: "Enrollment for this intake is closed.", code: "INTAKE_CLOSED", intake, classes: closedPublicClasses, labels, appearance, school_name: tenantRow?.name ?? "" },
       { status: 410 },
     );
   }
@@ -206,6 +207,7 @@ export async function GET(
     classes: publicClasses,
     labels,
     appearance,
+    school_name: tenantRow?.name ?? "",
   };
 
   return NextResponse.json(response);
