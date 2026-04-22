@@ -3,7 +3,10 @@
 import { Suspense, useEffect, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { formatCurrency, formatAmount } from "@/lib/utils";
-import type { ClassStatus } from "@/types/database";
+import type { ClassStatus, TenantAppearance } from "@/types/database";
+import { DEFAULT_APPEARANCE } from "@/types/database";
+import { MinimalTemplate, BoldTemplate, WarmTemplate, ProfessionalTemplate } from "@/components/enrollment/templates";
+import type { TemplateProps } from "@/components/enrollment/templates";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -53,6 +56,7 @@ interface ApiResponse {
   intake: PublicIntake;
   classes: PublicClass[];
   labels?: TenantLabels;
+  appearance?: Omit<TenantAppearance, "id" | "tenant_id" | "updated_at">;
 }
 
 interface ApiError {
@@ -1279,6 +1283,7 @@ function IntakeLandingContent() {
   const tl = data.labels ?? DEFAULT_LABELS;
   const isLanguageSchool = tl.orgType === "language_school";
   const intakeNameMM = isLanguageSchool ? getIntakeNameMM(intake.name, intake.year) : null;
+  const appearance = data.appearance ?? DEFAULT_APPEARANCE;
 
   // ── All classes full ──────────────────────────────────────────
   const allFull = allClasses.length > 0 && allClasses.every((c) => c.seat_remaining === 0 || c.status === "full");
@@ -1286,7 +1291,7 @@ function IntakeLandingContent() {
     return <AllClassesFullPage intake={intake} labels={tl} />;
   }
 
-  // ── Event org type → dark luxury theme ────────────────────────
+  // ── Event org type → dark luxury theme (unchanged) ────────────
   if (tl.orgType === "event") {
     return (
       <EventEnrollmentPage
@@ -1300,52 +1305,73 @@ function IntakeLandingContent() {
     );
   }
 
-  // ── Default theme (language_school, training_center) ──────────
-  return (
-    <div>
-      {/* Intake header */}
-      <div className="mb-8 text-center">
-        <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">{intake.name}</h1>
-        {intakeNameMM && (
-          <p className="font-myanmar mt-1 text-lg text-gray-600">{intakeNameMM}</p>
-        )}
-      </div>
+  // ── Template-based rendering (language_school, training_center) ─
+  const templateProps: TemplateProps = {
+    appearance,
+    intake,
+    classes,
+    labels: tl,
+    slug: params.slug,
+    onSelectClass: handleSelectClass,
+  };
 
-      {/* Track status link */}
-      <div className="mb-6 text-center">
-        <a
-          href={`/enroll/${params.slug}/status`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 text-sm font-medium text-[#1a3f8a] hover:underline"
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15a2.25 2.25 0 012.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z" />
-          </svg>
-          Track your enrollment status
-          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-          </svg>
-        </a>
-      </div>
+  // Wrap templates in -mx/-my to break out of the public layout's padding
+  const templateWrapper = (node: React.ReactNode) => (
+    <div className="-mx-4 sm:-mx-6 -my-6 sm:-my-10">{node}</div>
+  );
 
-      {/* Class grid */}
-      {classes.length === 0 ? (
-        <div className="py-16 text-center">
-          <p className="text-lg text-gray-500">Nothing available yet. Please check back soon.</p>
-          {isLanguageSchool && (
-            <p className="font-myanmar mt-1 text-gray-400">
-              ဤသင်တန်းအတွက် အတန်းများ မရှိသေးပါ
-            </p>
+  if (appearance.template_id === "bold") {
+    return templateWrapper(<BoldTemplate {...templateProps} />);
+  }
+  if (appearance.template_id === "warm") {
+    return templateWrapper(<WarmTemplate {...templateProps} />);
+  }
+  if (appearance.template_id === "professional") {
+    return templateWrapper(<ProfessionalTemplate {...templateProps} />);
+  }
+
+  // Default: minimal (also handles legacy pages with no appearance record)
+  // For tenants that haven't configured appearance yet, keep the original
+  // layout if it was "language_school" with intakeNameMM, otherwise minimal.
+  if (!data.appearance) {
+    return (
+      <div>
+        <div className="mb-8 text-center">
+          <h1 className="text-2xl font-bold text-gray-900 sm:text-3xl">{intake.name}</h1>
+          {intakeNameMM && (
+            <p className="font-myanmar mt-1 text-lg text-gray-600">{intakeNameMM}</p>
           )}
         </div>
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
-          {classes.map((cls) => (
-            <ClassCard key={cls.id} cls={cls} onSelect={handleSelectClass} labels={tl} />
-          ))}
+        <div className="mb-6 text-center">
+          <a
+            href={`/enroll/${params.slug}/status`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-[#1a3f8a] hover:underline"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15a2.25 2.25 0 012.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z" />
+            </svg>
+            Track your enrollment status
+          </a>
         </div>
-      )}
-    </div>
-  );
+        {classes.length === 0 ? (
+          <div className="py-16 text-center">
+            <p className="text-lg text-gray-500">Nothing available yet. Please check back soon.</p>
+            {isLanguageSchool && (
+              <p className="font-myanmar mt-1 text-gray-400">ဤသင်တန်းအတွက် အတန်းများ မရှိသေးပါ</p>
+            )}
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2">
+            {classes.map((cls) => (
+              <ClassCard key={cls.id} cls={cls} onSelect={handleSelectClass} labels={tl} />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return templateWrapper(<MinimalTemplate {...templateProps} />);
 }

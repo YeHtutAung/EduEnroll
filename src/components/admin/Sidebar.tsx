@@ -96,6 +96,13 @@ export default function Sidebar({ displayName, displayEmail, displayRole, school
       emoji: "📖",
     },
     {
+      href: "/admin/appearance",
+      labelEn: "Appearance",
+      labelMm: "ပုံစံထိန်းသိမ်း",
+      emoji: "🎨",
+      ownerOnly: true,
+    },
+    {
       href: "/admin/settings",
       labelEn: "Settings",
       labelMm: "ဆက်တင်",

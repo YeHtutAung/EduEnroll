@@ -123,6 +123,29 @@ export interface Tenant {
   created_at: string;
 }
 
+export type TemplateId = "minimal" | "bold" | "warm" | "professional";
+
+export interface TenantAppearance {
+  id: string;
+  tenant_id: string;
+  template_id: TemplateId;
+  primary_color: string;
+  tagline: string | null;
+  cta_button_text: string;
+  logo_url: string | null;
+  hero_url: string | null;
+  updated_at: string;
+}
+
+export const DEFAULT_APPEARANCE: Omit<TenantAppearance, "id" | "tenant_id" | "updated_at"> = {
+  template_id: "minimal",
+  primary_color: "#2563eb",
+  tagline: null,
+  cta_button_text: "Enroll Now",
+  logo_url: null,
+  hero_url: null,
+};
+
 export interface TelegramAdminRequest {
   id: string;
   tenant_id: string;
