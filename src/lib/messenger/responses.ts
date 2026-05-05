@@ -1,7 +1,7 @@
 // ─── Messenger bot response handlers ─────────────────────────────────────────
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { formatMMK } from "@/lib/utils";
+import { formatCurrency } from "@/lib/utils";
 import { sendTextMessage, sendQuickReplies, sendButtonTemplate } from "./send";
 import type { Enrollment, Class, Payment, BankAccount, MenuButton } from "@/types/database";
 
@@ -175,16 +175,17 @@ function intakeToSlug(slug: string | null, name: string, year: number): string {
   return `${month}-${year}`;
 }
 
-async function getTenantInfo(tenantId: string): Promise<{ orgType: string; menuButtons: MenuButton[] | null }> {
+async function getTenantInfo(tenantId: string): Promise<{ orgType: string; menuButtons: MenuButton[] | null; currency: string }> {
   const supabase = createAdminClient();
   const { data } = await supabase
     .from("tenants")
-    .select("org_type, menu_buttons")
+    .select("org_type, menu_buttons, currency")
     .eq("id", tenantId)
-    .single() as { data: { org_type: string; menu_buttons: MenuButton[] | null } | null; error: unknown };
+    .single() as { data: { org_type: string; menu_buttons: MenuButton[] | null; currency: string } | null; error: unknown };
   return {
     orgType: data?.org_type ?? "language_school",
     menuButtons: data?.menu_buttons ?? null,
+    currency: data?.currency ?? "MMK",
   };
 }
 
@@ -312,7 +313,7 @@ export async function sendFees(
   pageToken: string,
 ): Promise<void> {
   const supabase = createAdminClient();
-  const { orgType, menuButtons: customButtons } = await getTenantInfo(tenantId);
+  const { orgType, menuButtons: customButtons, currency } = await getTenantInfo(tenantId);
   const l = getLabels(orgType);
 
   // Find the latest open intake
@@ -336,12 +337,12 @@ export async function sendFees(
 
   const { data: classes } = await supabase
     .from("classes")
-    .select("level, fee_mmk")
+    .select("level, fee_amount")
     .eq("intake_id", intake.id)
     .eq("tenant_id", tenantId)
     .in("status", ["open", "full"])
     .order("level") as {
-    data: Pick<Class, "level" | "fee_mmk">[] | null;
+    data: Pick<Class, "level" | "fee_amount">[] | null;
     error: unknown;
   };
 
@@ -358,7 +359,7 @@ export async function sendFees(
 
   let msg = `💰 ${l.feesTitle.mm} / ${l.feesTitle.en}\n📋 ${intake.name}\n\n`;
   for (const c of classes) {
-    msg += `${l.levelPrefix}${c.level}: ${formatMMK(c.fee_mmk)}\n`;
+    msg += `${l.levelPrefix}${c.level}: ${formatCurrency(c.fee_amount, currency)}\n`;
   }
 
   const buttons = getMenuButtons(orgType, customButtons);
@@ -570,16 +571,16 @@ export async function sendStatusCheck(
   pageToken: string,
 ): Promise<void> {
   const supabase = createAdminClient();
-  const { orgType } = await getTenantInfo(tenantId);
+  const { orgType, currency } = await getTenantInfo(tenantId);
   const l = getLabels(orgType);
 
   const { data: enrollment } = (await supabase
     .from("enrollments")
-    .select("*, classes(level, fee_mmk)")
+    .select("*, classes(level, fee_amount)")
     .eq("enrollment_ref", ref)
     .eq("tenant_id", tenantId)
     .single()) as {
-    data: (Enrollment & { classes: Pick<Class, "level" | "fee_mmk"> | null }) | null;
+    data: (Enrollment & { classes: Pick<Class, "level" | "fee_amount"> | null }) | null;
     error: unknown;
   };
 
@@ -644,7 +645,7 @@ export async function sendStatusCheck(
 
     if (enrollment.classes) {
       reply += `${l.statusLevelLabel.en} / ${l.statusLevelLabel.mm}: ${l.levelPrefix}${enrollment.classes.level}\n`;
-      reply += `${l.statusFeeLabel.en} / ${l.statusFeeLabel.mm}: ${formatMMK(enrollment.classes.fee_mmk)}\n`;
+      reply += `${l.statusFeeLabel.en} / ${l.statusFeeLabel.mm}: ${formatCurrency(enrollment.classes.fee_amount, currency)}\n`;
     }
 
     reply += `\nStatus: ${statusLabel.en}\nအခြေအနေ: ${statusLabel.mm}`;
@@ -671,9 +672,10 @@ export async function sendBuyTickets(
 
   const { data: tenant } = await supabase
     .from("tenants")
-    .select("subdomain")
+    .select("subdomain, currency")
     .eq("id", tenantId)
-    .single() as { data: { subdomain: string } | null; error: unknown };
+    .single() as { data: { subdomain: string; currency: string } | null; error: unknown };
+  const currency = tenant?.currency ?? "MMK";
 
   const { data: intake } = await supabase
     .from("intakes")
@@ -695,12 +697,12 @@ export async function sendBuyTickets(
 
   const { data: classes } = await supabase
     .from("classes")
-    .select("level, fee_mmk")
+    .select("level, fee_amount")
     .eq("intake_id", intake.id)
     .eq("tenant_id", tenantId)
     .in("status", ["open", "full"])
     .order("level") as {
-    data: Pick<Class, "level" | "fee_mmk">[] | null;
+    data: Pick<Class, "level" | "fee_amount">[] | null;
     error: unknown;
   };
 
@@ -711,7 +713,7 @@ export async function sendBuyTickets(
   let msg = `Ticket ဝယ်ယူရန်\n\nလက်မှတ်အမျိုးအစားများ\n`;
   if (classes && classes.length > 0) {
     for (const c of classes) {
-      msg += `${c.level} – ${formatMMK(c.fee_mmk)}\n`;
+      msg += `${c.level} – ${formatCurrency(c.fee_amount, currency)}\n`;
     }
   }
   msg += `ဝယ်ယူလိုသော Ticket အမျိုးအစားကို ရွေးချယ်ပြီး ဆက်လက်လုပ်ဆောင်နိုင်ပါသည်။\n\n`;
@@ -721,7 +723,7 @@ export async function sendBuyTickets(
   msg += `Buy Tickets\n\nTicket Types:\n`;
   if (classes && classes.length > 0) {
     for (const c of classes) {
-      msg += `${c.level} – ${formatMMK(c.fee_mmk)}\n`;
+      msg += `${c.level} – ${formatCurrency(c.fee_amount, currency)}\n`;
     }
   }
   msg += `Please select your preferred ticket type to continue.\n\n`;

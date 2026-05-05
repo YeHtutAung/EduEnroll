@@ -199,7 +199,7 @@ export function enrollmentConfirmationEmail(params: {
   studentName: string;
   enrollmentRef: string;
   classLevel: string;
-  feeMmk: number;
+  feeAmount: number;
   feeFormatted: string;
   paymentUrl: string;
   statusUrl: string;
@@ -207,9 +207,9 @@ export function enrollmentConfirmationEmail(params: {
   tenantName?: string;
   logoUrl?: string;
 }): { subject: string; html: string } {
-  const { studentName, enrollmentRef, classLevel, feeMmk, feeFormatted, paymentUrl, statusUrl, orgType, tenantName, logoUrl } = params;
+  const { studentName, enrollmentRef, classLevel, feeAmount, feeFormatted, paymentUrl, statusUrl, orgType, tenantName, logoUrl } = params;
   const l = getLabels(orgType);
-  const feeMm = toMmFee(feeMmk);
+  const feeMm = toMmFee(feeAmount);
 
   // Build ticket rows: split comma-separated items into individual rows
   const ticketItems = classLevel.split(",").map((s) => cleanClassLevel(s.trim())).filter(Boolean);

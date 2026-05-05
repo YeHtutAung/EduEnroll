@@ -126,7 +126,7 @@ CLASS_RES=$(curl -s -X POST "${SB_URL}/rest/v1/classes" \
     \"intake_id\": \"${INTAKE_ID}\",
     \"tenant_id\": \"${TENANT_A}\",
     \"level\": \"N5\",
-    \"fee_mmk\": 300000,
+    \"fee_amount\": 300000,
     \"seat_total\": 30,
     \"seat_remaining\": 30,
     \"status\": \"open\"

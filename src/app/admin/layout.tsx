@@ -79,17 +79,19 @@ export default async function AdminLayout({
     seat: "Seat",
     fee: "Fee",
     orgType: "language_school",
+    currency: "MMK",
   };
   if (profile.tenant_id) {
     const { data: tenant } = (await supabase
       .from("tenants")
-      .select("name, logo_url, org_type, label_intake, label_class, label_student, label_seat, label_fee")
+      .select("name, logo_url, org_type, currency, label_intake, label_class, label_student, label_seat, label_fee")
       .eq("id", profile.tenant_id)
       .single()) as {
       data: {
         name: string;
         logo_url: string | null;
         org_type: string;
+        currency: string;
         label_intake: string;
         label_class: string;
         label_student: string;
@@ -107,6 +109,7 @@ export default async function AdminLayout({
       tenantLabels.seat = tenant.label_seat || "Seat";
       tenantLabels.fee = tenant.label_fee || "Fee";
       tenantLabels.orgType = tenant.org_type || "language_school";
+      tenantLabels.currency = tenant.currency || "MMK";
     }
   }
 

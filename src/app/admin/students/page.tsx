@@ -7,7 +7,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useRole } from "@/components/admin/RoleContext";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
 import { mm } from "@/lib/mm-labels";
-import { formatMMKSimple } from "@/lib/utils";
+import { formatCurrencySimple } from "@/lib/utils";
 import type { EnrollmentStatus, Intake, JlptLevel, PaymentStatus } from "@/types/database";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -23,9 +23,9 @@ interface StudentRow {
   enrolled_at: string;
   class_level: JlptLevel;
   intake_name: string;
-  fee_mmk: number;
+  fee_amount: number;
   quantity: number;
-  items?: { class_level: string; quantity: number; fee_mmk: number; subtotal_mmk: number }[] | null;
+  items?: { class_level: string; quantity: number; fee_amount: number; subtotal: number }[] | null;
   telegram_linked: boolean;
   telegram_phone: string | null;
   telegram_channel_name: string | null;
@@ -52,12 +52,12 @@ interface StudentDetail {
   enrolled_at: string;
   class_level: string | null;
   intake_name: string | null;
-  fee_mmk: number | null;
-  items?: { class_level: string; quantity: number; fee_mmk: number; subtotal_mmk: number }[] | null;
+  fee_amount: number | null;
+  items?: { class_level: string; quantity: number; fee_amount: number; subtotal: number }[] | null;
   payment: {
     id: string;
     status: PaymentStatus;
-    amount_mmk: number;
+    amount: number;
     bank_reference: string | null;
     payer_institution: string | null;
     submitted_at: string;
@@ -388,7 +388,7 @@ function StudentDetailModal({
                               />
                               <span className="text-gray-800">{item.class_level}</span>
                               <span className="text-gray-400">×{item.quantity}</span>
-                              <span className="ml-auto text-gray-600">{formatMMKSimple(item.subtotal_mmk)}</span>
+                              <span className="ml-auto text-gray-600">{formatCurrencySimple(item.subtotal, tl.currency)}</span>
                             </div>
                           ))}
                         </div>
@@ -413,8 +413,8 @@ function StudentDetailModal({
                   <DetailRow
                     label={tl.fee}
                     value={
-                      detail.fee_mmk != null
-                        ? <span className="font-semibold text-[#1a3f8a]">{formatMMKSimple(detail.fee_mmk)}</span>
+                      detail.fee_amount != null
+                        ? <span className="font-semibold text-[#1a3f8a]">{formatCurrencySimple(detail.fee_amount, tl.currency)}</span>
                         : "—"
                     }
                   />
@@ -430,7 +430,7 @@ function StudentDetailModal({
                       </div>
                       <div className="space-y-1.5 text-sm">
                         <p className="text-gray-500">
-                          Amount: <span className="font-medium text-gray-800">{formatMMKSimple(detail.payment.amount_mmk)}</span>
+                          Amount: <span className="font-medium text-gray-800">{formatCurrencySimple(detail.payment.amount, tl.currency)}</span>
                         </p>
                         {detail.payment.payer_institution && (
                           <p className="text-gray-500">
@@ -830,7 +830,7 @@ export default function StudentsPage() {
         "Ref",
         tl.class,
         "Qty",
-        `${tl.fee} (MMK)`,
+        `${tl.fee} (${tl.currency})`,
         tl.intake,
         "Status",
         "Date",
@@ -856,7 +856,7 @@ export default function StudentsPage() {
                 s.enrollment_ref,
                 ci.class_level,
                 ci.quantity,
-                ci.subtotal_mmk,
+                ci.subtotal,
                 s.intake_name,
                 s.status,
                 fmtDateMMT(s.enrolled_at),
@@ -867,7 +867,7 @@ export default function StudentsPage() {
                 null, ...emptyFormCells, null,
                 ci.class_level,
                 ci.quantity,
-                ci.subtotal_mmk,
+                ci.subtotal,
                 null, null, null, null,
               ]);
             }
@@ -879,7 +879,7 @@ export default function StudentsPage() {
             s.enrollment_ref,
             s.class_level,
             s.quantity,
-            s.fee_mmk,
+            s.fee_amount,
             s.intake_name,
             s.status,
             fmtDateMMT(s.enrolled_at),
@@ -1155,7 +1155,7 @@ export default function StudentsPage() {
           const formHeaders = displayFields.length > 0
             ? displayFields.map((f) => f.field_label)
             : ["Name", "Phone", "Email"];
-          const baseHeaders = ["No.", ...formHeaders, "Ref", tl.class, "Qty", `${tl.fee} (MMK)`, tl.intake, "Status"];
+          const baseHeaders = ["No.", ...formHeaders, "Ref", tl.class, "Qty", `${tl.fee} (${tl.currency})`, tl.intake, "Status"];
           const allHeaders = isLanguageSchool ? [...baseHeaders, "TG", "TG Phone", "Channel", "Date"] : [...baseHeaders, "Date"];
 
           return (
@@ -1266,14 +1266,14 @@ export default function StudentsPage() {
                             {student.items && student.items.length > 0 ? (
                               <div className="space-y-0.5">
                                 {student.items.map((ci, i) => (
-                                  <div key={i} className="text-gray-600">{formatMMKSimple(ci.subtotal_mmk)}</div>
+                                  <div key={i} className="text-gray-600">{formatCurrencySimple(ci.subtotal, tl.currency)}</div>
                                 ))}
                                 <div className="border-t border-gray-200 pt-0.5 font-semibold text-gray-800">
-                                  {formatMMKSimple(student.fee_mmk)}
+                                  {formatCurrencySimple(student.fee_amount, tl.currency)}
                                 </div>
                               </div>
                             ) : (
-                              <span className="text-gray-700">{formatMMKSimple(student.fee_mmk)}</span>
+                              <span className="text-gray-700">{formatCurrencySimple(student.fee_amount, tl.currency)}</span>
                             )}
                           </td>
 

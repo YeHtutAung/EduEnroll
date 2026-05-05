@@ -9,6 +9,7 @@ export interface TenantLabels {
   seat: string;
   fee: string;
   orgType: string;
+  currency: string;
 }
 
 const DEFAULT_LABELS: TenantLabels = {
@@ -18,6 +19,7 @@ const DEFAULT_LABELS: TenantLabels = {
   seat: "Seat",
   fee: "Fee",
   orgType: "language_school",
+  currency: "MMK",
 };
 
 const TenantLabelsContext = createContext<TenantLabels>(DEFAULT_LABELS);

@@ -14,13 +14,13 @@ type ClassRow = {
   level: string;
   seat_remaining: number;
   seat_total: number;
-  fee_mmk: number;
+  fee_amount: number;
 };
 
 type PaymentRow = {
   enrollment_id: string;
   status: string;
-  amount_mmk: number;
+  amount: number;
   created_at: string;
 };
 
@@ -59,7 +59,7 @@ export async function GET(request: NextRequest) {
 
     supabase
       .from("classes")
-      .select("id, level, seat_remaining, seat_total, fee_mmk")
+      .select("id, level, seat_remaining, seat_total, fee_amount")
       .eq("tenant_id", tenantId) as unknown as Promise<{
       data: ClassRow[] | null;
       error: unknown;
@@ -67,7 +67,7 @@ export async function GET(request: NextRequest) {
 
     supabase
       .from("payments")
-      .select("enrollment_id, status, amount_mmk, created_at")
+      .select("enrollment_id, status, amount, created_at")
       .eq("tenant_id", tenantId) as unknown as Promise<{
       data: PaymentRow[] | null;
       error: unknown;
@@ -221,7 +221,7 @@ export async function GET(request: NextRequest) {
     if (classId) {
       const cls = classMap.get(classId);
       if (cls) {
-        revenueByLevel[cls.level] = (revenueByLevel[cls.level] ?? 0) + p.amount_mmk;
+        revenueByLevel[cls.level] = (revenueByLevel[cls.level] ?? 0) + p.amount;
       }
     } else {
       // Cart enrollment — split revenue proportionally by items
@@ -231,7 +231,7 @@ export async function GET(request: NextRequest) {
         for (const item of items) {
           const cls = classMap.get(item.class_id);
           if (cls) {
-            const share = Math.round((p.amount_mmk * item.quantity) / totalQty);
+            const share = Math.round((p.amount * item.quantity) / totalQty);
             revenueByLevel[cls.level] = (revenueByLevel[cls.level] ?? 0) + share;
           }
         }
@@ -282,7 +282,7 @@ export async function GET(request: NextRequest) {
     paymentCount > 0 ? Math.round((totalHours / paymentCount) * 10) / 10 : 0;
 
   // ─── 7. Top stats ────────────────────────────────────────────────────
-  const totalRevenue = filteredPayments.reduce((s, p) => s + p.amount_mmk, 0);
+  const totalRevenue = filteredPayments.reduce((s, p) => s + p.amount, 0);
 
   return NextResponse.json({
     daily_enrollments,
@@ -293,6 +293,6 @@ export async function GET(request: NextRequest) {
     avg_payment_hours,
     total_enrolled: totalEnrolled,
     confirmed_count: confirmedCount,
-    total_revenue_mmk: totalRevenue,
+    total_revenue: totalRevenue,
   });
 }

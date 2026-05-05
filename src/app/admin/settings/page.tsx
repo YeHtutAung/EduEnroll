@@ -516,8 +516,9 @@ function SettingsContent() {
   const [emailOnEnroll, setEmailOnEnroll] = useState(false);
   const [savingEmailToggle, setSavingEmailToggle] = useState(false);
 
-  // ── Payment mode ──────────────────────────────────────────────────────────
-  const [paymentMode, setPaymentMode] = useState<"bank_transfer" | "mmqr">("bank_transfer");
+  // ── Currency & Payment mode ──────────────────────────────────────────────
+  const [currency, setCurrency] = useState("MMK");
+  const [paymentMode, setPaymentMode] = useState<"bank_transfer" | "mmqr" | "stripe">("bank_transfer");
   const [mmqrProvider, setMmqrProvider] = useState<"abank" | "mmpay">("abank");
   const [savingPaymentMode, setSavingPaymentMode] = useState(false);
 
@@ -543,13 +544,14 @@ function SettingsContent() {
       // Fetch tenant name + logo + org labels
       const { data: tenant } = await supabase
         .from("tenants")
-        .select("name, logo_url, org_type, label_intake, label_class, label_student, label_seat, label_fee, auto_cancel_hours, email_on_enroll, payment_mode, mmqr_provider")
+        .select("name, logo_url, org_type, currency, label_intake, label_class, label_student, label_seat, label_fee, auto_cancel_hours, email_on_enroll, payment_mode, mmqr_provider")
         .eq("id", profile.tenant_id)
         .single() as {
         data: {
           name: string;
           logo_url: string | null;
           org_type: string;
+          currency: string;
           label_intake: string;
           label_class: string;
           label_student: string;
@@ -575,7 +577,8 @@ function SettingsContent() {
         });
         setAutoCancelHours(tenant.auto_cancel_hours ?? 4320);
         setEmailOnEnroll(tenant.email_on_enroll ?? false);
-        setPaymentMode((tenant.payment_mode as "bank_transfer" | "mmqr") ?? "bank_transfer");
+        setCurrency(tenant.currency || "MMK");
+        setPaymentMode((tenant.payment_mode as "bank_transfer" | "mmqr" | "stripe") ?? "bank_transfer");
         setMmqrProvider((tenant.mmqr_provider as "abank" | "mmpay") ?? "abank");
       }
     } catch {
@@ -767,7 +770,7 @@ function SettingsContent() {
     try {
       const { error } = await supabase
         .from("tenants")
-        .update({ payment_mode: paymentMode, mmqr_provider: mmqrProvider } as never)
+        .update({ currency, payment_mode: paymentMode, mmqr_provider: mmqrProvider } as never)
         .eq("id", tenantId);
       if (error) throw new Error((error as Error).message);
       toast.success("Payment mode saved.");
@@ -1224,6 +1227,23 @@ function SettingsContent() {
         subtitle="Choose how students pay for enrollments."
       >
         <div className="space-y-4">
+          {/* Currency */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1.5">Currency</label>
+            <select
+              value={currency}
+              onChange={(e) => setCurrency(e.target.value)}
+              className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
+            >
+              <option value="MMK">MMK — Myanmar Kyat</option>
+              <option value="SGD">SGD — Singapore Dollar</option>
+              <option value="USD">USD — US Dollar</option>
+              <option value="THB">THB — Thai Baht</option>
+              <option value="JPY">JPY — Japanese Yen</option>
+            </select>
+            <p className="mt-1 text-xs text-gray-400">This currency is used for all class fees and payment displays.</p>
+          </div>
+
           {/* Mode toggle */}
           <div className="flex gap-3">
             <button
@@ -1262,6 +1282,17 @@ function SettingsContent() {
                 </div>
               </div>
             </button>
+            <button
+              onClick={() => setPaymentMode("stripe")}
+              className={`flex-1 rounded-xl border-2 px-4 py-3 text-left transition-colors ${
+                paymentMode === "stripe"
+                  ? "border-[#1a3f8a] bg-[#1a3f8a]/5"
+                  : "border-gray-200 hover:border-gray-300"
+              }`}
+            >
+              <p className="font-semibold text-sm">Stripe</p>
+              <p className="text-xs text-gray-500 mt-0.5">Card Payment (SGD, USD, etc.)</p>
+            </button>
           </div>
 
           {/* Provider selector (only when MMQR) */}
@@ -1287,6 +1318,17 @@ function SettingsContent() {
               </svg>
               <p className="text-xs text-blue-700">
                 Bank accounts and receipt upload will be hidden from students. Only the MMQR payment button will be shown.
+              </p>
+            </div>
+          )}
+
+          {paymentMode === "stripe" && (
+            <div className="flex items-start gap-2 rounded-lg bg-purple-50 px-3 py-2.5">
+              <svg className="mt-0.5 h-4 w-4 shrink-0 text-purple-500" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 002.25-2.25V6.75A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25v10.5A2.25 2.25 0 004.5 19.5z" />
+              </svg>
+              <p className="text-xs text-purple-700">
+                Students will be redirected to Stripe Checkout to pay by card. Payment is auto-confirmed — no manual verification needed.
               </p>
             </div>
           )}
@@ -2063,7 +2105,7 @@ function SettingsContent() {
       </SectionCard>
 
       {/* ── Section 5: Enrollment Bot ─────────────────────────────────── */}
-      <SectionCard title="Enrollment Bot" subtitle="Telegram bot for student notifications, phone verification, and channel invites.">
+      <SectionCard title="Enrollment Bot" subtitle="Telegram bot for student enrollment notifications, phone verification, and channel invites.">
         {tgLoading ? (
           <div className="space-y-3">
             <Pulse className="h-6 w-48" />
