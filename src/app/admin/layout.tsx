@@ -7,8 +7,9 @@ import { RoleProvider } from "@/components/admin/RoleContext";
 import { TenantLabelsProvider } from "@/components/admin/TenantLabelsContext";
 import type { TenantLabels } from "@/components/admin/TenantLabelsContext";
 import { ToastProvider } from "@/components/ui/Toast";
-import type { User, UserRole } from "@/types/database";
+import type { User, UserRole, AdminTheme } from "@/types/database";
 import { extractSubdomainFromHost } from "@/lib/tenant";
+import { getThemeTokens, themeToCSSVars } from "@/lib/adminThemes";
 
 export default async function AdminLayout({
   children,
@@ -81,6 +82,20 @@ export default async function AdminLayout({
     orgType: "language_school",
     currency: "MMK",
   };
+  let adminTheme: AdminTheme = "professional";
+  if (profile.tenant_id) {
+    const { data: appearanceRow } = (await supabase
+      .from("tenant_appearance")
+      .select("admin_theme")
+      .eq("tenant_id", profile.tenant_id)
+      .maybeSingle()) as { data: { admin_theme: string } | null; error: unknown };
+    if (appearanceRow?.admin_theme) {
+      adminTheme = appearanceRow.admin_theme as AdminTheme;
+    }
+  }
+  const themeTokens = getThemeTokens(adminTheme);
+  const cssVars = themeToCSSVars(themeTokens);
+
   if (profile.tenant_id) {
     const { data: tenant } = (await supabase
       .from("tenants")
@@ -118,7 +133,10 @@ export default async function AdminLayout({
       <TenantLabelsProvider labels={tenantLabels}>
       <ToastProvider>
         {/* flex-row: sidebar + content side-by-side on lg+; stacked on mobile */}
-        <div className="flex h-screen bg-[#f0f4ff] overflow-hidden">
+        <div
+          className="flex h-screen overflow-hidden"
+          style={{ ...cssVars as React.CSSProperties, backgroundColor: themeTokens.pageBg }}
+        >
           <Sidebar
             displayName={displayName}
             displayEmail={displayEmail}

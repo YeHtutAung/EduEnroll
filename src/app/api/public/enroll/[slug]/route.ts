@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import { formatCurrencySimple } from "@/lib/utils";
-import type { Intake, Class } from "@/types/database";
+import type { Intake, Class, TenantAppearance } from "@/types/database";
+import { DEFAULT_APPEARANCE } from "@/types/database";
 
 // Always fetch live data — intake/class availability changes in real time
 export const dynamic = "force-dynamic";
@@ -42,6 +43,8 @@ interface PublicIntakeResponse {
   intake: Pick<Intake, "id" | "name" | "year" | "status" | "hero_image_url">;
   classes: PublicClassView[];
   labels: TenantLabelsView;
+  appearance: Omit<TenantAppearance, "id" | "tenant_id" | "updated_at">;
+  school_name: string;
 }
 
 // ─── Slug validation ─────────────────────────────────────────────────────────
@@ -69,13 +72,22 @@ export async function GET(
 
   const supabase = createAdminClient();
 
+  // ── Fetch tenant appearance ────────────────────────────────────
+  const { data: appearanceRow } = (await supabase
+    .from("tenant_appearance")
+    .select("template_id, primary_color, tagline, cta_button_text, logo_url, hero_url")
+    .eq("tenant_id", tenantId)
+    .maybeSingle()) as { data: Omit<TenantAppearance, "id" | "tenant_id" | "updated_at"> | null; error: unknown };
+
+  const appearance = appearanceRow ?? DEFAULT_APPEARANCE;
+
   // ── Fetch tenant labels ────────────────────────────────────────
   const { data: tenantRow } = (await supabase
     .from("tenants")
-    .select("org_type, currency, label_intake, label_class, label_student, label_seat, label_fee")
+    .select("name, org_type, currency, label_intake, label_class, label_student, label_seat, label_fee")
     .eq("id", tenantId)
     .single()) as {
-    data: { org_type: string; currency: string; label_intake: string; label_class: string; label_student: string; label_seat: string; label_fee: string } | null;
+    data: { name: string; org_type: string; currency: string; label_intake: string; label_class: string; label_student: string; label_seat: string; label_fee: string } | null;
     error: unknown;
   };
   const labels: TenantLabelsView = {
@@ -129,7 +141,7 @@ export async function GET(
     }));
 
     return NextResponse.json(
-      { error: "Enrollment for this intake is closed.", code: "INTAKE_CLOSED", intake, classes: closedPublicClasses, labels },
+      { error: "Enrollment for this intake is closed.", code: "INTAKE_CLOSED", intake, classes: closedPublicClasses, labels, appearance, school_name: tenantRow?.name ?? "" },
       { status: 410 },
     );
   }
@@ -194,6 +206,8 @@ export async function GET(
     intake,
     classes: publicClasses,
     labels,
+    appearance,
+    school_name: tenantRow?.name ?? "",
   };
 
   return NextResponse.json(response);

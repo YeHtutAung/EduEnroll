@@ -4,6 +4,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
 import { formatCurrencySimple, formatAmount } from "@/lib/utils";
 import QRPaymentModal from "@/components/payments/QRPaymentModal";
+import BrandHeader from "@/components/enrollment/BrandHeader";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -997,6 +998,9 @@ export default function PaymentInstructionsPage() {
   const [availableClasses, setAvailableClasses] = useState<AvailableClass[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [primaryColor, setPrimaryColor] = useState("#1a6b3c");
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [schoolName, setSchoolName] = useState("");
   const [showQRModal, setShowQRModal] = useState(false);
   const [timerExpired, setTimerExpired] = useState(false);
   const [stripeLoading, setStripeLoading] = useState(false);
@@ -1066,6 +1070,9 @@ export default function PaymentInstructionsPage() {
             const intakeRes = await fetch(`/api/public/enroll/${encodeURIComponent(statusData.intake_slug)}`);
             const intakeData = await intakeRes.json();
             if (intakeData.labels?.orgType) setOrgType(intakeData.labels.orgType);
+            if (intakeData.appearance?.primary_color) setPrimaryColor(intakeData.appearance.primary_color);
+            if (intakeData.appearance?.logo_url) setLogoUrl(intakeData.appearance.logo_url);
+            if (intakeData.school_name) setSchoolName(intakeData.school_name);
 
             // Build set of already-purchased class levels
             const purchasedLevels = new Set<string>();
@@ -1170,8 +1177,22 @@ export default function PaymentInstructionsPage() {
     };
   }, [enrollment?.status, enrollment?.payment_mode, showQRModal, params.ref]);
 
-  if (loading) return <LoadingSkeleton />;
-  if (error || !enrollment) return <ErrorPage message={error || "Unknown error"} />;
+  const brandHeader = schoolName ? (
+    <BrandHeader schoolName={schoolName} primaryColor={primaryColor} logoUrl={logoUrl} />
+  ) : null;
+
+  if (loading) return (
+    <div className="min-h-screen bg-white">
+      {brandHeader}
+      <main className="mx-auto max-w-lg px-4 py-8 sm:px-6"><LoadingSkeleton /></main>
+    </div>
+  );
+  if (error || !enrollment) return (
+    <div className="min-h-screen bg-white">
+      {brandHeader}
+      <main className="mx-auto max-w-lg px-4 py-8 sm:px-6"><ErrorPage message={error || "Unknown error"} /></main>
+    </div>
+  );
 
   const qty = enrollment.quantity ?? 1;
   const currency = enrollment.currency ?? "MMK";
@@ -1189,7 +1210,9 @@ export default function PaymentInstructionsPage() {
   const isConfirmed = enrollment.status === "confirmed";
 
   return (
-    <div className="mx-auto max-w-lg">
+    <div className="min-h-screen bg-white">
+      {brandHeader}
+      <main className="mx-auto max-w-lg px-4 py-8 sm:px-6">
 
       {/* ══════════════════════════════════════════════════════════════
           CONFIRMED STATE — celebratory receipt-style layout
@@ -1570,7 +1593,7 @@ export default function PaymentInstructionsPage() {
 
           <ol className="space-y-4">
             <li className="flex gap-3">
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1a6b3c] text-sm font-bold text-white">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white" style={{ backgroundColor: primaryColor }}>
                 1
               </span>
               <div className="text-sm text-gray-700">
@@ -1598,7 +1621,7 @@ export default function PaymentInstructionsPage() {
             </li>
 
             <li className="flex gap-3">
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1a6b3c] text-sm font-bold text-white">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white" style={{ backgroundColor: primaryColor }}>
                 2
               </span>
               <div className="text-sm text-gray-700">
@@ -1618,7 +1641,7 @@ export default function PaymentInstructionsPage() {
             </li>
 
             <li className="flex gap-3">
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1a6b3c] text-sm font-bold text-white">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white" style={{ backgroundColor: primaryColor }}>
                 3
               </span>
               <div className="text-sm text-gray-700">
@@ -1632,7 +1655,7 @@ export default function PaymentInstructionsPage() {
             </li>
 
             <li className="flex gap-3">
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1a6b3c] text-sm font-bold text-white">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white" style={{ backgroundColor: primaryColor }}>
                 4
               </span>
               <div className="text-sm text-gray-700">
@@ -1720,7 +1743,8 @@ export default function PaymentInstructionsPage() {
         <>
           <a
             href="#upload-section"
-            className="mb-8 flex w-full items-center justify-center gap-2 rounded-lg border-2 border-[#1a6b3c] bg-white py-3 text-sm font-semibold text-[#1a6b3c] hover:bg-[#1a6b3c]/5 transition-colors"
+            className="mb-8 flex w-full items-center justify-center gap-2 rounded-lg border-2 bg-white py-3 text-sm font-semibold transition-colors"
+            style={{ borderColor: primaryColor, color: primaryColor }}
           >
             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
@@ -1790,7 +1814,8 @@ export default function PaymentInstructionsPage() {
                 </div>
                 <a
                   href={`/enroll/${encodeURIComponent(enrollment.intake_slug!)}`}
-                  className="rounded-lg bg-[#1a6b3c] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#155d33] transition-colors"
+                  className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-colors"
+                  style={{ backgroundColor: primaryColor }}
                 >
                   {orgType === "event" ? "Get Tickets" : "Enroll"}
                 </a>
@@ -1805,6 +1830,7 @@ export default function PaymentInstructionsPage() {
         <TelegramConnectButton enrollmentRef={enrollment.enrollment_ref} classLevel={enrollment.class_level ?? "Class"} />
       )}
 
+      </main>
     </div>
   );
 }
