@@ -2105,7 +2105,7 @@ function SettingsContent() {
       </SectionCard>
 
       {/* ── Section 5: Enrollment Bot ─────────────────────────────────── */}
-      <SectionCard title="Enrollment Bot" subtitle="Telegram bot for student notifications, phone verification, and channel invites.">
+      <SectionCard title="Enrollment Bot" subtitle="Telegram bot for student enrollment notifications, phone verification, and channel invites.">
         {tgLoading ? (
           <div className="space-y-3">
             <Pulse className="h-6 w-48" />
