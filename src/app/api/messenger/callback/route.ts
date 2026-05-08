@@ -80,7 +80,11 @@ export async function GET(request: NextRequest) {
     tokenUrl.searchParams.set("code", code);
 
     const tokenRes = await fetch(tokenUrl.toString());
-    if (!tokenRes.ok) throw new Error(`Token exchange failed: ${tokenRes.status}`);
+    if (!tokenRes.ok) {
+      const body = await tokenRes.text();
+      console.error("[messenger] Step 1 failed:", tokenRes.status, body);
+      throw new Error(`token_exchange:${tokenRes.status}`);
+    }
     const { access_token: shortLivedToken } = await tokenRes.json();
 
     // ── Step 2: Exchange for long-lived user token ──────────────────────
@@ -91,18 +95,26 @@ export async function GET(request: NextRequest) {
     longUrl.searchParams.set("fb_exchange_token", shortLivedToken);
 
     const longRes = await fetch(longUrl.toString());
-    if (!longRes.ok) throw new Error(`Long-lived token exchange failed: ${longRes.status}`);
+    if (!longRes.ok) {
+      const body = await longRes.text();
+      console.error("[messenger] Step 2 failed:", longRes.status, body);
+      throw new Error(`token_extend:${longRes.status}`);
+    }
     const { access_token: longLivedToken } = await longRes.json();
 
     // ── Step 3: Get list of pages the user manages ──────────────────────
     const pagesRes = await fetch(`${GRAPH_API}/me/accounts?access_token=${longLivedToken}`);
-    if (!pagesRes.ok) throw new Error(`Pages fetch failed: ${pagesRes.status}`);
+    if (!pagesRes.ok) {
+      const body = await pagesRes.text();
+      console.error("[messenger] Step 3 failed:", pagesRes.status, body);
+      throw new Error(`pages_fetch:${pagesRes.status}`);
+    }
     const { data: pages } = await pagesRes.json() as {
       data: { id: string; name: string; access_token: string }[];
     };
 
     if (!pages || pages.length === 0) {
-      throw new Error("No Facebook Pages found for this account.");
+      throw new Error("no_pages");
     }
 
     // ── Step 4: Single page → auto-connect; multiple → page picker ──────
@@ -139,10 +151,12 @@ export async function GET(request: NextRequest) {
     console.log(`[messenger] ${pages.length} pages found for ${state}, redirecting to picker`);
     return new NextResponse(null, { status: 302, headers: { Location: pickerUrl.toString() } });
   } catch (err) {
-    console.error("[messenger] OAuth callback error:", err);
+    const detail = err instanceof Error ? err.message : "unknown";
+    console.error("[messenger] OAuth callback error:", detail);
     const errorUrl = new URL(settingsUrl(state));
     errorUrl.searchParams.set("tab", "messenger");
     errorUrl.searchParams.set("error", "connection_failed");
+    errorUrl.searchParams.set("detail", detail);
     return new NextResponse(null, { status: 302, headers: { Location: errorUrl.toString() } });
   }
 }
