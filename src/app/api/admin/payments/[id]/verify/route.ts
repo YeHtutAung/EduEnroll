@@ -10,7 +10,8 @@ import {
 import { sendStatusNotification } from "@/lib/messenger/notify";
 import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
-import { resolveEmailFromFormData } from "@/lib/utils";
+import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils";
+import { sendSms } from "@/lib/sms";
 import type { Enrollment, Payment, PaymentStatus, EnrollmentStatus } from "@/types/database";
 
 type EnrollmentResult = { data: Enrollment | null; error: unknown };
@@ -108,9 +109,9 @@ export async function PATCH(
   // ── Fetch tenant info for email branding ───────────────────────────────────
   const { data: tenantInfo } = await admin
     .from("tenants")
-    .select("name, org_type, logo_url, currency")
+    .select("name, org_type, logo_url, currency, sms_on_payment")
     .eq("id", tenantId)
-    .single() as { data: { name: string; org_type: string; logo_url: string | null; currency: string } | null; error: unknown };
+    .single() as { data: { name: string; org_type: string; logo_url: string | null; currency: string; sms_on_payment: boolean } | null; error: unknown };
 
   const orgType = tenantInfo?.org_type;
   const tenantName = tenantInfo?.name;
@@ -280,6 +281,19 @@ export async function PATCH(
       });
       sendEmail({ to: enrollEmail, ...emailData }).catch((err) => {
         console.error("[verify] Approval email failed:", err);
+      });
+    }
+
+    // SMS notification
+    const enrollPhone = enrollment.phone || resolvePhoneFromFormData(fd);
+    if (enrollPhone && tenantInfo?.sms_on_payment !== false) {
+      const name = enrollment.student_name_en || "Student";
+      sendSms({
+        to: enrollPhone,
+        message: `Hi ${name}, your payment for ${enrollment.enrollment_ref} has been confirmed. Welcome to class!`,
+        clientReference: enrollment.enrollment_ref,
+      }).catch((err) => {
+        console.error("[verify] Approval SMS failed:", err);
       });
     }
 
