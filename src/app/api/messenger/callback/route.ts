@@ -9,7 +9,9 @@ import { encryptToken } from "@/lib/messenger/crypto";
 const GRAPH_API = "https://graph.facebook.com/v19.0";
 
 function settingsUrl(slug: string) {
-  return `https://${slug}.kuunyi.com/admin/settings`;
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://kuunyi.com";
+  const { protocol, hostname } = new URL(appUrl);
+  return `${protocol}//${slug}.${hostname}/admin/settings`;
 }
 
 async function savePage(
