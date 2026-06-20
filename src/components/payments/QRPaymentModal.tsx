@@ -6,7 +6,7 @@ import { formatCurrencySimple } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type QRProvider = "mmpay" | "abank";
+type QRProvider = "mmpay" | "abank" | "paypay";
 
 interface QRPaymentModalProps {
   enrollmentRef: string;
@@ -31,7 +31,10 @@ export default function QRPaymentModal({
   onClose,
   provider = "mmpay",
 }: QRPaymentModalProps) {
-  const apiBase = provider === "abank" ? "/api/public/payments/abank" : "/api/public/payments/mmpay";
+  const apiBase =
+    provider === "abank" ? "/api/public/payments/abank"
+    : provider === "paypay" ? "/api/public/payments/paypay"
+    : "/api/public/payments/mmpay";
   const [state, setState] = useState<ModalState>("loading");
   const [qrData, setQrData] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
@@ -40,6 +43,8 @@ export default function QRPaymentModal({
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const slowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [paypayUrl, setPaypayUrl] = useState<string | null>(null);
+  const [paypayDeeplink, setPaypayDeeplink] = useState<string | null>(null);
 
   // ── Close on Escape ────────────────────────────────────────
   useEffect(() => {
@@ -69,20 +74,27 @@ export default function QRPaymentModal({
             `${apiBase}/status?ref=${encodeURIComponent(paymentRef)}`,
           );
           if (!res.ok) return;
-          const data: { mmqr_status: string } = await res.json();
+          const data = await res.json();
 
-          if (data.mmqr_status === "SUCCESS") {
+          // PayPay returns paypay_status, MMQR returns mmqr_status
+          const status = data.paypay_status ?? data.mmqr_status;
+
+          if (status === "SUCCESS" || status === "COMPLETED") {
             if (pollRef.current) clearInterval(pollRef.current);
             if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
             if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
             setState("success");
             onSuccess();
-          } else if (data.mmqr_status === "FAILED") {
+          } else if (status === "FAILED" || status === "CANCELED" || status === "EXPIRED") {
             if (pollRef.current) clearInterval(pollRef.current);
             if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
             if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
             setState("error");
-            setErrorMsg("Payment was declined. Please try again.");
+            setErrorMsg(
+              status === "EXPIRED"
+                ? "Payment has expired. Please try again."
+                : "Payment was declined. Please try again.",
+            );
           }
         } catch {
           // Ignore polling errors — will retry next interval
@@ -129,17 +141,26 @@ export default function QRPaymentModal({
 
         const data = await res.json();
         console.log("[QRPaymentModal] API response:", data);
-        setQrData(data.qr);
+
+        // PayPay returns a URL, MMQR returns a QR string
+        const qrSource = data.qr ?? data.url;
+        setQrData(qrSource);
         setOrderId(data.orderId);
-        // Generate QR image from EMVCo string
-        if (data.qr) {
+
+        // Generate QR image from either EMVCo string or PayPay URL
+        if (qrSource) {
           try {
-            const dataUrl = await QRCode.toDataURL(data.qr, { width: 280, margin: 2 });
+            const dataUrl = await QRCode.toDataURL(qrSource, { width: 280, margin: 2 });
             setQrImageUrl(dataUrl);
           } catch {
             console.error("[QRPaymentModal] QR render failed");
           }
         }
+
+        // Store PayPay-specific URLs for direct-open button
+        if (data.url) setPaypayUrl(data.url);
+        if (data.deeplink) setPaypayDeeplink(data.deeplink);
+
         setState("qr");
         startPolling(data.orderId);
       } catch {
@@ -176,8 +197,19 @@ export default function QRPaymentModal({
         }
 
         const data = await res.json();
-        setQrData(data.qr);
+        const qrSource = data.qr ?? data.url;
+        setQrData(qrSource);
         setOrderId(data.orderId);
+        if (qrSource) {
+          try {
+            const dataUrl = await QRCode.toDataURL(qrSource, { width: 280, margin: 2 });
+            setQrImageUrl(dataUrl);
+          } catch {
+            console.error("[QRPaymentModal] QR render failed");
+          }
+        }
+        if (data.url) setPaypayUrl(data.url);
+        if (data.deeplink) setPaypayDeeplink(data.deeplink);
         setState("qr");
         startPolling(data.orderId);
       } catch {
@@ -228,12 +260,22 @@ export default function QRPaymentModal({
         {/* ── QR state ──────────────────────────────────────── */}
         {state === "qr" && (
           <div className="flex flex-col items-center">
-            {/* Header */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/mmqr-logo.png" alt="MyanmarPay MMQR" className="mb-2 h-14 w-auto" />
-
-            <h3 className="text-lg font-semibold text-gray-900">Pay with MMQR</h3>
-            <p className="font-myanmar mt-0.5 text-sm text-gray-500">MMQR ဖြင့် ငွေပေးချေပါ</p>
+            {/* Header — provider-specific branding */}
+            {provider === "paypay" ? (
+              <>
+                <div className="mb-2 flex h-14 items-center justify-center">
+                  <span className="text-3xl font-bold text-[#ff0033]">PayPay</span>
+                </div>
+                <h3 className="text-lg font-semibold text-gray-900">Pay with PayPay</h3>
+              </>
+            ) : (
+              <>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/mmqr-logo.png" alt="MyanmarPay MMQR" className="mb-2 h-14 w-auto" />
+                <h3 className="text-lg font-semibold text-gray-900">Pay with MMQR</h3>
+                <p className="font-myanmar mt-0.5 text-sm text-gray-500">MMQR ဖြင့် ငွေပေးချေပါ</p>
+              </>
+            )}
 
             {/* Amount */}
             <div className="mt-3 rounded-lg bg-gray-50 px-4 py-2 text-center">
@@ -310,22 +352,52 @@ export default function QRPaymentModal({
               </button>
             )}
 
-            {/* Instructions — highlighted banner */}
-            <div className="mt-4 w-full rounded-lg bg-blue-50 border border-blue-200 px-4 py-3">
-              <div className="flex items-start gap-2">
-                <svg className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+            {/* Open in PayPay app (mobile) */}
+            {provider === "paypay" && paypayUrl && (
+              <a
+                href={paypayDeeplink || paypayUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-[#ff0033] px-4 py-3 text-sm font-semibold text-white hover:bg-[#e6002e] transition-colors"
+              >
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                 </svg>
-                <div>
-                  <p className="text-xs font-medium text-blue-800">
-                    Scan with <span className="font-semibold">KBZPay</span>, <span className="font-semibold">Wave</span>, <span className="font-semibold">CB Pay</span>, <span className="font-semibold">A+ wallet</span> or any MMQR-supported app
-                  </p>
-                  <p className="font-myanmar mt-1 text-xs text-blue-600">
-                    KBZPay, Wave, CB Pay, A+ wallet သို့မဟုတ် MMQR ပံ့ပိုးသော app ဖြင့် စကင်ဖတ်ပါ
-                  </p>
+                Open in PayPay App
+              </a>
+            )}
+
+            {/* Instructions — provider-specific */}
+            {provider === "paypay" ? (
+              <div className="mt-4 w-full rounded-lg bg-red-50 border border-red-200 px-4 py-3">
+                <div className="flex items-start gap-2">
+                  <svg className="mt-0.5 h-4 w-4 shrink-0 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                  </svg>
+                  <div>
+                    <p className="text-xs font-medium text-red-800">
+                      Scan with the <span className="font-semibold">PayPay</span> app, or tap &quot;Open in PayPay App&quot; below
+                    </p>
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : (
+              <div className="mt-4 w-full rounded-lg bg-blue-50 border border-blue-200 px-4 py-3">
+                <div className="flex items-start gap-2">
+                  <svg className="mt-0.5 h-4 w-4 shrink-0 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
+                  </svg>
+                  <div>
+                    <p className="text-xs font-medium text-blue-800">
+                      Scan with <span className="font-semibold">KBZPay</span>, <span className="font-semibold">Wave</span>, <span className="font-semibold">CB Pay</span>, <span className="font-semibold">A+ wallet</span> or any MMQR-supported app
+                    </p>
+                    <p className="font-myanmar mt-1 text-xs text-blue-600">
+                      KBZPay, Wave, CB Pay, A+ wallet သို့မဟုတ် MMQR ပံ့ပိုးသော app ဖြင့် စကင်ဖတ်ပါ
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Order reference */}
             {orderId && (

@@ -4,7 +4,8 @@ import abank from "@/lib/abank";
 import { sendEmail, enrollmentApprovedEmail } from "@/lib/email";
 import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
-import { resolveEmailFromFormData } from "@/lib/utils";
+import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils";
+import { sendSms } from "@/lib/sms";
 
 // ─── GET /api/public/payments/abank/callback ────────────────────────────────
 // ABank calls this URL (GET) after payment completes.
@@ -68,13 +69,14 @@ export async function GET(request: NextRequest) {
     // Send notifications (best-effort)
     const { data: enrollment } = (await supabase
       .from("enrollments")
-      .select("tenant_id, telegram_chat_id, email, enrollment_ref, student_name_en, class_id, quantity, form_data")
+      .select("tenant_id, telegram_chat_id, email, phone, enrollment_ref, student_name_en, class_id, quantity, form_data")
       .eq("id", payment.enrollment_id)
       .single()) as {
       data: {
         tenant_id: string;
         telegram_chat_id: string | null;
         email: string | null;
+        phone: string | null;
         enrollment_ref: string;
         student_name_en: string;
         class_id: string | null;
@@ -128,10 +130,10 @@ export async function GET(request: NextRequest) {
       // Fetch tenant info for email branding
       const { data: tenantInfo } = (await supabase
         .from("tenants")
-        .select("name, org_type, logo_url, currency")
+        .select("name, org_type, logo_url, currency, sms_on_payment")
         .eq("id", enrollment.tenant_id)
         .single()) as {
-        data: { name: string; org_type: string; logo_url: string | null; currency: string } | null;
+        data: { name: string; org_type: string; logo_url: string | null; currency: string; sms_on_payment: boolean } | null;
         error: unknown;
       };
       const tenantCurrency = tenantInfo?.currency ?? "MMK";
@@ -175,6 +177,22 @@ export async function GET(request: NextRequest) {
         notifyTasks.push(
           sendEmail({ to: enrollEmail, ...emailData }).catch((err) => {
             console.error("[abank-callback] Approval email failed:", err);
+          }),
+        );
+      }
+
+      // SMS notification
+      const enrollPhone = enrollment.phone
+        || resolvePhoneFromFormData(enrollment.form_data as Record<string, string> | null);
+      if (enrollPhone && tenantInfo?.sms_on_payment !== false) {
+        const name = enrollment.student_name_en || "Student";
+        notifyTasks.push(
+          sendSms({
+            to: enrollPhone,
+            message: `Hi ${name}, your payment for ${enrollment.enrollment_ref} has been confirmed. Welcome to class!`,
+            clientReference: enrollment.enrollment_ref,
+          }).catch((err) => {
+            console.error("[abank-callback] Approval SMS failed:", err);
           }),
         );
       }
