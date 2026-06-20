@@ -1,0 +1,155 @@
+import { NextRequest, NextResponse } from "next/server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveTenantId } from "@/lib/api";
+import paypay from "@/lib/paypay";
+
+// ─── POST /api/public/payments/paypay ───────────────────────────────────────
+// Creates a PayPay QR payment order and returns the payment URL.
+//
+// Body: { enrollmentRef: string }
+
+export async function POST(request: NextRequest) {
+  const tenantId = await resolveTenantId();
+  if (tenantId instanceof NextResponse) return tenantId;
+
+  // ── 1. Parse body ──────────────────────────────────────────
+  let body: { enrollmentRef?: string };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { error: "Bad Request", message: "Invalid JSON body." },
+      { status: 400 },
+    );
+  }
+
+  const { enrollmentRef } = body;
+  if (!enrollmentRef || typeof enrollmentRef !== "string") {
+    return NextResponse.json(
+      { error: "Bad Request", message: "enrollmentRef is required." },
+      { status: 400 },
+    );
+  }
+
+  const supabase = createAdminClient();
+
+  // ── 2. Look up enrollment ──────────────────────────────────
+  const { data: enrollment, error: enrollmentError } = (await supabase
+    .from("enrollments")
+    .select("*, classes(id, fee_amount, level), enrollment_items(class_id, quantity, fee_amount)")
+    .eq("enrollment_ref", enrollmentRef.trim())
+    .eq("tenant_id", tenantId)
+    .single()) as {
+    data: {
+      id: string;
+      enrollment_ref: string;
+      tenant_id: string;
+      class_id: string | null;
+      quantity: number | null;
+      status: string;
+      student_name_en: string;
+      classes: { id: string; fee_amount: number; level: string } | null;
+      enrollment_items: { class_id: string; quantity: number; fee_amount: number }[] | null;
+    } | null;
+    error: unknown;
+  };
+
+  if (enrollmentError || !enrollment) {
+    return NextResponse.json(
+      { error: "Not Found", message: "Enrollment not found." },
+      { status: 404 },
+    );
+  }
+
+  // ── 3. Guard: only pending_payment or partial_payment ──────
+  if (enrollment.status !== "pending_payment" && enrollment.status !== "partial_payment") {
+    return NextResponse.json(
+      { error: "Conflict", message: "This enrollment is not awaiting payment." },
+      { status: 409 },
+    );
+  }
+
+  // ── 4. Calculate total fee ─────────────────────────────────
+  const isCart =
+    !enrollment.class_id &&
+    enrollment.enrollment_items &&
+    enrollment.enrollment_items.length > 0;
+
+  let totalFee: number;
+
+  if (isCart) {
+    totalFee = enrollment.enrollment_items!.reduce(
+      (sum, item) => sum + item.fee_amount * item.quantity,
+      0,
+    );
+  } else if (enrollment.classes) {
+    const qty = enrollment.quantity ?? 1;
+    totalFee = enrollment.classes.fee_amount * qty;
+  } else {
+    return NextResponse.json(
+      { error: "Internal Server Error", message: "Class data not found." },
+      { status: 500 },
+    );
+  }
+
+  // ── 5. Adjust for partial payment ──────────────────────────
+  if (enrollment.status === "partial_payment") {
+    const { data: existingPayment } = (await supabase
+      .from("payments")
+      .select("received_amount")
+      .eq("enrollment_id", enrollment.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single()) as { data: { received_amount: number | null } | null; error: unknown };
+
+    if (existingPayment?.received_amount) {
+      totalFee = totalFee - existingPayment.received_amount;
+    }
+  }
+
+  // ── 6. Build merchantPaymentId (<=64 chars) ────────────────
+  const ts = Date.now().toString(36);
+  const shortEnroll = enrollment.id.replace(/-/g, "").slice(0, 12);
+  const merchantPaymentId = `PY-${shortEnroll}-${ts}`;
+
+  // ── Build redirect URL ─────────────────────────────────────
+  const host = request.headers.get("host") ?? "localhost:3005";
+  const proto = host.startsWith("localhost") ? "http" : "https";
+  const redirectUrl = `${proto}://${host}/enroll/payment/${encodeURIComponent(enrollmentRef)}?paypay=success`;
+
+  try {
+    const result = await paypay.createQR({
+      merchantPaymentId,
+      amount: totalFee,
+      orderDescription: `Payment for ${enrollment.enrollment_ref}`,
+      redirectUrl,
+    });
+
+    // ── 7. Create payment record ─────────────────────────────
+    await supabase.from("payments").insert({
+      enrollment_id: enrollment.id,
+      tenant_id: enrollment.tenant_id,
+      amount: totalFee,
+      payment_ref: merchantPaymentId,
+      payment_method: "paypay",
+      paypay_code_id: result.data?.codeId ?? null,
+      paypay_status: "CREATED",
+      status: "awaiting_payment",
+    } as never);
+
+    return NextResponse.json({
+      url: result.data?.url ?? null,
+      deeplink: result.data?.deeplink ?? null,
+      orderId: merchantPaymentId,
+      codeId: result.data?.codeId ?? null,
+      amount: totalFee,
+    });
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    console.error("[paypay] createQR error:", errMsg);
+    return NextResponse.json(
+      { error: "Payment Gateway Error", message: "Failed to create PayPay payment. Please try again." },
+      { status: 502 },
+    );
+  }
+}
