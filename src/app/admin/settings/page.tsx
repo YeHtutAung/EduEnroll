@@ -522,7 +522,7 @@ function SettingsContent() {
 
   // ── Currency & Payment mode ──────────────────────────────────────────────
   const [currency, setCurrency] = useState("MMK");
-  const [paymentMode, setPaymentMode] = useState<"bank_transfer" | "mmqr" | "stripe">("bank_transfer");
+  const [paymentMode, setPaymentMode] = useState<"bank_transfer" | "mmqr" | "stripe" | "paypay">("bank_transfer");
   const [mmqrProvider, setMmqrProvider] = useState<"abank" | "mmpay">("abank");
   const [savingPaymentMode, setSavingPaymentMode] = useState(false);
 
@@ -584,7 +584,7 @@ function SettingsContent() {
         setEmailOnEnroll(tenant.email_on_enroll ?? false);
         setSmsOnPayment(tenant.sms_on_payment ?? true);
         setCurrency(tenant.currency || "MMK");
-        setPaymentMode((tenant.payment_mode as "bank_transfer" | "mmqr" | "stripe") ?? "bank_transfer");
+        setPaymentMode((tenant.payment_mode as "bank_transfer" | "mmqr" | "stripe" | "paypay") ?? "bank_transfer");
         setMmqrProvider((tenant.mmqr_provider as "abank" | "mmpay") ?? "abank");
       }
     } catch {
@@ -1332,6 +1332,17 @@ function SettingsContent() {
               <p className="font-semibold text-sm">Stripe</p>
               <p className="text-xs text-gray-500 mt-0.5">Card Payment (SGD, USD, etc.)</p>
             </button>
+            <button
+              onClick={() => setPaymentMode("paypay")}
+              className={`flex-1 rounded-xl border-2 px-4 py-3 text-left transition-colors ${
+                paymentMode === "paypay"
+                  ? "border-[#1a3f8a] bg-[#1a3f8a]/5"
+                  : "border-gray-200 hover:border-gray-300"
+              }`}
+            >
+              <p className="font-semibold text-sm">PayPay</p>
+              <p className="text-xs text-gray-500 mt-0.5">QR Payment (JPY)</p>
+            </button>
           </div>
 
           {/* Provider selector (only when MMQR) */}
@@ -1368,6 +1379,17 @@ function SettingsContent() {
               </svg>
               <p className="text-xs text-purple-700">
                 Students will be redirected to Stripe Checkout to pay by card. Payment is auto-confirmed — no manual verification needed.
+              </p>
+            </div>
+          )}
+
+          {paymentMode === "paypay" && (
+            <div className="flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2.5">
+              <svg className="mt-0.5 h-4 w-4 shrink-0 text-red-500" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z" />
+              </svg>
+              <p className="text-xs text-red-700">
+                Students will see a PayPay QR code to scan with the PayPay app. Payment is auto-confirmed via webhook — no manual verification needed.
               </p>
             </div>
           )}

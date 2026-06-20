@@ -34,7 +34,7 @@ interface EnrollmentInfo {
   enrolled_at?: string;
   auto_cancel_minutes?: number;
   telegram_bot_username?: string | null;
-  payment_mode?: "bank_transfer" | "mmqr" | "stripe";
+  payment_mode?: "bank_transfer" | "mmqr" | "stripe" | "paypay";
   mmqr_provider?: "abank" | "mmpay";
   class_image_url?: string | null;
   items?: CartItem[] | null;
@@ -1043,6 +1043,11 @@ export default function PaymentInstructionsPage() {
       window.history.replaceState({}, "", window.location.pathname);
     }
 
+    const paypayParam = params_.get("paypay");
+    if (paypayParam === "success") {
+      // PayPay redirected back — page-level polling will detect status change
+    }
+
     async function fetchData() {
       try {
         const [statusRes, banksRes] = await Promise.all([
@@ -1140,8 +1145,9 @@ export default function PaymentInstructionsPage() {
   useEffect(() => {
     const isPending = enrollment?.status === "pending_payment" || enrollment?.status === "partial_payment";
     const isMMQR = enrollment?.payment_mode === "mmqr";
+    const isPayPay = enrollment?.payment_mode === "paypay";
 
-    if (isMMQR && isPending && !showQRModal) {
+    if ((isMMQR || isPayPay) && isPending && !showQRModal) {
       const pollFn = () => {
         fetch(`/api/public/status?ref=${encodeURIComponent(params.ref)}`)
           .then((res) => res.ok ? res.json() : null)
@@ -1499,6 +1505,53 @@ export default function PaymentInstructionsPage() {
               </div>
             )}
 
+          {/* ── Pay via PayPay ──────────────────────────────────── */}
+          {showUpload && paymentMode === "paypay" && (
+            <div className={`mb-6 rounded-xl border-2 p-5 text-center shadow-sm ${
+              timerExpired
+                ? "border-gray-300 bg-gray-400"
+                : "border-[#ff0033] bg-[#ff0033]"
+            }`}>
+              <p className="text-sm text-white/80">
+                {timerExpired
+                  ? "Payment time has expired"
+                  : "Pay to complete your enrollment"}
+              </p>
+              <p className="mt-1 text-3xl font-bold font-mono text-white">
+                {isPartialReUpload && enrollment.payment?.remaining_amount
+                  ? formatCurrencySimple(enrollment.payment.remaining_amount, currency)
+                  : formatCurrencySimple(totalFee, currency)}
+              </p>
+              <button
+                onClick={() => setShowQRModal(true)}
+                disabled={timerExpired}
+                className={`mt-4 flex w-full items-center justify-center gap-3 rounded-lg py-3.5 text-base font-semibold transition-colors ${
+                  timerExpired
+                    ? "bg-white/50 text-gray-400 cursor-not-allowed"
+                    : "bg-white text-[#ff0033] hover:bg-white/90"
+                }`}
+              >
+                <span className="text-xl font-bold">PayPay</span>
+                <div>
+                  <span className="block">{timerExpired ? "Payment Expired" : "Pay with PayPay"}</span>
+                </div>
+              </button>
+              {timerExpired && enrollment.intake_slug && (
+                <div className="mt-4 rounded-lg bg-white/20 px-4 py-3">
+                  <p className="text-sm text-white">
+                    Your spot has been released. Enroll again to secure a new one.
+                  </p>
+                  <a
+                    href={`/enroll/${encodeURIComponent(enrollment.intake_slug)}`}
+                    className="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-white py-3 text-sm font-semibold text-[#1a6b3c] hover:bg-white/90 transition-colors"
+                  >
+                    Enroll Again
+                  </a>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ── Pay via MMQR (high priority for owner) ────────────── */}
           {showUpload && paymentMode === "mmqr" && (
             <div className={`mb-6 rounded-xl border-2 p-5 text-center shadow-sm ${
@@ -1679,7 +1732,7 @@ export default function PaymentInstructionsPage() {
             ? enrollment.payment.remaining_amount
             : totalFee}
           studentName={enrollment.student_name_en}
-          provider={mmqrProvider}
+          provider={paymentMode === "paypay" ? "paypay" : mmqrProvider}
           onSuccess={() => {
             setShowQRModal(false);
             handleUploadSuccess();
