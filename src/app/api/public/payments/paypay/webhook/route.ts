@@ -25,9 +25,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
   } else {
-    // If no signature header present, log warning but still process
-    // (PayPay sandbox may not send signatures — remove this fallback in production)
-    console.warn("[paypay-webhook] No signature header — processing anyway (sandbox mode?)");
+    // Reject missing signatures in production — only allow in sandbox
+    if (process.env.PAYPAY_MODE === "production") {
+      console.warn("[paypay-webhook] Missing signature in production — rejecting");
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    console.warn("[paypay-webhook] No signature header — allowing in sandbox mode");
   }
 
   // ── 3. Parse webhook payload ─────────────────────────────────

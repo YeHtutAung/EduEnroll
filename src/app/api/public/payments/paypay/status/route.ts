@@ -49,8 +49,8 @@ export async function GET(request: NextRequest) {
     const status = result.data?.status ?? "CREATED";
 
     if (status === "COMPLETED") {
-      // Update payment + enrollment
-      await supabase
+      // Update payment + enrollment (conditional to prevent duplicate notifications)
+      const { data: updated } = (await supabase
         .from("payments")
         .update({
           paypay_status: "COMPLETED",
@@ -59,15 +59,20 @@ export async function GET(request: NextRequest) {
           bank_reference: result.data?.paymentId ?? null,
           received_amount: payment.amount,
         } as never)
-        .eq("id", payment.id);
+        .eq("id", payment.id)
+        .neq("status", "verified")
+        .select("id")) as { data: { id: string }[] | null; error: unknown };
 
-      await supabase
-        .from("enrollments")
-        .update({ status: "confirmed" } as never)
-        .eq("id", payment.enrollment_id);
+      // Only update enrollment + send notifications if we actually changed the payment
+      if (updated && updated.length > 0) {
+        await supabase
+          .from("enrollments")
+          .update({ status: "confirmed" } as never)
+          .eq("id", payment.enrollment_id);
 
-      // Send notifications
-      await sendPaymentNotifications(supabase, payment, request);
+        // Send notifications
+        await sendPaymentNotifications(supabase, payment, request);
+      }
     } else if (status === "FAILED") {
       await supabase
         .from("payments")
