@@ -148,7 +148,7 @@ export async function POST(request: NextRequest) {
     const errMsg = err instanceof Error ? err.message : String(err);
     console.error("[paypay] createQR error:", errMsg);
     return NextResponse.json(
-      { error: "Payment Gateway Error", message: "Failed to create PayPay payment. Please try again." },
+      { error: "Payment Gateway Error", message: "Failed to create PayPay payment. Please try again.", detail: errMsg },
       { status: 502 },
     );
   }
