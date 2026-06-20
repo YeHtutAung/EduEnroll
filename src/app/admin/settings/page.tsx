@@ -515,10 +515,14 @@ function SettingsContent() {
   const [savingPolicy, setSavingPolicy] = useState(false);
   const [emailOnEnroll, setEmailOnEnroll] = useState(false);
   const [savingEmailToggle, setSavingEmailToggle] = useState(false);
+  const [smsOnPayment, setSmsOnPayment] = useState(true);
+  const [savingSmsToggle, setSavingSmsToggle] = useState(false);
+  const [smsBalance, setSmsBalance] = useState<{ balance: number; currency: string } | null>(null);
+  const [loadingSmsBalance, setLoadingSmsBalance] = useState(false);
 
   // ── Currency & Payment mode ──────────────────────────────────────────────
   const [currency, setCurrency] = useState("MMK");
-  const [paymentMode, setPaymentMode] = useState<"bank_transfer" | "mmqr" | "stripe">("bank_transfer");
+  const [paymentMode, setPaymentMode] = useState<"bank_transfer" | "mmqr" | "stripe" | "paypay">("bank_transfer");
   const [mmqrProvider, setMmqrProvider] = useState<"abank" | "mmpay">("abank");
   const [savingPaymentMode, setSavingPaymentMode] = useState(false);
 
@@ -544,7 +548,7 @@ function SettingsContent() {
       // Fetch tenant name + logo + org labels
       const { data: tenant } = await supabase
         .from("tenants")
-        .select("name, logo_url, org_type, currency, label_intake, label_class, label_student, label_seat, label_fee, auto_cancel_hours, email_on_enroll, payment_mode, mmqr_provider")
+        .select("name, logo_url, org_type, currency, label_intake, label_class, label_student, label_seat, label_fee, auto_cancel_hours, email_on_enroll, sms_on_payment, payment_mode, mmqr_provider")
         .eq("id", profile.tenant_id)
         .single() as {
         data: {
@@ -559,6 +563,7 @@ function SettingsContent() {
           label_fee: string;
           auto_cancel_hours: number;
           email_on_enroll: boolean;
+          sms_on_payment: boolean;
           payment_mode: string;
           mmqr_provider: string;
         } | null;
@@ -577,8 +582,9 @@ function SettingsContent() {
         });
         setAutoCancelHours(tenant.auto_cancel_hours ?? 4320);
         setEmailOnEnroll(tenant.email_on_enroll ?? false);
+        setSmsOnPayment(tenant.sms_on_payment ?? true);
         setCurrency(tenant.currency || "MMK");
-        setPaymentMode((tenant.payment_mode as "bank_transfer" | "mmqr" | "stripe") ?? "bank_transfer");
+        setPaymentMode((tenant.payment_mode as "bank_transfer" | "mmqr" | "stripe" | "paypay") ?? "bank_transfer");
         setMmqrProvider((tenant.mmqr_provider as "abank" | "mmpay") ?? "abank");
       }
     } catch {
@@ -760,6 +766,39 @@ function SettingsContent() {
       toast.error(err instanceof Error ? err.message : "Failed to update email setting.");
     } finally {
       setSavingEmailToggle(false);
+    }
+  }
+
+  async function handleToggleSmsOnPayment() {
+    if (!tenantId) return;
+    setSavingSmsToggle(true);
+    try {
+      const newVal = !smsOnPayment;
+      const { error } = await supabase
+        .from("tenants")
+        .update({ sms_on_payment: newVal } as never)
+        .eq("id", tenantId);
+      if (error) throw new Error((error as Error).message);
+      setSmsOnPayment(newVal);
+      toast.success(newVal ? "Payment SMS enabled." : "Payment SMS disabled.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to update SMS setting.");
+    } finally {
+      setSavingSmsToggle(false);
+    }
+  }
+
+  async function fetchSmsBalance() {
+    setLoadingSmsBalance(true);
+    try {
+      const res = await fetch("/api/admin/sms/balance");
+      if (!res.ok) return;
+      const data = (await res.json()) as { balance: number; currency: string };
+      setSmsBalance(data);
+    } catch {
+      // non-critical
+    } finally {
+      setLoadingSmsBalance(false);
     }
   }
 
@@ -1293,6 +1332,17 @@ function SettingsContent() {
               <p className="font-semibold text-sm">Stripe</p>
               <p className="text-xs text-gray-500 mt-0.5">Card Payment (SGD, USD, etc.)</p>
             </button>
+            <button
+              onClick={() => setPaymentMode("paypay")}
+              className={`flex-1 rounded-xl border-2 px-4 py-3 text-left transition-colors ${
+                paymentMode === "paypay"
+                  ? "border-[#1a3f8a] bg-[#1a3f8a]/5"
+                  : "border-gray-200 hover:border-gray-300"
+              }`}
+            >
+              <p className="font-semibold text-sm">PayPay</p>
+              <p className="text-xs text-gray-500 mt-0.5">QR Payment (JPY)</p>
+            </button>
           </div>
 
           {/* Provider selector (only when MMQR) */}
@@ -1329,6 +1379,17 @@ function SettingsContent() {
               </svg>
               <p className="text-xs text-purple-700">
                 Students will be redirected to Stripe Checkout to pay by card. Payment is auto-confirmed — no manual verification needed.
+              </p>
+            </div>
+          )}
+
+          {paymentMode === "paypay" && (
+            <div className="flex items-start gap-2 rounded-lg bg-red-50 px-3 py-2.5">
+              <svg className="mt-0.5 h-4 w-4 shrink-0 text-red-500" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z" />
+              </svg>
+              <p className="text-xs text-red-700">
+                Students will see a PayPay QR code to scan with the PayPay app. Payment is auto-confirmed via webhook — no manual verification needed.
               </p>
             </div>
           )}
@@ -1701,6 +1762,55 @@ function SettingsContent() {
             </p>
           </div>
         )}
+      </SectionCard>
+
+      {/* ── Section: SMS Notifications ──────────────────────────────── */}
+      <SectionCard title="SMS Notifications" subtitle="Send SMS to students via SmsPoh when payment is verified.">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm font-medium text-gray-800">
+              Send SMS on payment verified
+            </p>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Sends a confirmation SMS when a student&apos;s payment is approved.
+            </p>
+            <p className="font-myanmar text-xs text-gray-400 mt-0.5">
+              ငွေပေးချေမှု အတည်ပြုသောအခါ SMS ပို့ပါ။
+            </p>
+          </div>
+          <Toggle
+            checked={smsOnPayment}
+            onChange={handleToggleSmsOnPayment}
+            disabled={savingSmsToggle}
+          />
+        </div>
+
+        <div className="mt-5 pt-5 border-t border-gray-100 flex items-center justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-gray-700">Account Balance</p>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {loadingSmsBalance
+                ? "Loading…"
+                : smsBalance
+                  ? `${smsBalance.balance.toLocaleString()} ${smsBalance.currency}`
+                  : "Not configured or unavailable."}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={fetchSmsBalance}
+            disabled={loadingSmsBalance}
+            className="px-3 py-1.5 text-xs font-medium text-[#1a3f8a] border border-[#1a3f8a] rounded-lg hover:bg-blue-50 disabled:opacity-50 transition-colors"
+          >
+            {loadingSmsBalance ? "Checking…" : "Check Balance"}
+          </button>
+        </div>
+
+        <div className="mt-4 rounded-lg bg-gray-50 border border-gray-200 px-4 py-3">
+          <p className="text-xs text-gray-400">
+            API keys and sender ID are configured via environment variables. Contact your developer to change them.
+          </p>
+        </div>
       </SectionCard>
 
       {/* ── Section 6: School Profile ────────────────────────────────── */}

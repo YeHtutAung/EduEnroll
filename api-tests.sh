@@ -29,7 +29,7 @@ TEST_PASSWORD="${TEST_PASSWORD:-}"
 TIMESTAMP=$(date +%s)
 
 # ── Safety: block production URLs ──────────────────────────────
-if echo "$BASE_URL" | grep -qiE "kuunyi\.com|nhxmumcvgnxlczjsgctz"; then
+if echo "$BASE_URL" | grep -qiE "kuunyi\.com|nhxmumcvgnxlczjsgctz" && ! echo "$BASE_URL" | grep -qiE "staging\.kuunyi\.com"; then
   echo "ERROR: Cannot run tests against production!"
   echo "       BASE_URL=$BASE_URL"
   echo "       Use http://localhost:3005 or a dev/staging URL instead."
