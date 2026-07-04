@@ -8,7 +8,7 @@
 
 ## Overview
 
-A new "Trusted Official" event ticketing flow for EduEnroll's **event** tenant type. Visual direction: navy + gold, structured, high-trust (matches option 3a/3b in the wireframes file). Covers 4 screens: ticket selection, attendee details, payment (Card + PayNow), and success/e-ticket.
+A new "Trusted Official" event ticketing flow for EduEnroll's **event** tenant type. Visual direction: navy + gold, structured, high-trust (matches option 3a/3b in the wireframes file). Covers 4 screens: ticket selection, attendee details, payment (Card + PayNow via Stripe Elements), and success/e-ticket.
 
 This is an **additive** implementation — existing templates and shared enrollment routes remain untouched.
 
@@ -18,6 +18,26 @@ This is an **additive** implementation — existing templates and shared enrollm
 
 - **In scope:** `Ev*` template family only. Language-school (`Ls*`) templates are not affected.
 - **Out of scope:** MMQR/bank transfer flow, existing shared enrollment routes.
+
+---
+
+## Template ID
+
+The new template uses `template_id = "ev-trusted-official"` in the `tenant_appearance` table.
+
+**Code change in `/enroll/[slug]/page.tsx`:** Add a redirect check **before** line 297 (before the `newStyleIds` block):
+
+```ts
+// Redirect ev-trusted-official to its dedicated ticket-selection page
+if (appearance.template_id === "ev-trusted-official") {
+  router.replace(`/enroll/${params.slug}/tickets/`);
+  return null;
+}
+```
+
+Do **not** add `"ev-trusted-official"` to the `newStyleIds` array — that array is for templates that render inline. The new template has its own dedicated route.
+
+No DB migration needed for the template ID itself — `template_id` is a plain text column.
 
 ---
 
@@ -39,105 +59,245 @@ src/app/(public)/enroll/[slug]/
 src/components/enrollment/templates/
   EvTrustedOfficialTemplate.tsx   # New template component
 
-src/app/api/public/payments/stripe/
-  intent/
-    route.ts          # POST — create PaymentIntent (card + paynow)
-    status/
-      route.ts        # GET  — poll PaymentIntent status (for PayNow)
+src/app/api/public/
+  enrollment/
+    [ref]/
+      route.ts        # GET — fetch enrollment summary by ref
+                      # PATCH — update attendee details on pending enrollment
+
+  payments/stripe/
+    intent/
+      route.ts        # POST — create PaymentIntent (card + paynow)
+      status/
+        route.ts      # GET  — poll PaymentIntent status (for PayNow)
 ```
 
-**Template detection:** The existing `/enroll/[slug]/page.tsx` detects the `trusted_official` template value in the tenant appearance and redirects to `/enroll/[slug]/tickets/` instead of rendering inline. All other template values continue to render inline as before.
+**Note:** New enrollment-by-ref routes are under `/api/public/enrollment/[ref]/` (singular "enrollment") — not `/api/public/enroll/[ref]/`. This avoids any collision with the existing `/api/public/enroll/[slug]/route.ts` which returns intake + class data.
+
+---
+
+## DB Migration Required
+
+### 1. Add `stripe_payment_intent_id` to `payments` table
+
+```sql
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS stripe_payment_intent_id text;
+CREATE INDEX IF NOT EXISTS payments_stripe_payment_intent_id_idx
+  ON payments(stripe_payment_intent_id)
+  WHERE stripe_payment_intent_id IS NOT NULL;
+```
+
+The existing `stripe_session_id` column is **not repurposed** — it continues to store Checkout Session IDs for the existing Stripe Checkout flow.
+
+### 2. Add `card_brand` and `card_last4` to `payments` table
+
+```sql
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS card_brand text;
+ALTER TABLE payments ADD COLUMN IF NOT EXISTS card_last4 text;
+```
+
+These are populated by the `GET /api/public/payments/stripe/intent/status` route when payment succeeds (retrieved from `paymentIntent.payment_method_details.card`). Screen 4 uses them to display `"Visa ••4242"`. If null (e.g. PayNow), Screen 4 shows `"PayNow"`.
 
 ---
 
 ## Data Flow
 
 ### Screen 1 → Screen 2 (Cart submit)
+
 1. User selects ticket quantities in `EvTrustedOfficialTemplate`.
-2. On "Continue", `POST /api/public/enroll` creates a **pending enrollment** record with cart items (reuses existing endpoint).
-3. Backend returns `enrollment_ref`.
-4. Client redirects to `/enroll/[slug]/checkout/?ref={enrollment_ref}`.
+2. On "Continue", client calls `POST /api/public/enroll` (existing endpoint, reused as-is).
+   - **Important:** `EvTrustedOfficialTemplate` must pass `form_data: {}` (empty object) or omit it entirely. Do NOT pass an email in `form_data` at this step — the existing endpoint sends a confirmation email if an email is present, which would reference the old payment URL. Email is collected on Screen 2.
+   - Client reads only `data.enrollment_ref` from the response and ignores all bank-transfer fields.
+3. Client redirects to `/enroll/[slug]/checkout/?ref={enrollment_ref}`.
+
+### Screen 2 (Attendee details page load)
+
+- Page reads `?ref=` from URL.
+- Calls `GET /api/public/enrollment/{ref}` to fetch the enrollment summary.
+- Error states:
+  - `404`: show full-page error — "Order not found" + "Return to event" link → `/enroll/[slug]/tickets/`.
+  - `410 Gone` (status `cancelled`): show — "This order has expired" + "Return to event" link.
+  - `409` from PATCH or intent POST (auto-cancel fired between steps): show inline error — "This order has expired. Please start again." + link back to `/enroll/[slug]/tickets/`.
 
 ### Screen 2 → Screen 3 (Attendee details submit)
-1. Page reads `?ref=` and fetches enrollment to show order summary card.
-2. User fills name, company, email.
-3. On "Continue to Payment":
-   - `PATCH /api/public/enroll/{ref}` updates attendee details on the enrollment record.
-   - `POST /api/public/payments/stripe/intent` creates a Stripe PaymentIntent with `payment_method_types: ["card", "paynow"]`, returns `{ clientSecret, paymentIntentId }`.
-4. Client redirects to `/enroll/[slug]/checkout/payment/?ref={ref}&pi={paymentIntentId}`.
 
-### Screen 3 — Payment
-- **Card tab:** Stripe `PaymentElement` renders card fields. On "Pay", `stripe.confirmCardPayment(clientSecret)` is called. On success → redirect to `/enroll/[slug]/checkout/success/?ref={ref}`.
-- **PayNow tab:** PayNow QR image URL fetched from Stripe's `next_action.paynow_display_qr_code.image_url_svg`. Page polls `GET /api/public/payments/stripe/intent/status?pi={paymentIntentId}` every 3 seconds. On `status: "succeeded"` → auto-redirect to success page.
+1. Call `PATCH /api/public/enrollment/{ref}` with `{ student_name_en, company, email }`. This call is idempotent — calling it multiple times with the same data is safe.
+2. On PATCH success: call `POST /api/public/payments/stripe/intent` with `{ enrollmentRef }`.
+   - On intent POST failure (e.g. Stripe API down): display inline error below the submit button — "Payment setup failed. Please try again." Retry is safe (PATCH is idempotent; intent POST is idempotent).
+3. Store `clientSecret` in `sessionStorage` keyed by `enrollment_ref`.
+4. Redirect to `/enroll/[slug]/checkout/payment/?ref={ref}&pi={paymentIntentId}`.
+
+### Screen 3 — Payment (page load)
+
+- Read `?ref=` and `?pi=` from URL.
+- Read `clientSecret` from `sessionStorage[ref]`. If missing (page refresh): call `GET /api/public/enrollment/{ref}` and use returned `stripe_client_secret`.
+- Initialise Stripe: `const stripe = await loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY)`.
+
+### Screen 3 — Card tab
+
+1. Render `<Elements stripe={stripe} options={{ clientSecret }}>` wrapping `<PaymentElement />`.
+2. On "Pay": call `stripe.confirmPayment({ elements, confirmParams: { return_url: "{origin}/enroll/{slug}/checkout/success/?ref={ref}" } })`.
+   - Stripe handles the redirect to `return_url` on success.
+   - On error: display Stripe's `error.message` in a red error banner. Keep the form active for retry.
+3. Show spinner + disabled pay button while `confirmPayment` is in flight.
+
+### Screen 3 — PayNow tab
+
+PayNow requires no card-field input from the user — do **not** use `<PaymentElement>` for this tab. Instead:
+
+1. Render a "Pay via PayNow" button.
+2. On button click: call `stripe.confirmPayment({ clientSecret, confirmParams: { return_url: "{origin}/enroll/{slug}/checkout/success/?ref={ref}" }, redirect: "if_required" })`.
+   - `redirect: "if_required"` prevents a page redirect for PayNow (which stays in-app).
+   - Result: `{ paymentIntent, error }` (no redirect).
+3. From `paymentIntent.next_action.paynow_display_qr_code`:
+   - `image_url_svg` → render as `<img>` (130×130px).
+   - `hosted_instructions_url` → fetch to get the UEN for the UEN row display.
+4. Display: QR image + UEN row + amber "Waiting for payment" chip with 10:00 countdown.
+5. Poll `GET /api/public/payments/stripe/intent/status?pi={paymentIntentId}` every 3 seconds.
+6. On `{ status: "succeeded" }`: redirect to `/enroll/[slug]/checkout/success/?ref={ref}`.
+7. On `{ status: "cancelled" }` (auto-cancel fired): show "Payment expired" error + "Return to event" link.
+8. On countdown expiry (10 minutes, QR expired): show "QR code expired" message + "Generate new QR" button that calls `confirmPayment` again to get a fresh QR.
 
 ### Screen 4 — Success
-- Reads `?ref=` from URL.
-- Fetches enrollment + most recent payment record from DB (no Stripe client needed).
-- Displays ticket stub, amount paid, payment method.
 
-### Abandoned sessions
-Pending enrollments without payment are cleaned up by the existing `auto_cancel_minutes` mechanism — no new cleanup logic needed.
+- Reads `?ref=` from URL.
+- Calls `GET /api/public/enrollment/{ref}` to fetch enrollment summary.
+- Displays ticket stub, amount paid, payment method:
+  - Card: `"{card_brand} ••{card_last4}"` (from `payments` table). If null, fall back to "Credit Card".
+  - PayNow: `"PayNow"`.
+- "DOWNLOAD E-TICKET" button: rendered as **disabled** with `title="Coming soon"` tooltip.
+- No Stripe client needed on this screen.
+
+---
+
+## API Routes
+
+### Existing (reused, no changes)
+`POST /api/public/enroll` — creates pending enrollment with cart items. Returns `{ enrollment_ref, ... }`. Client uses only `enrollment_ref`.
+
+### New: `GET /api/public/enrollment/[ref]`
+- Public, no auth. Tenant-scoped.
+- Returns:
+  ```json
+  {
+    "enrollment_ref": "TS-2026-3381",
+    "status": "pending_payment",
+    "student_name_en": "John Doe",
+    "company": "Acme Corp",
+    "email": "john@example.com",
+    "total_amount": 360,
+    "currency": "sgd",
+    "items": [{ "level": "General Admission", "quantity": 2, "fee_amount": 180 }],
+    "event_name": "TechSummit 2026",
+    "event_dates": "14–15 Nov",
+    "stripe_client_secret": "pi_xxx_secret_xxx"
+  }
+  ```
+- `stripe_client_secret`: **only included if** a `payments` row exists for this enrollment with `payment_method: "stripe"`, `status: "awaiting_payment"`, and a non-null `stripe_payment_intent_id`. If no such row exists, omit the field entirely (no Stripe API call is made in that case). If the row exists, retrieve the PI from Stripe and return its `client_secret`.
+- Error responses: `404` if not found or wrong tenant; `410` if status is `cancelled`.
+
+### New: `PATCH /api/public/enrollment/[ref]`
+- Public, no auth (enrollment ref acts as access token). Tenant-scoped.
+- Body: `{ student_name_en: string, company?: string, email: string }`.
+- Updates `student_name_en`, `company`, `email` on the enrollment record. Idempotent.
+- Only allowed if status is `pending_payment`.
+- Returns: `{ enrollment_ref, status }`.
+- Error responses: `404` not found; `409` if status is not `pending_payment` (expired/already confirmed).
+
+### New: `POST /api/public/payments/stripe/intent`
+- Body: `{ enrollmentRef: string }`.
+- Guards:
+  - Enrollment must exist and belong to tenant → `404`.
+  - Status must be `pending_payment` → `409`.
+  - Currency must not be `mmk` → `400` (same guard as existing Stripe Checkout route).
+- Idempotency: check for existing `payments` row with `payment_method: "stripe"`, `status: "awaiting_payment"`, non-null `stripe_payment_intent_id`. If found and PI is still `requires_payment_method` or `requires_confirmation` on Stripe, return the existing `clientSecret`. Otherwise create a new PI.
+- Creates: `stripe.paymentIntents.create({ amount: totalCents, currency, payment_method_types: ["card", "paynow"], metadata: { tenant_id, enrollment_id, enrollment_ref } })`.
+- Inserts `payments` row: `{ enrollment_id, tenant_id, amount, payment_method: "stripe", status: "awaiting_payment", stripe_payment_intent_id: pi.id }`.
+- Returns: `{ clientSecret: pi.client_secret, paymentIntentId: pi.id }`.
+
+### New: `GET /api/public/payments/stripe/intent/status?pi={paymentIntentId}`
+- Public, no auth. PaymentIntent IDs are already client-side; no PII is returned — only status. This is consistent with Stripe's own client-side `retrievePaymentIntent` API.
+- Retrieves PaymentIntent from Stripe by ID.
+- If `status === "succeeded"`:
+  - Finds `payments` row by `stripe_payment_intent_id`.
+  - Idempotency guard: if `payments.status !== "verified"`:
+    - Update `payments`: `{ status: "verified", paid_at: now(), card_brand: pi.payment_method_details?.card?.brand ?? null, card_last4: pi.payment_method_details?.card?.last4 ?? null }`.
+    - Update `enrollments`: `{ status: "confirmed" }`.
+  - Returns `{ status: "succeeded" }`.
+- If `status === "canceled"` or enrollment is `cancelled` (auto-cancel fired): returns `{ status: "cancelled" }`.
+- Otherwise: returns `{ status: "pending" }`.
+- Webhook/polling race: Stripe webhooks may also update the enrollment. The idempotency guard prevents double-writes — both paths are safe.
 
 ---
 
 ## Stripe Integration
 
 **Mode:** Stripe Elements (embedded, PaymentIntent API) — not Stripe Checkout Sessions.
-
-**New API routes:**
-
-`POST /api/public/payments/stripe/intent`
-- Validates enrollment ref, checks status is `pending_payment`.
-- Creates `stripe.paymentIntents.create({ amount, currency, payment_method_types: ["card", "paynow"] })`.
-- Inserts a `payments` record with `status: "awaiting_payment"`, `payment_method: "stripe"`.
-- Returns `{ clientSecret, paymentIntentId }`.
-- Idempotent: returns existing open PaymentIntent if one exists for this enrollment.
-
-`GET /api/public/payments/stripe/intent/status?pi={paymentIntentId}`
-- Retrieves PaymentIntent from Stripe.
-- If `status: "succeeded"`: updates `payments` record to `verified`, updates `enrollments` to `confirmed`. Returns `{ status: "succeeded" }`.
-- If not yet succeeded: returns `{ status: "pending" }`.
-- Idempotent — safe to call on every poll tick.
-
 **Client packages to install:** `@stripe/react-stripe-js`, `@stripe/stripe-js`
 
-**Existing routes untouched:** `/api/public/payments/stripe` (Checkout Session) and `/api/public/payments/stripe/verify` remain unchanged.
+**Card tab:** use `<Elements>` + `<PaymentElement>` + `stripe.confirmPayment()`.
+
+**PayNow tab:** do NOT use `<PaymentElement>` (PayNow requires no card fields). Call `stripe.confirmPayment({ clientSecret, confirmParams: { return_url }, redirect: "if_required" })` directly. Read `next_action.paynow_display_qr_code` from the result.
+
+**`confirmPayment` (not `confirmCardPayment`):** always use `stripe.confirmPayment()` — this is the current API compatible with both `PaymentElement` and direct PaymentIntent confirmation. `confirmCardPayment` is the legacy API and must not be used.
+
+**Existing routes untouched:**
+- `/api/public/payments/stripe` (Checkout Session route)
+- `/api/public/payments/stripe/verify` (Checkout Session verify route)
 
 ---
 
 ## Component Breakdown
 
 ### `EvTrustedOfficialTemplate.tsx`
-- Extends `EventTemplateProps` (existing type, no changes).
+- Defines its own props interface (does NOT extend `EventTemplateProps` — that type is coupled to the `onCartCheckout` callback designed for the old shared flow):
+  ```ts
+  interface EvTrustedOfficialTemplateProps {
+    appearance: Omit<TenantAppearance, "id" | "tenant_id" | "updated_at">;
+    intake: TemplateIntake;
+    classes: TemplateClass[];
+    labels: TemplateLabels;
+    slug: string;
+    currency: string;
+  }
+  ```
+- Internally manages cart state.
+- On checkout: calls `POST /api/public/enroll` (omitting `form_data`) → on success, `router.push(\`/enroll/${slug}/checkout/?ref=${enrollmentRef}\`)`.
 - Ticket cards: standard variant (white bg, neutral border) and featured/VIP variant (cream bg, gold border, "POPULAR" badge).
-- Quantity stepper: bordered pill with −/qty/+ segments, live subtotal text.
-- Sticky bottom cart bar: ticket count + running total + "CONTINUE →" CTA button.
-- On checkout: calls `POST /api/public/enroll` → redirects to `/enroll/[slug]/checkout/?ref=...`.
+- Quantity stepper: bordered pill with −/qty/+ segments, live subtotal.
+- Sticky bottom cart bar: ticket count + running total + "CONTINUE →" CTA.
 
-### `TrustedOfficialShell` (shared wrapper, used in Screens 2–4)
+### `TrustedOfficialShell` (shared wrapper for Screens 2–4)
 - Brand row: 30×30px rounded-square logo mark + org name.
-- Step label row ("STEP N OF 2") + 2-segment gold progress bar.
-- Cream page background (`#f7f5ef`).
-- Keeps Screens 2–4 consistent without repeating markup.
+- Step label + progress bar:
+  - Screen 2: "STEP 1 OF 2" / "Attendee details" — first segment gold, second track color.
+  - Screen 3: "STEP 2 OF 2" / "Payment" — both segments gold.
+  - Screen 4: No step label — both segments gold (completion state).
+- Cream page background `#f7f5ef`.
 
 ### Screen 2 — `/enroll/[slug]/checkout/page.tsx`
-- Fetches enrollment by `?ref=` to populate order summary card.
+- Fetches enrollment via `GET /api/public/enrollment/{ref}`.
+- Error handling: `404` or `410` → full-page error with "Return to event" link.
 - Order summary card: cream bg, gold border, ticket line items + event name/dates.
-- Form fields: Full Name (focused/navy border), Company, Email (with helper text).
-- On submit: PATCH attendee details → create PaymentIntent → redirect to payment.
+- Form fields: Full Name (focused/navy border), Company (optional), Email + helper text.
+- 409 from PATCH or intent POST → inline error: "This order has expired." + link to `/enroll/[slug]/tickets/`.
+- On submit: PATCH → intent POST → store `clientSecret` in `sessionStorage` → redirect.
 
 ### Screen 3 — `/enroll/[slug]/checkout/payment/page.tsx`
-- Card/PayNow toggle: two equal-width segments, active = navy fill + white text.
-- **Card tab:** `<Elements stripe={...} options={{ clientSecret }}><PaymentElement /></Elements>` + "PAY SGD X.XX" button + Stripe security note.
-- **PayNow tab:** QR image (from Stripe `next_action`), UEN row, amber "Waiting for payment" chip with mm:ss countdown, 3s polling → auto-redirect on success.
-- Loading/error states: spinner on pay button, red error banner on failure (English only).
+- On load: read `clientSecret` from `sessionStorage`. If missing: call `GET /api/public/enrollment/{ref}` → use `stripe_client_secret`.
+- Card/PayNow toggle: visual custom toggle (not Stripe's UI).
+- Card tab: `<Elements>` + `<PaymentElement>` + pay button + Stripe security note.
+- PayNow tab: static layout (no Stripe element). "Pay via PayNow" button triggers `confirmPayment` → renders QR + UEN + amber countdown + 3s polling.
+- Error banner: red-bordered card, English only, with retry action.
+- Spinner + disabled button while `confirmPayment` is in flight.
 
 ### Screen 4 — `/enroll/[slug]/checkout/success/page.tsx`
+- Fetches enrollment via `GET /api/public/enrollment/{ref}`.
 - 42×42px checkmark badge (navy circle, gold checkmark).
 - Heading: "Payment successful" (card) or "PayNow payment received" (PayNow).
-- Navy ticket stub card with right-edge perforation effect, order ref, small QR placeholder.
-- Payment summary card: amount paid + payment method.
-- "DOWNLOAD E-TICKET" outlined button (wired to existing e-ticket PDF generation if available, otherwise placeholder).
+- Navy ticket stub card with right-edge perforation effect, order ref, QR placeholder.
+- Payment summary: amount paid + payment method (`card_brand ••card_last4` or `"PayNow"`).
+- "DOWNLOAD E-TICKET" button: `disabled` + `title="Coming soon"`.
 
 ---
 
@@ -159,7 +319,7 @@ Pending enrollments without payment are cleaned up by the existing `auto_cancel_
 | Amber chip text | `#8a6a1f` |
 | Stripe purple (wordmark only) | `#635bff` |
 
-**Typography:** Inter (400/600/700/800). No Myanmar text in this flow (SGD/English-only event context).
+**Typography:** Inter (400/600/700/800). No Myanmar text in this flow.
 
 **Radius:** Cards 9–12px, buttons 6–8px, small badges 4–6px.
 
@@ -176,8 +336,15 @@ Pending enrollments without payment are cleaned up by the existing `auto_cancel_
 
 ---
 
-## Open Questions / Deferred
+## Implementation Order
 
-- **E-ticket PDF download:** Wire to existing PDF generation if available; placeholder button otherwise. Confirm at implementation time.
-- **PayNow QR expiry:** Stripe PayNow QR codes expire after ~10 minutes. The amber countdown chip should reflect this (10:00 countdown). Confirm expiry duration with Stripe docs at implementation time.
-- **`auto_cancel_minutes` value:** Ensure the tenant's `auto_cancel_minutes` is set to a value >= 10 minutes for PayNow tenants, so the enrollment isn't cancelled before the PayNow QR expires.
+1. DB migration: add `stripe_payment_intent_id`, `card_brand`, `card_last4` to `payments`.
+2. New API routes: `GET+PATCH /api/public/enrollment/[ref]`, `POST /api/public/payments/stripe/intent`, `GET /api/public/payments/stripe/intent/status`.
+3. Install `@stripe/react-stripe-js` and `@stripe/stripe-js`.
+4. `EvTrustedOfficialTemplate.tsx` component.
+5. `TrustedOfficialShell` wrapper component.
+6. Screen 2: `/enroll/[slug]/checkout/page.tsx`.
+7. Screen 3: `/enroll/[slug]/checkout/payment/page.tsx`.
+8. Screen 4: `/enroll/[slug]/checkout/success/page.tsx`.
+9. Screen 1: `/enroll/[slug]/tickets/page.tsx` (renders `EvTrustedOfficialTemplate`).
+10. Update `/enroll/[slug]/page.tsx`: add `"ev-trusted-official"` redirect check before the `newStyleIds` block.
