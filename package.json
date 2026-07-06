@@ -6,6 +6,8 @@
     "dev": "next dev -p 3005",
     "build": "next build",
     "start": "next start",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "lint": "next lint",
     "format": "prettier --write .",
     "db:migrate": "npx supabase db push",
@@ -40,12 +42,14 @@
     "@types/qrcode": "^1.5.6",
     "@types/react": "^18",
     "@types/react-dom": "^18",
+    "@vitejs/plugin-react": "^6.0.3",
     "eslint": "^8",
     "eslint-config-next": "14.2.35",
     "eslint-config-prettier": "^10.1.8",
     "postcss": "^8",
     "prettier": "^3.8.1",
     "tailwindcss": "^3.4.1",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }
