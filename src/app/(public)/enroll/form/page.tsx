@@ -354,6 +354,27 @@ function DynamicField({
   );
 }
 
+// ─── Page shell (module-level — must NOT be defined inside a component) ──────
+
+function PageWrapper({
+  schoolName,
+  primaryColor,
+  logoUrl,
+  children,
+}: {
+  schoolName: string;
+  primaryColor: string;
+  logoUrl: string | null;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="min-h-screen bg-white">
+      {schoolName && <BrandHeader schoolName={schoolName} primaryColor={primaryColor} logoUrl={logoUrl} />}
+      <main className="mx-auto max-w-xl px-4 py-8 sm:px-6">{children}</main>
+    </div>
+  );
+}
+
 // ─── Main page ───────────────────────────────────────────────────────────────
 
 export default function EnrollmentFormPageWrapper() {
@@ -609,22 +630,12 @@ function EnrollmentFormPage() {
     }
   }
 
-  // ── Shared wrapper ───────────────────────────────────────────
-  function PageWrapper({ children }: { children: React.ReactNode }) {
-    return (
-      <div className="min-h-screen bg-white">
-        {schoolName && <BrandHeader schoolName={schoolName} primaryColor={primaryColor} logoUrl={logoUrl} />}
-        <main className="mx-auto max-w-xl px-4 py-8 sm:px-6">{children}</main>
-      </div>
-    );
-  }
-
   // ── Render guards ────────────────────────────────────────────
-  if (pageLoading) return <PageWrapper><LoadingSkeleton /></PageWrapper>;
+  if (pageLoading) return <PageWrapper schoolName={schoolName} primaryColor={primaryColor} logoUrl={logoUrl}><LoadingSkeleton /></PageWrapper>;
 
   if (pageError) {
     return (
-      <PageWrapper>
+      <PageWrapper schoolName={schoolName} primaryColor={primaryColor} logoUrl={logoUrl}>
         <ErrorPage
           message={pageError}
           onBack={slug ? () => router.push(`/enroll/${slug}`) : undefined}
@@ -641,7 +652,7 @@ function EnrollmentFormPage() {
   // ── Step 1: Personal Information ─────────────────────────────
   if (step === 1) {
     return (
-      <PageWrapper>
+      <PageWrapper schoolName={schoolName} primaryColor={primaryColor} logoUrl={logoUrl}>
       <div className="mx-auto max-w-md">
         <StepIndicator step={1} color={primaryColor} />
 
@@ -746,7 +757,7 @@ function EnrollmentFormPage() {
 
   // ── Step 2: Review & Confirm ─────────────────────────────────
   return (
-    <PageWrapper>
+    <PageWrapper schoolName={schoolName} primaryColor={primaryColor} logoUrl={logoUrl}>
     <div className="mx-auto max-w-md">
       <StepIndicator step={2} color={primaryColor} />
 

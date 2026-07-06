@@ -14,4 +14,8 @@ export { default as BoldTemplate } from "./BoldTemplate";
 export { default as WarmTemplate } from "./WarmTemplate";
 export { default as ProfessionalTemplate } from "./ProfessionalTemplate";
 
+// Trusted Official flow (dedicated /tickets/ + /checkout/ routes)
+export { default as EvTrustedOfficialTemplate } from "./EvTrustedOfficialTemplate";
+export type { EvTrustedOfficialTemplateProps } from "./EvTrustedOfficialTemplate";
+
 export type { TemplateProps, EventTemplateProps } from "./types";

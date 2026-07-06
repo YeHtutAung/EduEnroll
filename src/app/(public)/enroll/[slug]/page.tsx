@@ -292,6 +292,12 @@ function IntakeLandingContent() {
   const allFull = allClasses.length > 0 && allClasses.every((c) => c.seat_remaining === 0 || c.status === "full");
   if (allFull) return <PageShell><AllClassesFullPage intake={intake} labels={tl} /></PageShell>;
 
+  // Redirect ev-trusted-official to its dedicated ticket-selection page
+  if (appearance.template_id === "ev-trusted-official") {
+    router.replace(`/enroll/${params.slug}/tickets/`);
+    return null;
+  }
+
   // Determine which template to render.
   // If appearance has a new-style template_id use it; otherwise fall back by org type.
   const newStyleIds = ["ls-classic", "ls-modern", "ls-warm", "ev-luxury", "ev-festival", "ev-corporate"];
