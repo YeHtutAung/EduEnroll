@@ -17,36 +17,51 @@ const BASE_URL = () =>
     : "https://stg-api.sandbox.paypay.ne.jp";
 
 // ── HMAC-SHA256 Auth Headers ────────────────────────────────────────────────
-// PayPay OPA uses HMAC authentication:
-// Authorization: hmac OPA-Auth:{apiKey}:{hmacSignature}:{nonce}:{epoch}:{contentMD5}
-// String to sign: {path}\n{contentType}\n{contentMD5}\n{epoch}\n{nonce}
+// PayPay OPA HMAC format (from official SDK):
+// String to sign: {path}\n{method}\n{nonce}\n{epoch}\n{contentType}\n{payloadDigest}
+// For GET/no-body: contentType="empty", payloadDigest="empty"
+// For POST: contentType="application/json", payloadDigest=base64(MD5(contentType+body))
+// Authorization: hmac OPA-Auth:{apiKey}:{hmac}:{nonce}:{epoch}:{payloadDigest}
 
 function authHeaders(
   method: string,
   path: string,
-  contentType: string,
   body?: string,
 ): Record<string, string> {
   const nonce = crypto.randomUUID();
   const epoch = Math.floor(Date.now() / 1000).toString();
 
-  // Content-MD5: hash of body for POST, empty string for GET (no body)
-  const contentMD5 = body
-    ? crypto.createHash("md5").update(body, "utf8").digest("base64")
-    : "";
+  let contentType: string;
+  let payloadDigest: string;
+
+  if (body) {
+    contentType = "application/json";
+    payloadDigest = crypto
+      .createHash("md5")
+      .update(contentType + body, "utf8")
+      .digest("base64");
+  } else {
+    contentType = "empty";
+    payloadDigest = "empty";
+  }
 
   // String to sign
-  const message = `${path}\n${contentType}\n${contentMD5}\n${epoch}\n${nonce}`;
+  const message = `${path}\n${method}\n${nonce}\n${epoch}\n${contentType}\n${payloadDigest}`;
   const hmac = crypto
     .createHmac("sha256", API_SECRET())
     .update(message)
     .digest("base64");
 
-  return {
-    "Content-Type": contentType,
-    Authorization: `hmac OPA-Auth:${API_KEY()}:${hmac}:${nonce}:${epoch}:${contentMD5}`,
+  const headers: Record<string, string> = {
+    Authorization: `hmac OPA-Auth:${API_KEY()}:${hmac}:${nonce}:${epoch}:${payloadDigest}`,
     "X-ASSUME-MERCHANT": MERCHANT_ID(),
   };
+
+  if (body) {
+    headers["Content-Type"] = "application/json";
+  }
+
+  return headers;
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -113,7 +128,7 @@ async function createQR(params: CreateQRParams): Promise<CreateQRResponse> {
     redirectType: "WEB_LINK",
   });
 
-  const headers = authHeaders("POST", path, "application/json;charset=UTF-8", body);
+  const headers = authHeaders("POST", path, body);
 
   const res = await fetch(`${BASE_URL()}${path}`, {
     method: "POST",
@@ -133,7 +148,7 @@ async function createQR(params: CreateQRParams): Promise<CreateQRResponse> {
 
 async function getPaymentStatus(merchantPaymentId: string): Promise<PaymentStatusResponse> {
   const path = `/v2/codes/payments/${encodeURIComponent(merchantPaymentId)}`;
-  const headers = authHeaders("GET", path, "application/json;charset=UTF-8");
+  const headers = authHeaders("GET", path);
 
   const res = await fetch(`${BASE_URL()}${path}`, {
     method: "GET",
