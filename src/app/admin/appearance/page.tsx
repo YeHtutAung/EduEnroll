@@ -67,9 +67,10 @@ const LS_TEMPLATES: { id: TemplateId; name: string; description: string }[] = [
 ];
 
 const EV_TEMPLATES: { id: TemplateId; name: string; description: string }[] = [
-  { id: "ev-luxury",    name: "Luxury",    description: "Dark theatrical, large typography & gold accents." },
-  { id: "ev-festival",  name: "Festival",  description: "Dark glass, vibrant gradient orbs, energetic." },
-  { id: "ev-corporate", name: "Corporate", description: "Clean white cards, structured & professional." },
+  { id: "ev-luxury",           name: "Luxury",         description: "Dark theatrical, large typography & gold accents." },
+  { id: "ev-festival",         name: "Festival",       description: "Dark glass, vibrant gradient orbs, energetic." },
+  { id: "ev-corporate",        name: "Corporate",      description: "Clean white cards, structured & professional." },
+  { id: "ev-trusted-official", name: "Trusted Official", description: "Navy & gold, multi-ticket cart with Stripe checkout." },
 ];
 
 function PublicTemplateThumbnail({ id, primaryColor }: { id: TemplateId; primaryColor: string }) {
@@ -151,6 +152,28 @@ function PublicTemplateThumbnail({ id, primaryColor }: { id: TemplateId; primary
           {[0, 1, 2].map((i) => (
             <div key={i} className="rounded-lg p-1" style={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)" }}>
               <div className="h-2 w-full rounded" style={{ backgroundColor: primaryColor + "80" }} />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (id === "ev-trusted-official") {
+    return (
+      <div className="h-24 w-full rounded-lg overflow-hidden border border-[#0f1f42]" style={{ background: "#f7f5ef" }}>
+        <div className="h-6 bg-[#0f1f42] flex items-center px-2 gap-1.5">
+          <div className="h-1.5 w-1.5 rounded-full bg-[#d4af5a]" />
+          <div className="h-1 w-10 rounded-full bg-white/30" />
+        </div>
+        <div className="p-1.5 flex flex-col gap-1">
+          {[0, 1].map((i) => (
+            <div key={i} className="flex items-center justify-between rounded px-1.5 py-1 border" style={{ background: "#fff", borderColor: "#e3e0d6" }}>
+              <div className="h-1 w-8 rounded-full bg-[#0f1f42]/40" />
+              <div className="flex items-center gap-0.5">
+                <div className="h-3 w-3 rounded-sm bg-[#0f1f42]/20" />
+                <div className="h-1 w-3 rounded-full bg-[#d4af5a]/70" />
+                <div className="h-3 w-3 rounded-sm bg-[#0f1f42]/20" />
+              </div>
             </div>
           ))}
         </div>
