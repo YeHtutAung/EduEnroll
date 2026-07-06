@@ -26,7 +26,7 @@ export async function PUT(request: Request) {
   const body = await request.json().catch(() => null);
   if (!body) return NextResponse.json({ error: "Invalid JSON." }, { status: 400 });
 
-  const VALID_TEMPLATES = ["ls-classic", "ls-modern", "ls-warm", "ev-luxury", "ev-festival", "ev-corporate"];
+  const VALID_TEMPLATES = ["ls-classic", "ls-modern", "ls-warm", "ev-luxury", "ev-festival", "ev-corporate", "ev-trusted-official"];
   if (body.template_id && !VALID_TEMPLATES.includes(body.template_id)) {
     return NextResponse.json({ error: "Invalid template_id." }, { status: 400 });
   }
