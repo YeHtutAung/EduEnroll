@@ -121,13 +121,7 @@ function PayNowTab({
     const stripe = await stripePromise;
     if (!stripe) { setError("Stripe not loaded."); setPaying(false); return; }
 
-    const { paymentIntent, error: stripeError } = await stripe.confirmPayment({
-      clientSecret,
-      confirmParams: {
-        return_url: `${window.location.origin}/enroll/${slug}/checkout/success/?ref=${enrollmentRef}`,
-      },
-      redirect: "if_required",
-    });
+    const { paymentIntent, error: stripeError } = await stripe.confirmPayNowPayment(clientSecret);
 
     if (stripeError) {
       setError(stripeError.message ?? "Failed to generate QR. Please try again.");
