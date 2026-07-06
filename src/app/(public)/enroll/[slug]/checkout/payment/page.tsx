@@ -13,7 +13,6 @@ const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!
 function CardForm({ slug, enrollmentRef, totalAmount }: { slug: string; enrollmentRef: string; totalAmount: number }) {
   const stripe = useStripe();
   const elements = useElements();
-  const router = useRouter();
   const [paying, setPaying] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

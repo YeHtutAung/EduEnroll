@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import TrustedOfficialShell from "@/components/enrollment/TrustedOfficialShell";
 
 interface EnrollmentData {
@@ -17,7 +17,6 @@ interface EnrollmentData {
 }
 
 function SuccessContent() {
-  const params = useParams<{ slug: string }>();
   const searchParams = useSearchParams();
   const ref = searchParams.get("ref") ?? "";
   const [data, setData] = useState<EnrollmentData | null>(null);
