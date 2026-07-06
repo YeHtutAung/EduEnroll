@@ -131,7 +131,8 @@ export type TemplateId =
   | "ls-warm"
   | "ev-luxury"
   | "ev-festival"
-  | "ev-corporate";
+  | "ev-corporate"
+  | "ev-trusted-official";
 
 export interface TenantAppearance {
   id: string;
