@@ -70,8 +70,8 @@ function CardForm({ slug, enrollmentRef, totalAmount }: { slug: string; enrollme
 // ─── PayNow Tab ───────────────────────────────────────────────────────────────
 
 function PayNowTab({
-  slug, enrollmentRef, piId, clientSecret, totalAmount,
-}: { slug: string; enrollmentRef: string; piId: string; clientSecret: string; totalAmount: number }) {
+  slug, enrollmentRef, piId, totalAmount,
+}: { slug: string; enrollmentRef: string; piId: string; totalAmount: number }) {
   const router = useRouter();
   const [qrImageUrl, setQrImageUrl] = useState<string | null>(null);
   const [paying, setPaying] = useState(false);
@@ -118,25 +118,33 @@ function PayNowTab({
     setExpired(false);
     setSeconds(600);
 
-    const stripe = await stripePromise;
-    if (!stripe) { setError("Stripe not loaded."); setPaying(false); return; }
+    try {
+      const res = await fetch("/api/public/payments/stripe/paynow-confirm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentIntentId: piId, enrollmentRef }),
+      });
+      const data = await res.json();
 
-    const { paymentIntent, error: stripeError } = await stripe.confirmPayNowPayment(clientSecret);
+      if (!res.ok) {
+        setError(data.message ?? "Failed to generate QR. Please try again.");
+        setPaying(false);
+        return;
+      }
 
-    if (stripeError) {
-      setError(stripeError.message ?? "Failed to generate QR. Please try again.");
-      setPaying(false);
-      return;
-    }
+      if (data.alreadyPaid) {
+        router.push(`/enroll/${slug}/checkout/success/?ref=${enrollmentRef}`);
+        return;
+      }
 
-    const qrData = (paymentIntent?.next_action as unknown as { paynow_display_qr_code?: { image_url_svg?: string } } | null)
-      ?.paynow_display_qr_code;
-
-    if (qrData?.image_url_svg) {
-      setQrImageUrl(qrData.image_url_svg);
-      startPolling();
-    } else {
-      setError("Could not generate PayNow QR. Please try card payment instead.");
+      if (data.qrImageUrl) {
+        setQrImageUrl(data.qrImageUrl);
+        startPolling();
+      } else {
+        setError("Could not generate PayNow QR. Please try card payment instead.");
+      }
+    } catch {
+      setError("Network error. Please try again.");
     }
     setPaying(false);
   }
@@ -288,7 +296,6 @@ function PaymentContent() {
           slug={params.slug}
           enrollmentRef={ref}
           piId={piId}
-          clientSecret={clientSecret}
           totalAmount={totalAmount}
         />
       )}
