@@ -50,10 +50,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ alreadyPaid: true });
     }
 
-    // Confirm with PayNow payment method
+    // Create a PayNow PaymentMethod, then confirm the PaymentIntent with it.
+    // Two-step approach: payment_method_data inline is unreliable for PayNow
+    // on PaymentIntents with multiple payment_method_types.
+    const pm = await (stripe.paymentMethods.create as (params: Record<string, unknown>) => Promise<{ id: string }>).call(stripe.paymentMethods, { type: "paynow" });
     const pi = await stripe.paymentIntents.confirm(paymentIntentId, {
-      payment_method_data: { type: "paynow" },
-    } as never);
+      payment_method: pm.id,
+      return_url: "https://kuunyi.com", // required field; PayNow uses QR, not redirect
+    });
 
     const qrCode = (pi.next_action as unknown as {
       paynow_display_qr_code?: { image_url_svg?: string };
