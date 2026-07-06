@@ -22,7 +22,7 @@ export async function GET(
       enrollment_ref, status, student_name_en, email,
       enrollment_items(quantity, fee_amount, classes(level)),
       classes(level, fee_amount, intakes(name, slug)),
-      quantity, fee_amount,
+      quantity,
       payments(stripe_payment_intent_id, status, payment_method, card_brand, card_last4)
     `)
     .eq("enrollment_ref", params.ref.trim())
@@ -151,7 +151,6 @@ interface EnrollmentRow {
   student_name_en: string | null;
   email: string | null;
   quantity: number | null;
-  fee_amount: number | null;
   enrollment_items: { quantity: number; fee_amount: number; classes: { level: string } | null }[] | null;
   classes: { level: string; fee_amount: number; intakes: { name: string; slug: string } | null } | null;
   payments: PaymentRow[] | null;
