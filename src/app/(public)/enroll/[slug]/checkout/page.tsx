@@ -256,7 +256,10 @@ function CheckoutForm() {
     setFormError(null);
 
     // Derive the two DB columns + extra form_data
-    const nameField = fields.find((f) => f.field_key === "name_en") ?? fields.find((f) => f.field_type === "text" && f.is_default);
+    const nameField =
+      fields.find((f) => f.field_key === "name_en") ??
+      fields.find((f) => f.field_type === "text" && f.is_default) ??
+      fields.find((f) => f.field_type === "text");
     const emailField = fields.find((f) => f.field_key === "email" || f.field_type === "email");
 
     const student_name_en = nameField ? (values[nameField.field_key] ?? "").trim() : "";
