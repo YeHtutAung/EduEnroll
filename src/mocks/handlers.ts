@@ -3,6 +3,7 @@ import { http, HttpResponse } from "msw";
 import {
   BANK_TRANSFER_ENROLLMENT,
   MMQR_ENROLLMENT,
+  NO_INTAKE_ENROLLMENT,
   PAYPAY_ENROLLMENT,
   STRIPE_ENROLLMENT,
   SUBMITTED_ENROLLMENT,
@@ -19,8 +20,9 @@ export const handlers = [
       "E2E-MMQR-001":      MMQR_ENROLLMENT,
       "E2E-PAYPAY-001":    PAYPAY_ENROLLMENT,
       "E2E-STRIPE-001":    STRIPE_ENROLLMENT,
-      "E2E-SUBMITTED-001": SUBMITTED_ENROLLMENT,
-      "E2E-VERIFIED-001":  VERIFIED_ENROLLMENT,
+      "E2E-SUBMITTED-001":  SUBMITTED_ENROLLMENT,
+      "E2E-VERIFIED-001":   VERIFIED_ENROLLMENT,
+      "E2E-FORM-NULL-001":  NO_INTAKE_ENROLLMENT,
     };
     const payload = map[ref];
     if (!payload) return new HttpResponse(null, { status: 404 });

@@ -77,6 +77,15 @@ export const VERIFIED_ENROLLMENT = {
   card_last4: "4242",
 };
 
+// Enrollment with no intake_id — triggers the DEFAULT_FIELDS fallback in checkout step 1
+export const NO_INTAKE_ENROLLMENT = {
+  ...BASE,
+  enrollment_ref: "E2E-FORM-NULL-001",
+  payment_mode: "bank_transfer",
+  intake_id: null,
+  bank_accounts: [AYA_BANK],
+};
+
 export const FORM_FIELDS = [
   {
     id: "f1",
