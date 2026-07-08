@@ -5,13 +5,15 @@
 interface TrustedOfficialShellProps {
   logoUrl?: string | null;
   orgName: string;
+  brandColor?: string | null;
   step?: 1 | 2 | "complete";
   children: React.ReactNode;
 }
 
 export default function TrustedOfficialShell({
-  logoUrl, orgName, step, children,
+  logoUrl, orgName, brandColor, step, children,
 }: TrustedOfficialShellProps) {
+  const brand = brandColor || "#0f1f42";
   const seg1Gold = step === 1 || step === 2 || step === "complete";
   const seg2Gold = step === 2 || step === "complete";
 
@@ -25,19 +27,19 @@ export default function TrustedOfficialShell({
         ) : (
           <div
             className="w-[30px] h-[30px] rounded-[6px] flex items-center justify-center text-[11px] font-black"
-            style={{ background: "#0f1f42", color: "#d4af5a" }}
+            style={{ background: brand, color: "#d4af5a" }}
           >
             {orgName.charAt(0)}
           </div>
         )}
-        <span className="text-[12.5px] font-semibold" style={{ color: "#0f1f42" }}>{orgName}</span>
+        <span className="text-[12.5px] font-semibold" style={{ color: brand }}>{orgName}</span>
       </div>
 
       {/* Step label + progress bar */}
       {step !== "complete" && (
         <div className="px-5 mb-4">
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[10px] font-bold uppercase tracking-[1.5px]" style={{ color: "#0f1f42" }}>
+            <span className="text-[10px] font-bold uppercase tracking-[1.5px]" style={{ color: brand }}>
               Step {step} of 2
             </span>
             <span className="text-[10px]" style={{ color: "#8b8f9a" }}>

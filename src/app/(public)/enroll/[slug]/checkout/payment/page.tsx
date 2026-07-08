@@ -5,8 +5,18 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
 import TrustedOfficialShell from "@/components/enrollment/TrustedOfficialShell";
+import QRPaymentModal from "@/components/payments/QRPaymentModal";
 
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface BankAccount {
+  bank_name: string;
+  account_number: string;
+  account_holder: string;
+  qr_code_url: string | null;
+}
 
 // ─── Card Payment Form ────────────────────────────────────────────────────────
 
@@ -214,11 +224,122 @@ function PayNowTab({
   );
 }
 
+// ─── Bank Transfer Section ────────────────────────────────────────────────────
+
+function BankTransferSection({
+  enrollmentRef, bankAccounts, totalAmount, slug,
+}: { enrollmentRef: string; bankAccounts: BankAccount[]; totalAmount: number; slug: string }) {
+  const router = useRouter();
+  const [files, setFiles] = useState<File[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function handleSubmit() {
+    if (files.length === 0) { setError("Please select a payment screenshot."); return; }
+    setUploading(true);
+    setError(null);
+    const fd = new FormData();
+    fd.append("enrollment_ref", enrollmentRef);
+    files.forEach((f) => fd.append("proof_image", f));
+    try {
+      const res = await fetch("/api/public/payments/upload", { method: "POST", body: fd });
+      if (!res.ok) {
+        const d = await res.json();
+        setError(d.message ?? "Upload failed. Please try again.");
+        setUploading(false);
+        return;
+      }
+      router.push(`/enroll/${slug}/checkout/success/?ref=${enrollmentRef}`);
+    } catch {
+      setError("Network error. Please try again.");
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {bankAccounts.length === 0 && (
+        <div className="p-3 rounded-[8px] text-[12px] text-center" style={{ background: "#fff5f5", color: "#991b1b", border: "1px solid #fca5a5" }}>
+          No bank accounts configured. Please contact the organiser.
+        </div>
+      )}
+
+      {bankAccounts.map((bank, i) => (
+        <div key={i} className="rounded-[10px] p-4" style={{ border: "1px solid #e3e0d6", background: "#fbfaf6" }}>
+          <p className="text-[10px] font-bold tracking-[1.2px] uppercase mb-2.5" style={{ color: "#8b8f9a" }}>
+            {bank.bank_name}
+          </p>
+          <div className="flex justify-between text-[12px] mb-1.5">
+            <span style={{ color: "#8b8f9a" }}>Account No.</span>
+            <span className="font-bold font-mono" style={{ color: "#0f1f42" }}>{bank.account_number}</span>
+          </div>
+          <div className="flex justify-between text-[12px]">
+            <span style={{ color: "#8b8f9a" }}>Account Name</span>
+            <span className="font-bold" style={{ color: "#0f1f42" }}>{bank.account_holder}</span>
+          </div>
+          {bank.qr_code_url && (
+            <div className="mt-3 text-center">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={bank.qr_code_url} alt="Bank QR" className="w-[120px] h-[120px] mx-auto rounded-[6px] object-contain" />
+            </div>
+          )}
+        </div>
+      ))}
+
+      <div className="rounded-[8px] px-4 py-3 text-center" style={{ background: "#fdf3e0", border: "1px solid #eed9a3" }}>
+        <p className="text-[10px] mb-0.5" style={{ color: "#8a6a1f" }}>Transfer exactly</p>
+        <p className="text-[18px] font-extrabold" style={{ color: "#8a6a1f" }}>{totalAmount.toLocaleString()}</p>
+      </div>
+
+      <div>
+        <p className="text-[11px] font-semibold mb-1.5" style={{ color: "#43485a" }}>
+          Upload payment screenshot
+        </p>
+        <label
+          className="block w-full rounded-[8px] border-2 border-dashed p-4 text-center cursor-pointer"
+          style={{ borderColor: files.length > 0 ? "#0f1f42" : "#d8d5c9" }}
+        >
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            multiple
+            className="hidden"
+            onChange={(e) => { setFiles(Array.from(e.target.files ?? [])); setError(null); }}
+          />
+          {files.length > 0 ? (
+            <p className="text-[12px] font-semibold" style={{ color: "#0f1f42" }}>
+              {files.length} file{files.length > 1 ? "s" : ""} selected
+            </p>
+          ) : (
+            <p className="text-[12px]" style={{ color: "#8b8f9a" }}>Tap to select screenshot</p>
+          )}
+        </label>
+      </div>
+
+      {error && (
+        <div className="p-3 rounded-lg border text-[12px]" style={{ background: "#fff5f5", borderColor: "#fca5a5", color: "#991b1b" }}>
+          {error}
+        </div>
+      )}
+
+      <button
+        className="w-full py-3 rounded-[8px] text-[12.5px] font-bold text-white disabled:opacity-60"
+        style={{ background: "#0f1f42" }}
+        onClick={handleSubmit}
+        disabled={uploading || files.length === 0 || bankAccounts.length === 0}
+      >
+        {uploading ? "Submitting..." : "SUBMIT PAYMENT PROOF"}
+      </button>
+    </div>
+  );
+}
+
 // ─── Payment Page ─────────────────────────────────────────────────────────────
 
 function PaymentContent() {
   const params = useParams<{ slug: string }>();
   const searchParams = useSearchParams();
+  const router = useRouter();
   const ref = searchParams.get("ref") ?? "";
   const piId = searchParams.get("pi") ?? "";
 
@@ -226,7 +347,14 @@ function PaymentContent() {
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [totalAmount, setTotalAmount] = useState(0);
   const [orgName, setOrgName] = useState("");
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [brandColor, setBrandColor] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [paymentMode, setPaymentMode] = useState<string | null>(null);
+  const [mmqrProvider, setMmqrProvider] = useState<"abank" | "mmpay">("mmpay");
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
+  const [studentName, setStudentName] = useState("");
+  const [showQRModal, setShowQRModal] = useState(false);
 
   useEffect(() => {
     const stored = sessionStorage.getItem(`cs_${ref}`);
@@ -237,8 +365,17 @@ function PaymentContent() {
       .then((d) => {
         setTotalAmount(d.total_amount ?? 0);
         setOrgName(d.event_name ?? "");
-        if (!stored && d.stripe_client_secret) setClientSecret(d.stripe_client_secret);
-        if (!stored && !d.stripe_client_secret) setLoadError("Payment session not found. Please go back and try again.");
+        setLogoUrl(d.logo_url ?? null);
+        setBrandColor(d.brand_color ?? null);
+        setStudentName(d.student_name_en ?? "");
+        const mode = d.payment_mode ?? "bank_transfer";
+        setPaymentMode(mode);
+        setMmqrProvider(d.mmqr_provider === "abank" ? "abank" : "mmpay");
+        setBankAccounts(d.bank_accounts ?? []);
+        if (mode === "stripe") {
+          if (!stored && d.stripe_client_secret) setClientSecret(d.stripe_client_secret);
+          if (!stored && !d.stripe_client_secret) setLoadError("Payment session not found. Please go back and try again.");
+        }
       })
       .catch(() => setLoadError("Failed to load payment details."));
   }, [ref]);
@@ -254,7 +391,8 @@ function PaymentContent() {
     );
   }
 
-  if (!clientSecret) {
+  // Wait until we know the payment mode (and clientSecret for Stripe)
+  if (!paymentMode || (paymentMode === "stripe" && !clientSecret)) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: "#f7f5ef" }}>
         <div className="w-5 h-5 border-2 rounded-full animate-spin" style={{ borderColor: "#0f1f42", borderTopColor: "transparent" }} />
@@ -262,43 +400,80 @@ function PaymentContent() {
     );
   }
 
+  const isQRMode = paymentMode === "mmqr" || paymentMode === "paypay";
+  const qrProvider = paymentMode === "paypay" ? "paypay" : mmqrProvider;
+
   return (
-    <TrustedOfficialShell orgName={orgName} step={2}>
+    <TrustedOfficialShell orgName={orgName} logoUrl={logoUrl} brandColor={brandColor} step={2}>
       {/* Total due card */}
       <div className="flex items-center justify-between rounded-[10px] px-4 py-3 mb-5" style={{ border: "1px solid #e3e0d6", background: "#fbfaf6" }}>
         <span className="text-[11.5px]" style={{ color: "#8b8f9a" }}>Total due</span>
         <span className="text-[19px] font-extrabold" style={{ color: "#0f1f42" }}>{totalAmount.toLocaleString()}</span>
       </div>
 
-      {/* Method toggle */}
-      <div className="flex rounded-[7px] overflow-hidden mb-5" style={{ border: "1.5px solid #d8d5c9" }}>
-        {(["card", "paynow"] as const).map((t) => (
-          <button
-            key={t}
-            className="flex-1 py-2 text-[11px] font-bold uppercase tracking-wide transition-colors"
-            style={{
-              background: tab === t ? "#0f1f42" : "transparent",
-              color: tab === t ? "#ffffff" : "#43485a",
-            }}
-            onClick={() => setTab(t)}
-          >
-            {t === "card" ? "CARD" : "PAYNOW"}
-          </button>
-        ))}
-      </div>
+      {paymentMode === "stripe" && clientSecret ? (
+        <>
+          {/* Stripe: Card + PayNow method toggle */}
+          <div className="flex rounded-[7px] overflow-hidden mb-5" style={{ border: "1.5px solid #d8d5c9" }}>
+            {(["card", "paynow"] as const).map((t) => (
+              <button
+                key={t}
+                className="flex-1 py-2 text-[11px] font-bold uppercase tracking-wide transition-colors"
+                style={{
+                  background: tab === t ? "#0f1f42" : "transparent",
+                  color: tab === t ? "#ffffff" : "#43485a",
+                }}
+                onClick={() => setTab(t)}
+              >
+                {t === "card" ? "CARD" : "PAYNOW"}
+              </button>
+            ))}
+          </div>
 
-      {tab === "card" ? (
-        <Elements stripe={stripePromise} options={{ clientSecret }}>
-          <CardForm slug={params.slug} enrollmentRef={ref} totalAmount={totalAmount} />
-        </Elements>
-      ) : (
-        <PayNowTab
-          slug={params.slug}
+          {tab === "card" ? (
+            <Elements stripe={stripePromise} options={{ clientSecret }}>
+              <CardForm slug={params.slug} enrollmentRef={ref} totalAmount={totalAmount} />
+            </Elements>
+          ) : (
+            <PayNowTab
+              slug={params.slug}
+              enrollmentRef={ref}
+              piId={piId}
+              totalAmount={totalAmount}
+            />
+          )}
+        </>
+      ) : paymentMode === "bank_transfer" ? (
+        <BankTransferSection
           enrollmentRef={ref}
-          piId={piId}
+          bankAccounts={bankAccounts}
           totalAmount={totalAmount}
+          slug={params.slug}
         />
-      )}
+      ) : isQRMode ? (
+        <>
+          <button
+            className="w-full py-3 rounded-[8px] text-[12.5px] font-bold text-white"
+            style={{ background: "#0f1f42" }}
+            onClick={() => setShowQRModal(true)}
+          >
+            {paymentMode === "paypay" ? "Pay via PayPay" : "Pay via MMQR"}
+          </button>
+          <p className="text-center text-[9.5px] mt-3" style={{ color: "#aca795" }}>
+            A QR code will be generated for {totalAmount.toLocaleString()}
+          </p>
+          {showQRModal && (
+            <QRPaymentModal
+              enrollmentRef={ref}
+              amount={totalAmount}
+              studentName={studentName}
+              provider={qrProvider as "abank" | "mmpay" | "paypay"}
+              onSuccess={() => router.push(`/enroll/${params.slug}/checkout/success/?ref=${ref}`)}
+              onClose={() => setShowQRModal(false)}
+            />
+          )}
+        </>
+      ) : null}
     </TrustedOfficialShell>
   );
 }
