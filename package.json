@@ -10,6 +10,7 @@
     "test:watch": "vitest",
     "seed:e2e": "node --env-file=.env.local --experimental-strip-types scripts/seed-e2e.ts",
     "test:e2e": "npm run seed:e2e && playwright test",
+    "test:e2e:staging": "cross-env SEED_TENANT_SLUG=walmal node --env-file=.env.local --experimental-strip-types scripts/seed-e2e.ts && cross-env PLAYWRIGHT_BASE_URL=https://walmal.staging.kuunyi.com playwright test",
     "test:e2e:ui": "npm run seed:e2e && playwright test --ui",
     "lint": "next lint",
     "format": "prettier --write .",
