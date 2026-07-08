@@ -2,6 +2,10 @@
 // Seeds fixed E2E test data into the dev Supabase DB.
 // Run with: npm run seed:e2e
 // Requires .env.local with NEXT_PUBLIC_SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
+//
+// SEED_TENANT_SLUG env var (default: "e2e-test"):
+//   - "e2e-test" → creates a dedicated test tenant
+//   - any other slug (e.g. "walmal") → looks up existing tenant by subdomain
 
 import { config } from "dotenv";
 config({ path: ".env.local" });
@@ -20,9 +24,10 @@ const db = createClient(SUPABASE_URL, SERVICE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
+const TENANT_SLUG = process.env.SEED_TENANT_SLUG ?? "e2e-test";
+
 // ── Fixed IDs (stable across runs) ────────────────────────────────────────────
 
-const TENANT_ID      = "e2e00000-0000-0000-0000-000000000001";
 const BANK_ACCT_ID   = "e2e00000-0000-0000-0000-000000000002";
 const INTAKE_ID      = "e2e00000-0000-0000-0000-000000000003";
 const CLASS_ID       = "e2e00000-0000-0000-0000-000000000004";
@@ -41,16 +46,33 @@ async function run(label: string, fn: () => PromiseLike<{ error: unknown }>) {
 // ── Seed ──────────────────────────────────────────────────────────────────────
 
 async function seed() {
-  console.log("\nSeeding E2E test data into dev DB...\n");
+  console.log(`\nSeeding E2E test data into dev DB (tenant: ${TENANT_SLUG})...\n`);
 
-  // 1. Tenant
-  await run("tenant (e2e-test)", () =>
-    db.from("tenants").upsert(
-      { id: TENANT_ID, name: "E2E Test Org", subdomain: "e2e-test", plan: "pro",
-        payment_mode: "bank_transfer", mmqr_provider: "abank" } as never,
-      { onConflict: "id" },
-    ),
-  );
+  // 1. Tenant — create if e2e-test, look up if any other existing tenant
+  let TENANT_ID: string;
+  if (TENANT_SLUG === "e2e-test") {
+    const E2E_TENANT_ID = "e2e00000-0000-0000-0000-000000000001";
+    await run("tenant (e2e-test)", () =>
+      db.from("tenants").upsert(
+        { id: E2E_TENANT_ID, name: "E2E Test Org", subdomain: "e2e-test", plan: "pro",
+          payment_mode: "bank_transfer", mmqr_provider: "abank" } as never,
+        { onConflict: "id" },
+      ),
+    );
+    TENANT_ID = E2E_TENANT_ID;
+  } else {
+    const { data: tenant, error } = await db
+      .from("tenants")
+      .select("id")
+      .eq("subdomain", TENANT_SLUG)
+      .single();
+    if (error || !tenant) {
+      console.error(`  ✗ tenant not found for subdomain "${TENANT_SLUG}"`);
+      process.exit(1);
+    }
+    TENANT_ID = (tenant as { id: string }).id;
+    console.log(`  ✓ tenant (${TENANT_SLUG}) → ${TENANT_ID}`);
+  }
 
   // 2. Bank account
   await run("bank_account (AYA)", () =>
@@ -61,13 +83,18 @@ async function seed() {
     ),
   );
 
-  // 3. Tenant appearance
-  await run("tenant_appearance", () =>
-    db.from("tenant_appearance").upsert(
-      { tenant_id: TENANT_ID, template_id: "ev-trusted-official", primary_color: "#0f1f42" },
-      { onConflict: "tenant_id" },
-    ),
-  );
+  // 3. Tenant appearance — only seed for the dedicated e2e-test tenant to avoid
+  //    overwriting real tenant branding when running against an existing tenant.
+  if (TENANT_SLUG === "e2e-test") {
+    await run("tenant_appearance", () =>
+      db.from("tenant_appearance").upsert(
+        { tenant_id: TENANT_ID, template_id: "ev-trusted-official", primary_color: "#0f1f42" },
+        { onConflict: "tenant_id" },
+      ),
+    );
+  } else {
+    console.log("  - tenant_appearance (skipped — using existing tenant settings)");
+  }
 
   // 4. Intake
   await run("intake (E2E Test Event)", () =>

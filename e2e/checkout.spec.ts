@@ -1,13 +1,15 @@
 // e2e/checkout.spec.ts
 //
 // Architecture:
-//   Real DB (via NEXT_PUBLIC_DEV_TENANT=e2e-test):
-//     Step 1 form, bank_transfer payment + upload, success page
-//   page.route() mocks (testing UI for different payment modes):
-//     mmqr, paypay, stripe — only the enrollment GET is mocked so the UI
-//     renders the right mode; everything else hits the real stack
+//   Real DB (step 1 form, success page):
+//     Enrollment refs seeded by seed-e2e.ts; real API calls hit the staging DB.
+//   page.route() mocks (payment page — all payment modes):
+//     The enrollment GET is mocked so the UI renders the correct payment mode
+//     regardless of the tenant's configured payment_mode. Bank transfer tests
+//     also mock the enrollment GET (walmal tenant may use a different mode).
+//     Everything else (PATCH, upload, abank QR) hits the real stack.
 //
-// Run `npm run seed:e2e` before running these tests to ensure clean state.
+// Run `npm run test:e2e:staging` (seeds then runs) or seed manually first.
 
 import { test, expect } from "@playwright/test";
 
@@ -43,6 +45,11 @@ const BASE_ENROLLMENT = {
   card_brand: null,
   card_last4: null,
 };
+
+/** Bank accounts seeded by seed-e2e.ts — used in bank_transfer payment page mocks. */
+const SEEDED_BANK_ACCOUNTS = [
+  { bank_name: "AYA", account_number: "100200300", account_holder: "E2E Test Org", qr_code_url: null },
+];
 
 // ─── Suite: Checkout step 1 — attendee details ────────────────────────────────
 
@@ -117,14 +124,27 @@ test.describe("Checkout — step 1 (attendee details)", () => {
 
 test.describe("Checkout — payment page", () => {
   test("bank_transfer: shows bank account and amount from real DB", async ({ page }) => {
+    // Mock enrollment GET — ensures bank_transfer mode regardless of tenant's payment_mode setting
+    await page.route("**/api/public/enrollment/E2E-BANK-001", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...BASE_ENROLLMENT,
+          enrollment_ref: "E2E-BANK-001",
+          payment_mode: "bank_transfer",
+          bank_accounts: SEEDED_BANK_ACCOUNTS,
+        }),
+      }),
+    );
+
     await page.goto(paymentUrl("E2E-BANK-001"));
 
     await expect(page.getByText("Total due")).toBeVisible({ timeout: 15_000 });
 
-    // Bank account details from real DB (seeded by seed-e2e.ts)
+    // Bank account details from SEEDED_BANK_ACCOUNTS (seeded by seed-e2e.ts)
     await expect(page.getByText("AYA")).toBeVisible();
     await expect(page.getByText("100200300")).toBeVisible();
-    // account holder appears in multiple places — check the unique account number instead
 
     await expect(page.getByText("Transfer exactly")).toBeVisible();
     await expect(page.getByText("5,000").first()).toBeVisible();
@@ -135,6 +155,20 @@ test.describe("Checkout — payment page", () => {
   });
 
   test("bank_transfer: upload file + submit redirects to success page", async ({ page }) => {
+    // Mock enrollment GET — ensures bank_transfer mode regardless of tenant's payment_mode setting
+    await page.route("**/api/public/enrollment/E2E-BANK-001", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...BASE_ENROLLMENT,
+          enrollment_ref: "E2E-BANK-001",
+          payment_mode: "bank_transfer",
+          bank_accounts: SEEDED_BANK_ACCOUNTS,
+        }),
+      }),
+    );
+
     // Mock the upload POST — avoids polluting storage with test files
     await page.route("**/api/public/payments/upload", async (route) => {
       await route.fulfill({
@@ -225,7 +259,28 @@ test.describe("Checkout — payment page", () => {
   });
 
   test("stripe: shows CARD and PAYNOW tabs", async ({ page }) => {
-    page.on("console", () => {}); // suppress Stripe JS console errors in test
+    // Stub Stripe.js CDN to prevent client-side exception from fake client secret
+    await page.route(/js\.stripe\.com/, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/javascript",
+        body: `window.Stripe = function() {
+          return {
+            elements: function() {
+              return {
+                create: function() { return { mount: function() {}, on: function() {}, unmount: function() {}, destroy: function() {}, update: function() {} }; },
+                update: function() {},
+                fetchUpdates: async function() { return { error: null }; },
+                getElement: function() { return null; },
+                submit: async function() { return { error: null }; },
+              };
+            },
+            confirmPayment: async function() { return { error: null }; },
+            retrievePaymentIntent: async function() { return { paymentIntent: { status: "requires_payment_method" } }; },
+          };
+        };`,
+      }),
+    );
 
     await page.route("**/api/public/enrollment/E2E-STRIPE-001", (route) =>
       route.fulfill({

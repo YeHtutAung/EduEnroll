@@ -9,7 +9,7 @@ export default defineConfig({
   reporter: [["html", { open: "never" }]],
 
   use: {
-    baseURL: "http://localhost:3006",
+    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3006",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     viewport: { width: 390, height: 844 },
@@ -22,7 +22,8 @@ export default defineConfig({
     },
   ],
 
-  webServer: {
+  // Skip local dev server when running against an external base URL (e.g. staging)
+  webServer: process.env.PLAYWRIGHT_BASE_URL ? undefined : {
     // No MSW — E2E tests hit the real dev DB via NEXT_PUBLIC_DEV_TENANT
     command: "cross-env NEXT_PUBLIC_DEV_TENANT=e2e-test next dev -p 3006",
     url: "http://localhost:3006",
