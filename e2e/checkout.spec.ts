@@ -5,6 +5,10 @@ import { test, expect } from "@playwright/test";
 
 const SLUG = "test-event";
 
+function checkoutUrl(ref: string) {
+  return `/enroll/${SLUG}/checkout/?ref=${ref}`;
+}
+
 function paymentUrl(ref: string) {
   return `/enroll/${SLUG}/checkout/payment/?ref=${ref}&pi=pi_test_e2e_001`;
 }
@@ -14,6 +18,67 @@ function successUrl(ref: string) {
 }
 
 // ─── Suite ───────────────────────────────────────────────────────────────────
+
+test.describe("Checkout — step 1 (attendee details)", () => {
+  test("shows order summary and form fields", async ({ page }) => {
+    await page.goto(checkoutUrl("E2E-BANK-001"));
+
+    // Order summary card
+    await expect(page.getByText("E2E Test Event")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText(/1 × N3/i)).toBeVisible();
+
+    // Your Details heading
+    await expect(page.getByText("Your Details")).toBeVisible();
+
+    // Form fields rendered
+    await expect(page.getByLabel(/Full Name/i)).toBeVisible();
+    await expect(page.getByLabel(/Email/i)).toBeVisible();
+
+    // Continue button present
+    await expect(page.getByRole("button", { name: /CONTINUE TO PAYMENT/i })).toBeVisible();
+  });
+
+  test("shows default name+email fields when intake_id is null", async ({ page }) => {
+    // This is the regression test for the spinner-lock bug:
+    // When intake_id is null the form previously got stuck showing a spinner.
+    await page.goto(checkoutUrl("E2E-FORM-NULL-001"));
+
+    await expect(page.getByLabel(/Full Name/i)).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByLabel(/Email/i)).toBeVisible();
+
+    // Button must be enabled (not stuck in disabled/spinner state)
+    await expect(page.getByRole("button", { name: /CONTINUE TO PAYMENT/i })).not.toBeDisabled();
+  });
+
+  test("submit with blank fields shows native validation (button not disabled)", async ({ page }) => {
+    await page.goto(checkoutUrl("E2E-BANK-001"));
+    await expect(page.getByLabel(/Full Name/i)).toBeVisible({ timeout: 10_000 });
+
+    // Button is enabled once fields are loaded
+    await expect(page.getByRole("button", { name: /CONTINUE TO PAYMENT/i })).not.toBeDisabled();
+  });
+
+  test("filling form and submitting navigates to payment page", async ({ page }) => {
+    await page.goto(checkoutUrl("E2E-BANK-001"));
+    await expect(page.getByLabel(/Full Name/i)).toBeVisible({ timeout: 10_000 });
+
+    await page.getByLabel(/Full Name/i).fill("E2E Test User");
+    await page.getByLabel(/Email/i).fill("e2e@test.com");
+
+    await page.getByRole("button", { name: /CONTINUE TO PAYMENT/i }).click();
+
+    // After PATCH + PaymentIntent create, redirects to payment page
+    await page.waitForURL(`**/checkout/payment*`, { timeout: 10_000 });
+    expect(page.url()).toContain("E2E-BANK-001");
+  });
+
+  test("shows error message when ref is not found", async ({ page }) => {
+    await page.goto(checkoutUrl("DOES-NOT-EXIST"));
+
+    await expect(page.getByText("Order not found.")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("Return to event page")).toBeVisible();
+  });
+});
 
 test.describe("Checkout — payment page", () => {
   test("bank_transfer: shows bank account details and amount", async ({ page }) => {
