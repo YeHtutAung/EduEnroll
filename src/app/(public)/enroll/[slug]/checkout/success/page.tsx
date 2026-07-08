@@ -65,13 +65,25 @@ function SuccessContent() {
     if (!ref) { setError("Missing order reference."); return; }
     sessionStorage.removeItem(`cs_${ref}`);
 
-    fetch(`/api/public/enrollment/${ref}`)
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.error) setError(d.error);
-        else setData(d);
-      })
-      .catch(() => setError("Failed to load order details."));
+    // If Stripe redirected back with ?payment_intent=pi_xxx&redirect_status=succeeded,
+    // call the intent/status endpoint first to confirm payment and advance enrollment status.
+    const urlParams = new URLSearchParams(window.location.search);
+    const piId = urlParams.get("payment_intent");
+    const redirectStatus = urlParams.get("redirect_status");
+
+    const verify = piId && redirectStatus === "succeeded"
+      ? fetch(`/api/public/payments/stripe/intent/status?pi=${encodeURIComponent(piId)}`).catch(() => null)
+      : Promise.resolve(null);
+
+    verify.then(() =>
+      fetch(`/api/public/enrollment/${ref}`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (d.error) setError(d.error);
+          else setData(d);
+        })
+        .catch(() => setError("Failed to load order details.")),
+    );
   }, [ref]);
 
   if (error || !data) {
