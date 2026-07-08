@@ -124,12 +124,17 @@ async function seed() {
     );
   }
 
-  // 8. Payments — delete old records then insert fresh ones so status is reproducible
+  // 8. Payments — delete old records then insert fresh ones so status is reproducible.
+  //    E2E-BANK-001 intentionally has NO payment: inserting a pending payment would
+  //    trigger the DB to move it to payment_submitted, breaking the PATCH in the submit test.
   const paymentSeeds = [
-    { ref: "E2E-BANK-001",      payment_method: "bank_transfer", status: "pending",  card_brand: null,   card_last4: null   },
     { ref: "E2E-SUBMITTED-001", payment_method: "bank_transfer", status: "pending",  card_brand: null,   card_last4: null   },
     { ref: "E2E-VERIFIED-001",  payment_method: "stripe",        status: "verified", card_brand: "visa", card_last4: "4242" },
   ];
+
+  // Clean up any payments left on E2E-BANK-001 by previous upload tests
+  const { data: bankEnr } = await db.from("enrollments").select("id").eq("enrollment_ref", "E2E-BANK-001").single();
+  if (bankEnr) await db.from("payments").delete().eq("enrollment_id", (bankEnr as { id: string }).id);
 
   for (const { ref, ...payment } of paymentSeeds) {
     const { data: enr } = await db
