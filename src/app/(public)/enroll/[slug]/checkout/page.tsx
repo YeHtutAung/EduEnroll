@@ -271,10 +271,9 @@ function CheckoutForm() {
       return;
     }
 
-    // Everything else goes into form_data
+    // Save all field values to form_data (including name/email) so admin listing can display them
     const form_data: Record<string, string> = {};
     fields.forEach((f) => {
-      if (f.field_key === nameField?.field_key || f.field_key === emailField?.field_key) return;
       const v = (values[f.field_key] ?? "").trim();
       if (v) form_data[f.field_key] = v;
     });
