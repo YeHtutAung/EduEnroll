@@ -23,7 +23,8 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: "cross-env NEXT_PUBLIC_MSW_ENABLED=true next dev -p 3006",
+    // No MSW — E2E tests hit the real dev DB via NEXT_PUBLIC_DEV_TENANT
+    command: "cross-env NEXT_PUBLIC_DEV_TENANT=e2e-test next dev -p 3006",
     url: "http://localhost:3006",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

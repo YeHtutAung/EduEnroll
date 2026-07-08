@@ -69,6 +69,8 @@ export async function GET(
   }
 
   const verifiedPayment = payments?.find((p) => p.status === "verified");
+  // Fall back to any payment so the success page can show the method even before verification
+  const anyPayment = payments?.[0];
 
   // Fetch branding + payment config in parallel
   const [appearanceResult, tenantResult, bankResult] = await Promise.all([
@@ -108,7 +110,7 @@ export async function GET(
     payment_mode: tenant?.payment_mode ?? "bank_transfer",
     mmqr_provider: tenant?.mmqr_provider ?? null,
     bank_accounts: bankAccounts,
-    payment_method: verifiedPayment?.payment_method ?? null,
+    payment_method: verifiedPayment?.payment_method ?? anyPayment?.payment_method ?? null,
     card_brand: verifiedPayment?.card_brand ?? null,
     card_last4: verifiedPayment?.card_last4 ?? null,
     ...(stripeClientSecret ? { stripe_client_secret: stripeClientSecret } : {}),
