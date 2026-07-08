@@ -221,18 +221,30 @@ function CheckoutForm() {
   }, [ref]);
 
   useEffect(() => {
-    if (!summary?.intake_id) return;
+    if (!summary) return;
+
+    const DEFAULT_FIELDS: FormField[] = [
+      { id: "name_en", field_key: "name_en", field_label: "Full Name", field_type: "text",  is_required: true, options: null, sort_order: 1, is_default: true },
+      { id: "email",   field_key: "email",   field_label: "Email",     field_type: "email", is_required: true, options: null, sort_order: 2, is_default: true },
+    ];
+
+    const applyFields = (f: FormField[]) => {
+      setFields(f);
+      const init: Record<string, string> = {};
+      f.forEach((field) => { init[field.field_key] = ""; });
+      setValues(init);
+    };
+
+    if (!summary.intake_id) {
+      applyFields(DEFAULT_FIELDS);
+      return;
+    }
+
     fetch(`/api/public/form-fields?intake_id=${summary.intake_id}`)
       .then((r) => r.json())
-      .then((f: FormField[]) => {
-        setFields(f);
-        // Initialise values map
-        const init: Record<string, string> = {};
-        f.forEach((field) => { init[field.field_key] = ""; });
-        setValues(init);
-      })
-      .catch(() => {/* non-fatal — fallback handled below */});
-  }, [summary?.intake_id]);
+      .then((f: FormField[]) => applyFields(f.length > 0 ? f : DEFAULT_FIELDS))
+      .catch(() => applyFields(DEFAULT_FIELDS));
+  }, [summary]);
 
   function setValue(key: string, val: string) {
     setValues((prev) => ({ ...prev, [key]: val }));
