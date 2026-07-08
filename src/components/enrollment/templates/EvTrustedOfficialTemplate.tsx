@@ -24,11 +24,13 @@ function TicketCard({
   qty,
   onQtyChange,
   featured,
+  brand,
 }: {
   cls: TemplateClass;
   qty: number;
   onQtyChange: (classId: string, delta: number) => void;
   featured: boolean;
+  brand: string;
 }) {
   const { isDisabled, overlayState } = getCardState(cls);
   const max = cls.max_tickets_per_person ?? 10;
@@ -52,7 +54,7 @@ function TicketCard({
       {/* Header row */}
       <div className="flex items-start justify-between mb-1">
         <div className="flex items-center gap-2">
-          <span className="font-bold text-[13px]" style={{ color: "#0f1f42" }}>{cls.level}</span>
+          <span className="font-bold text-[13px]" style={{ color: brand }}>{cls.level}</span>
           {featured && (
             <span
               className="text-[8.5px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded text-white"
@@ -62,7 +64,7 @@ function TicketCard({
             </span>
           )}
         </div>
-        <span className="text-[12.5px] font-bold" style={{ color: "#0f1f42" }}>
+        <span className="text-[12.5px] font-bold" style={{ color: brand }}>
           {cls.fee_formatted}
         </span>
       </div>
@@ -86,7 +88,7 @@ function TicketCard({
           >
             <button
               className="w-[26px] h-[26px] flex items-center justify-center text-sm font-bold hover:bg-gray-50"
-              style={{ color: "#0f1f42" }}
+              style={{ color: brand }}
               onClick={() => onQtyChange(cls.id, -1)}
               disabled={qty === 0}
             >
@@ -94,13 +96,13 @@ function TicketCard({
             </button>
             <span
               className="w-[26px] text-center text-[12px] font-bold"
-              style={{ color: "#0f1f42", borderLeft: "1px solid #d8d5c9", borderRight: "1px solid #d8d5c9" }}
+              style={{ color: brand, borderLeft: "1px solid #d8d5c9", borderRight: "1px solid #d8d5c9" }}
             >
               {qty}
             </span>
             <button
               className="w-[26px] h-[26px] flex items-center justify-center text-sm font-bold hover:bg-gray-50"
-              style={{ color: "#0f1f42" }}
+              style={{ color: brand }}
               onClick={() => onQtyChange(cls.id, 1)}
               disabled={qty >= max}
             >
@@ -109,7 +111,7 @@ function TicketCard({
           </div>
           {/* Subtotal */}
           {qty > 0 && (
-            <span className="text-[11.5px] font-semibold" style={{ color: "#0f1f42" }}>
+            <span className="text-[11.5px] font-semibold" style={{ color: brand }}>
               {cls.fee_formatted.replace(/[\d,]+/, String(subtotal.toLocaleString()))}
             </span>
           )}
@@ -126,6 +128,9 @@ export default function EvTrustedOfficialTemplate({
 }: EvTrustedOfficialTemplateProps) {
   const router = useRouter();
   const logoUrl = appearance.logo_url;
+  const brand = appearance.primary_color || "#0f1f42";
+  const tagline = appearance.tagline ?? null;
+  const ctaText = appearance.cta_button_text || "CONTINUE →";
   const [cart, setCart] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -182,12 +187,12 @@ export default function EvTrustedOfficialTemplate({
         ) : (
           <div
             className="w-[30px] h-[30px] rounded-[6px] flex items-center justify-center text-[11px] font-black"
-            style={{ background: "#0f1f42", color: "#d4af5a" }}
+            style={{ background: brand, color: "#d4af5a" }}
           >
             {intake.name.charAt(0)}
           </div>
         )}
-        <span className="text-[12.5px] font-semibold" style={{ color: "#0f1f42" }}>
+        <span className="text-[12.5px] font-semibold" style={{ color: brand }}>
           {intake.name}
         </span>
       </div>
@@ -200,9 +205,12 @@ export default function EvTrustedOfficialTemplate({
         <p className="text-[10px] font-bold uppercase tracking-[2.5px] mb-1" style={{ color: "#b7912b" }}>
           {intake.year}
         </p>
-        <h1 className="text-[19px] font-extrabold leading-tight" style={{ color: "#0f1f42" }}>
+        <h1 className="text-[19px] font-extrabold leading-tight" style={{ color: brand }}>
           Select Your Ticket
         </h1>
+        {tagline && (
+          <p className="text-[11px] mt-1" style={{ color: "#8b8f9a" }}>{tagline}</p>
+        )}
       </div>
 
       {/* ── Ticket cards ─────────────────────────────────── */}
@@ -219,6 +227,7 @@ export default function EvTrustedOfficialTemplate({
               qty={cart[cls.id] ?? 0}
               onQtyChange={handleQtyChange}
               featured={i === 0 && classes.length > 1}
+              brand={brand}
             />
           ))
         )}
@@ -238,20 +247,20 @@ export default function EvTrustedOfficialTemplate({
           style={{ background: "#ffffff", borderTop: "1px solid #e3e0d6", padding: "12px 22px 18px" }}
         >
           <div className="flex items-center justify-between mb-3">
-            <span className="text-[11.5px] font-bold" style={{ color: "#0f1f42" }}>
+            <span className="text-[11.5px] font-bold" style={{ color: brand }}>
               {cartCount} ticket{cartCount > 1 ? "s" : ""} selected
             </span>
-            <span className="text-[12px] font-extrabold" style={{ color: "#0f1f42" }}>
+            <span className="text-[12px] font-extrabold" style={{ color: brand }}>
               {cartTotal.toLocaleString()}
             </span>
           </div>
           <button
             className="w-full py-2.5 rounded-[7px] text-[12px] font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-60"
-            style={{ background: "#0f1f42" }}
+            style={{ background: brand }}
             onClick={handleCheckout}
             disabled={loading}
           >
-            {loading ? "Processing..." : "CONTINUE →"}
+            {loading ? "Processing..." : ctaText}
           </button>
         </div>
       )}
