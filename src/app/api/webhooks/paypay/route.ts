@@ -4,7 +4,7 @@ import paypay from "@/lib/paypay";
 import { dispatchPaymentApproved } from "@/server/notifications/dispatchPaymentApproved";
 import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils";
 
-// ─── POST /api/public/payments/paypay/webhook ───────────────────────────────
+// ─── POST /api/webhooks/paypay ───────────────────────────────
 // PayPay transaction webhook handler.
 // Verifies webhook signature, then updates payment + enrollment status.
 

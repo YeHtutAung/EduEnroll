@@ -116,7 +116,7 @@ export async function POST(request: NextRequest) {
   // ── Build callback URL ────────────────────────────────────
   const host = request.headers.get("host") ?? "localhost:3005";
   const proto = host.startsWith("localhost") ? "http" : "https";
-  const callbackUrl = `${proto}://${host}/api/public/payments/abank/callback`;
+  const callbackUrl = `${proto}://${host}/api/webhooks/abank`;
 
   try {
     const result = await abank.createOrder({
