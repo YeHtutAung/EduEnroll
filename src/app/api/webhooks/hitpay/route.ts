@@ -10,6 +10,11 @@ import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils"
 
 export async function POST(request: NextRequest) {
   const bodyText = await request.text();
+  const contentType = request.headers.get("content-type") ?? "";
+
+  // Temporary debug — log body format to diagnose signature issues
+  console.log("[hitpay-webhook] content-type:", contentType);
+  console.log("[hitpay-webhook] body preview:", bodyText.slice(0, 300));
 
   // ── 1. Verify signature ────────────────────────────────────────────────────
   // HitPay includes the HMAC as an `hmac` field in the form-urlencoded body.
