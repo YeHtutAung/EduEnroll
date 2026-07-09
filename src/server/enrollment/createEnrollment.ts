@@ -93,7 +93,7 @@ export async function createEnrollment(
   return { ok: true, result: successPayload };
 }
 
-function mapEnrollmentError(payload: SubmitEnrollmentResult): SingleEnrollmentError {
+function mapEnrollmentError(payload: Extract<SubmitEnrollmentResult, { success: false }>): SingleEnrollmentError {
   switch (payload.error) {
     case "CLASS_NOT_FOUND":
       return { ok: false, status: 404, error: "Not Found", message: "Class not found." };
