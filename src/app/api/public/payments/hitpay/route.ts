@@ -122,20 +122,24 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // ── 6. Duplicate guard ─────────────────────────────────────────────────────
-  const { data: existingHitPay } = (await supabase
-    .from("payments")
-    .select("hitpay_payment_id")
-    .eq("enrollment_id", enrollment.id)
-    .not("hitpay_payment_id", "is", null)
-    .eq("status", "awaiting_payment")
-    .single()) as { data: { hitpay_payment_id: string | null } | null; error: unknown };
+  // ── 6. Duplicate guard (PayNow only) ──────────────────────────────────────
+  // Only guard PayNow — card payments redirect away so they can't be double-tapped.
+  // If the student switches from PayNow to Card, we need a fresh card request.
+  if (hitpayMethod === "paynow_online") {
+    const { data: existingHitPay } = (await supabase
+      .from("payments")
+      .select("hitpay_payment_id")
+      .eq("enrollment_id", enrollment.id)
+      .not("hitpay_payment_id", "is", null)
+      .eq("status", "awaiting_payment")
+      .single()) as { data: { hitpay_payment_id: string | null } | null; error: unknown };
 
-  if (existingHitPay?.hitpay_payment_id) {
-    return NextResponse.json({
-      paymentRequestId: existingHitPay.hitpay_payment_id,
-      amount: totalFee,
-    });
+    if (existingHitPay?.hitpay_payment_id) {
+      return NextResponse.json({
+        paymentRequestId: existingHitPay.hitpay_payment_id,
+        amount: totalFee,
+      });
+    }
   }
 
   // ── 7. Build redirect URL (card only) ──────────────────────────────────────
