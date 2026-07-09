@@ -3,7 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { decryptToken } from "@/lib/telegram/crypto";
 import { extractSubdomainFromHost } from "@/lib/tenant";
 import { askAgent } from "@/lib/agent-client";
-import { sendTelegramMessage } from "@/lib/telegram";
+import { sendTelegramMessage } from "@/lib/telegram/send";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

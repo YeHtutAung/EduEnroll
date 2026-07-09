@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireOwner } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { decryptToken } from "@/lib/telegram/crypto";
-import { sendTelegramMessage } from "@/lib/telegram";
+import { sendTelegramMessage } from "@/lib/telegram/send";
 
 // ─── GET /api/telegram/admin-requests ────────────────────────────────────────
 // Returns all pending support bot access requests for the tenant.
