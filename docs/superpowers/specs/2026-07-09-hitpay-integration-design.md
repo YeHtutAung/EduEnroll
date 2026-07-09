@@ -20,15 +20,22 @@ HitPay's API requires one payment method per request. PayNow and Card are theref
 ### 2.1 Migration — `supabase/migrations/087_hitpay_support.sql`
 
 ```sql
--- 1. Add hitpay_payment_id to payments
+-- 1. Add hitpay_payment_id to payments + index for webhook lookups
 ALTER TABLE public.payments
   ADD COLUMN IF NOT EXISTS hitpay_payment_id text;
+
+CREATE INDEX IF NOT EXISTS payments_hitpay_payment_id_idx
+  ON public.payments (hitpay_payment_id)
+  WHERE hitpay_payment_id IS NOT NULL;
 
 -- 2. Update payment_mode comment
 COMMENT ON COLUMN public.tenants.payment_mode IS
   'bank_transfer | mmqr | stripe | paypay | hitpay';
 
 -- 3. Update payment_method comment
+-- Both PayNow and Card sub-flows share the same "hitpay" value.
+-- The payment sub-type (paynow_online vs card) is available in the
+-- webhook payload (payments[0].payment_type) but is not stored separately.
 COMMENT ON COLUMN public.payments.payment_method IS
   'manual_upload | abank_mmqr | mmqr | stripe | paypay | hitpay';
 ```
@@ -47,9 +54,15 @@ hitpay_payment_id: string | null;  // HitPay payment request ID
 HITPAY_API_KEY=        # from HitPay dashboard → API Keys
 HITPAY_SALT=           # from HitPay dashboard → Webhook salt (for HMAC verification)
 HITPAY_MODE=sandbox    # sandbox | production
+                       # If absent or any value other than "production", falls back to
+                       # sandbox URLs — this is intentional safe-default behaviour.
 ```
 
 Keys stay in env vars only — never stored in the database or exposed to the client.
+
+### 2.4 NPM Dependencies
+
+`qrcode` is already installed (used by `src/components/payments/QRPaymentModal.tsx`). No new packages needed.
 
 ---
 
@@ -68,7 +81,7 @@ const BASE_URL = () =>
     : "https://api.sandbox.hit-pay.com/v1";
 ```
 
-Auth header: `X-BUSINESS-API-KEY: <key>` on all requests.
+Auth header: `X-BUSINESS-API-KEY: <key>` + `X-Requested-With: XMLHttpRequest` on all requests.
 
 ### 3.2 `createPaymentRequest(params)`
 
@@ -77,7 +90,7 @@ Auth header: `X-BUSINESS-API-KEY: <key>` on all requests.
 **PayNow (QR) params:**
 ```ts
 {
-  amount: string,           // e.g. "50.00"
+  amount: string,           // e.g. "50.00" — decimal string, not integer
   currency: "SGD",
   payment_methods: ["paynow_online"],
   generate_qr: true,
@@ -94,7 +107,7 @@ Returns: `qr_code_data.qr_code` (raw PayNow EMV string) + `id` (payment request 
   amount: string,
   currency: "SGD",
   payment_methods: ["card"],
-  redirect_url: string,     // back to payment page with ?hitpay=success&reference=<id>
+  redirect_url: string,     // back to payment page with ?hitpay=success
   reference_number: string,
   name?: string,
   email?: string,
@@ -104,11 +117,16 @@ Returns: `url` (HitPay hosted checkout URL) + `id`.
 
 ### 3.3 `verifyWebhook(bodyText, signature)`
 
-HMAC-SHA256 of raw body using `HITPAY_SALT`. Timing-safe compare. Returns `boolean`.
+HMAC-SHA256 of raw body using `HITPAY_SALT`. Guards buffer length mismatch before calling `timingSafeEqual` (same pattern as paypay client):
 
 ```ts
-const computed = crypto.createHmac("sha256", SALT()).update(bodyText).digest("hex");
-return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(signature));
+function verifyWebhook(bodyText: string, signature: string): boolean {
+  const computed = crypto.createHmac("sha256", SALT()).update(bodyText).digest("hex");
+  const computedBuf = Buffer.from(computed);
+  const signatureBuf = Buffer.from(signature);
+  if (computedBuf.length !== signatureBuf.length) return false;
+  return crypto.timingSafeEqual(computedBuf, signatureBuf);
+}
 ```
 
 ### 3.4 `parseWebhookPayload(bodyText)`
@@ -131,45 +149,65 @@ Parses raw JSON. Key fields:
 2. Look up enrollment — select class fee, enrollment items, status
 3. Guard: only allow `pending_payment` or `partial_payment`
 4. Calculate total fee (single class or cart; subtract `received_amount` for partial)
-5. Build `redirectUrl` for card: `${proto}://${host}/enroll/payment/${enrollmentRef}?hitpay=success`
-6. Call `hitpay.createPaymentRequest()` with the resolved params
-7. Insert `payments` row:
+5. **Duplicate guard:** check for existing `payments` row where `enrollment_id = enrollment.id` AND `hitpay_payment_id IS NOT NULL` AND `status = "awaiting_payment"`. If found, return the existing `hitpay_payment_id` to the client without calling HitPay again. This prevents double-charging when a student taps the button twice.
+6. Build `redirectUrl` for card: `${proto}://${host}/enroll/payment/${enrollmentRef}?hitpay=success`
+7. Format amount as decimal string: `(totalFee / 100).toFixed(2)` if stored in minor units, or `String(totalFee)` if already in SGD — confirm against how fee is stored for MMK tenants. (For SGD tenants, fee is stored in cents; divide by 100.)
+8. Call `hitpay.createPaymentRequest()` with the resolved params
+9. Insert `payments` row:
    ```ts
    {
      enrollment_id, tenant_id,
      amount: totalFee,
-     payment_method: "hitpay",
+     payment_method: "hitpay",   // same value for both paynow and card sub-flows
      hitpay_payment_id: result.id,
      status: "awaiting_payment",
    }
    ```
-8. Return:
-   - PayNow: `{ qrCode: result.qr_code_data.qr_code, paymentRequestId: result.id, amount }`
-   - Card: `{ url: result.url, paymentRequestId: result.id, amount }`
+10. Return:
+    - PayNow: `{ qrCode: result.qr_code_data.qr_code, paymentRequestId: result.id, amount }`
+    - Card: `{ url: result.url, paymentRequestId: result.id, amount }`
 
 ### 4.2 `GET /api/public/payments/hitpay/status?ref=<enrollmentRef>`
 
-Polls enrollment status for the QR polling loop.
+**Purpose:** Local DB poll for QR payment completion. No call to HitPay's API — the webhook is the sole source of truth. This route reads the current enrollment status from Supabase.
 
-Returns: `{ enrollmentStatus: string }` — client polls every 3s, redirects to success when `enrollmentStatus === "confirmed"`.
+**Note:** This differs from the paypay/status route which polls the PayPay API directly. HitPay has no equivalent polling endpoint, so this route is purely a DB read.
 
-Same pattern as `GET /api/public/payments/paypay/status`.
+**Query:** Look up enrollment by `enrollment_ref + tenant_id`, return its `status`.
+
+**Response:**
+```ts
+{ enrollmentStatus: "pending_payment" | "confirmed" | "rejected" | "cancelled" }
+```
+
+**Client behaviour:**
+- Poll every 3 seconds while `enrollmentStatus === "pending_payment"`
+- Redirect to success page when `enrollmentStatus === "confirmed"`
+- Show error and stop polling when `enrollmentStatus === "rejected"` (payment failed — see Section 4.3)
+- Stop polling on any other terminal status
 
 ### 4.3 `POST /api/webhooks/hitpay`
 
-Webhook handler for `payment_request.completed` events.
+Webhook handler for HitPay events.
 
 **Flow:**
 1. Read raw body text (`request.text()`) + `Hitpay-Signature` header
-2. Verify signature — return `403` if invalid or missing
-3. Parse payload — return `200` immediately if `status !== "completed"` (idempotent)
-4. Find `payments` row by `hitpay_payment_id = payload.id`
-5. Return `200` if payment not found (may be from another system) or already `verified`
-6. Update payment: `status → "verified"`, `verified_at → now`
-7. Update enrollment: `status → "confirmed"`
-8. Call `dispatchPaymentApproved(...)` — reuses existing notification fan-out (email, SMS, Messenger, Telegram, channel invite)
-
-Always return `200` — HitPay retries on non-200.
+2. Reject missing signature with `403`
+3. Verify signature with `hitpay.verifyWebhook()` — reject with `403` if invalid
+4. Parse payload with `hitpay.parseWebhookPayload()`
+5. **Handle `failed` status:** if `payload.status === "failed"`, find the `payments` row by `.eq("hitpay_payment_id", payload.id)` and update `status → "rejected"`. This lets the QR polling loop terminate gracefully. Return `200`.
+6. If `payload.status !== "completed"` (and not `"failed"`), return `200` immediately (idempotent)
+7. Find `payments` row: `.from("payments").select(...).eq("hitpay_payment_id", payload.id).single()`
+8. Return `200` if not found (may belong to another system) or already `verified` (replay guard)
+9. Update payment: `status → "verified"`, `verified_at → now`
+10. Update enrollment: `status → "confirmed"`
+11. Fetch notification data (same pattern as paypay webhook):
+    - Enrollment: `enrollment_ref`, `student_name_en`, `email`, `phone`, `form_data`, `messenger_psid`, `telegram_chat_id`, `class_id`
+    - Class: `level` (for `classLevel`)
+    - Tenant: `name`, `org_type`, `logo_url`, `currency`, `sms_on_payment`
+    - Resolve `email` and `phone` from `form_data` fallbacks using `resolveEmailFromFormData` / `resolvePhoneFromFormData`
+12. Call `dispatchPaymentApproved({ tenantId, enrollmentId, enrollmentRef, studentName, classLevel, feeFormatted, statusUrl, paymentUrl, currency, email, phone, messengerPsid, telegramChatId, classId, tenantName, orgType, logoUrl, smsOnPayment })`
+13. Always return `200` — HitPay retries on non-200
 
 ---
 
@@ -184,26 +222,28 @@ Two pills: **PayNow** | **Card**. Default: PayNow tab.
 ### 5.2 PayNow Tab
 
 1. "Generate QR" button → `POST /api/public/payments/hitpay` `{ enrollmentRef, method: "paynow_online" }`
-2. On response: render `qrCode` string as image via `QRCode.toDataURL()` (same as `QRPaymentModal.tsx`)
+2. On response: render `qrCode` string as image via `QRCode.toDataURL()` (same as `QRPaymentModal.tsx`, width 280, margin 2)
 3. Show QR image with instruction: "Scan with your banking app (PayNow)"
 4. Start polling `GET /api/public/payments/hitpay/status?ref=` every 3s
 5. On `enrollmentStatus === "confirmed"` → redirect to success page
-6. "Cancel" button → clears QR, stops polling
+6. On `enrollmentStatus === "rejected"` → show error: "Payment failed. Please try again." Stop polling, hide QR
+7. "Cancel" button → clears QR, stops polling
 
 ### 5.3 Card Tab
 
 1. "Pay by Card" button → `POST /api/public/payments/hitpay` `{ enrollmentRef, method: "card" }`
 2. On response: `window.location.href = url` (full-page redirect to HitPay hosted checkout)
 3. HitPay redirects back to payment page with `?hitpay=success&reference=<id>`
-4. Page detects `?hitpay=success` on load → shows "Payment processing…" banner
-5. Webhook confirms enrollment asynchronously — student sees status update when page polls or refreshes
+4. The `reference` query param (HitPay payment request ID) is **ignored** — the webhook is the sole authority for confirming payment. Do not use `reference` to query status.
+5. Page detects `?hitpay=success` on load → shows "Payment received — confirming your enrollment…" banner
+6. Webhook confirms enrollment asynchronously — student sees confirmed status on page refresh or via existing enrollment status polling
 
 ### 5.4 URL Parameter Handling
 
-On page load, check for `?hitpay=success`:
+On page load, check `?hitpay=success`:
 - Set `hitpayReturn = "success"` state
 - Show info banner: "Payment received — confirming your enrollment…"
-- Do not mark enrollment as paid based on redirect alone (webhook is authoritative)
+- Do not mark enrollment as paid based on this redirect alone
 
 ---
 
@@ -230,10 +270,10 @@ Register in HitPay Dashboard → Developers → Webhook Endpoints:
 
 | File | Change |
 |---|---|
-| `supabase/migrations/087_hitpay_support.sql` | New — DB migration |
+| `supabase/migrations/087_hitpay_support.sql` | New — DB migration + index |
 | `src/lib/hitpay.ts` | New — API client |
 | `src/app/api/public/payments/hitpay/route.ts` | New — create payment request |
-| `src/app/api/public/payments/hitpay/status/route.ts` | New — QR polling status |
+| `src/app/api/public/payments/hitpay/status/route.ts` | New — QR polling (DB read only) |
 | `src/app/api/webhooks/hitpay/route.ts` | New — webhook handler |
 | `src/types/database.ts` | Add `hitpay_payment_id` to `Payment` |
 | `src/app/admin/settings/page.tsx` | Add HitPay payment mode option |
