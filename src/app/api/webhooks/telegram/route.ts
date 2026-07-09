@@ -15,14 +15,14 @@ interface TelegramUpdate {
   };
 }
 
-// ─── GET /api/webhook ─────────────────────────────────────────────────────────
+// ─── GET /api/webhooks/telegram ─────────────────────────────────────────────────────────
 // Telegram webhook verification ping.
 
 export async function GET() {
   return NextResponse.json({ ok: true });
 }
 
-// ─── POST /api/webhook ────────────────────────────────────────────────────────
+// ─── POST /api/webhooks/telegram ────────────────────────────────────────────────────────
 // Support bot webhook. Always returns 200 — Telegram retries on non-200.
 
 export async function POST(request: NextRequest) {

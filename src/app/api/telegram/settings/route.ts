@@ -161,7 +161,7 @@ export async function PATCH(request: NextRequest) {
         );
       }
 
-      const webhookUrl = `${proto}://${host}/api/webhook`;
+      const webhookUrl = `${proto}://${host}/api/webhooks/telegram`;
       const webhookResult = await setWebhook(body.botToken, webhookUrl, secret);
       if (!webhookResult.ok) {
         return NextResponse.json(
