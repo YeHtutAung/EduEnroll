@@ -124,7 +124,7 @@ export async function createCartEnrollment(
   return { ok: true, result: successPayload };
 }
 
-function mapCartEnrollmentError(payload: SubmitCartEnrollmentResult): CartEnrollmentError {
+function mapCartEnrollmentError(payload: Extract<SubmitCartEnrollmentResult, { success: false }>): CartEnrollmentError {
   const levelHint = payload.class_level ? ` (${payload.class_level})` : "";
   switch (payload.error) {
     case "EMPTY_CART":
