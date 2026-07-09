@@ -26,6 +26,8 @@ vi.mock("@/lib/utils", () => ({
   resolvePhoneFromFormData: vi.fn().mockReturnValue(null),
 }));
 
+import { dispatchPaymentApproved } from "@/server/notifications/dispatchPaymentApproved";
+
 const { POST } = await import("@/app/api/webhooks/hitpay/route");
 
 // ── Fixtures ──────────────────────────────────────────────────────────────
@@ -132,6 +134,7 @@ describe("POST /api/webhooks/hitpay", () => {
   it("returns 200 and confirms enrollment on completed status", async () => {
     const res = await POST(makeRequest(COMPLETED_PAYLOAD));
     expect(res.status).toBe(200);
+    expect(dispatchPaymentApproved).toHaveBeenCalledOnce();
   });
 
   it("updates payment to rejected on failed status", async () => {
