@@ -1,83 +1,66 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import mmpay from "@/lib/mmpay";
+import abank from "@/lib/abank";
 import { sendEmail, enrollmentApprovedEmail } from "@/lib/email";
 import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
 import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils";
 import { sendSms } from "@/lib/sms";
 
-// ─── POST /api/public/payments/mmqr/webhook ─────────────────────────────────
-// MyanMyanPay webhook callback handler.
-// Verifies HMAC signature, then updates payment + enrollment status.
+// ─── GET /api/webhooks/abank ────────────────────────────────
+// ABank calls this URL (GET) after payment completes.
+// Success params: orderId, amount, status, transactionId, billNo,
+//                 endToEndId, transactionDateTime, institutionName
+// Fail adds: errorCode, errorDesc
 
-export async function POST(request: NextRequest) {
-  // ── 1. Read headers and body ───────────────────────────────
-  const signature = request.headers.get("x-mmpay-signature") ?? "";
-  const nonce = request.headers.get("x-mmpay-nonce") ?? "";
-  const bodyText = await request.text();
+export async function GET(request: NextRequest) {
+  const params = abank.parseCallback(request.nextUrl.searchParams);
 
-  // ── 2. Verify HMAC signature ───────────────────────────────
-  const isValid = await mmpay.verifyCb(bodyText, nonce, signature);
-  if (!isValid) {
-    console.warn("[mmqr-webhook] Invalid signature");
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  if (!params.orderId) {
+    return NextResponse.json({ error: "Missing orderId" }, { status: 400 });
   }
 
-  // ── 3. Parse payload ───────────────────────────────────────
-  let payload: {
-    orderId: string;
-    amount: number;
-    currency: string;
-    vendor: string;
-    method: string;
-    status: "PENDING" | "SUCCESS" | "FAILED" | "REFUNDED";
-    condition: string;
-    transactionRefId: string;
-  };
-
-  try {
-    payload = JSON.parse(bodyText);
-  } catch {
-    return NextResponse.json({ error: "Bad Request" }, { status: 400 });
-  }
+  console.log("[abank-callback]", params);
 
   const supabase = createAdminClient();
 
-  // ── 4. Find payment by payment_ref ─────────────────────────
+  // ── Find payment by payment_ref ───────────────────────────
   const { data: payment } = (await supabase
     .from("payments")
     .select("id, enrollment_id, status")
-    .eq("payment_ref", payload.orderId)
+    .eq("payment_ref", params.orderId)
     .single()) as {
     data: { id: string; enrollment_id: string; status: string } | null;
     error: unknown;
   };
 
   if (!payment) {
-    console.warn("[mmqr-webhook] Payment not found for orderId:", payload.orderId);
+    console.warn("[abank-callback] Payment not found for orderId:", params.orderId);
     return NextResponse.json({ error: "Not Found" }, { status: 404 });
   }
 
-  // Skip if payment already finalized
+  // Skip if already finalized
   if (payment.status === "verified" || payment.status === "rejected") {
     return NextResponse.json({ message: "Already processed" }, { status: 200 });
   }
 
-  // ── 5. Update based on status ──────────────────────────────
-  if (payload.status === "SUCCESS") {
-    // Update payment to verified
+  // ── Update based on callback status ───────────────────────
+  const isSuccess = !params.errorCode && params.status;
+
+  if (isSuccess) {
     await supabase
       .from("payments")
       .update({
         mmqr_status: "SUCCESS",
         status: "verified",
-        paid_at: new Date().toISOString(),
-        bank_reference: payload.transactionRefId,
+        paid_at: params.transactionDateTime
+          ? new Date(params.transactionDateTime).toISOString()
+          : new Date().toISOString(),
+        bank_reference: `CB:${params.transactionId || params.endToEndId || "unknown"}`,
+        payer_institution: params.institutionName || null,
       } as never)
       .eq("id", payment.id);
 
-    // Update enrollment to confirmed
     await supabase
       .from("enrollments")
       .update({ status: "confirmed" } as never)
@@ -111,7 +94,7 @@ export async function POST(request: NextRequest) {
       const proto = host.startsWith("localhost") ? "http" : "https";
       const statusUrl = `${proto}://${host}/status?ref=${enrollment.enrollment_ref}`;
 
-      // Resolve class level
+      // Resolve class level for email
       let classLevel = "Ticket";
       let feeFormatted: string | undefined;
       const isCart = enrollment.class_id === null;
@@ -174,7 +157,7 @@ export async function POST(request: NextRequest) {
             paymentUrl: statusUrl,
             currency: tenantCurrency,
           }).catch((err) => {
-            console.error("[mmqr-webhook] Telegram notification failed:", err);
+            console.error("[abank-callback] Telegram notification failed:", err);
           }),
         );
       }
@@ -193,7 +176,7 @@ export async function POST(request: NextRequest) {
         });
         notifyTasks.push(
           sendEmail({ to: enrollEmail, ...emailData }).catch((err) => {
-            console.error("[mmqr-webhook] Approval email failed:", err);
+            console.error("[abank-callback] Approval email failed:", err);
           }),
         );
       }
@@ -209,7 +192,7 @@ export async function POST(request: NextRequest) {
             message: `Hi ${name}, your payment for ${enrollment.enrollment_ref} has been confirmed. Welcome to class!`,
             clientReference: enrollment.enrollment_ref,
           }).catch((err) => {
-            console.error("[mmqr-webhook] Approval SMS failed:", err);
+            console.error("[abank-callback] Approval SMS failed:", err);
           }),
         );
       }
@@ -224,26 +207,21 @@ export async function POST(request: NextRequest) {
             telegramChatId: enrollment.telegram_chat_id,
             studentName: enrollment.student_name_en || "Student",
           }).catch((err) => {
-            console.error("[mmqr-webhook] Channel invite failed:", err);
+            console.error("[abank-callback] Channel invite failed:", err);
           }),
         );
       }
 
       await Promise.allSettled(notifyTasks);
     }
-  } else if (payload.status === "FAILED") {
+  } else {
     await supabase
       .from("payments")
       .update({
         mmqr_status: "FAILED",
-      } as never)
-      .eq("id", payment.id);
-  } else if (payload.status === "REFUNDED") {
-    await supabase
-      .from("payments")
-      .update({
-        mmqr_status: "REFUNDED",
-        status: "rejected",
+        bank_reference: params.errorCode
+          ? `${params.errorCode}: ${params.errorDesc ?? ""}`
+          : null,
       } as never)
       .eq("id", payment.id);
   }

@@ -277,6 +277,7 @@ export interface Payment {
   status: PaymentStatus;
   verified_by: string | null;        // references users.id
   verified_by_agent: number | null;  // telegram chat_id of agent verifier
+  hitpay_payment_id: string | null;  // HitPay payment request ID
   verified_at: string | null;
   created_at: string;
 }
