@@ -1010,7 +1010,6 @@ export default function PaymentInstructionsPage() {
 
   // ── HitPay state ─────────────────────────────────────────────────────────
   const [hitpayTab, setHitpayTab] = useState<"paynow" | "card">("paynow");
-  const [hitpayQrCode, setHitpayQrCode] = useState<string | null>(null);
   const [hitpayQrImage, setHitpayQrImage] = useState<string | null>(null);
   const [hitpayLoading, setHitpayLoading] = useState(false);
   const [hitpayError, setHitpayError] = useState<string | null>(null);
@@ -1148,7 +1147,6 @@ export default function PaymentInstructionsPage() {
     if (hitpayLoading) return;
     setHitpayLoading(true);
     setHitpayError(null);
-    setHitpayQrCode(null);
     setHitpayQrImage(null);
 
     try {
@@ -1160,10 +1158,8 @@ export default function PaymentInstructionsPage() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.message ?? "Failed to generate QR.");
 
-      const qrCode: string = data.qrCode;
-      setHitpayQrCode(qrCode);
 
-      const dataUrl = await QRCode.toDataURL(qrCode, { width: 280, margin: 2 });
+      const dataUrl = await QRCode.toDataURL(data.qrCode as string, { width: 280, margin: 2 });
       setHitpayQrImage(dataUrl);
       setHitpayPolling(true);
     } catch (err) {
@@ -1651,7 +1647,7 @@ export default function PaymentInstructionsPage() {
                       <img src={hitpayQrImage} alt="PayNow QR Code" className="mx-auto rounded-lg" width={280} height={280} />
                       <p className="mt-2 text-xs text-gray-500">Scan with your banking app (PayNow)</p>
                       <button
-                        onClick={() => { setHitpayQrImage(null); setHitpayQrCode(null); setHitpayPolling(false); }}
+                        onClick={() => { setHitpayQrImage(null); setHitpayPolling(false); }}
                         className="mt-3 text-xs text-gray-400 underline"
                       >
                         Cancel
