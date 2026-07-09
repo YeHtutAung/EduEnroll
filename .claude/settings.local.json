@@ -14,7 +14,23 @@
       "WebFetch(domain:docs.myanmyanpay.com)",
       "Bash(npx supabase:*)",
       "Bash(npx tsc:*)",
-      "Bash(wc -l /c/YHA/006_Claude_Workspace/EduEnroll/src/app/admin/intakes/\\\\\\\\[id\\\\\\\\]/page.tsx)"
+      "Bash(wc -l /c/YHA/006_Claude_Workspace/EduEnroll/src/app/admin/intakes/\\\\\\\\[id\\\\\\\\]/page.tsx)",
+      "Bash(cat '/c/YHA/006_Claude_Workspace/EduEnroll/src/app/\\(public\\)/enroll/form/page.tsx' | head -120)",
+      "Bash(cat '/c/YHA/006_Claude_Workspace/EduEnroll/src/app/\\(public\\)/enroll/[slug]/page.tsx' | head -100)",
+      "WebFetch(domain:developer.paypay.ne.jp)",
+      "WebFetch(domain:www.paypay.ne.jp)",
+      "Bash(cd \"C:/YHA/006_Claude_Workspace/EduEnroll\" && gh run view 27869083356 --log-failed 2>&1 | tail -40)",
+      "Bash(xargs grep:*)",
+      "Bash(grep -A5 \"interface PaymentRow\" /c/YHA/006_Claude_Workspace/EduEnroll/.worktrees/ev-trusted-official/src/app/api/public/enrollment/[ref]/route.ts)",
+      "Bash(find /c/YHA/006_Claude_Workspace/EduEnroll/.worktrees/ev-trusted-official/docs -name \"*.md\" -type f 2>/dev/null | head -10)",
+      "Bash(git add:*)",
+      "Bash(ls \"C:/YHA/006_Claude_Workspace/EduEnroll/.worktrees/ev-trusted-official/src/app/\\(public\\)/enroll/[slug]/\")",
+      "Bash(grep -n \"useRouter\\\\|router\" src/app/\\\\\\(public\\\\\\)/enroll/\\\\[slug\\\\]/page.tsx | head -10)",
+      "Bash(cd \"C:/YHA/006_Claude_Workspace/EduEnroll\" && printf 'pk_test_51TlgUEFB744UzlXeETLZwuJgNJdvD3MbQH8IIuLMbvGcRAuhXrKaTu1NtlBbsYrzj9dkc8weDHVu80vjqF1KSREl00jTLGelwY' | npx vercel env add NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY preview 2>&1)",
+      "Bash(cd \"C:/YHA/006_Claude_Workspace/EduEnroll\" && npm run seed:e2e && npx cross-env PLAYWRIGHT_BASE_URL=https://walmal.staging.kuunyi.com npx playwright test 2>&1)",
+      "Bash(find \"C:/YHA/006_Claude_Workspace/EduEnroll/src/app\" -path \"*/api/public*form*\" -o -path \"*/api/public*intake*\" 2>/dev/null | grep -v node_modules)",
+      "Bash(find \"C:/YHA/006_Claude_Workspace/EduEnroll/src/app/api\" -path \"*student*\" -o -path \"*enrollment*\" 2>/dev/null | grep -v node_modules | grep \"route.ts\")",
+      "Bash(cd \"C:/YHA/006_Claude_Workspace/EduEnroll/.worktrees/cleanup-phase-a\" && npx vitest run 2>&1 | tail -10)"
     ]
   }
 }

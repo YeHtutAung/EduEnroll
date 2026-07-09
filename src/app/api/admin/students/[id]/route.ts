@@ -150,6 +150,8 @@ export async function GET(
       ? {
           id:               payment.id,
           status:           payment.status,
+          payment_method:   payment.payment_method ?? null,
+          payment_ref:      payment.payment_ref ?? null,
           amount:       payment.amount,
           bank_reference:      payment.bank_reference ?? null,
           payer_institution:   payment.payer_institution ?? null,

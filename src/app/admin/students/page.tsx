@@ -57,6 +57,8 @@ interface StudentDetail {
   payment: {
     id: string;
     status: PaymentStatus;
+    payment_method: string | null;
+    payment_ref: string | null;
     amount: number;
     bank_reference: string | null;
     payer_institution: string | null;
@@ -211,6 +213,7 @@ function StudentDetailModal({
   const [tgRelinkUrl, setTgRelinkUrl] = useState<string | null>(null);
   const [tgChannelName, setTgChannelName] = useState<string | null>(null);
   const [resendingEmail, setResendingEmail] = useState(false);
+  const [syncingPaypay, setSyncingPaypay] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -478,6 +481,40 @@ function StudentDetailModal({
                         </div>
                       ) : (
                         <p className="text-xs text-gray-400 italic">No proof image uploaded</p>
+                      )}
+
+                      {/* Sync PayPay status button — shown when payment is awaiting PayPay confirmation */}
+                      {detail.payment?.payment_method === "paypay" && detail.payment?.status === "awaiting_payment" && detail.payment?.payment_ref && (
+                        <button
+                          onClick={async () => {
+                            setSyncingPaypay(true);
+                            try {
+                              const res = await fetch(
+                                `/api/public/payments/paypay/status?ref=${encodeURIComponent(detail.payment!.payment_ref!)}`,
+                              );
+                              const data = await res.json();
+                              if (data.paypay_status === "COMPLETED") {
+                                toast.success("PayPay payment confirmed! Refreshing…");
+                                // Reload detail
+                                const r = await fetch(`/api/admin/students/${row.enrollment_id}`);
+                                if (r.ok) setDetail(await r.json());
+                              } else {
+                                toast.error(`PayPay status: ${data.paypay_status ?? "CREATED"} — payment not yet completed.`);
+                              }
+                            } catch {
+                              toast.error("Failed to check PayPay status.");
+                            } finally {
+                              setSyncingPaypay(false);
+                            }
+                          }}
+                          disabled={syncingPaypay}
+                          className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium text-red-700 bg-red-50 border border-red-200 rounded-lg hover:bg-red-100 disabled:opacity-50 transition-colors"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                          </svg>
+                          {syncingPaypay ? "Checking…" : "Sync PayPay Status"}
+                        </button>
                       )}
 
                       {/* Resend email button */}

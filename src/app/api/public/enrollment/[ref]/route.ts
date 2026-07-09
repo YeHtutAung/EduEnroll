@@ -20,8 +20,8 @@ export async function GET(
     .from("enrollments")
     .select(`
       enrollment_ref, status, student_name_en, email,
-      enrollment_items(quantity, fee_amount, classes(level)),
-      classes(level, fee_amount, intakes(name, slug)),
+      enrollment_items(quantity, fee_amount, classes(level, intakes(id, name, slug))),
+      classes(level, fee_amount, intakes(id, name, slug)),
       quantity,
       payments(stripe_payment_intent_id, status, payment_method, card_brand, card_last4)
     `)
@@ -69,6 +69,32 @@ export async function GET(
   }
 
   const verifiedPayment = payments?.find((p) => p.status === "verified");
+  // Fall back to any payment so the success page can show the method even before verification
+  const anyPayment = payments?.[0];
+
+  // Fetch branding + payment config in parallel
+  const [appearanceResult, tenantResult, bankResult] = await Promise.all([
+    supabase
+      .from("tenant_appearances")
+      .select("logo_url, primary_color")
+      .eq("tenant_id", tenantId)
+      .single() as unknown as Promise<{ data: { logo_url: string | null; primary_color: string | null } | null; error: unknown }>,
+    supabase
+      .from("tenants")
+      .select("payment_mode, mmqr_provider")
+      .eq("id", tenantId)
+      .single() as unknown as Promise<{ data: { payment_mode: string | null; mmqr_provider: string | null } | null; error: unknown }>,
+    supabase
+      .from("bank_accounts")
+      .select("bank_name, account_number, account_holder, qr_code_url")
+      .eq("tenant_id", tenantId)
+      .eq("is_active", true)
+      .order("bank_name") as unknown as Promise<{ data: { bank_name: string; account_number: string; account_holder: string; qr_code_url: string | null }[] | null; error: unknown }>,
+  ]);
+
+  const appearance = appearanceResult.data;
+  const tenant = tenantResult.data;
+  const bankAccounts = bankResult.data ?? [];
 
   return NextResponse.json({
     enrollment_ref: enrollment.enrollment_ref,
@@ -77,8 +103,20 @@ export async function GET(
     email: enrollment.email ?? "",
     total_amount: totalAmount,
     items,
-    event_name: (enrollment.classes as { intakes?: { name: string } | null } | null)?.intakes?.name ?? "",
-    payment_method: verifiedPayment?.payment_method ?? null,
+    intake_id:
+      (enrollment.classes as { intakes?: { id: string } | null } | null)?.intakes?.id ??
+      (enrollment.enrollment_items?.[0]?.classes as { intakes?: { id: string } | null } | null)?.intakes?.id ??
+      null,
+    event_name:
+      (enrollment.classes as { intakes?: { name: string } | null } | null)?.intakes?.name ??
+      (enrollment.enrollment_items?.[0]?.classes as { intakes?: { name: string } | null } | null)?.intakes?.name ??
+      "",
+    logo_url: appearance?.logo_url ?? null,
+    brand_color: appearance?.primary_color ?? null,
+    payment_mode: tenant?.payment_mode ?? "bank_transfer",
+    mmqr_provider: tenant?.mmqr_provider ?? null,
+    bank_accounts: bankAccounts,
+    payment_method: verifiedPayment?.payment_method ?? anyPayment?.payment_method ?? null,
     card_brand: verifiedPayment?.card_brand ?? null,
     card_last4: verifiedPayment?.card_last4 ?? null,
     ...(stripeClientSecret ? { stripe_client_secret: stripeClientSecret } : {}),
@@ -95,14 +133,14 @@ export async function PATCH(
   const tenantId = await resolveTenantId();
   if (tenantId instanceof NextResponse) return tenantId;
 
-  let body: { student_name_en?: string; company?: string; email?: string };
+  let body: { student_name_en?: string; email?: string; form_data?: Record<string, string> };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Bad Request", message: "Invalid JSON." }, { status: 400 });
   }
 
-  const { student_name_en, company, email } = body;
+  const { student_name_en, email, form_data } = body;
   if (!student_name_en || !email) {
     return NextResponse.json({ error: "Bad Request", message: "student_name_en and email are required." }, { status: 400 });
   }
@@ -128,7 +166,7 @@ export async function PATCH(
     .update({
       student_name_en: student_name_en.trim(),
       email: email.trim(),
-      ...(company ? { form_data: { company: company.trim() } } : {}),
+      ...(form_data && Object.keys(form_data).length > 0 ? { form_data } : {}),
     } as never)
     .eq("id", enrollment.id);
 
@@ -151,7 +189,7 @@ interface EnrollmentRow {
   student_name_en: string | null;
   email: string | null;
   quantity: number | null;
-  enrollment_items: { quantity: number; fee_amount: number; classes: { level: string } | null }[] | null;
-  classes: { level: string; fee_amount: number; intakes: { name: string; slug: string } | null } | null;
+  enrollment_items: { quantity: number; fee_amount: number; classes: { level: string; intakes: { id: string; name: string; slug: string } | null } | null }[] | null;
+  classes: { level: string; fee_amount: number; intakes: { id: string; name: string; slug: string } | null } | null;
   payments: PaymentRow[] | null;
 }

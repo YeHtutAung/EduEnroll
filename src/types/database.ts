@@ -275,7 +275,9 @@ export interface Payment {
   stripe_payment_intent_id: string | null;
   payer_institution: string | null;
   status: PaymentStatus;
-  verified_by: string | null;   // references users.id
+  verified_by: string | null;        // references users.id
+  verified_by_agent: number | null;  // telegram chat_id of agent verifier
+  hitpay_payment_id: string | null;  // HitPay payment request ID
   verified_at: string | null;
   created_at: string;
 }

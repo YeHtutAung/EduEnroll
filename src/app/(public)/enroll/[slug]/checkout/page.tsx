@@ -4,13 +4,194 @@ import { useEffect, useState, Suspense } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import TrustedOfficialShell from "@/components/enrollment/TrustedOfficialShell";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 interface EnrollmentSummary {
   enrollment_ref: string;
   status: string;
   total_amount: number;
   items: { level: string; quantity: number; fee_amount: number }[];
   event_name: string;
+  intake_id: string | null;
+  logo_url: string | null;
+  brand_color: string | null;
 }
+
+interface FormField {
+  id: string;
+  field_key: string;
+  field_label: string;
+  field_type: string;
+  is_required: boolean;
+  options: string[] | null;
+  sort_order: number;
+  is_default: boolean;
+}
+
+// ─── Dynamic field renderer ───────────────────────────────────────────────────
+
+function DynamicField({
+  field,
+  value,
+  onChange,
+}: {
+  field: FormField;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const isEmail = field.field_key === "email";
+  const baseInput = "w-full h-[33px] px-3 rounded-[7px] text-[12px] outline-none";
+  const borderStyle = (v: string) => ({ border: `1.5px solid ${v ? "#0f1f42" : "#d8d5c9"}` });
+
+  const label = (
+    <label className="block text-[11px] font-semibold mb-1" style={{ color: "#43485a" }}>
+      {field.field_label}
+      {!field.is_required && <span className="font-normal ml-1" style={{ color: "#9a9484" }}>(optional)</span>}
+    </label>
+  );
+
+  switch (field.field_type) {
+    case "select":
+      return (
+        <div>
+          {label}
+          <select
+            className="w-full h-[33px] px-3 rounded-[7px] text-[12px] outline-none bg-white"
+            style={borderStyle(value)}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            required={field.is_required}
+          >
+            <option value="">Select...</option>
+            {(field.options ?? []).map((o) => (
+              <option key={o} value={o}>{o}</option>
+            ))}
+          </select>
+        </div>
+      );
+
+    case "radio":
+      return (
+        <div>
+          {label}
+          <div className="flex flex-col gap-1.5 mt-1">
+            {(field.options ?? []).map((o) => (
+              <label key={o} className="flex items-center gap-2 text-[12px]" style={{ color: "#43485a" }}>
+                <input
+                  type="radio"
+                  name={field.field_key}
+                  value={o}
+                  checked={value === o}
+                  onChange={() => onChange(o)}
+                  required={field.is_required && !value}
+                  className="accent-[#0f1f42]"
+                />
+                {o}
+              </label>
+            ))}
+          </div>
+        </div>
+      );
+
+    case "checkbox":
+      return (
+        <label className="flex items-center gap-2 text-[12px]" style={{ color: "#43485a" }}>
+          <input
+            type="checkbox"
+            checked={value === "true"}
+            onChange={(e) => onChange(e.target.checked ? "true" : "")}
+            className="accent-[#0f1f42] w-4 h-4"
+          />
+          {field.field_label}
+          {field.is_required && <span className="text-red-500 ml-0.5">*</span>}
+        </label>
+      );
+
+    case "date":
+      return (
+        <div>
+          {label}
+          <input
+            type="date"
+            className={baseInput}
+            style={borderStyle(value)}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            required={field.is_required}
+          />
+        </div>
+      );
+
+    case "address":
+      return (
+        <div>
+          {label}
+          <textarea
+            className="w-full px-3 py-2 rounded-[7px] text-[12px] outline-none resize-none"
+            style={{ border: `1.5px solid ${value ? "#0f1f42" : "#d8d5c9"}`, minHeight: "64px" }}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={field.field_label}
+            required={field.is_required}
+            rows={2}
+          />
+        </div>
+      );
+
+    case "phone":
+      return (
+        <div>
+          {label}
+          <input
+            type="tel"
+            className={baseInput}
+            style={borderStyle(value)}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="09xxxxxxxxx"
+            required={field.is_required}
+          />
+        </div>
+      );
+
+    case "email":
+      return (
+        <div>
+          {label}
+          <input
+            type="email"
+            className={baseInput}
+            style={borderStyle(value)}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="you@example.com"
+            required={field.is_required}
+          />
+          {isEmail && (
+            <p className="text-[9.5px] mt-1" style={{ color: "#9a9484" }}>E-ticket will be sent to this address.</p>
+          )}
+        </div>
+      );
+
+    default: // text and anything else
+      return (
+        <div>
+          {label}
+          <input
+            type="text"
+            className={baseInput}
+            style={borderStyle(value)}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={field.field_label}
+            required={field.is_required}
+          />
+        </div>
+      );
+  }
+}
+
+// ─── Checkout form ────────────────────────────────────────────────────────────
 
 function CheckoutForm() {
   const params = useParams<{ slug: string }>();
@@ -19,11 +200,11 @@ function CheckoutForm() {
   const ref = searchParams.get("ref") ?? "";
 
   const [summary, setSummary] = useState<EnrollmentSummary | null>(null);
+  const [fields, setFields] = useState<FormField[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [name, setName] = useState("");
-  const [company, setCompany] = useState("");
-  const [email, setEmail] = useState("");
+  // field_key → value map
+  const [values, setValues] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -35,25 +216,74 @@ function CheckoutForm() {
         if (r.status === 410) throw new Error("This order has expired.");
         return r.json();
       })
-      .then((d) => setSummary(d))
+      .then((d: EnrollmentSummary) => setSummary(d))
       .catch((e: Error) => setLoadError(e.message));
   }, [ref]);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!name.trim() || !email.trim()) {
-      setFormError("Name and email are required.");
+  useEffect(() => {
+    if (!summary) return;
+
+    const DEFAULT_FIELDS: FormField[] = [
+      { id: "name_en", field_key: "name_en", field_label: "Full Name", field_type: "text",  is_required: true, options: null, sort_order: 1, is_default: true },
+      { id: "email",   field_key: "email",   field_label: "Email",     field_type: "email", is_required: true, options: null, sort_order: 2, is_default: true },
+    ];
+
+    const applyFields = (f: FormField[]) => {
+      setFields(f);
+      const init: Record<string, string> = {};
+      f.forEach((field) => { init[field.field_key] = ""; });
+      setValues(init);
+    };
+
+    if (!summary.intake_id) {
+      applyFields(DEFAULT_FIELDS);
       return;
     }
+
+    fetch(`/api/public/form-fields?intake_id=${summary.intake_id}`)
+      .then((r) => r.json())
+      .then((f: FormField[]) => applyFields(f.length > 0 ? f : DEFAULT_FIELDS))
+      .catch(() => applyFields(DEFAULT_FIELDS));
+  }, [summary]);
+
+  function setValue(key: string, val: string) {
+    setValues((prev) => ({ ...prev, [key]: val }));
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
     setSubmitting(true);
     setFormError(null);
+
+    // Derive the two DB columns + extra form_data
+    const nameField =
+      fields.find((f) => f.field_key === "name_en") ??
+      fields.find((f) => f.field_type === "text" && f.is_default) ??
+      fields.find((f) => f.field_type === "text");
+    const emailField = fields.find((f) => f.field_key === "email" || f.field_type === "email");
+
+    const student_name_en = nameField ? (values[nameField.field_key] ?? "").trim() : "";
+    const email = emailField ? (values[emailField.field_key] ?? "").trim() : "";
+
+    if (!student_name_en || !email) {
+      setFormError("Name and email are required.");
+      setSubmitting(false);
+      return;
+    }
+
+    // Save all field values to form_data (including name/email) so admin listing can display them
+    const form_data: Record<string, string> = {};
+    fields.forEach((f) => {
+      const v = (values[f.field_key] ?? "").trim();
+      if (v) form_data[f.field_key] = v;
+    });
 
     try {
       // 1. Save attendee details
       const patchRes = await fetch(`/api/public/enrollment/${ref}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ student_name_en: name.trim(), company: company.trim(), email: email.trim() }),
+        body: JSON.stringify({ student_name_en, email, form_data }),
       });
       if (!patchRes.ok) {
         const d = await patchRes.json();
@@ -103,7 +333,7 @@ function CheckoutForm() {
   }
 
   return (
-    <TrustedOfficialShell orgName={summary.event_name} step={1}>
+    <TrustedOfficialShell orgName={summary.event_name} logoUrl={summary.logo_url} brandColor={summary.brand_color} step={1}>
       {/* Order summary card */}
       <div className="rounded-[10px] p-4 mb-5" style={{ background: "#fbf8ee", border: "1px solid rgba(212,175,90,.33)" }}>
         {summary.items.map((item, i) => (
@@ -121,42 +351,21 @@ function CheckoutForm() {
       </p>
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <div>
-          <label className="block text-[11px] font-semibold mb-1" style={{ color: "#43485a" }}>Full Name</label>
-          <input
-            className="w-full h-[33px] px-3 rounded-[7px] text-[12px] outline-none"
-            style={{ border: `1.5px solid ${name ? "#0f1f42" : "#d8d5c9"}` }}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Your full name"
-            required
-          />
-        </div>
-        <div>
-          <label className="block text-[11px] font-semibold mb-1" style={{ color: "#43485a" }}>
-            Company <span className="font-normal" style={{ color: "#9a9484" }}>(optional)</span>
-          </label>
-          <input
-            className="w-full h-[33px] px-3 rounded-[7px] text-[12px] outline-none"
-            style={{ border: "1.5px solid #d8d5c9" }}
-            value={company}
-            onChange={(e) => setCompany(e.target.value)}
-            placeholder="Your company"
-          />
-        </div>
-        <div>
-          <label className="block text-[11px] font-semibold mb-1" style={{ color: "#43485a" }}>Email Address</label>
-          <input
-            type="email"
-            className="w-full h-[33px] px-3 rounded-[7px] text-[12px] outline-none"
-            style={{ border: "1.5px solid #d8d5c9" }}
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
-            required
-          />
-          <p className="text-[9.5px] mt-1" style={{ color: "#9a9484" }}>E-ticket will be sent to this address.</p>
-        </div>
+        {fields.length > 0 ? (
+          fields.map((field) => (
+            <DynamicField
+              key={field.id}
+              field={field}
+              value={values[field.field_key] ?? ""}
+              onChange={(v) => setValue(field.field_key, v)}
+            />
+          ))
+        ) : (
+          /* Fallback while fields load or if intake has no fields */
+          <div className="flex items-center justify-center py-4">
+            <div className="w-4 h-4 border-2 rounded-full animate-spin" style={{ borderColor: "#0f1f42", borderTopColor: "transparent" }} />
+          </div>
+        )}
 
         {formError && (
           <div className="p-3 rounded-lg border text-[12px]" style={{ background: "#fff5f5", borderColor: "#fca5a5", color: "#991b1b" }}>
@@ -171,7 +380,7 @@ function CheckoutForm() {
           type="submit"
           className="w-full py-3 rounded-[8px] text-[12.5px] font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-60"
           style={{ background: "#0f1f42" }}
-          disabled={submitting}
+          disabled={submitting || fields.length === 0}
         >
           {submitting ? "Please wait..." : "CONTINUE TO PAYMENT →"}
         </button>

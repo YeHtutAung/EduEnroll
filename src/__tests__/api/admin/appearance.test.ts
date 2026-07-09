@@ -66,4 +66,23 @@ describe("PUT /api/admin/appearance — template_id validation", () => {
     const res = await PUT(makeRequest({ primary_color: "#ff0000" }));
     expect(res.status).not.toBe(400);
   });
+
+  it("returns 500 when the database rejects the upsert (e.g. CHECK constraint violation)", async () => {
+    // Simulate the DB rejecting the value (e.g. template_id not in CHECK constraint)
+    const failSingle = vi.fn().mockResolvedValue({ data: null, error: { message: "check constraint violated" } });
+    const failSelect = vi.fn().mockReturnValue({ single: failSingle });
+    const failUpsert = vi.fn().mockReturnValue({ select: failSelect });
+    vi.mocked(requireOwner).mockResolvedValueOnce({
+      supabase: { from: vi.fn().mockReturnValue({ upsert: failUpsert }) } as never,
+      tenantId: "test-tenant-id",
+      user: {} as never,
+      isAgent: false,
+      agentChatId: null,
+    } satisfies AuthContext);
+
+    const res = await PUT(makeRequest({ template_id: "ls-classic" }));
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.error).toMatch(/save/i);
+  });
 });
