@@ -1,19 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, badRequest, notFound } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
-import {
-  sendEmail,
-  enrollmentApprovedEmail,
-  enrollmentRejectedEmail,
-  partialPaymentEmail,
-} from "@/lib/email";
-import { sendStatusNotification } from "@/lib/messenger/notify";
-import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
-import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
 import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils";
-import { sendSms } from "@/lib/sms";
 import type { Enrollment, Payment } from "@/types/database";
 import { verifyPayment } from "@/server/payments/verifyPayment";
+import { dispatchPaymentApproved } from "@/server/notifications/dispatchPaymentApproved";
+import { dispatchPaymentRejected } from "@/server/notifications/dispatchPaymentRejected";
+import { dispatchPartialPaymentRequested } from "@/server/notifications/dispatchPartialPaymentRequested";
 
 type EnrollmentResult = { data: Enrollment | null; error: unknown };
 type PaymentResult    = { data: Payment    | null; error: unknown };
@@ -139,80 +132,26 @@ export async function PATCH(
 
   // ── Approve notifications ────────────────────────────────────────────────────
   if (action === "approve") {
-    // Messenger notification (if enrolled via chatbot)
-    if (enrollment.messenger_psid) {
-      sendStatusNotification({
-        tenantId,
-        messengerPsid: enrollment.messenger_psid,
-        action: "approve",
-        studentName: enrollment.student_name_en || "Student",
-        enrollmentRef: enrollment.enrollment_ref,
-        classLevel,
-        statusUrl,
-        paymentUrl,
-        currency,
-      }).catch((err) => {
-        console.error("[verify] Messenger approval notification failed:", err);
-      });
-    }
-
-    // Telegram notification
-    if (enrollment.telegram_chat_id) {
-      sendTelegramStatusNotification({
-        tenantId,
-        telegramChatId: enrollment.telegram_chat_id,
-        action: "approve",
-        studentName: enrollment.student_name_en || "Student",
-        enrollmentRef: enrollment.enrollment_ref,
-        classLevel,
-        statusUrl,
-        paymentUrl,
-        currency,
-      }).catch((err) => {
-        console.error("[verify] Telegram approval notification failed:", err);
-      });
-
-      // Auto-send channel invite (language_school only, non-blocking)
-      sendChannelInviteIfEligible({
-        tenantId,
-        enrollmentId: enrollment.id,
-        classId: enrollment.class_id,
-        telegramChatId: enrollment.telegram_chat_id,
-        studentName: enrollment.student_name_en || "Student",
-      }).catch((err) => {
-        console.error("[verify] Channel invite failed:", err);
-      });
-    }
-
-    // Email notification
-    if (enrollEmail) {
-      const emailData = enrollmentApprovedEmail({
-        studentName: enrollment.student_name_en || "Student",
-        enrollmentRef: enrollment.enrollment_ref,
-        classLevel,
-        statusUrl,
-        feeFormatted,
-        orgType,
-        tenantName,
-        logoUrl,
-      });
-      sendEmail({ to: enrollEmail, ...emailData }).catch((err) => {
-        console.error("[verify] Approval email failed:", err);
-      });
-    }
-
-    // SMS notification
-    const enrollPhone = enrollment.phone || resolvePhoneFromFormData(fd);
-    if (enrollPhone && tenantInfo?.sms_on_payment !== false) {
-      const name = enrollment.student_name_en || "Student";
-      sendSms({
-        to: enrollPhone,
-        message: `Hi ${name}, your payment for ${enrollment.enrollment_ref} has been confirmed. Welcome to class!`,
-        clientReference: enrollment.enrollment_ref,
-      }).catch((err) => {
-        console.error("[verify] Approval SMS failed:", err);
-      });
-    }
+    await dispatchPaymentApproved({
+      tenantId,
+      enrollmentId: enrollment.id,
+      enrollmentRef: enrollment.enrollment_ref,
+      studentName: enrollment.student_name_en || "Student",
+      classLevel,
+      feeFormatted,
+      statusUrl,
+      paymentUrl,
+      currency,
+      email: enrollEmail,
+      phone: enrollment.phone || resolvePhoneFromFormData(fd),
+      messengerPsid: enrollment.messenger_psid,
+      telegramChatId: enrollment.telegram_chat_id,
+      classId: enrollment.class_id,
+      tenantName,
+      orgType,
+      logoUrl,
+      smsOnPayment: tenantInfo?.sms_on_payment,
+    });
 
     if (enrollment.messenger_psid || enrollEmail) {
       await admin
@@ -230,66 +169,25 @@ export async function PATCH(
       ? payment.amount - received_amount
       : null;
 
-    // Messenger notification (if enrolled via chatbot)
-    if (enrollment.messenger_psid) {
-      sendStatusNotification({
-        tenantId,
-        messengerPsid: enrollment.messenger_psid,
-        action: "request_remaining",
-        studentName: enrollment.student_name_en || "Student",
-        enrollmentRef: enrollment.enrollment_ref,
-        classLevel,
-        statusUrl,
-        paymentUrl,
-        adminNote: (admin_note as string).trim(),
-        receivedAmount: typeof received_amount === "number" ? received_amount : null,
-        remainingAmount,
-        currency,
-      }).catch((err) => {
-        console.error("[verify] Messenger partial notification failed:", err);
-      });
-    }
-
-    // Telegram notification
-    if (enrollment.telegram_chat_id) {
-      sendTelegramStatusNotification({
-        tenantId,
-        telegramChatId: enrollment.telegram_chat_id,
-        action: "request_remaining",
-        studentName: enrollment.student_name_en || "Student",
-        enrollmentRef: enrollment.enrollment_ref,
-        classLevel,
-        statusUrl,
-        paymentUrl,
-        adminNote: (admin_note as string).trim(),
-        receivedAmount: typeof received_amount === "number" ? received_amount : null,
-        remainingAmount,
-        currency,
-      }).catch((err) => {
-        console.error("[verify] Telegram partial notification failed:", err);
-      });
-    }
-
-    // Email notification
-    if (enrollEmail) {
-      const emailData = partialPaymentEmail({
-        studentName: enrollment.student_name_en || "Student",
-        enrollmentRef: enrollment.enrollment_ref,
-        classLevel,
-        totalAmount: payment.amount,
-        receivedAmount: typeof received_amount === "number" ? received_amount : null,
-        remainingAmount,
-        adminNote: (admin_note as string).trim(),
-        paymentUrl,
-        statusUrl,
-        orgType,
-        tenantName,
-        logoUrl,
-      });
-      sendEmail({ to: enrollEmail, ...emailData }).catch((err) => {
-        console.error("[verify] Partial payment email failed:", err);
-      });
-    }
+    await dispatchPartialPaymentRequested({
+      tenantId,
+      enrollmentRef: enrollment.enrollment_ref,
+      studentName: enrollment.student_name_en || "Student",
+      classLevel,
+      statusUrl,
+      paymentUrl,
+      currency,
+      email: enrollEmail,
+      messengerPsid: enrollment.messenger_psid,
+      telegramChatId: enrollment.telegram_chat_id,
+      tenantName,
+      orgType,
+      logoUrl,
+      adminNote: (admin_note as string).trim(),
+      totalAmount: payment.amount,
+      receivedAmount: typeof received_amount === "number" ? received_amount : null,
+      remainingAmount,
+    });
 
     if (enrollment.messenger_psid || enrollEmail) {
       await admin
@@ -303,58 +201,22 @@ export async function PATCH(
 
   // ── Reject notifications ─────────────────────────────────────────────────────
 
-  // Messenger notification (if enrolled via chatbot)
-  if (enrollment.messenger_psid) {
-    sendStatusNotification({
-      tenantId,
-      messengerPsid: enrollment.messenger_psid,
-      action: "reject",
-      studentName: enrollment.student_name_en || "Student",
-      enrollmentRef: enrollment.enrollment_ref,
-      classLevel,
-      statusUrl,
-      paymentUrl,
-      rejectionReason: typeof rejection_reason === "string" ? rejection_reason : null,
-      currency,
-    }).catch((err) => {
-      console.error("[verify] Messenger rejection notification failed:", err);
-    });
-  }
-
-  // Telegram notification
-  if (enrollment.telegram_chat_id) {
-    sendTelegramStatusNotification({
-      tenantId,
-      telegramChatId: enrollment.telegram_chat_id,
-      action: "reject",
-      studentName: enrollment.student_name_en || "Student",
-      enrollmentRef: enrollment.enrollment_ref,
-      classLevel,
-      statusUrl,
-      paymentUrl,
-      rejectionReason: typeof rejection_reason === "string" ? rejection_reason : null,
-      currency,
-    }).catch((err) => {
-      console.error("[verify] Telegram rejection notification failed:", err);
-    });
-  }
-
-  // Email notification
-  if (enrollEmail) {
-    const emailData = enrollmentRejectedEmail({
-      studentName: enrollment.student_name_en || "Student",
-      enrollmentRef: enrollment.enrollment_ref,
-      classLevel,
-      reason: typeof rejection_reason === "string" ? rejection_reason : null,
-      statusUrl,
-      orgType,
-      tenantName,
-      logoUrl,
-    });
-    sendEmail({ to: enrollEmail, ...emailData }).catch((err) => {
-      console.error("[verify] Rejection email failed:", err);
-    });
-  }
+  await dispatchPaymentRejected({
+    tenantId,
+    enrollmentRef: enrollment.enrollment_ref,
+    studentName: enrollment.student_name_en || "Student",
+    classLevel,
+    statusUrl,
+    paymentUrl,
+    currency,
+    email: enrollEmail,
+    messengerPsid: enrollment.messenger_psid,
+    telegramChatId: enrollment.telegram_chat_id,
+    tenantName,
+    orgType,
+    logoUrl,
+    rejectionReason: typeof rejection_reason === "string" ? rejection_reason : null,
+  });
 
   if (enrollment.messenger_psid || enrollEmail) {
     await admin
