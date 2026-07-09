@@ -10,16 +10,17 @@ import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils"
 
 export async function POST(request: NextRequest) {
   const bodyText = await request.text();
-  const signature = request.headers.get("hitpay-signature");
 
   // ── 1. Verify signature ────────────────────────────────────────────────────
-  if (!signature) {
-    console.warn("[hitpay-webhook] Missing hitpay-signature header");
+  // HitPay includes the HMAC as an `hmac` field in the form-urlencoded body.
+  const hmac = new URLSearchParams(bodyText).get("hmac") ?? "";
+  if (!hmac) {
+    console.warn("[hitpay-webhook] Missing hmac in payload");
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   try {
-    const isValid = hitpay.verifyWebhook(bodyText, signature);
+    const isValid = hitpay.verifyWebhook(bodyText, hmac);
     if (!isValid) {
       console.warn("[hitpay-webhook] Invalid signature");
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
     const { data: payment } = (await supabase
       .from("payments")
       .select("id")
-      .eq("hitpay_payment_id", payload.id)
+      .eq("hitpay_payment_id", payload.payment_request_id)
       .single()) as { data: { id: string } | null; error: unknown };
 
     if (payment) {
@@ -66,14 +67,14 @@ export async function POST(request: NextRequest) {
   const { data: payment } = (await supabase
     .from("payments")
     .select("id, enrollment_id, amount, status")
-    .eq("hitpay_payment_id", payload.id)
+    .eq("hitpay_payment_id", payload.payment_request_id)
     .single()) as {
     data: { id: string; enrollment_id: string; amount: number; status: string } | null;
     error: unknown;
   };
 
   if (!payment) {
-    console.warn("[hitpay-webhook] Payment not found for hitpay_payment_id:", payload.id);
+    console.warn("[hitpay-webhook] Payment not found for hitpay_payment_id:", payload.payment_request_id);
     return NextResponse.json({ ok: true });
   }
 
