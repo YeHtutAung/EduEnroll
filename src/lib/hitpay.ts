@@ -35,17 +35,15 @@ export interface HitPayPaymentRequest {
   [key: string]: unknown;
 }
 
-// HitPay sends webhooks as application/x-www-form-urlencoded (not JSON).
-// Fields: payment_id, payment_request_id, amount, currency, status, reference_number, hmac
+// HitPay sends webhooks as application/json.
 export interface HitPayWebhookPayload {
-  payment_id: string;
-  payment_request_id: string;  // matches hitpay_payment_id stored in payments table
-  amount: string;
-  currency: string;
+  id: string;                  // payment request ID — matches hitpay_payment_id in payments table
   status: "completed" | "pending" | "failed";
-  reference_number: string;
-  hmac: string;
-  [key: string]: string;
+  payments?: Array<{
+    payment_type: string;
+    [key: string]: unknown;
+  }>;
+  [key: string]: unknown;
 }
 
 // ── 1. Create Payment Request ──────────────────────────────────────────────
@@ -94,32 +92,22 @@ async function createPaymentRequest(
 }
 
 // ── 2. Verify Webhook Signature ────────────────────────────────────────────
-// HitPay sends webhooks as application/x-www-form-urlencoded.
-// The HMAC is included as an `hmac` field in the body (not a header).
-// Verification: sort all fields except `hmac` alphabetically by key,
-// concatenate as `key + value` (no separator between pairs),
-// then compute HMAC-SHA256 with the salt and compare.
+// HitPay sends webhooks as application/json.
+// Signature header: Hitpay-Signature (HMAC-SHA256 of raw body using salt).
 
-function verifyWebhook(bodyText: string, hmac: string): boolean {
-  const params = new URLSearchParams(bodyText);
-  const str = Array.from(params.entries())
-    .filter(([k]) => k !== "hmac")
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([k, v]) => k + v)
-    .join("");
-  const computed = crypto.createHmac("sha256", SALT()).update(str).digest("hex");
+function verifyWebhook(bodyText: string, signature: string): boolean {
+  const computed = crypto.createHmac("sha256", SALT()).update(bodyText).digest("hex");
   const computedBuf = Buffer.from(computed);
-  const hmacBuf = Buffer.from(hmac);
-  if (computedBuf.length !== hmacBuf.length) return false;
-  return crypto.timingSafeEqual(computedBuf, hmacBuf);
+  const signatureBuf = Buffer.from(signature);
+  if (computedBuf.length !== signatureBuf.length) return false;
+  return crypto.timingSafeEqual(computedBuf, signatureBuf);
 }
 
 // ── 3. Parse Webhook Payload ───────────────────────────────────────────────
-// Body is application/x-www-form-urlencoded — parse with URLSearchParams.
+// Body is application/json.
 
 function parseWebhookPayload(bodyText: string): HitPayWebhookPayload {
-  const params = new URLSearchParams(bodyText);
-  return Object.fromEntries(params.entries()) as unknown as HitPayWebhookPayload;
+  return JSON.parse(bodyText) as HitPayWebhookPayload;
 }
 
 // ── Export ──────────────────────────────────────────────────────────────────

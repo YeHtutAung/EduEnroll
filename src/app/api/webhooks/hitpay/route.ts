@@ -10,22 +10,20 @@ import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils"
 
 export async function POST(request: NextRequest) {
   const bodyText = await request.text();
-  const contentType = request.headers.get("content-type") ?? "";
+  const signature = request.headers.get("hitpay-signature");
 
-  // Temporary debug — log body format to diagnose signature issues
-  console.log("[hitpay-webhook] content-type:", contentType);
-  console.log("[hitpay-webhook] body preview:", bodyText.slice(0, 300));
+  // Debug: log salt length and signature presence to verify env var
+  console.log("[hitpay-webhook] salt-length:", process.env.HITPAY_SALT?.length ?? 0, "sig-present:", !!signature, "body-len:", bodyText.length);
 
   // ── 1. Verify signature ────────────────────────────────────────────────────
-  // HitPay includes the HMAC as an `hmac` field in the form-urlencoded body.
-  const hmac = new URLSearchParams(bodyText).get("hmac") ?? "";
-  if (!hmac) {
-    console.warn("[hitpay-webhook] Missing hmac in payload");
+  // HitPay sends application/json with HMAC-SHA256 in Hitpay-Signature header.
+  if (!signature) {
+    console.warn("[hitpay-webhook] Missing Hitpay-Signature header");
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   try {
-    const isValid = hitpay.verifyWebhook(bodyText, hmac);
+    const isValid = hitpay.verifyWebhook(bodyText, signature);
     if (!isValid) {
       console.warn("[hitpay-webhook] Invalid signature");
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -51,7 +49,7 @@ export async function POST(request: NextRequest) {
     const { data: payment } = (await supabase
       .from("payments")
       .select("id")
-      .eq("hitpay_payment_id", payload.payment_request_id)
+      .eq("hitpay_payment_id", payload.id)
       .single()) as { data: { id: string } | null; error: unknown };
 
     if (payment) {
@@ -72,14 +70,14 @@ export async function POST(request: NextRequest) {
   const { data: payment } = (await supabase
     .from("payments")
     .select("id, enrollment_id, amount, status")
-    .eq("hitpay_payment_id", payload.payment_request_id)
+    .eq("hitpay_payment_id", payload.id)
     .single()) as {
     data: { id: string; enrollment_id: string; amount: number; status: string } | null;
     error: unknown;
   };
 
   if (!payment) {
-    console.warn("[hitpay-webhook] Payment not found for hitpay_payment_id:", payload.payment_request_id);
+    console.warn("[hitpay-webhook] Payment not found for hitpay_payment_id:", payload.id);
     return NextResponse.json({ ok: true });
   }
 
