@@ -73,6 +73,7 @@ function setupMocks(opts?: {
       return {
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),
+        not: vi.fn().mockReturnThis(),
         order: vi.fn().mockReturnThis(),
         limit: vi.fn().mockReturnThis(),
         single: vi.fn().mockResolvedValue({ data: existingPayment, error: null }),
@@ -82,6 +83,7 @@ function setupMocks(opts?: {
     return {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
+      not: vi.fn().mockReturnThis(),
       single: vi.fn().mockResolvedValue({ data: null, error: null }),
     };
   });
@@ -144,5 +146,16 @@ describe("POST /api/public/payments/hitpay", () => {
     expect(mockCreatePaymentRequest).not.toHaveBeenCalled();
     const body = await res.json();
     expect(body.paymentRequestId).toBe("hp-existing");
+  });
+
+  it("does not return null hitpay_payment_id when payment_method=hitpay but id is null", async () => {
+    // A hitpay payment row exists but hitpay_payment_id was never set (e.g. partial write)
+    setupMocks({
+      existingPayment: { hitpay_payment_id: null, status: "awaiting_payment" },
+    });
+    const res = await POST(makeRequest({ enrollmentRef: "NM-2026-0001", method: "paynow_online" }));
+    // Should call HitPay and return a fresh QR code, not the null id
+    expect(res.status).toBe(200);
+    expect(mockCreatePaymentRequest).toHaveBeenCalled();
   });
 });

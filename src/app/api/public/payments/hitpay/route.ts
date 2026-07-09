@@ -127,7 +127,7 @@ export async function POST(request: NextRequest) {
     .from("payments")
     .select("hitpay_payment_id")
     .eq("enrollment_id", enrollment.id)
-    .eq("payment_method", "hitpay")
+    .not("hitpay_payment_id", "is", null)
     .eq("status", "awaiting_payment")
     .single()) as { data: { hitpay_payment_id: string | null } | null; error: unknown };
 
