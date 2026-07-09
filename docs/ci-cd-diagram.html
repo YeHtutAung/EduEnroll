@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>EduEnroll CI/CD Pipeline</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+  <style>
+    body {
+      background: #0f1225;
+      color: #e2e8f0;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      margin: 0;
+      padding: 40px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h1 {
+      font-size: 1.8rem;
+      margin-bottom: 8px;
+      color: #93c5fd;
+    }
+    .subtitle {
+      color: #94a3b8;
+      margin-bottom: 32px;
+      font-size: 0.95rem;
+    }
+    .mermaid {
+      background: #1e293b;
+      border-radius: 12px;
+      padding: 32px;
+      max-width: 1100px;
+      width: 100%;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.4);
+    }
+    .legend {
+      margin-top: 32px;
+      display: flex;
+      gap: 24px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.85rem;
+      color: #94a3b8;
+    }
+    .legend-dot {
+      width: 14px;
+      height: 14px;
+      border-radius: 4px;
+    }
+    .workflows {
+      margin-top: 36px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      max-width: 1100px;
+      width: 100%;
+    }
+    .workflow-card {
+      background: #1e293b;
+      border-radius: 10px;
+      padding: 20px;
+      border-left: 4px solid;
+    }
+    .workflow-card h3 {
+      margin: 0 0 8px 0;
+      font-size: 1rem;
+    }
+    .workflow-card p {
+      margin: 0;
+      font-size: 0.82rem;
+      color: #94a3b8;
+      line-height: 1.5;
+    }
+    .workflow-card .file {
+      font-family: monospace;
+      font-size: 0.75rem;
+      color: #64748b;
+      margin-top: 10px;
+    }
+    .w1 { border-color: #3b82f6; }
+    .w1 h3 { color: #60a5fa; }
+    .w2 { border-color: #f59e0b; }
+    .w2 h3 { color: #fbbf24; }
+    .w3 { border-color: #10b981; }
+    .w3 h3 { color: #34d399; }
+  </style>
+</head>
+<body>
+  <h1>EduEnroll CI/CD Pipeline</h1>
+  <p class="subtitle">Branch-based deployment with Vercel auto-deploy</p>
+
+  <div class="mermaid">
+%%{init: {
+  'theme': 'dark',
+  'themeVariables': {
+    'primaryColor': '#1e40af',
+    'primaryTextColor': '#e2e8f0',
+    'primaryBorderColor': '#3b82f6',
+    'lineColor': '#64748b',
+    'secondaryColor': '#7c3aed',
+    'tertiaryColor': '#065f46',
+    'nodeTextColor': '#e2e8f0',
+    'edgeLabelBackground': '#1e293b'
+  }
+}}%%
+
+flowchart TD
+  subgraph DEV["<b>dev branch</b>"]
+    direction TB
+    D1["Developer pushes code\nor opens PR"]
+    D2["<b>CI Workflow</b>\nLint + Build"]
+    D1 --> D2
+  end
+
+  subgraph STAGING["<b>staging branch</b>"]
+    direction TB
+    S0["PR merged to staging"]
+    S1["<b>CI Workflow</b>\nLint + Build"]
+    S2["Vercel auto-deploys\nstaging preview"]
+    S3["<b>Wait for Deploy</b>\n3 min + health check"]
+    S4["<b>API Tests</b>\napi-tests.sh"]
+    S5["<b>Security Audit</b>\nsecurity-audit.sh"]
+    S0 --> S1
+    S0 --> S2
+    S2 --> S3
+    S3 --> S4
+    S3 --> S5
+  end
+
+  subgraph PROD["<b>main branch</b>"]
+    direction TB
+    P0["PR merged to main"]
+    P1["<b>CI Workflow</b>\nLint + Build"]
+    P2["Vercel auto-deploys\nto production"]
+    P3["<b>Health Check</b>\nHTTP status + API probe"]
+    P4["<b>Deploy Notification</b>\nPass / Fail report"]
+    P0 --> P1
+    P0 --> P2
+    P2 --> P3
+    P3 --> P4
+  end
+
+  DEV -- "PR to staging" --> STAGING
+  STAGING -- "PR to main" --> PROD
+
+  style DEV fill:#1e3a5f,stroke:#3b82f6,stroke-width:2px,color:#93c5fd
+  style STAGING fill:#3b2f0a,stroke:#f59e0b,stroke-width:2px,color:#fbbf24
+  style PROD fill:#0a3b2a,stroke:#10b981,stroke-width:2px,color:#34d399
+
+  style D1 fill:#1e40af,stroke:#3b82f6,color:#e2e8f0
+  style D2 fill:#1e3a8a,stroke:#60a5fa,color:#e2e8f0
+
+  style S0 fill:#78350f,stroke:#f59e0b,color:#e2e8f0
+  style S1 fill:#78350f,stroke:#f59e0b,color:#e2e8f0
+  style S2 fill:#713f12,stroke:#fbbf24,color:#e2e8f0
+  style S3 fill:#713f12,stroke:#fbbf24,color:#e2e8f0
+  style S4 fill:#92400e,stroke:#fb923c,color:#e2e8f0
+  style S5 fill:#92400e,stroke:#fb923c,color:#e2e8f0
+
+  style P0 fill:#065f46,stroke:#10b981,color:#e2e8f0
+  style P1 fill:#065f46,stroke:#10b981,color:#e2e8f0
+  style P2 fill:#047857,stroke:#34d399,color:#e2e8f0
+  style P3 fill:#047857,stroke:#34d399,color:#e2e8f0
+  style P4 fill:#047857,stroke:#34d399,color:#e2e8f0
+  </div>
+
+  <div class="legend">
+    <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div> dev (development)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div> staging (pre-production)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#10b981"></div> main (production)</div>
+    <div class="legend-item"><div class="legend-dot" style="background:#7c3aed"></div> Vercel auto-deploy</div>
+  </div>
+
+  <div class="workflows">
+    <div class="workflow-card w1">
+      <h3>CI Workflow</h3>
+      <p>
+        <b>Trigger:</b> Push or PR to dev / staging / main<br/>
+        <b>Steps:</b> Checkout &rarr; Node 20 &rarr; npm ci &rarr; Lint &rarr; Build<br/>
+        <b>Must pass</b> before merging
+      </p>
+      <div class="file">ci.yml</div>
+    </div>
+    <div class="workflow-card w2">
+      <h3>Staging Tests</h3>
+      <p>
+        <b>Trigger:</b> Push to staging (or manual)<br/>
+        <b>Steps:</b> Wait 3 min for Vercel &rarr; Health check &rarr; API tests + Security audit (parallel)<br/>
+        <b>Secrets:</b> STAGING_URL, Supabase keys, bypass token
+      </p>
+      <div class="file">staging-tests.yml</div>
+    </div>
+    <div class="workflow-card w3">
+      <h3>Production Deploy</h3>
+      <p>
+        <b>Trigger:</b> Push to main<br/>
+        <b>Steps:</b> Wait 60s &rarr; HTTP health check &rarr; API probe &rarr; Pass/fail notification<br/>
+        <b>Vercel auto-deploys</b> main to production
+      </p>
+      <div class="file">deploy-prod.yml</div>
+    </div>
+  </div>
+
+  <script>mermaid.initialize({ startOnLoad: true });</script>
+</body>
+</html>
