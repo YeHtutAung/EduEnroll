@@ -398,10 +398,12 @@ function HitPaySection({
     setLoading(true);
     setError(null);
     try {
+      const origin = window.location.origin;
+      const redirectUrl = `${origin}/enroll/${slug}/checkout/payment?ref=${encodeURIComponent(enrollmentRef)}&hitpay=success`;
       const res = await fetch("/api/public/payments/hitpay", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enrollmentRef, method: "card" }),
+        body: JSON.stringify({ enrollmentRef, method: "card", redirectUrl }),
       });
       const data = await res.json();
       if (!res.ok) {

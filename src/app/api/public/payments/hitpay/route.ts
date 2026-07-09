@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
   if (tenantId instanceof NextResponse) return tenantId;
 
   // ── 1. Parse body ──────────────────────────────────────────────────────────
-  let body: { enrollmentRef?: string; method?: string };
+  let body: { enrollmentRef?: string; method?: string; redirectUrl?: string };
   try {
     body = await request.json();
   } catch {
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { enrollmentRef, method } = body;
+  const { enrollmentRef, method, redirectUrl: clientRedirectUrl } = body;
 
   if (!enrollmentRef || typeof enrollmentRef !== "string") {
     return NextResponse.json(
@@ -139,9 +139,12 @@ export async function POST(request: NextRequest) {
   }
 
   // ── 7. Build redirect URL (card only) ──────────────────────────────────────
+  // Prefer client-supplied redirectUrl (the client knows its own page path).
+  // Fall back to the generic payment page path for backwards compatibility.
   const host = request.headers.get("host") ?? "localhost:3005";
   const proto = host.startsWith("localhost") ? "http" : "https";
-  const redirectUrl = `${proto}://${host}/enroll/payment/${encodeURIComponent(enrollmentRef)}?hitpay=success`;
+  const fallbackRedirectUrl = `${proto}://${host}/enroll/payment/${encodeURIComponent(enrollmentRef)}?hitpay=success`;
+  const redirectUrl = clientRedirectUrl ?? fallbackRedirectUrl;
 
   // ── 8. Call HitPay API ─────────────────────────────────────────────────────
   try {
