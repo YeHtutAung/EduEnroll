@@ -72,9 +72,16 @@ describe("hitpay.createPaymentRequest", () => {
       expect.stringContaining("sandbox"),
       expect.objectContaining({
         method: "POST",
-        headers: expect.objectContaining({ "X-BUSINESS-API-KEY": "test-key" }),
+        headers: expect.objectContaining({
+          "X-BUSINESS-API-KEY": "test-key",
+          "X-Requested-With": "XMLHttpRequest",
+        }),
       }),
     );
+    const callBody = new URLSearchParams(mockFetch.mock.calls[0][1].body as string);
+    expect(callBody.getAll("payment_methods[]")).toEqual(["paynow_online"]);
+    expect(callBody.get("generate_qr")).toBe("true");
+    expect(callBody.get("redirect_url")).toBeNull();
     expect(result.id).toBe("req-1");
     expect(result.qr_code_data?.qr_code).toBe("QR_STRING");
   });
