@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
+import QRCode from "qrcode";
 import { formatCurrencySimple, formatAmount } from "@/lib/utils";
 import QRPaymentModal from "@/components/payments/QRPaymentModal";
 import BrandHeader from "@/components/enrollment/BrandHeader";
@@ -34,7 +35,7 @@ interface EnrollmentInfo {
   enrolled_at?: string;
   auto_cancel_minutes?: number;
   telegram_bot_username?: string | null;
-  payment_mode?: "bank_transfer" | "mmqr" | "stripe" | "paypay";
+  payment_mode?: "bank_transfer" | "mmqr" | "stripe" | "paypay" | "hitpay";
   mmqr_provider?: "abank" | "mmpay";
   class_image_url?: string | null;
   items?: CartItem[] | null;
@@ -1007,6 +1008,15 @@ export default function PaymentInstructionsPage() {
   const [stripeError, setStripeError] = useState<string | null>(null);
   const [stripeReturn, setStripeReturn] = useState<"success" | "cancelled" | null>(null);
 
+  // ── HitPay state ─────────────────────────────────────────────────────────
+  const [hitpayTab, setHitpayTab] = useState<"paynow" | "card">("paynow");
+  const [hitpayQrCode, setHitpayQrCode] = useState<string | null>(null);
+  const [hitpayQrImage, setHitpayQrImage] = useState<string | null>(null);
+  const [hitpayLoading, setHitpayLoading] = useState(false);
+  const [hitpayError, setHitpayError] = useState<string | null>(null);
+  const [hitpayReturn, setHitpayReturn] = useState<"success" | null>(null);
+  const [hitpayPolling, setHitpayPolling] = useState(false);
+
   useEffect(() => {
     // Handle Stripe return
     const params_ = new URLSearchParams(window.location.search);
@@ -1046,6 +1056,12 @@ export default function PaymentInstructionsPage() {
     const paypayParam = params_.get("paypay");
     if (paypayParam === "success") {
       // PayPay redirected back — page-level polling will detect status change
+    }
+
+    const hitpayParam = params_.get("hitpay");
+    if (hitpayParam === "success") {
+      setHitpayReturn("success");
+      window.history.replaceState({}, "", window.location.pathname);
     }
 
     async function fetchData() {
@@ -1128,6 +1144,55 @@ export default function PaymentInstructionsPage() {
     }
   }
 
+  async function handleHitPayPayNow() {
+    if (hitpayLoading) return;
+    setHitpayLoading(true);
+    setHitpayError(null);
+    setHitpayQrCode(null);
+    setHitpayQrImage(null);
+
+    try {
+      const res = await fetch("/api/public/payments/hitpay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enrollmentRef: params.ref, method: "paynow_online" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message ?? "Failed to generate QR.");
+
+      const qrCode: string = data.qrCode;
+      setHitpayQrCode(qrCode);
+
+      const dataUrl = await QRCode.toDataURL(qrCode, { width: 280, margin: 2 });
+      setHitpayQrImage(dataUrl);
+      setHitpayPolling(true);
+    } catch (err) {
+      setHitpayError(err instanceof Error ? err.message : "Something went wrong.");
+    } finally {
+      setHitpayLoading(false);
+    }
+  }
+
+  async function handleHitPayCard() {
+    if (hitpayLoading) return;
+    setHitpayLoading(true);
+    setHitpayError(null);
+
+    try {
+      const res = await fetch("/api/public/payments/hitpay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enrollmentRef: params.ref, method: "card" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message ?? "Failed to initiate card payment.");
+      window.location.href = data.url;
+    } catch (err) {
+      setHitpayError(err instanceof Error ? err.message : "Something went wrong.");
+      setHitpayLoading(false);
+    }
+  }
+
   const handleUploadSuccess = useCallback(() => {
     fetch(`/api/public/status?ref=${encodeURIComponent(params.ref)}`)
       .then((res) => res.json())
@@ -1182,6 +1247,36 @@ export default function PaymentInstructionsPage() {
       if (pageSlowTimerRef.current) { clearTimeout(pageSlowTimerRef.current); pageSlowTimerRef.current = null; }
     };
   }, [enrollment?.status, enrollment?.payment_mode, showQRModal, params.ref]);
+
+  // ── HitPay QR polling ─────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!hitpayPolling || !params.ref) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(
+          `/api/public/payments/hitpay/status?ref=${encodeURIComponent(params.ref)}`,
+        );
+        const data = await res.json();
+
+        if (data.enrollmentStatus === "confirmed") {
+          clearInterval(interval);
+          setHitpayPolling(false);
+          const intakeSlug = enrollment?.intake_slug ?? "";
+          window.location.href = `/enroll/${encodeURIComponent(intakeSlug)}/checkout/success/?ref=${encodeURIComponent(params.ref)}`;
+        } else if (data.enrollmentStatus === "rejected" || data.enrollmentStatus === "cancelled") {
+          clearInterval(interval);
+          setHitpayPolling(false);
+          setHitpayQrImage(null);
+          setHitpayError("Payment failed. Please try again.");
+        }
+      } catch {
+        // network error — keep polling
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [hitpayPolling, params.ref, enrollment?.intake_slug]);
 
   const brandHeader = schoolName ? (
     <BrandHeader schoolName={schoolName} primaryColor={primaryColor} logoUrl={logoUrl} />
@@ -1504,6 +1599,101 @@ export default function PaymentInstructionsPage() {
                 )}
               </div>
             )}
+
+          {/* ── Pay via HitPay ──────────────────────────────────────── */}
+          {enrollment.payment_mode === "hitpay" && (enrollment.status === "pending_payment" || enrollment.status === "partial_payment") && (
+            <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+
+              {/* Return banner */}
+              {hitpayReturn === "success" && (
+                <div className="mb-4 rounded-lg bg-blue-50 px-3 py-2.5 text-sm text-blue-700 text-center">
+                  Payment received — confirming your enrollment…
+                </div>
+              )}
+
+              {/* Tab selector */}
+              <div className="flex gap-2 mb-4">
+                <button
+                  onClick={() => { setHitpayTab("paynow"); setHitpayQrImage(null); setHitpayError(null); setHitpayPolling(false); }}
+                  className={`flex-1 rounded-lg py-2 text-sm font-semibold transition-colors ${
+                    hitpayTab === "paynow"
+                      ? "bg-[#1a3f8a] text-white"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  PayNow
+                </button>
+                <button
+                  onClick={() => { setHitpayTab("card"); setHitpayQrImage(null); setHitpayError(null); setHitpayPolling(false); }}
+                  className={`flex-1 rounded-lg py-2 text-sm font-semibold transition-colors ${
+                    hitpayTab === "card"
+                      ? "bg-[#1a3f8a] text-white"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  Card
+                </button>
+              </div>
+
+              {/* Error */}
+              {hitpayError && (
+                <div className="mb-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+                  {hitpayError}
+                </div>
+              )}
+
+              {/* PayNow tab */}
+              {hitpayTab === "paynow" && (
+                <>
+                  {hitpayQrImage ? (
+                    <div className="text-center">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={hitpayQrImage} alt="PayNow QR Code" className="mx-auto rounded-lg" width={280} height={280} />
+                      <p className="mt-2 text-xs text-gray-500">Scan with your banking app (PayNow)</p>
+                      <button
+                        onClick={() => { setHitpayQrImage(null); setHitpayQrCode(null); setHitpayPolling(false); }}
+                        className="mt-3 text-xs text-gray-400 underline"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-sm text-gray-500 mb-4">
+                        Generate a PayNow QR code and scan it with your banking app to pay instantly.
+                      </p>
+                      <button
+                        onClick={handleHitPayPayNow}
+                        disabled={hitpayLoading}
+                        className="w-full rounded-xl bg-[#1a3f8a] px-4 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-900 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {hitpayLoading ? "Generating QR…" : "Generate PayNow QR"}
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
+
+              {/* Card tab */}
+              {hitpayTab === "card" && (
+                <>
+                  <p className="text-sm text-gray-500 mb-4">
+                    You will be redirected to a secure payment page to pay by Visa or Mastercard.
+                  </p>
+                  <button
+                    onClick={handleHitPayCard}
+                    disabled={hitpayLoading}
+                    className="w-full rounded-xl bg-[#1a3f8a] px-4 py-3 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-blue-900 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {hitpayLoading ? "Redirecting…" : "Pay by Card"}
+                  </button>
+                  <p className="mt-2 text-center text-xs text-gray-400">
+                    Powered by HitPay — secure card payment
+                  </p>
+                </>
+              )}
+            </div>
+          )}
 
           {/* ── Pay via PayPay ──────────────────────────────────── */}
           {showUpload && paymentMode === "paypay" && (
