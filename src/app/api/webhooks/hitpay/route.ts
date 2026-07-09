@@ -12,9 +12,6 @@ export async function POST(request: NextRequest) {
   const bodyText = await request.text();
   const signature = request.headers.get("hitpay-signature");
 
-  // Debug: log salt length and signature presence to verify env var
-  console.log("[hitpay-webhook] salt-length:", process.env.HITPAY_SALT?.length ?? 0, "sig-present:", !!signature, "body-len:", bodyText.length);
-
   // ── 1. Verify signature ────────────────────────────────────────────────────
   // HitPay sends application/json with HMAC-SHA256 in Hitpay-Signature header.
   if (!signature) {
