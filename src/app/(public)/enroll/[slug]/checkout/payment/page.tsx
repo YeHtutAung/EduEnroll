@@ -4,6 +4,7 @@ import { Suspense, useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { loadStripe } from "@stripe/stripe-js";
 import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-stripe-js";
+import QRCode from "qrcode";
 import TrustedOfficialShell from "@/components/enrollment/TrustedOfficialShell";
 import QRPaymentModal from "@/components/payments/QRPaymentModal";
 
@@ -334,6 +335,185 @@ function BankTransferSection({
   );
 }
 
+// ─── HitPay Section ───────────────────────────────────────────────────────────
+
+function HitPaySection({
+  enrollmentRef, totalAmount, slug,
+}: { enrollmentRef: string; totalAmount: number; slug: string }) {
+  const router = useRouter();
+  const [hitpayTab, setHitpayTab] = useState<"paynow" | "card">("paynow");
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const pollRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, []);
+
+  function startPolling() {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/public/payments/hitpay/status?ref=${enrollmentRef}`);
+        const data = await res.json();
+        const status = data.enrollmentStatus;
+        if (status === "confirmed") {
+          clearInterval(pollRef.current!);
+          router.push(`/enroll/${slug}/checkout/success/?ref=${enrollmentRef}`);
+        } else if (status === "rejected" || status === "cancelled") {
+          clearInterval(pollRef.current!);
+          setError("Payment failed. Please try again.");
+          setQrDataUrl(null);
+        }
+      } catch { /* keep polling on network error */ }
+    }, 3000);
+  }
+
+  async function handlePayNow() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/public/payments/hitpay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enrollmentRef, method: "paynow_online" }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.message ?? "Failed to generate QR. Please try again.");
+        setLoading(false);
+        return;
+      }
+      const dataUrl = await QRCode.toDataURL(data.qrCode, { width: 200, margin: 2 });
+      setQrDataUrl(dataUrl);
+      startPolling();
+    } catch {
+      setError("Network error. Please try again.");
+    }
+    setLoading(false);
+  }
+
+  async function handleCard() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/public/payments/hitpay", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enrollmentRef, method: "card" }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.message ?? "Failed to initiate card payment. Please try again.");
+        setLoading(false);
+        return;
+      }
+      window.location.href = data.url;
+    } catch {
+      setError("Network error. Please try again.");
+      setLoading(false);
+    }
+  }
+
+  function handleCancel() {
+    if (pollRef.current) clearInterval(pollRef.current);
+    setQrDataUrl(null);
+    setError(null);
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* Tab selector */}
+      <div className="flex rounded-[7px] overflow-hidden" style={{ border: "1.5px solid #d8d5c9" }}>
+        {(["paynow", "card"] as const).map((t) => (
+          <button
+            key={t}
+            className="flex-1 py-2 text-[11px] font-bold uppercase tracking-wide transition-colors"
+            style={{
+              background: hitpayTab === t ? "#0f1f42" : "transparent",
+              color: hitpayTab === t ? "#ffffff" : "#43485a",
+            }}
+            onClick={() => { setHitpayTab(t); handleCancel(); }}
+          >
+            {t === "paynow" ? "PAYNOW" : "CARD"}
+          </button>
+        ))}
+      </div>
+
+      {hitpayTab === "paynow" ? (
+        <div className="flex flex-col gap-4">
+          {qrDataUrl ? (
+            <>
+              <div className="rounded-[10px] p-[18px] text-center" style={{ border: "1px solid #e3e0d6" }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={qrDataUrl} alt="PayNow QR" className="w-[130px] h-[130px] mx-auto mb-2" />
+                <p className="text-[10.5px]" style={{ color: "#8b8f9a" }}>Scan with your banking app (PayNow)</p>
+                <p className="text-[9.5px]" style={{ color: "#aca795" }}>DBS · OCBC · UOB · and most PayNow banks</p>
+              </div>
+              <div className="flex items-center justify-between px-3 py-2 rounded-[8px]" style={{ background: "#fdf3e0", border: "1px solid #eed9a3" }}>
+                <span className="text-[10.5px]" style={{ color: "#8a6a1f" }}>Waiting for payment</span>
+                <span className="text-[10px] flex items-center gap-1.5" style={{ color: "#8a6a1f" }}>
+                  <span className="w-1.5 h-1.5 rounded-full animate-pulse inline-block" style={{ background: "#8a6a1f" }} />
+                  Confirming
+                </span>
+              </div>
+              <button
+                className="w-full py-2.5 rounded-[8px] text-[11.5px] font-semibold"
+                style={{ border: "1px solid #d8d5c9", color: "#43485a" }}
+                onClick={handleCancel}
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-[12px] text-center" style={{ color: "#8b8f9a" }}>
+                A PayNow QR code will be generated for {totalAmount.toLocaleString()}.
+              </p>
+              <button
+                className="w-full py-3 rounded-[8px] text-[12.5px] font-bold text-white disabled:opacity-60"
+                style={{ background: "#0f1f42" }}
+                onClick={handlePayNow}
+                disabled={loading}
+              >
+                {loading ? "Generating QR..." : "Pay via PayNow"}
+              </button>
+            </>
+          )}
+          {error && (
+            <div className="p-3 rounded-lg border text-[12px]" style={{ background: "#fff5f5", borderColor: "#fca5a5", color: "#991b1b" }}>
+              {error}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-4">
+          <p className="text-[12px] text-center" style={{ color: "#8b8f9a" }}>
+            Pay securely by Visa or Mastercard.
+          </p>
+          {error && (
+            <div className="p-3 rounded-lg border text-[12px]" style={{ background: "#fff5f5", borderColor: "#fca5a5", color: "#991b1b" }}>
+              {error}
+            </div>
+          )}
+          <button
+            className="w-full py-3 rounded-[8px] text-[12.5px] font-bold text-white disabled:opacity-60"
+            style={{ background: "#0f1f42" }}
+            onClick={handleCard}
+            disabled={loading}
+          >
+            {loading ? "Redirecting..." : "Pay by Card"}
+          </button>
+          <p className="text-center text-[9.5px]" style={{ color: "#aca795" }}>
+            Powered by <span className="font-bold" style={{ color: "#0f1f42" }}>HitPay</span>
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Payment Page ─────────────────────────────────────────────────────────────
 
 function PaymentContent() {
@@ -355,6 +535,11 @@ function PaymentContent() {
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [studentName, setStudentName] = useState("");
   const [showQRModal, setShowQRModal] = useState(false);
+  const [hitpayReturn, setHitpayReturn] = useState(false);
+
+  useEffect(() => {
+    if (searchParams.get("hitpay") === "success") setHitpayReturn(true);
+  }, [searchParams]);
 
   useEffect(() => {
     const stored = sessionStorage.getItem(`cs_${ref}`);
@@ -405,6 +590,13 @@ function PaymentContent() {
 
   return (
     <TrustedOfficialShell orgName={orgName} logoUrl={logoUrl} brandColor={brandColor} step={2}>
+      {/* HitPay return banner */}
+      {hitpayReturn && (
+        <div className="mb-4 p-3 rounded-[8px] text-[12px] text-center" style={{ background: "#fdf3e0", border: "1px solid #eed9a3", color: "#8a6a1f" }}>
+          Payment received — confirming your enrollment…
+        </div>
+      )}
+
       {/* Total due card */}
       <div className="flex items-center justify-between rounded-[10px] px-4 py-3 mb-5" style={{ border: "1px solid #e3e0d6", background: "#fbfaf6" }}>
         <span className="text-[11.5px]" style={{ color: "#8b8f9a" }}>Total due</span>
@@ -450,6 +642,8 @@ function PaymentContent() {
           totalAmount={totalAmount}
           slug={params.slug}
         />
+      ) : paymentMode === "hitpay" ? (
+        <HitPaySection enrollmentRef={ref} totalAmount={totalAmount} slug={params.slug} />
       ) : isQRMode ? (
         <>
           <button
