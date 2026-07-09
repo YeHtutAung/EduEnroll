@@ -12,16 +12,11 @@ import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
 import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils";
 import { sendSms } from "@/lib/sms";
-import type { Enrollment, Payment, PaymentStatus, EnrollmentStatus } from "@/types/database";
+import type { Enrollment, Payment } from "@/types/database";
+import { verifyPayment } from "@/server/payments/verifyPayment";
 
 type EnrollmentResult = { data: Enrollment | null; error: unknown };
 type PaymentResult    = { data: Payment    | null; error: unknown };
-
-function dbError(label: string, err: unknown) {
-  const e = err as { message?: string; details?: string; hint?: string; code?: string };
-  console.error(`[verify] ${label}:`, JSON.stringify({ message: e.message, details: e.details, hint: e.hint, code: e.code }));
-  return NextResponse.json({ error: e.message, details: e.details, hint: e.hint, code: e.code }, { status: 500 });
-}
 
 // ─── PATCH /api/admin/payments/[id]/verify ────────────────────────────────────
 // [id] = payment id
@@ -103,7 +98,6 @@ export async function PATCH(
   const fd = enrollment.form_data as Record<string, string> | null;
   const enrollEmail = enrollment.email || resolveEmailFromFormData(fd);
 
-  const now = new Date().toISOString();
   const admin = createAdminClient(); // bypasses RLS for class seat update
 
   // ── Fetch tenant info for email branding ───────────────────────────────────
@@ -118,110 +112,33 @@ export async function PATCH(
   const logoUrl = tenantInfo?.logo_url ?? undefined;
   const currency = tenantInfo?.currency ?? "MMK";
 
-  // ── Is this a cart enrollment? ───────────────────────────────────────────────
-  const isCart = enrollment.class_id === null;
+  // ── Execute verification action (DB writes + seat restoration) ───────────────
+  const result = await verifyPayment({
+    action,
+    payment,
+    enrollment,
+    tenantId,
+    tenantInfo: { currency },
+    verifier: { verifiedByHuman, verifiedByAgent },
+    rejection_reason: typeof rejection_reason === "string" ? rejection_reason : undefined,
+    admin_note: typeof admin_note === "string" ? admin_note : undefined,
+    received_amount: typeof received_amount === "number" ? received_amount : undefined,
+    requestHost: request.headers.get("host") ?? "localhost:3005",
+  });
 
-  // ── Helper: get class level + build URLs ────────────────────────────────────
-  async function getClassAndUrls() {
-    let classLevel = "";
-    let totalFee = 0;
+  const {
+    enrollment: updatedEnrollment,
+    payment: updatedPayment,
+    classLevel,
+    statusUrl,
+    paymentUrl,
+    feeFormatted,
+  } = result;
 
-    if (isCart) {
-      // Cart enrollment: get levels from enrollment_items
-      const { data: items } = await admin
-        .from("enrollment_items")
-        .select("quantity, fee_amount, classes(level)")
-        .eq("enrollment_id", enrollment!.id) as {
-        data: { quantity: number; fee_amount: number; classes: { level: string } | null }[] | null;
-        error: unknown;
-      };
-      if (items && items.length > 0) {
-        classLevel = items
-          .map((i) => i.quantity > 1 ? `${i.classes?.level ?? "?"} x${i.quantity}` : (i.classes?.level ?? "?"))
-          .join(", ");
-        totalFee = items.reduce((sum, i) => sum + i.fee_amount * i.quantity, 0);
-      }
-    } else {
-      const { data: cls } = await admin
-        .from("classes")
-        .select("level, fee_amount")
-        .eq("id", enrollment!.class_id!)
-        .single() as { data: { level: string; fee_amount: number } | null; error: unknown };
-      classLevel = cls?.level ?? "";
-      totalFee = (cls?.fee_amount ?? 0) * (enrollment!.quantity ?? 1);
-    }
+  const now = new Date().toISOString();
 
-    const host = request.headers.get("host") ?? "localhost:3005";
-    const proto = host.startsWith("localhost") ? "http" : "https";
-    const statusUrl = `${proto}://${host}/status?ref=${enrollment!.enrollment_ref}`;
-    const paymentUrl = `${proto}://${host}/enroll/payment/${enrollment!.enrollment_ref}`;
-
-    const feeFormatted = totalFee > 0
-      ? `${String(totalFee).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} ${currency}`
-      : undefined;
-
-    return { classLevel, statusUrl, paymentUrl, feeFormatted };
-  }
-
-  // ── Helper: restore seats (works for both cart and single-class) ─────────────
-  async function restoreSeats() {
-    const itemsToRestore: { class_id: string; quantity: number }[] = [];
-
-    if (isCart) {
-      const { data: items } = await admin
-        .from("enrollment_items")
-        .select("class_id, quantity")
-        .eq("enrollment_id", enrollment!.id) as {
-        data: { class_id: string; quantity: number }[] | null;
-        error: unknown;
-      };
-      if (items) itemsToRestore.push(...items);
-    } else if (enrollment!.class_id) {
-      itemsToRestore.push({ class_id: enrollment!.class_id, quantity: enrollment!.quantity ?? 1 });
-    }
-
-    for (const item of itemsToRestore) {
-      const { data: cls } = await admin
-        .from("classes")
-        .select("seat_remaining")
-        .eq("id", item.class_id)
-        .single() as { data: { seat_remaining: number } | null; error: unknown };
-      if (cls) {
-        await admin
-          .from("classes")
-          .update({
-            seat_remaining: cls.seat_remaining + item.quantity,
-            status: "open",
-          } as never)
-          .eq("id", item.class_id);
-      }
-    }
-  }
-
-  // ── Approve ──────────────────────────────────────────────────────────────────
+  // ── Approve notifications ────────────────────────────────────────────────────
   if (action === "approve") {
-    const newPaymentStatus: PaymentStatus    = "verified";
-    const newEnrollStatus: EnrollmentStatus  = "confirmed";
-
-    const { error: pe } = await admin
-      .from("payments")
-      .update({ status: newPaymentStatus, verified_by: verifiedByHuman, verified_by_agent: verifiedByAgent, verified_at: now } as never)
-      .eq("id", payment.id);
-
-    if (pe) return dbError(`${action} payment update`, pe);
-
-    const { data: updatedEnrollment, error: ee } = await admin
-      .from("enrollments")
-      .update({ status: newEnrollStatus } as never)
-      .eq("id", enrollment.id)
-      .select()
-      .single() as EnrollmentResult;
-
-    if (ee) return dbError(`${action} enrollment update`, ee);
-
-    // Send notifications (best-effort, non-blocking)
-    const { classLevel, statusUrl, paymentUrl, feeFormatted } = await getClassAndUrls();
-
     // Messenger notification (if enrolled via chatbot)
     if (enrollment.messenger_psid) {
       sendStatusNotification({
@@ -304,44 +221,11 @@ export async function PATCH(
         .eq("id", enrollment.id);
     }
 
-    return NextResponse.json({
-      enrollment: updatedEnrollment,
-      payment: { ...payment, status: newPaymentStatus, verified_by: verifiedByHuman, verified_by_agent: verifiedByAgent, verified_at: now },
-    });
+    return NextResponse.json({ enrollment: updatedEnrollment, payment: updatedPayment });
   }
 
-  // ── Request Remaining (partial payment) ────────────────────────────────────
+  // ── Request Remaining notifications ─────────────────────────────────────────
   if (action === "request_remaining") {
-    const newEnrollStatus: EnrollmentStatus = "partial_payment";
-
-    // Update payment with admin note and received amount
-    const paymentUpdate: Record<string, unknown> = {
-      admin_note: (admin_note as string).trim(),
-      verified_by: user.id,
-      verified_at: now,
-    };
-    if (typeof received_amount === "number") {
-      paymentUpdate.received_amount = received_amount;
-    }
-
-    const { error: pe } = await admin
-      .from("payments")
-      .update(paymentUpdate as never)
-      .eq("id", payment.id);
-
-    if (pe) return dbError(`${action} payment update`, pe);
-
-    const { data: updatedEnrollment, error: ee } = await admin
-      .from("enrollments")
-      .update({ status: newEnrollStatus } as never)
-      .eq("id", enrollment.id)
-      .select()
-      .single() as EnrollmentResult;
-
-    if (ee) return dbError(`${action} enrollment update`, ee);
-
-    // Send notifications (best-effort, non-blocking)
-    const { classLevel, paymentUrl, statusUrl } = await getClassAndUrls();
     const remainingAmount = typeof received_amount === "number"
       ? payment.amount - received_amount
       : null;
@@ -414,44 +298,10 @@ export async function PATCH(
         .eq("id", enrollment.id);
     }
 
-    return NextResponse.json({
-      enrollment: updatedEnrollment,
-      payment: { ...payment, ...paymentUpdate },
-    });
+    return NextResponse.json({ enrollment: updatedEnrollment, payment: updatedPayment });
   }
 
-  // ── Reject ───────────────────────────────────────────────────────────────────
-  const newPaymentStatus: PaymentStatus   = "rejected";
-  const newEnrollStatus: EnrollmentStatus = "rejected";
-
-  const { error: pe } = await admin
-    .from("payments")
-    .update({ status: newPaymentStatus, verified_by: user.id, verified_at: now } as never)
-    .eq("id", payment.id);
-
-  if (pe) return dbError("reject payment update", pe);
-
-  const enrollUpdatePayload: Record<string, unknown> = { status: newEnrollStatus };
-  if (typeof rejection_reason === "string") {
-    enrollUpdatePayload.rejection_reason = rejection_reason;
-  }
-
-  const { data: updatedEnrollment, error: ee } = await admin
-    .from("enrollments")
-    .update(enrollUpdatePayload as never)
-    .eq("id", enrollment.id)
-    .select()
-    .single() as EnrollmentResult;
-
-  if (ee) return dbError("reject enrollment update", ee);
-
-  // Restore seats only if enrollment wasn't already rejected (prevents double-restore)
-  if (enrollment.status !== "rejected") {
-    await restoreSeats();
-  }
-
-  // Send notifications (best-effort, non-blocking)
-  const { classLevel: rejClassLevel, statusUrl: rejStatusUrl, paymentUrl: rejPaymentUrl } = await getClassAndUrls();
+  // ── Reject notifications ─────────────────────────────────────────────────────
 
   // Messenger notification (if enrolled via chatbot)
   if (enrollment.messenger_psid) {
@@ -461,9 +311,9 @@ export async function PATCH(
       action: "reject",
       studentName: enrollment.student_name_en || "Student",
       enrollmentRef: enrollment.enrollment_ref,
-      classLevel: rejClassLevel,
-      statusUrl: rejStatusUrl,
-      paymentUrl: rejPaymentUrl,
+      classLevel,
+      statusUrl,
+      paymentUrl,
       rejectionReason: typeof rejection_reason === "string" ? rejection_reason : null,
       currency,
     }).catch((err) => {
@@ -479,9 +329,9 @@ export async function PATCH(
       action: "reject",
       studentName: enrollment.student_name_en || "Student",
       enrollmentRef: enrollment.enrollment_ref,
-      classLevel: rejClassLevel,
-      statusUrl: rejStatusUrl,
-      paymentUrl: rejPaymentUrl,
+      classLevel,
+      statusUrl,
+      paymentUrl,
       rejectionReason: typeof rejection_reason === "string" ? rejection_reason : null,
       currency,
     }).catch((err) => {
@@ -494,9 +344,9 @@ export async function PATCH(
     const emailData = enrollmentRejectedEmail({
       studentName: enrollment.student_name_en || "Student",
       enrollmentRef: enrollment.enrollment_ref,
-      classLevel: rejClassLevel,
+      classLevel,
       reason: typeof rejection_reason === "string" ? rejection_reason : null,
-      statusUrl: rejStatusUrl,
+      statusUrl,
       orgType,
       tenantName,
       logoUrl,
@@ -515,7 +365,7 @@ export async function PATCH(
 
   const responseBody: Record<string, unknown> = {
     enrollment: updatedEnrollment,
-    payment: { ...payment, status: newPaymentStatus, verified_by: verifiedByHuman, verified_by_agent: verifiedByAgent, verified_at: now },
+    payment: updatedPayment,
   };
   if (typeof rejection_reason === "string") responseBody.rejection_reason = rejection_reason;
 
