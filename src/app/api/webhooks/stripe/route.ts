@@ -8,7 +8,7 @@ import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils"
 import { sendSms } from "@/lib/sms";
 import type Stripe from "stripe";
 
-// ─── POST /api/stripe/webhook ─────────────────────────────────────────────────
+// ─── POST /api/webhooks/stripe ─────────────────────────────────────────────────
 // Handles Stripe webhook events. Verifies signature, auto-confirms enrollment.
 // IMPORTANT: Use request.text() (not request.json()) to get the raw body —
 // Stripe signature verification requires the unmodified body string.
