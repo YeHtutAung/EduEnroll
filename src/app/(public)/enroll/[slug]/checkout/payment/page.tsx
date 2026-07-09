@@ -538,10 +538,24 @@ function PaymentContent() {
   const [studentName, setStudentName] = useState("");
   const [showQRModal, setShowQRModal] = useState(false);
   const [hitpayReturn, setHitpayReturn] = useState(false);
+  const hitpayReturnPollRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    if (searchParams.get("hitpay") === "success") setHitpayReturn(true);
-  }, [searchParams]);
+    if (searchParams.get("hitpay") !== "success") return;
+    setHitpayReturn(true);
+    // Poll enrollment status until confirmed — webhook confirms asynchronously
+    hitpayReturnPollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/public/payments/hitpay/status?ref=${ref}`);
+        const data = await res.json();
+        if (data.enrollmentStatus === "confirmed") {
+          clearInterval(hitpayReturnPollRef.current!);
+          router.push(`/enroll/${params.slug}/checkout/success/?ref=${ref}`);
+        }
+      } catch { /* keep polling */ }
+    }, 3000);
+    return () => { if (hitpayReturnPollRef.current) clearInterval(hitpayReturnPollRef.current); };
+  }, [searchParams, ref, params.slug, router]);
 
   useEffect(() => {
     const stored = sessionStorage.getItem(`cs_${ref}`);
