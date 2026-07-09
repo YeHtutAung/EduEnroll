@@ -247,3 +247,23 @@ export async function unbanChatMember(
   });
   return res.json();
 }
+
+/**
+ * Legacy signature: chatId first, botToken last.
+ * Used by admin-requests and webhook routes.
+ * Prefer sendMessage() for new code.
+ *
+ * Preserves the error-suppression behavior of the original src/lib/telegram.ts:
+ * network errors are caught and logged, never thrown to the caller.
+ */
+export async function sendTelegramMessage(
+  chatId: number,
+  text: string,
+  botToken: string,
+): Promise<void> {
+  try {
+    await sendMessage(botToken, String(chatId), text, "HTML");
+  } catch (err) {
+    console.error("[telegram] sendTelegramMessage error:", err);
+  }
+}

@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import paypay from "@/lib/paypay";
-import { sendPaymentNotifications } from "@/lib/payment-notifications";
+import { dispatchPaymentApproved } from "@/server/notifications/dispatchPaymentApproved";
+import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils";
 
 // ─── GET /api/public/payments/paypay/status?ref=PY-xxx ──────────────────────
 // Polls PayPay API and updates local payment record.
@@ -71,7 +72,92 @@ export async function GET(request: NextRequest) {
           .eq("id", payment.enrollment_id);
 
         // Send notifications
-        await sendPaymentNotifications(supabase, payment, request);
+        const { data: enrollment } = (await supabase
+          .from("enrollments")
+          .select("tenant_id, telegram_chat_id, email, phone, enrollment_ref, student_name_en, class_id, quantity, form_data")
+          .eq("id", payment.enrollment_id)
+          .single()) as {
+          data: {
+            tenant_id: string;
+            telegram_chat_id: string | null;
+            email: string | null;
+            phone: string | null;
+            enrollment_ref: string;
+            student_name_en: string;
+            class_id: string | null;
+            quantity: number | null;
+            form_data: Record<string, string> | null;
+          } | null;
+          error: unknown;
+        };
+
+        if (enrollment) {
+          const host = request.headers.get("host") ?? "localhost:3005";
+          const proto = host.startsWith("localhost") ? "http" : "https";
+          const statusUrl = `${proto}://${host}/status?ref=${enrollment.enrollment_ref}`;
+
+          const { data: tenantInfo } = (await supabase
+            .from("tenants")
+            .select("name, org_type, logo_url, currency, sms_on_payment")
+            .eq("id", enrollment.tenant_id)
+            .single()) as {
+            data: { name: string; org_type: string; logo_url: string | null; currency: string; sms_on_payment: boolean } | null;
+            error: unknown;
+          };
+          const tenantCurrency = tenantInfo?.currency ?? "JPY";
+
+          let classLevel = "Ticket";
+          let feeFormatted: string | undefined;
+          const isCart = enrollment.class_id === null;
+
+          if (isCart) {
+            const { data: items } = (await supabase
+              .from("enrollment_items")
+              .select("quantity, fee_amount, classes(level)")
+              .eq("enrollment_id", payment.enrollment_id)) as {
+              data: { quantity: number; fee_amount: number; classes: { level: string } | null }[] | null;
+              error: unknown;
+            };
+            if (items && items.length > 0) {
+              classLevel = items
+                .map((i) => (i.quantity > 1 ? `${i.classes?.level ?? "?"} x${i.quantity}` : (i.classes?.level ?? "?")))
+                .join(", ");
+              const total = items.reduce((s, i) => s + i.fee_amount * i.quantity, 0);
+              feeFormatted = `${String(total).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} ${tenantCurrency}`;
+            }
+          } else {
+            const { data: cls } = (await supabase
+              .from("classes")
+              .select("level, fee_amount")
+              .eq("id", enrollment.class_id!)
+              .single()) as { data: { level: string; fee_amount: number } | null; error: unknown };
+            if (cls) {
+              classLevel = cls.level;
+              const total = cls.fee_amount * (enrollment.quantity ?? 1);
+              feeFormatted = `${String(total).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} ${tenantCurrency}`;
+            }
+          }
+
+          await dispatchPaymentApproved({
+            tenantId: enrollment.tenant_id,
+            enrollmentId: payment.enrollment_id,
+            enrollmentRef: enrollment.enrollment_ref,
+            studentName: enrollment.student_name_en || "Student",
+            classLevel,
+            feeFormatted,
+            statusUrl,
+            paymentUrl: statusUrl,
+            currency: tenantCurrency,
+            email: enrollment.email || resolveEmailFromFormData(enrollment.form_data),
+            phone: enrollment.phone || resolvePhoneFromFormData(enrollment.form_data),
+            telegramChatId: enrollment.telegram_chat_id,
+            classId: enrollment.class_id,
+            tenantName: tenantInfo?.name,
+            orgType: tenantInfo?.org_type,
+            logoUrl: tenantInfo?.logo_url ?? undefined,
+            smsOnPayment: tenantInfo?.sms_on_payment,
+          });
+        }
       }
     } else if (status === "FAILED") {
       await supabase

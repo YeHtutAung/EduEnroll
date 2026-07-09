@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<![CDATA[<helmet data-dc-atomics>
+<meta name="design_doc_mode" content="canvas">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Kalam:wght@400;700&family=Architects+Daughter&family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Myanmar:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  body{margin:0;background:#f0eee9;font-family:'Kalam',cursive;}
+  .dv-turn{padding:44px 48px 40px;border-bottom:2px dashed rgba(0,0,0,.15);}
+  .dv-thd{display:flex;align-items:baseline;gap:12px;margin:0 0 26px;}
+  .dv-tid{display:inline-block;width:fit-content;font:700 12px 'Kalam',cursive;padding:4px 10px;background:#1a1a1a;color:#fff;border-radius:6px;text-decoration:none;}
+  .dv-tname{font:700 17px 'Kalam',cursive;color:#1a1a1a;}
+  .dv-opts{display:flex;flex-wrap:wrap;gap:36px;align-items:flex-start;}
+  .dv-opt{flex:none;display:flex;flex-direction:column;gap:12px;}
+  .dv-oid{display:inline-block;width:fit-content;font:700 13px 'Kalam',cursive;padding:4px 10px;background:rgba(0,0,0,.08);color:#1a1a1a;border-radius:6px;text-decoration:none;}
+  .dv-olabel{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font:400 13px 'Kalam',cursive;color:rgba(0,0,0,.6);}
+  .dv-olabel b{font-size:15px;color:#1a1a1a;}
+  .dv-next{margin:26px 0 0;font:16px 'Kalam',cursive;color:rgba(0,0,0,.55);}
+  .dv-next a{display:inline;}
+  .flow{display:flex;gap:22px;}
+  .phone{width:230px;border:3px solid #1a1a1a;border-radius:26px;background:#fff;overflow:hidden;box-shadow:3px 3px 0 rgba(0,0,0,.12);}
+  .phone-hd{text-align:center;font-size:11px;padding:6px 0 4px;color:rgba(0,0,0,.4);letter-spacing:2px;}
+  .phone-body{padding:14px 14px 18px;min-height:520px;}
+  .bar{height:9px;border-radius:4px;background:rgba(0,0,0,.15);}
+  .btn{border:2px solid #1a1a1a;border-radius:8px;text-align:center;font-weight:700;padding:8px 0;font-size:13px;}
+  .card{border:2px solid rgba(0,0,0,.4);border-radius:10px;padding:10px;}
+  .dashed{border:2px dashed rgba(0,0,0,.35);border-radius:10px;}
+</style>
+</helmet>
+
+<section class="dv-turn" id="t3" style="font-family:'Inter',sans-serif;">
+  <div class="dv-thd"><a class="dv-tid" href="#t3">3</a><span class="dv-tname" style="font-family:'Inter',sans-serif;">Event ticketing, Stripe checkout, SGD &mdash; same Trusted Official style</span></div>
+  <div class="dv-opts">
+    <div class="dv-opt" id="3a">
+      <div class="dv-olabel" style="font-family:'Inter',sans-serif;"><a class="dv-oid" href="#3a" style="background:#0f1f42;color:#fff;">3a</a><b style="font-family:'Inter',sans-serif;">Event flow &mdash; tickets &rarr; details &rarr; card payment &rarr; e-ticket</b></div>
+      <div class="flow">
+
+        <!-- Landing: ticket selection -->
+        <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" hint-size="230,520">
+          <div style="height:100%;overflow:hidden;padding-top:56px;background:#f7f5ef;font-family:'Inter',sans-serif;box-sizing:border-box;">
+            <div style="padding:0 22px;">
+              <div style="display:flex;align-items:center;gap:9px;margin-bottom:20px;">
+                <div style="width:30px;height:30px;border-radius:6px;background:#0f1f42;color:#d4af5a;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px;">TS</div>
+                <div style="font-size:12.5px;font-weight:600;color:#0f1f42;">TechSummit 2026</div>
+              </div>
+
+              <div style="text-align:center;padding:14px 0 18px;border-top:1.5px solid #d4af5a;border-bottom:1.5px solid #d4af5a;margin-bottom:18px;">
+                <div style="font-size:10px;font-weight:700;letter-spacing:2.5px;color:#b7912b;margin-bottom:6px;">SINGAPORE &middot; 14&ndash;15 NOV</div>
+                <div style="font-size:19px;font-weight:800;color:#0f1f42;">Select Your Ticket</div>
+              </div>
+
+              <div style="display:flex;flex-direction:column;gap:11px;">
+                <div style="background:#fff;border:1px solid #e3e0d6;border-radius:10px;padding:13px 14px;box-shadow:0 1px 2px rgba(15,31,66,.05);">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                    <span style="font-size:13px;font-weight:700;color:#0f1f42;">General Admission</span>
+                    <span style="font-size:12.5px;font-weight:700;color:#0f1f42;">SGD 180</span>
+                  </div>
+                  <div style="font-size:10.5px;color:#8b8f9a;margin-bottom:10px;">Access to all talks &amp; expo floor</div>
+                  <div style="display:flex;align-items:center;gap:10px;">
+                    <div style="display:flex;align-items:center;border:1px solid #d8d5c9;border-radius:7px;overflow:hidden;">
+                      <div style="width:26px;text-align:center;font-size:13px;color:#0f1f42;padding:4px 0;">&minus;</div>
+                      <div style="width:26px;text-align:center;font-size:12px;font-weight:700;border-left:1px solid #d8d5c9;border-right:1px solid #d8d5c9;padding:4px 0;">2</div>
+                      <div style="width:26px;text-align:center;font-size:13px;color:#0f1f42;padding:4px 0;">+</div>
+                    </div>
+                    <div style="font-size:10.5px;color:#8b8f9a;">SGD 360</div>
+                  </div>
+                </div>
+
+                <div style="background:#fbf8ee;border:1.5px solid #d4af5a;border-radius:10px;padding:13px 14px;">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                    <span style="font-size:13px;font-weight:700;color:#0f1f42;">VIP Pass <span style="background:#b7912b;color:#fff;font-size:8.5px;font-weight:700;padding:2px 6px;border-radius:4px;margin-left:5px;">POPULAR</span></span>
+                    <span style="font-size:12.5px;font-weight:700;color:#0f1f42;">SGD 420</span>
+                  </div>
+                  <div style="font-size:10.5px;color:#8b8f9a;">Front-row seating, speaker dinner, lounge access</div>
+                </div>
+              </div>
+            </div>
+
+            <div style="position:absolute;bottom:0;left:0;right:0;background:#fff;border-top:1px solid #e3e0d6;padding:12px 22px 18px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:9px;">
+                <span style="font-size:11.5px;font-weight:700;color:#0f1f42;">2 tickets selected</span>
+                <span style="font-size:12px;font-weight:800;color:#0f1f42;">SGD 360</span>
+              </div>
+              <div style="background:#0f1f42;color:#fff;text-align:center;font-size:12px;font-weight:700;padding:10px 0;border-radius:7px;">CONTINUE &rarr;</div>
+            </div>
+          </div>
+        </x-import>
+
+        <!-- Attendee details -->
+        <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" hint-size="230,520">
+          <div style="height:100%;overflow:hidden;padding-top:56px;background:#fff;font-family:'Inter',sans-serif;box-sizing:border-box;">
+            <div style="padding:0 22px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <span style="font-size:10.5px;font-weight:700;color:#0f1f42;letter-spacing:1px;">STEP 1 OF 2</span>
+                <span style="font-size:10.5px;color:#9a9484;">Attendee details</span>
+              </div>
+              <div style="display:flex;gap:5px;margin-bottom:18px;">
+                <div style="flex:1;height:4px;border-radius:2px;background:#b7912b;"></div>
+                <div style="flex:1;height:4px;border-radius:2px;background:#e9e6dc;"></div>
+              </div>
+
+              <div style="border:1px solid #d4af5a55;background:#fbf8ee;border-radius:10px;padding:11px 13px;margin-bottom:18px;">
+                <div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:4px;"><span style="color:#0f1f42;font-weight:700;">2 &times; General Admission</span><span style="font-weight:700;color:#0f1f42;">SGD 360</span></div>
+                <div style="font-size:10px;color:#9a9484;">TechSummit 2026 &middot; 14&ndash;15 Nov</div>
+              </div>
+
+              <div style="font-size:11px;font-weight:700;color:#0f1f42;letter-spacing:1.2px;border-bottom:1.5px solid #eee9dc;padding-bottom:7px;margin-bottom:14px;">YOUR DETAILS</div>
+
+              <div style="display:flex;flex-direction:column;gap:12px;">
+                <div>
+                  <div style="font-size:11px;font-weight:600;color:#43485a;margin-bottom:5px;">Full Name</div>
+                  <div style="border:1.5px solid #0f1f42;border-radius:7px;height:32px;"></div>
+                </div>
+                <div>
+                  <div style="font-size:11px;font-weight:600;color:#43485a;margin-bottom:5px;">Company</div>
+                  <div style="border:1.5px solid #d8d5c9;border-radius:7px;height:32px;"></div>
+                </div>
+                <div>
+                  <div style="font-size:11px;font-weight:600;color:#43485a;margin-bottom:5px;">Email Address</div>
+                  <div style="border:1.5px solid #d8d5c9;border-radius:7px;height:32px;"></div>
+                  <div style="font-size:9.5px;color:#9a9484;margin-top:4px;">E-tickets will be sent here</div>
+                </div>
+              </div>
+
+              <div style="background:#0f1f42;color:#fff;text-align:center;font-size:12.5px;font-weight:700;padding:11px 0;border-radius:8px;margin-top:20px;">CONTINUE TO PAYMENT &rarr;</div>
+            </div>
+          </div>
+        </x-import>
+
+        <!-- Stripe payment -->
+        <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" hint-size="230,520">
+          <div style="height:100%;overflow:hidden;padding-top:56px;background:#fff;font-family:'Inter',sans-serif;box-sizing:border-box;">
+            <div style="padding:0 22px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <span style="font-size:10.5px;font-weight:700;color:#0f1f42;letter-spacing:1px;">STEP 2 OF 2</span>
+                <span style="font-size:10.5px;color:#9a9484;">Payment</span>
+              </div>
+              <div style="display:flex;gap:5px;margin-bottom:18px;">
+                <div style="flex:1;height:4px;border-radius:2px;background:#b7912b;"></div>
+                <div style="flex:1;height:4px;border-radius:2px;background:#b7912b;"></div>
+              </div>
+
+              <div style="display:flex;justify-content:space-between;align-items:baseline;border:1px solid #e3e0d6;border-radius:10px;padding:12px 14px;margin-bottom:18px;background:#fbfaf6;">
+                <span style="font-size:11.5px;color:#8b8f9a;">Total due</span>
+                <span style="font-size:19px;font-weight:800;color:#0f1f42;">SGD 360.00</span>
+              </div>
+
+              <div style="font-size:11px;font-weight:700;color:#0f1f42;letter-spacing:1.2px;border-bottom:1.5px solid #eee9dc;padding-bottom:7px;margin-bottom:14px;">CARD DETAILS</div>
+
+              <div style="border:1.5px solid #0f1f42;border-radius:8px;padding:10px 12px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">
+                <span style="font-size:12px;color:#9a9484;letter-spacing:1px;">4242 4242 4242 4242</span>
+                <div style="display:flex;gap:4px;">
+                  <div style="width:20px;height:13px;border-radius:2px;background:#1a3f8a;"></div>
+                  <div style="width:20px;height:13px;border-radius:2px;background:#d4af5a;"></div>
+                </div>
+              </div>
+              <div style="display:flex;gap:10px;margin-bottom:18px;">
+                <div style="flex:1;border:1.5px solid #d8d5c9;border-radius:8px;height:34px;display:flex;align-items:center;padding:0 11px;font-size:11.5px;color:#9a9484;">MM / YY</div>
+                <div style="flex:1;border:1.5px solid #d8d5c9;border-radius:8px;height:34px;display:flex;align-items:center;padding:0 11px;font-size:11.5px;color:#9a9484;">CVC</div>
+              </div>
+
+              <div style="background:#0f1f42;color:#fff;text-align:center;font-size:12.5px;font-weight:700;padding:11px 0;border-radius:8px;margin-bottom:10px;">PAY SGD 360.00</div>
+              <div style="text-align:center;font-size:9.5px;color:#aca795;display:flex;align-items:center;justify-content:center;gap:5px;">
+                &#128274; Secured by <span style="font-weight:700;color:#635bff;">stripe</span>
+              </div>
+            </div>
+          </div>
+        </x-import>
+
+        <!-- Success / e-ticket -->
+        <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" hint-size="230,520">
+          <div style="height:100%;overflow:hidden;padding-top:56px;background:#f7f5ef;font-family:'Inter',sans-serif;box-sizing:border-box;">
+            <div style="padding:0 22px;">
+              <div style="text-align:center;margin-bottom:16px;">
+                <div style="width:42px;height:42px;border-radius:50%;background:#0f1f42;color:#d4af5a;display:flex;align-items:center;justify-content:center;font-size:19px;margin:0 auto 8px;">&#10003;</div>
+                <div style="font-size:14px;font-weight:800;color:#0f1f42;">Payment successful</div>
+                <div style="font-size:10.5px;color:#8b8f9a;margin-top:3px;">E-tickets sent to your email</div>
+              </div>
+
+              <div style="background:#0f1f42;border-radius:12px;padding:16px;position:relative;overflow:hidden;">
+                <div style="position:absolute;top:0;right:0;bottom:0;width:6px;background:repeating-linear-gradient(#0f1f42 0 6px,#f7f5ef 6px 11px);"></div>
+                <div style="font-size:9px;font-weight:700;letter-spacing:1.8px;color:#d4af5a;margin-bottom:4px;">TECHSUMMIT 2026</div>
+                <div style="font-size:14px;font-weight:800;color:#fff;margin-bottom:10px;">General Admission &times; 2</div>
+                <div style="font-size:10.5px;color:#c9cedb;margin-bottom:2px;">14&ndash;15 Nov &middot; Marina Bay Sands, Singapore</div>
+                <div style="border-top:1px dashed rgba(255,255,255,.25);margin:12px 0;"></div>
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                  <div>
+                    <div style="font-size:8.5px;color:#8a90a5;letter-spacing:1px;">ORDER REF</div>
+                    <div style="font-size:13px;font-weight:800;color:#fff;">TS-2026-3381</div>
+                  </div>
+                  <div style="width:42px;height:42px;background:#fff;border-radius:4px;background-image:repeating-linear-gradient(45deg,#0f1f42 0 3px,#fff 3px 6px);"></div>
+                </div>
+              </div>
+
+              <div style="margin-top:16px;border:1px solid #e3e0d6;border-radius:9px;padding:11px 13px;background:#fff;">
+                <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:5px;"><span style="color:#8b8f9a;">Amount paid</span><span style="font-weight:700;color:#0f1f42;">SGD 360.00</span></div>
+                <div style="display:flex;justify-content:space-between;font-size:11px;"><span style="color:#8b8f9a;">Payment method</span><span style="font-weight:700;color:#0f1f42;">Visa &bull;&bull;4242</span></div>
+              </div>
+
+              <div style="border:1.5px solid #0f1f42;color:#0f1f42;text-align:center;font-size:11.5px;font-weight:700;padding:9px 0;border-radius:8px;margin-top:14px;">DOWNLOAD E-TICKET</div>
+            </div>
+          </div>
+        </x-import>
+
+      </div>
+    </div>
+
+    <div class="dv-opt" id="3b">
+      <div class="dv-olabel" style="font-family:'Inter',sans-serif;"><a class="dv-oid" href="#3b" style="background:#0f1f42;color:#fff;">3b</a><b style="font-family:'Inter',sans-serif;">Same flow with PayNow checkout</b></div>
+      <div class="flow">
+
+        <!-- Payment method: PayNow selected -->
+        <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" hint-size="230,520">
+          <div style="height:100%;overflow:hidden;padding-top:56px;background:#fff;font-family:'Inter',sans-serif;box-sizing:border-box;">
+            <div style="padding:0 22px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <span style="font-size:10.5px;font-weight:700;color:#0f1f42;letter-spacing:1px;">STEP 2 OF 2</span>
+                <span style="font-size:10.5px;color:#9a9484;">Payment</span>
+              </div>
+              <div style="display:flex;gap:5px;margin-bottom:18px;">
+                <div style="flex:1;height:4px;border-radius:2px;background:#b7912b;"></div>
+                <div style="flex:1;height:4px;border-radius:2px;background:#b7912b;"></div>
+              </div>
+
+              <div style="display:flex;justify-content:space-between;align-items:baseline;border:1px solid #e3e0d6;border-radius:10px;padding:12px 14px;margin-bottom:16px;background:#fbfaf6;">
+                <span style="font-size:11.5px;color:#8b8f9a;">Total due</span>
+                <span style="font-size:19px;font-weight:800;color:#0f1f42;">SGD 360.00</span>
+              </div>
+
+              <div style="display:flex;gap:8px;margin-bottom:18px;">
+                <div style="flex:1;border:1.5px solid #d8d5c9;color:#43485a;text-align:center;font-size:11px;font-weight:700;padding:8px 0;border-radius:7px;">CARD</div>
+                <div style="flex:1;background:#0f1f42;color:#fff;text-align:center;font-size:11px;font-weight:700;padding:8px 0;border-radius:7px;">PAYNOW</div>
+              </div>
+
+              <div style="border:1px solid #e3e0d6;border-radius:10px;padding:18px;text-align:center;">
+                <div style="width:130px;height:130px;margin:0 auto 12px;background-image:repeating-linear-gradient(45deg,#0f1f42 0 4px,#fff 4px 8px);border-radius:6px;border:1px solid #e3e0d6;"></div>
+                <div style="font-size:10.5px;color:#8b8f9a;margin-bottom:4px;">Scan with your banking app</div>
+                <div style="font-size:9.5px;color:#aca795;">DBS &middot; OCBC &middot; UOB &middot; and other PayNow banks</div>
+              </div>
+
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;border:1px solid #e3e0d6;border-radius:8px;padding:9px 12px;">
+                <span style="font-size:11px;color:#8b8f9a;">PayNow UEN</span>
+                <span style="font-size:12px;font-weight:700;color:#0f1f42;">201826xxxxK</span>
+              </div>
+
+              <div style="background:#fdf3e0;border:1px solid #eed9a3;border-radius:8px;padding:9px 11px;display:flex;justify-content:space-between;align-items:center;margin-top:14px;">
+                <span style="font-size:10.5px;color:#8a6a1f;">Waiting for payment</span>
+                <span style="font-size:11.5px;font-weight:800;color:#8a6a1f;">04:52</span>
+              </div>
+
+              <div style="text-align:center;font-size:9.5px;color:#aca795;margin-top:10px;display:flex;align-items:center;justify-content:center;gap:5px;">
+                &#128274; Secured by <span style="font-weight:700;color:#635bff;">stripe</span>
+              </div>
+            </div>
+          </div>
+        </x-import>
+
+        <!-- Success / e-ticket (PayNow confirmed) -->
+        <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" hint-size="230,520">
+          <div style="height:100%;overflow:hidden;padding-top:56px;background:#f7f5ef;font-family:'Inter',sans-serif;box-sizing:border-box;">
+            <div style="padding:0 22px;">
+              <div style="text-align:center;margin-bottom:16px;">
+                <div style="width:42px;height:42px;border-radius:50%;background:#0f1f42;color:#d4af5a;display:flex;align-items:center;justify-content:center;font-size:19px;margin:0 auto 8px;">&#10003;</div>
+                <div style="font-size:14px;font-weight:800;color:#0f1f42;">PayNow payment received</div>
+                <div style="font-size:10.5px;color:#8b8f9a;margin-top:3px;">E-tickets sent to your email</div>
+              </div>
+
+              <div style="background:#0f1f42;border-radius:12px;padding:16px;position:relative;overflow:hidden;">
+                <div style="position:absolute;top:0;right:0;bottom:0;width:6px;background:repeating-linear-gradient(#0f1f42 0 6px,#f7f5ef 6px 11px);"></div>
+                <div style="font-size:9px;font-weight:700;letter-spacing:1.8px;color:#d4af5a;margin-bottom:4px;">TECHSUMMIT 2026</div>
+                <div style="font-size:14px;font-weight:800;color:#fff;margin-bottom:10px;">General Admission &times; 2</div>
+                <div style="font-size:10.5px;color:#c9cedb;margin-bottom:2px;">14&ndash;15 Nov &middot; Marina Bay Sands, Singapore</div>
+                <div style="border-top:1px dashed rgba(255,255,255,.25);margin:12px 0;"></div>
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                  <div>
+                    <div style="font-size:8.5px;color:#8a90a5;letter-spacing:1px;">ORDER REF</div>
+                    <div style="font-size:13px;font-weight:800;color:#fff;">TS-2026-3382</div>
+                  </div>
+                  <div style="width:42px;height:42px;background:#fff;border-radius:4px;background-image:repeating-linear-gradient(45deg,#0f1f42 0 3px,#fff 3px 6px);"></div>
+                </div>
+              </div>
+
+              <div style="margin-top:16px;border:1px solid #e3e0d6;border-radius:9px;padding:11px 13px;background:#fff;">
+                <div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:5px;"><span style="color:#8b8f9a;">Amount paid</span><span style="font-weight:700;color:#0f1f42;">SGD 360.00</span></div>
+                <div style="display:flex;justify-content:space-between;font-size:11px;"><span style="color:#8b8f9a;">Payment method</span><span style="font-weight:700;color:#0f1f42;">PayNow</span></div>
+              </div>
+
+              <div style="border:1.5px solid #0f1f42;color:#0f1f42;text-align:center;font-size:11.5px;font-weight:700;padding:9px 0;border-radius:8px;margin-top:14px;">DOWNLOAD E-TICKET</div>
+            </div>
+          </div>
+        </x-import>
+
+      </div>
+    </div>
+  </div>
+  <p class="dv-next" style="font-family:'Inter',sans-serif;font-size:14px;">Try next: "add a receipt email preview" &middot; "show the multi-ticket cart bar interaction" &middot; "add Apple Pay / Google Pay to the payment step"</p>
+</section>
+
+<section class="dv-turn" id="t2" style="font-family:'Inter',sans-serif;">
+  <div class="dv-thd"><a class="dv-tid" href="#t2">2</a><span class="dv-tname" style="font-family:'Inter',sans-serif;">Hi-fi polish of <a class="dv-oid" href="#1b" style="background:#0f1f42;color:#fff;">1b</a> Trusted Official</span></div>
+  <div class="dv-opts">
+    <div class="dv-opt" id="2a">
+      <div class="dv-olabel" style="font-family:'Inter',sans-serif;"><a class="dv-oid" href="#2a" style="background:#0f1f42;color:#fff;">2a</a><b style="font-family:'Inter',sans-serif;">Enrollment flow, polished</b></div>
+      <div class="flow">
+
+        <!-- Landing -->
+        <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" hint-size="230,520">
+          <div style="height:100%;overflow:hidden;padding-top:56px;background:#f7f5ef;font-family:'Inter',sans-serif;box-sizing:border-box;">
+            <div style="padding:0 22px;">
+              <div style="display:flex;align-items:center;gap:9px;margin-bottom:22px;">
+                <div style="width:30px;height:30px;border-radius:6px;background:#0f1f42;color:#d4af5a;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;">SA</div>
+                <div style="font-size:12.5px;font-weight:600;color:#0f1f42;letter-spacing:.2px;">Sakura Language Academy</div>
+              </div>
+
+              <div style="text-align:center;padding:16px 0 20px;border-top:1.5px solid #d4af5a;border-bottom:1.5px solid #d4af5a;margin-bottom:20px;">
+                <div style="font-size:10px;font-weight:700;letter-spacing:2.5px;color:#b7912b;margin-bottom:6px;">2026 AUTUMN INTAKE</div>
+                <div style="font-size:20px;font-weight:800;color:#0f1f42;letter-spacing:-.2px;">JLPT Enrollment</div>
+                <div style="font-size:11px;color:#7a8296;margin-top:5px;">Applications open now &middot; limited seats</div>
+              </div>
+
+              <div style="display:flex;flex-direction:column;gap:11px;">
+                <div style="background:#fff;border:1px solid #e3e0d6;border-radius:10px;padding:13px 14px;box-shadow:0 1px 2px rgba(15,31,66,.05);">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:9px;">
+                    <span style="background:#0f1f42;color:#fff;font-size:11px;font-weight:700;padding:3px 9px;border-radius:5px;letter-spacing:.3px;">N4</span>
+                    <span style="font-size:12.5px;font-weight:700;color:#0f1f42;">18,000 MMK</span>
+                  </div>
+                  <div style="display:flex;justify-content:space-between;font-size:10.5px;color:#8b8f9a;margin-bottom:6px;">
+                    <span>12 / 30 seats taken</span><span>Closes 14 Aug</span>
+                  </div>
+                  <div style="height:5px;background:#eee9dc;border-radius:3px;overflow:hidden;margin-bottom:11px;">
+                    <div style="width:40%;height:100%;background:#b7912b;"></div>
+                  </div>
+                  <div style="background:#0f1f42;color:#fff;text-align:center;font-size:11.5px;font-weight:700;padding:8px 0;border-radius:6px;letter-spacing:.3px;">ENROLL NOW</div>
+                </div>
+
+                <div style="background:#fbfaf6;border:1px solid #e3e0d6;border-radius:10px;padding:13px 14px;opacity:.55;">
+                  <div style="display:flex;justify-content:space-between;align-items:center;">
+                    <span style="background:#0f1f42;color:#fff;font-size:11px;font-weight:700;padding:3px 9px;border-radius:5px;">N3</span>
+                    <span style="font-size:11px;font-weight:700;color:#a03a2f;">FULLY BOOKED</span>
+                  </div>
+                </div>
+              </div>
+
+              <div style="text-align:center;margin-top:22px;font-size:10px;color:#9a9484;letter-spacing:.4px;">
+                &#128274; Secure enrollment &middot; verified by Sakura Academy
+              </div>
+            </div>
+          </div>
+        </x-import>
+
+        <!-- Form step 1 -->
+        <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" hint-size="230,520">
+          <div style="height:100%;overflow:hidden;padding-top:56px;background:#fff;font-family:'Inter',sans-serif;box-sizing:border-box;">
+            <div style="padding:0 22px;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <span style="font-size:10.5px;font-weight:700;color:#0f1f42;letter-spacing:1px;">STEP 1 OF 2</span>
+                <span style="font-size:10.5px;color:#9a9484;">Applicant details</span>
+              </div>
+              <div style="display:flex;gap:5px;margin-bottom:20px;">
+                <div style="flex:1;height:4px;border-radius:2px;background:#b7912b;"></div>
+                <div style="flex:1;height:4px;border-radius:2px;background:#e9e6dc;"></div>
+              </div>
+
+              <div style="border:1px solid #d4af5a55;background:#fbf8ee;border-radius:10px;padding:11px 13px;margin-bottom:20px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                  <span style="background:#0f1f42;color:#fff;font-size:10.5px;font-weight:700;padding:2.5px 8px;border-radius:5px;">N4</span>
+                  <span style="font-size:12.5px;font-weight:700;color:#0f1f42;">18,000 MMK</span>
+                </div>
+                <div style="font-size:10.5px;color:#9a9484;margin-top:5px;">2026 Autumn Intake</div>
+              </div>
+
+              <div style="font-size:11px;font-weight:700;color:#0f1f42;letter-spacing:1.2px;border-bottom:1.5px solid #eee9dc;padding-bottom:7px;margin-bottom:16px;">APPLICANT DETAILS</div>
+
+              <div style="display:flex;flex-direction:column;gap:14px;">
+                <div>
+                  <div style="font-size:11px;font-weight:600;color:#43485a;margin-bottom:5px;">Full Name (English)</div>
+                  <div style="border:1.5px solid #0f1f42;border-radius:7px;height:34px;background:#fff;"></div>
+                </div>
+                <div>
+                  <div style="font-size:11px;font-weight:600;color:#43485a;margin-bottom:5px;">Phone Number</div>
+                  <div style="border:1.5px solid #d8d5c9;border-radius:7px;height:34px;background:#fff;"></div>
+                  <div style="font-size:9.5px;color:#9a9484;margin-top:4px;">Myanmar or international format</div>
+                </div>
+                <div>
+                  <div style="font-size:11px;font-weight:600;color:#43485a;margin-bottom:5px;">Email Address</div>
+                  <div style="border:1.5px solid #d8d5c9;border-radius:7px;height:34px;background:#fff;"></div>
+                </div>
+              </div>
+
+              <div style="background:#0f1f42;color:#fff;text-align:center;font-size:12.5px;font-weight:700;padding:11px 0;border-radius:8px;margin-top:22px;letter-spacing:.3px;">CONTINUE &rarr;</div>
+            </div>
+          </div>
+        </x-import>
+
+        <!-- Payment -->
+        <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" hint-size="230,520">
+          <div style="height:100%;overflow:hidden;padding-top:56px;background:#fff;font-family:'Inter',sans-serif;box-sizing:border-box;">
+            <div style="padding:0 22px;">
+              <div style="text-align:center;margin-bottom:14px;">
+                <div style="width:42px;height:42px;border-radius:50%;background:#0f1f42;color:#d4af5a;display:flex;align-items:center;justify-content:center;font-size:19px;margin:0 auto 8px;">&#10003;</div>
+                <div style="font-size:13.5px;font-weight:700;color:#0f1f42;">Application received</div>
+              </div>
+
+              <div style="border:1.5px solid #b7912b;border-radius:9px;padding:10px;text-align:center;margin-bottom:14px;">
+                <div style="font-size:9px;font-weight:700;letter-spacing:1.8px;color:#b7912b;margin-bottom:3px;">REFERENCE NUMBER</div>
+                <div style="font-size:16px;font-weight:800;color:#0f1f42;letter-spacing:.5px;">EN-2026-9247</div>
+              </div>
+
+              <div style="background:#fdf3e0;border:1px solid #eed9a3;border-radius:8px;padding:9px 11px;display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                <span style="font-size:10.5px;color:#8a6a1f;">Complete payment within</span>
+                <span style="font-size:12px;font-weight:800;color:#8a6a1f;font-variant-numeric:tabular-nums;">23:41:07</span>
+              </div>
+
+              <div style="font-size:10.5px;font-weight:700;color:#0f1f42;letter-spacing:1px;border-bottom:1.5px solid #eee9dc;padding-bottom:6px;margin-bottom:11px;">BANK TRANSFER DETAILS</div>
+              <div style="border:1px solid #e3e0d6;border-radius:9px;padding:12px 13px;margin-bottom:16px;">
+                <div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:7px;"><span style="color:#8b8f9a;">Bank</span><span style="font-weight:700;color:#0f1f42;">KBZ Bank</span></div>
+                <div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:7px;"><span style="color:#8b8f9a;">Account No.</span><span style="font-weight:700;color:#0f1f42;">0123 4567 8901</span></div>
+                <div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:10px;"><span style="color:#8b8f9a;">Holder</span><span style="font-weight:700;color:#0f1f42;">Sakura Academy Co.</span></div>
+                <div style="border:1.5px solid #0f1f42;color:#0f1f42;text-align:center;font-size:11px;font-weight:700;padding:7px 0;border-radius:6px;">COPY ACCOUNT NUMBER</div>
+              </div>
+
+              <div style="border:1.5px dashed #b9b4a4;border-radius:9px;padding:16px;text-align:center;margin-bottom:16px;">
+                <div style="font-size:10.5px;color:#8b8578;font-weight:600;">Attach proof of transfer</div>
+                <div style="font-size:9.5px;color:#aca795;margin-top:2px;">JPG or PNG, up to 5MB</div>
+              </div>
+
+              <div style="background:#0f1f42;color:#fff;text-align:center;font-size:12.5px;font-weight:700;padding:11px 0;border-radius:8px;letter-spacing:.3px;">SUBMIT FOR REVIEW</div>
+            </div>
+          </div>
+        </x-import>
+
+      </div>
+    </div>
+  </div>
+  <p class="dv-next" style="font-family:'Inter',sans-serif;font-size:14px;">Try next: "adjust the gold accent" &middot; "add the admin dashboard in this style" &middot; "show the confirmed / success state after payment is verified"</p>
+</section>
+
+<section class="dv-turn" id="t1">
+  <div class="dv-thd"><a class="dv-tid" href="#t1">1</a><span class="dv-tname">Fresh directions for enrollment flow (landing &rarr; form &rarr; payment)</span></div>
+  <div class="dv-opts">
+
+    <!-- 1a Warm Community -->
+    <div class="dv-opt" id="1a">
+      <div class="dv-olabel"><a class="dv-oid" href="#1a">1a</a><b>Warm Community</b>terracotta &amp; cream, rounded, friendly, big class photos</div>
+      <div class="flow">
+        <!-- Landing -->
+        <div class="phone" style="border-color:#7a3a24;background:#fdf6ef;">
+          <div class="phone-hd">LANDING</div>
+          <div class="phone-body">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:16px;">
+              <div style="width:34px;height:34px;border-radius:50%;background:#c2603f;"></div>
+              <div class="bar" style="width:90px;background:#c2603f33;"></div>
+            </div>
+            <div style="text-align:center;margin-bottom:6px;font-size:22px;font-weight:700;color:#7a3a24;">Autumn Intake</div>
+            <div style="text-align:center;font-size:12px;color:#a8785f;margin-bottom:18px;">learn together, grow together</div>
+            <div style="display:flex;flex-direction:column;gap:12px;">
+              <div class="card" style="border-radius:16px;border-color:#c2603f88;transform:rotate(-1deg);">
+                <div style="height:56px;background:repeating-linear-gradient(45deg,#c2603f22,#c2603f22 6px,#fff 6px,#fff 12px);border-radius:8px;margin-bottom:8px;"></div>
+                <div style="display:flex;justify-content:space-between;align-items:center;">
+                  <span style="background:#c2603f;color:#fff;font-size:11px;padding:3px 8px;border-radius:20px;">N4</span>
+                  <span style="font-size:12px;color:#7a3a24;">18,000 K</span>
+                </div>
+                <div class="bar" style="margin:8px 0 8px;width:70%;"></div>
+                <div class="btn" style="border-radius:20px;border-color:#c2603f;color:#c2603f;">Join us &#9825;</div>
+              </div>
+              <div class="card" style="border-radius:16px;border-color:#c2603f55;opacity:.5;transform:rotate(1deg);">
+                <div style="display:flex;justify-content:space-between;">
+                  <span style="font-size:11px;">N3</span><span style="font-size:11px;">FULL</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- Form -->
+        <div class="phone" style="border-color:#7a3a24;background:#fdf6ef;">
+          <div class="phone-hd">FORM · STEP 1</div>
+          <div class="phone-body">
+            <div style="display:flex;gap:6px;margin-bottom:16px;">
+              <div style="flex:1;height:6px;border-radius:4px;background:#c2603f;"></div>
+              <div style="flex:1;height:6px;border-radius:4px;background:#c2603f22;"></div>
+            </div>
+            <div class="dashed" style="border-radius:16px;padding:10px;margin-bottom:16px;">
+              <div style="font-size:12px;color:#7a3a24;">Your seat &#9825;</div>
+              <div class="bar" style="width:60%;margin-top:6px;"></div>
+            </div>
+            <div style="font-size:13px;font-weight:700;color:#7a3a24;margin-bottom:10px;">Tell us about you</div>
+            <div style="display:flex;flex-direction:column;gap:12px;">
+              <div><div class="bar" style="width:60px;height:7px;margin-bottom:5px;"></div><div class="card" style="border-radius:12px;height:32px;border-color:#c2603f55;"></div></div>
+              <div><div class="bar" style="width:80px;height:7px;margin-bottom:5px;"></div><div class="card" style="border-radius:12px;height:32px;border-color:#c2603f55;"></div></div>
+              <div><div class="bar" style="width:70px;height:7px;margin-bottom:5px;"></div><div class="card" style="border-radius:12px;height:32px;border-color:#c2603f55;"></div></div>
+            </div>
+            <div class="btn" style="margin-top:20px;border-radius:20px;background:#c2603f;color:#fff;border-color:#c2603f;">Next &rarr;</div>
+          </div>
+        </div>
+        <!-- Payment -->
+        <div class="phone" style="border-color:#7a3a24;background:#fdf6ef;">
+          <div class="phone-hd">PAYMENT</div>
+          <div class="phone-body">
+            <div style="text-align:center;margin-bottom:12px;">
+              <div style="width:44px;height:44px;border-radius:50%;background:#c2603f22;border:2px solid #c2603f;margin:0 auto 8px;"></div>
+              <div style="font-size:13px;font-weight:700;color:#7a3a24;">You're almost in!</div>
+            </div>
+            <div class="dashed" style="border-radius:14px;padding:10px;text-align:center;margin-bottom:12px;">
+              <div style="font-size:10px;color:#a8785f;">REF CODE</div>
+              <div style="font-size:15px;font-weight:700;color:#7a3a24;">EN-9247</div>
+            </div>
+            <div class="card" style="border-radius:14px;margin-bottom:12px;">
+              <div class="bar" style="width:50%;height:7px;margin-bottom:6px;"></div>
+              <div class="bar" style="width:80%;height:7px;margin-bottom:6px;"></div>
+              <div class="btn" style="margin-top:6px;border-radius:20px;font-size:11px;padding:5px 0;">Copy number</div>
+            </div>
+            <div class="dashed" style="border-radius:14px;padding:14px;text-align:center;">
+              <div style="font-size:11px;color:#a8785f;">drop your receipt photo here &#9835;</div>
+            </div>
+            <div class="btn" style="margin-top:12px;border-radius:20px;background:#c2603f;color:#fff;border-color:#c2603f;">Submit</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 1b Trusted Official -->
+    <div class="dv-opt" id="1b">
+      <div class="dv-olabel"><a class="dv-oid" href="#1b">1b</a><b>Trusted Official</b>navy &amp; gold, structured, high trust for payments</div>
+      <div class="flow">
+        <!-- Landing -->
+        <div class="phone" style="border-color:#12234f;">
+          <div class="phone-hd">LANDING</div>
+          <div class="phone-body" style="background:#12234f0d;">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+              <div style="width:30px;height:30px;border:2px solid #12234f;"></div>
+              <div class="bar" style="width:70px;"></div>
+            </div>
+            <div style="border-top:2px solid #b7912b;border-bottom:2px solid #b7912b;padding:14px 0;text-align:center;margin-bottom:16px;">
+              <div style="font-size:10px;letter-spacing:3px;color:#b7912b;margin-bottom:4px;">2026 INTAKE</div>
+              <div style="font-size:19px;font-weight:700;color:#12234f;">Official Enrollment</div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:10px;">
+              <div class="card" style="border-color:#12234f;border-radius:4px;">
+                <div style="display:flex;justify-content:space-between;">
+                  <span style="font-size:12px;font-weight:700;color:#12234f;">LEVEL N4</span>
+                  <span style="font-size:11px;color:#b7912b;">18,000K</span>
+                </div>
+                <div class="bar" style="margin:8px 0;width:80%;"></div>
+                <div class="btn" style="border-radius:2px;background:#12234f;color:#fff;border-color:#12234f;font-size:11px;">ENROLL</div>
+              </div>
+              <div class="card" style="border-color:#12234f55;border-radius:4px;">
+                <div style="display:flex;justify-content:space-between;">
+                  <span style="font-size:12px;font-weight:700;">LEVEL N3</span>
+                  <span style="font-size:11px;color:#b7912b;">22,000K</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- Form -->
+        <div class="phone" style="border-color:#12234f;">
+          <div class="phone-hd">FORM · STEP 1</div>
+          <div class="phone-body">
+            <div style="text-align:center;font-size:11px;color:#12234f;margin-bottom:10px;">STEP 1 OF 2</div>
+            <div style="display:flex;gap:0;margin-bottom:16px;">
+              <div style="flex:1;height:4px;background:#b7912b;"></div>
+              <div style="flex:1;height:4px;background:#12234f22;"></div>
+            </div>
+            <div class="card" style="border-radius:4px;margin-bottom:16px;">
+              <div class="bar" style="width:50%;height:7px;"></div>
+            </div>
+            <div style="font-size:12px;font-weight:700;color:#12234f;margin-bottom:10px;border-bottom:1px solid #12234f33;padding-bottom:4px;">APPLICANT DETAILS</div>
+            <div style="display:flex;flex-direction:column;gap:12px;">
+              <div><div class="bar" style="width:60px;height:7px;margin-bottom:5px;"></div><div class="card" style="border-radius:2px;height:30px;"></div></div>
+              <div><div class="bar" style="width:80px;height:7px;margin-bottom:5px;"></div><div class="card" style="border-radius:2px;height:30px;"></div></div>
+              <div><div class="bar" style="width:70px;height:7px;margin-bottom:5px;"></div><div class="card" style="border-radius:2px;height:30px;"></div></div>
+            </div>
+            <div class="btn" style="margin-top:20px;border-radius:2px;background:#12234f;color:#fff;border-color:#12234f;">CONTINUE</div>
+          </div>
+        </div>
+        <!-- Payment -->
+        <div class="phone" style="border-color:#12234f;">
+          <div class="phone-hd">PAYMENT</div>
+          <div class="phone-body">
+            <div style="border:2px solid #b7912b;padding:10px;text-align:center;margin-bottom:12px;">
+              <div style="font-size:9px;letter-spacing:2px;color:#b7912b;">REFERENCE NO.</div>
+              <div style="font-size:16px;font-weight:700;color:#12234f;">EN-2026-9247</div>
+            </div>
+            <div style="font-size:11px;font-weight:700;color:#12234f;border-bottom:1px solid #12234f33;padding-bottom:4px;margin-bottom:8px;">BANK TRANSFER DETAILS</div>
+            <div class="card" style="border-radius:2px;margin-bottom:12px;">
+              <div class="bar" style="width:70%;height:7px;margin-bottom:6px;"></div>
+              <div class="bar" style="width:50%;height:7px;margin-bottom:6px;"></div>
+              <div class="btn" style="margin-top:6px;border-radius:2px;font-size:10px;padding:5px 0;border-color:#12234f;color:#12234f;">COPY ACCOUNT NO.</div>
+            </div>
+            <div style="border:2px dashed #12234f55;padding:14px;text-align:center;">
+              <div style="font-size:10px;color:#12234f88;">ATTACH PROOF OF TRANSFER</div>
+            </div>
+            <div class="btn" style="margin-top:12px;border-radius:2px;background:#12234f;color:#fff;border-color:#12234f;">SUBMIT FOR REVIEW</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 1c Modern Minimal -->
+    <div class="dv-opt" id="1c">
+      <div class="dv-olabel"><a class="dv-oid" href="#1c">1c</a><b>Modern Minimal</b>single accent, generous whitespace, flat, quiet confidence</div>
+      <div class="flow">
+        <!-- Landing -->
+        <div class="phone" style="border-color:#111;">
+          <div class="phone-hd">LANDING</div>
+          <div class="phone-body">
+            <div class="bar" style="width:50px;margin-bottom:36px;"></div>
+            <div style="font-size:24px;font-weight:700;margin-bottom:4px;">Winter<br>Intake</div>
+            <div style="font-size:12px;color:rgba(0,0,0,.4);margin-bottom:32px;">choose your level</div>
+            <div style="display:flex;flex-direction:column;gap:0;">
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0;border-bottom:1px solid #eee;">
+                <span style="font-size:14px;font-weight:700;">N4</span>
+                <span style="font-size:12px;color:rgba(0,0,0,.4);">18,000K</span>
+                <span style="font-size:16px;">&rarr;</span>
+              </div>
+              <div style="display:flex;justify-content:space-between;align-items:center;padding:14px 0;border-bottom:1px solid #eee;opacity:.35;">
+                <span style="font-size:14px;font-weight:700;">N3</span>
+                <span style="font-size:12px;">full</span>
+                <span style="font-size:16px;">&rarr;</span>
+              </div>
+            </div>
+            <div class="btn" style="margin-top:28px;border-radius:2px;background:#1a6b3c;color:#fff;border-color:#1a6b3c;">Continue</div>
+          </div>
+        </div>
+        <!-- Form -->
+        <div class="phone" style="border-color:#111;">
+          <div class="phone-hd">FORM · STEP 1</div>
+          <div class="phone-body">
+            <div style="font-size:11px;color:rgba(0,0,0,.35);margin-bottom:28px;">01 / 02</div>
+            <div style="font-size:16px;font-weight:700;margin-bottom:24px;">A few details</div>
+            <div style="display:flex;flex-direction:column;gap:22px;">
+              <div><div class="bar" style="width:50px;height:6px;margin-bottom:8px;"></div><div style="border-bottom:1px solid #111;height:26px;"></div></div>
+              <div><div class="bar" style="width:70px;height:6px;margin-bottom:8px;"></div><div style="border-bottom:1px solid #111;height:26px;"></div></div>
+              <div><div class="bar" style="width:60px;height:6px;margin-bottom:8px;"></div><div style="border-bottom:1px solid #111;height:26px;"></div></div>
+            </div>
+            <div class="btn" style="margin-top:32px;border-radius:2px;background:#1a6b3c;color:#fff;border-color:#1a6b3c;">Next</div>
+          </div>
+        </div>
+        <!-- Payment -->
+        <div class="phone" style="border-color:#111;">
+          <div class="phone-hd">PAYMENT</div>
+          <div class="phone-body">
+            <div style="font-size:32px;margin-bottom:10px;">&#10003;</div>
+            <div style="font-size:15px;font-weight:700;margin-bottom:2px;">Reference</div>
+            <div style="font-size:20px;font-weight:700;color:#1a6b3c;margin-bottom:28px;">EN-9247</div>
+            <div style="font-size:11px;color:rgba(0,0,0,.35);margin-bottom:6px;">TRANSFER TO</div>
+            <div class="bar" style="width:60%;height:7px;margin-bottom:6px;"></div>
+            <div class="bar" style="width:40%;height:7px;margin-bottom:16px;"></div>
+            <div style="border:1px solid #111;border-style:dashed;padding:16px;text-align:center;font-size:11px;color:rgba(0,0,0,.4);margin-bottom:16px;">
+              upload screenshot
+            </div>
+            <div class="btn" style="border-radius:2px;background:#1a6b3c;color:#fff;border-color:#1a6b3c;">Submit</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+  <p class="dv-next">Try next: "combine the warmth of <a href="#1a">1a</a> with the trust cues of <a href="#1b">1b</a>" &middot; "polish <a href="#1c">1c</a> into a hi-fi version" &middot; "show me the admin dashboard in one of these directions"</p>
+</section>
+]]>
+</x-dc>
+</body>
+</html>

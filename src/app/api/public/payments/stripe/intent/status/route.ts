@@ -44,6 +44,9 @@ export async function GET(request: NextRequest) {
           .from("enrollments")
           .update({ status: "confirmed" } as never)
           .eq("id", payment.enrollment_id);
+
+        // Notifications intentionally omitted: Stripe checkout is browser-driven.
+        // The user is already on the success page. No push notification is needed.
       }
 
       return NextResponse.json({ status: "succeeded" });
