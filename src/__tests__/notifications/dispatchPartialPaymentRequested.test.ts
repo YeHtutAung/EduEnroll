@@ -147,8 +147,7 @@ describe("dispatchPartialPaymentRequested", () => {
   });
 
   it("passes null receivedAmount and remainingAmount when not provided", async () => {
-    const { receivedAmount: _r, remainingAmount: _ra, ...withoutAmounts } = BASE_INPUT;
-    await dispatchPartialPaymentRequested(withoutAmounts);
+    await dispatchPartialPaymentRequested({ ...BASE_INPUT, receivedAmount: undefined, remainingAmount: undefined });
 
     expect(mockSendStatusNotification).toHaveBeenCalledWith(
       expect.objectContaining({ receivedAmount: null, remainingAmount: null }),
@@ -169,8 +168,7 @@ describe("dispatchPartialPaymentRequested", () => {
   });
 
   it("does NOT call sendEmail when email is undefined", async () => {
-    const { email: _email, ...withoutEmail } = BASE_INPUT;
-    await dispatchPartialPaymentRequested(withoutEmail);
+    await dispatchPartialPaymentRequested({ ...BASE_INPUT, email: undefined });
     expect(mockSendEmail).not.toHaveBeenCalled();
   });
 
@@ -182,8 +180,7 @@ describe("dispatchPartialPaymentRequested", () => {
   });
 
   it("does NOT call sendStatusNotification when messengerPsid is undefined", async () => {
-    const { messengerPsid: _psid, ...withoutPsid } = BASE_INPUT;
-    await dispatchPartialPaymentRequested(withoutPsid);
+    await dispatchPartialPaymentRequested({ ...BASE_INPUT, messengerPsid: undefined });
     expect(mockSendStatusNotification).not.toHaveBeenCalled();
   });
 
@@ -195,8 +192,7 @@ describe("dispatchPartialPaymentRequested", () => {
   });
 
   it("does NOT call sendTelegramStatusNotification when telegramChatId is undefined", async () => {
-    const { telegramChatId: _tgId, ...withoutTgId } = BASE_INPUT;
-    await dispatchPartialPaymentRequested(withoutTgId);
+    await dispatchPartialPaymentRequested({ ...BASE_INPUT, telegramChatId: undefined });
     expect(mockSendTelegramStatusNotification).not.toHaveBeenCalled();
   });
 

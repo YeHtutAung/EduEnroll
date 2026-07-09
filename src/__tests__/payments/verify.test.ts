@@ -139,7 +139,6 @@ function setupTableMocks(opts?: {
       const chain: Record<string, unknown> = {};
 
       // update() returns a chain where .eq() resolves with { error: null }
-      const updateEqFn = vi.fn().mockResolvedValue({ error: null });
       const updateChain: Record<string, unknown> = {
         eq: vi.fn().mockImplementation(() => {
           // For enrollments update, we need .eq().select().single()

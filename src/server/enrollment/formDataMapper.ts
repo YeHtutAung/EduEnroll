@@ -55,6 +55,7 @@ export function buildEnrollmentUpdatePayload(
  * Returns a Map of field_key → field_type.
  */
 export async function fetchFieldTypeMap(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   supabase: { from: (t: string) => any },
   intakeId: string,
 ): Promise<Map<string, string>> {

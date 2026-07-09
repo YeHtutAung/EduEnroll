@@ -183,8 +183,7 @@ describe("dispatchPaymentApproved", () => {
   });
 
   it("does NOT call sendEmail when email is undefined", async () => {
-    const { email: _email, ...withoutEmail } = BASE_INPUT;
-    await dispatchPaymentApproved(withoutEmail);
+    await dispatchPaymentApproved({ ...BASE_INPUT, email: undefined });
     expect(mockSendEmail).not.toHaveBeenCalled();
   });
 
@@ -196,8 +195,7 @@ describe("dispatchPaymentApproved", () => {
   });
 
   it("does NOT call sendSms when phone is undefined", async () => {
-    const { phone: _phone, ...withoutPhone } = BASE_INPUT;
-    await dispatchPaymentApproved(withoutPhone);
+    await dispatchPaymentApproved({ ...BASE_INPUT, phone: undefined });
     expect(mockSendSms).not.toHaveBeenCalled();
   });
 
@@ -207,8 +205,7 @@ describe("dispatchPaymentApproved", () => {
   });
 
   it("calls sendSms when smsOnPayment is undefined (default allow)", async () => {
-    const { smsOnPayment: _sms, ...withoutSmsFlag } = BASE_INPUT;
-    await dispatchPaymentApproved(withoutSmsFlag);
+    await dispatchPaymentApproved({ ...BASE_INPUT, smsOnPayment: undefined });
     expect(mockSendSms).toHaveBeenCalledOnce();
   });
 
@@ -220,8 +217,7 @@ describe("dispatchPaymentApproved", () => {
   });
 
   it("does NOT call sendStatusNotification when messengerPsid is undefined", async () => {
-    const { messengerPsid: _psid, ...withoutPsid } = BASE_INPUT;
-    await dispatchPaymentApproved(withoutPsid);
+    await dispatchPaymentApproved({ ...BASE_INPUT, messengerPsid: undefined });
     expect(mockSendStatusNotification).not.toHaveBeenCalled();
   });
 
@@ -233,8 +229,7 @@ describe("dispatchPaymentApproved", () => {
   });
 
   it("does NOT call sendTelegramStatusNotification when telegramChatId is undefined", async () => {
-    const { telegramChatId: _tgId, ...withoutTgId } = BASE_INPUT;
-    await dispatchPaymentApproved(withoutTgId);
+    await dispatchPaymentApproved({ ...BASE_INPUT, telegramChatId: undefined });
     expect(mockSendTelegramStatusNotification).not.toHaveBeenCalled();
   });
 
@@ -244,8 +239,7 @@ describe("dispatchPaymentApproved", () => {
   });
 
   it("passes classId=null to sendChannelInviteIfEligible when classId is undefined", async () => {
-    const { classId: _classId, ...withoutClassId } = BASE_INPUT;
-    await dispatchPaymentApproved(withoutClassId);
+    await dispatchPaymentApproved({ ...BASE_INPUT, classId: undefined });
 
     expect(mockSendChannelInviteIfEligible).toHaveBeenCalledWith(
       expect.objectContaining({ classId: null }),

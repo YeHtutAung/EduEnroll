@@ -136,8 +136,7 @@ describe("dispatchPaymentRejected", () => {
   });
 
   it("passes null rejectionReason when rejectionReason is undefined", async () => {
-    const { rejectionReason: _r, ...withoutReason } = BASE_INPUT;
-    await dispatchPaymentRejected(withoutReason);
+    await dispatchPaymentRejected({ ...BASE_INPUT, rejectionReason: undefined });
 
     expect(mockSendStatusNotification).toHaveBeenCalledWith(
       expect.objectContaining({ rejectionReason: null }),
@@ -163,8 +162,7 @@ describe("dispatchPaymentRejected", () => {
   });
 
   it("does NOT call sendEmail when email is undefined", async () => {
-    const { email: _email, ...withoutEmail } = BASE_INPUT;
-    await dispatchPaymentRejected(withoutEmail);
+    await dispatchPaymentRejected({ ...BASE_INPUT, email: undefined });
     expect(mockSendEmail).not.toHaveBeenCalled();
   });
 
@@ -176,8 +174,7 @@ describe("dispatchPaymentRejected", () => {
   });
 
   it("does NOT call sendStatusNotification when messengerPsid is undefined", async () => {
-    const { messengerPsid: _psid, ...withoutPsid } = BASE_INPUT;
-    await dispatchPaymentRejected(withoutPsid);
+    await dispatchPaymentRejected({ ...BASE_INPUT, messengerPsid: undefined });
     expect(mockSendStatusNotification).not.toHaveBeenCalled();
   });
 
@@ -189,8 +186,7 @@ describe("dispatchPaymentRejected", () => {
   });
 
   it("does NOT call sendTelegramStatusNotification when telegramChatId is undefined", async () => {
-    const { telegramChatId: _tgId, ...withoutTgId } = BASE_INPUT;
-    await dispatchPaymentRejected(withoutTgId);
+    await dispatchPaymentRejected({ ...BASE_INPUT, telegramChatId: undefined });
     expect(mockSendTelegramStatusNotification).not.toHaveBeenCalled();
   });
 
