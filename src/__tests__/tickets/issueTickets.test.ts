@@ -10,10 +10,9 @@ let enrollmentData: {
   quantity: number | null;
 } | null = null;
 let enrollmentItemsData: { class_id: string; quantity: number }[] = [];
-let classesData: { id: string; level: string; intake_id: string; event_date: string | null }[] =
-  [];
+let classesData: { id: string; level: string; intake_id: string; event_date: string | null }[] = [];
 
-const mockInsert = vi.fn().mockResolvedValue({ data: null, error: null });
+const mockUpsert = vi.fn().mockResolvedValue({ data: null, error: null });
 const mockUpdateEq = vi.fn().mockResolvedValue({ data: null, error: null });
 const mockUpdate = vi.fn().mockReturnValue({ eq: mockUpdateEq });
 
@@ -24,7 +23,7 @@ const mockAdminFrom = vi.fn((table: string) => {
         select: vi.fn().mockReturnValue({
           eq: vi.fn().mockResolvedValue({ count: ticketsCount, error: null }),
         }),
-        insert: mockInsert,
+        upsert: mockUpsert,
         update: mockUpdate,
       };
     case "enrollments":
@@ -54,9 +53,8 @@ vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({ from: mockAdminFrom }),
 }));
 
-const { issueTicketsForEnrollment, voidTicketsForEnrollment } = await import(
-  "@/server/tickets/issueTickets"
-);
+const { issueTicketsForEnrollment, voidTicketsForEnrollment } =
+  await import("@/server/tickets/issueTickets");
 
 beforeAll(() => {
   const { privateKey } = generateKeyPairSync("ed25519");
@@ -84,8 +82,10 @@ describe("issueTicketsForEnrollment", () => {
 
     await issueTicketsForEnrollment("e1");
 
-    expect(mockInsert).toHaveBeenCalledTimes(1);
-    const rows = mockInsert.mock.calls[0][0] as Record<string, unknown>[];
+    expect(mockUpsert).toHaveBeenCalledTimes(1);
+    const rows = mockUpsert.mock.calls[0][0] as Record<string, unknown>[];
+    const opts = mockUpsert.mock.calls[0][1] as { onConflict: string; ignoreDuplicates: boolean };
+    expect(opts).toEqual({ onConflict: "enrollment_id,class_id,seat_no", ignoreDuplicates: true });
     expect(rows).toHaveLength(2);
     for (const row of rows) {
       expect(row).toMatchObject({
@@ -98,6 +98,7 @@ describe("issueTicketsForEnrollment", () => {
       });
       expect(row.exp).toMatch(ISO_RE);
     }
+    expect(rows.map((r) => r.seat_no)).toEqual([1, 2]);
   });
 
   it("materializes tickets per class line for a cart enrollment", async () => {
@@ -114,13 +115,15 @@ describe("issueTicketsForEnrollment", () => {
 
     await issueTicketsForEnrollment("e1");
 
-    expect(mockInsert).toHaveBeenCalledTimes(1);
-    const rows = mockInsert.mock.calls[0][0] as Record<string, unknown>[];
+    expect(mockUpsert).toHaveBeenCalledTimes(1);
+    const rows = mockUpsert.mock.calls[0][0] as Record<string, unknown>[];
     expect(rows).toHaveLength(3);
     const gaRows = rows.filter((r) => r.tier === "GA");
     const vipRows = rows.filter((r) => r.tier === "VIP");
     expect(gaRows).toHaveLength(2);
     expect(vipRows).toHaveLength(1);
+    expect(gaRows.map((r) => r.seat_no)).toEqual([1, 2]);
+    expect(vipRows.map((r) => r.seat_no)).toEqual([1]);
     for (const row of rows) {
       expect(row).toMatchObject({ tenant_id: "t1", intake_id: "i1", admits: 1, status: "valid" });
     }
@@ -131,7 +134,7 @@ describe("issueTicketsForEnrollment", () => {
 
     await issueTicketsForEnrollment("e1");
 
-    expect(mockInsert).not.toHaveBeenCalled();
+    expect(mockUpsert).not.toHaveBeenCalled();
   });
 });
 

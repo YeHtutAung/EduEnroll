@@ -20,8 +20,11 @@ export function signTicketJwt(claims: TicketClaims): string {
   return `${header}.${payload}.${b64u(sig)}`;
 }
 
+// Verifies signature only — does NOT check exp/kid. Callers (scan endpoint) enforce exp/tenant via the DB.
 export function verifyTicketJwt(jwt: string): TicketClaims {
-  const [h, p, s] = jwt.split(".");
+  const parts = jwt.split(".");
+  if (parts.length !== 3) throw new Error("malformed ticket token");
+  const [h, p, s] = parts;
   const rawPub = Buffer.from(getPublicKeyBase64Url(), "base64url");
   // Rebuild a KeyObject from the raw 32-byte key via the fixed Ed25519 SPKI prefix.
   const spki = Buffer.concat([Buffer.from("302a300506032b6570032100", "hex"), rawPub]);

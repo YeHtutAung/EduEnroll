@@ -7,6 +7,7 @@ create table if not exists public.tickets (
   class_id uuid not null references public.classes(id) on delete cascade,
   tier text not null,
   admits int not null default 1,
+  seat_no int not null,
   exp timestamptz not null,
   kid text not null,
   status text not null default 'valid',
@@ -16,6 +17,8 @@ create table if not exists public.tickets (
 );
 create index if not exists tickets_tenant_intake_idx on public.tickets (tenant_id, intake_id);
 create index if not exists tickets_enrollment_idx on public.tickets (enrollment_id);
+create unique index if not exists tickets_enrollment_class_seat_uniq
+  on public.tickets (enrollment_id, class_id, seat_no);
 
 -- scanner_api_keys: per-tenant bearer keys (hashed)
 create table if not exists public.scanner_api_keys (

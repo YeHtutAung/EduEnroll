@@ -13,11 +13,19 @@ const TZ = process.env.TICKET_TZ ?? "Asia/Yangon";
 export async function issueTicketsForEnrollment(enrollmentId: string): Promise<void> {
   const supabase = createAdminClient();
 
-  // Idempotency guard: bail if any tickets already exist for this enrollment.
-  const { count } = (await supabase
-    .from("tickets")
-    .select("id", { count: "exact", head: true })
-    .eq("enrollment_id", enrollmentId)) as unknown as { count: number | null };
+  // Idempotency fast-path: skip work if tickets already exist for this enrollment.
+  // Not the sole guarantee — the DB-level unique index + upsert below is authoritative,
+  // so a failure/error on this count query is non-fatal and we just proceed.
+  let count: number | null = 0;
+  try {
+    const res = (await supabase
+      .from("tickets")
+      .select("id", { count: "exact", head: true })
+      .eq("enrollment_id", enrollmentId)) as unknown as { count: number | null };
+    count = res.count;
+  } catch {
+    count = 0;
+  }
   if ((count ?? 0) > 0) return;
 
   const { data: enrollment } = (await supabase
@@ -64,7 +72,8 @@ export async function issueTicketsForEnrollment(enrollmentId: string): Promise<v
     const c = byId.get(line.class_id);
     if (!c) continue;
     const expIso = new Date(ticketExpiry(c.event_date, TZ) * 1000).toISOString();
-    for (let i = 0; i < line.quantity; i++) {
+    const qty = Math.max(1, line.quantity ?? 1);
+    for (let seat = 1; seat <= qty; seat++) {
       rows.push({
         tenant_id: enrollment.tenant_id,
         intake_id: c.intake_id,
@@ -72,13 +81,22 @@ export async function issueTicketsForEnrollment(enrollmentId: string): Promise<v
         class_id: line.class_id,
         tier: c.level,
         admits: 1,
+        seat_no: seat,
         exp: expIso,
         kid,
         status: "valid",
       });
     }
   }
-  if (rows.length) await supabase.from("tickets").insert(rows as never);
+  if (rows.length) {
+    // Idempotent upsert: concurrent issuance (webhook + status polling can both fire)
+    // relies on the tickets_enrollment_class_seat_uniq unique index to dedupe safely.
+    const { error } = await supabase.from("tickets").upsert(rows as never, {
+      onConflict: "enrollment_id,class_id,seat_no",
+      ignoreDuplicates: true,
+    });
+    if (error) throw new Error(`issueTickets upsert failed: ${JSON.stringify(error)}`);
+  }
 }
 
 /** Marks every ticket belonging to an enrollment as void (e.g. on refund/cancellation). */

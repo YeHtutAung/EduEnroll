@@ -25,9 +25,13 @@ export async function resolveScannerTenant(request: NextRequest): Promise<string
   const a = Buffer.from(hash);
   const b = Buffer.from(data.key_hash);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
-  void supabase
-    .from("scanner_api_keys")
-    .update({ last_used_at: new Date().toISOString() } as never)
-    .eq("key_hash", hash);
+  try {
+    await supabase
+      .from("scanner_api_keys")
+      .update({ last_used_at: new Date().toISOString() } as never)
+      .eq("key_hash", hash);
+  } catch {
+    // non-fatal: last_used_at is best-effort telemetry
+  }
   return data.tenant_id;
 }

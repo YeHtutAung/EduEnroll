@@ -20,6 +20,10 @@ it("signs and verifies an EdDSA ticket JWT", () => {
   expect(claims).toMatchObject({ jti: "t1", eid: "e1", tier: "GA", admits: 1 });
 });
 
+it("rejects a malformed token that doesn't have 3 dot-separated parts", () => {
+  expect(() => verifyTicketJwt("not-a-jwt")).toThrow();
+});
+
 it("rejects a tampered payload", () => {
   const jwt = signTicketJwt({ jti: "t1", eid: "e1", tier: "GA", admits: 1, exp: 9999999999 });
   const [h, , s] = jwt.split(".");
