@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { it, expect, beforeAll } from "vitest";
 import { generateKeyPairSync } from "crypto";
 import { signTicketJwt, verifyTicketJwt } from "@/lib/tickets/sign";
 
