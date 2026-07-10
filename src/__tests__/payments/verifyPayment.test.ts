@@ -16,6 +16,11 @@ vi.mock("@/server/payments/seatRestoration", () => ({
   restoreSeats: mockRestoreSeats,
 }));
 
+vi.mock("@/server/tickets/issueTickets", () => ({
+  issueTicketsForEnrollment: vi.fn().mockResolvedValue(undefined),
+  voidTicketsForEnrollment: vi.fn().mockResolvedValue(undefined),
+}));
+
 const { verifyPayment } = await import("@/server/payments/verifyPayment");
 
 // ─── Fixtures ─────────────────────────────────────────────────────────────────

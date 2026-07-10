@@ -53,6 +53,11 @@ vi.mock("@/lib/telegram/channel-invite", () => ({
   sendChannelInviteIfEligible: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock("@/server/tickets/issueTickets", () => ({
+  issueTicketsForEnrollment: vi.fn().mockResolvedValue(undefined),
+  voidTicketsForEnrollment: vi.fn().mockResolvedValue(undefined),
+}));
+
 // resolveEmailFromFormData and resolvePhoneFromFormData are used in the route
 vi.mock("@/lib/utils", () => ({
   resolveEmailFromFormData: vi.fn().mockReturnValue(null),

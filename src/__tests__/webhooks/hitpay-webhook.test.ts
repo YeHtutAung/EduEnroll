@@ -26,6 +26,11 @@ vi.mock("@/lib/utils", () => ({
   resolvePhoneFromFormData: vi.fn().mockReturnValue(null),
 }));
 
+vi.mock("@/server/tickets/issueTickets", () => ({
+  issueTicketsForEnrollment: vi.fn().mockResolvedValue(undefined),
+  voidTicketsForEnrollment: vi.fn().mockResolvedValue(undefined),
+}));
+
 import { dispatchPaymentApproved } from "@/server/notifications/dispatchPaymentApproved";
 
 const { POST } = await import("@/app/api/webhooks/hitpay/route");

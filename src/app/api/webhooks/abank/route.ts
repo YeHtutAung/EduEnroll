@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import abank from "@/lib/abank";
+import { issueTicketsForEnrollment } from "@/server/tickets/issueTickets";
 import { sendEmail, enrollmentApprovedEmail } from "@/lib/email";
 import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
@@ -65,6 +66,12 @@ export async function GET(request: NextRequest) {
       .from("enrollments")
       .update({ status: "confirmed" } as never)
       .eq("id", payment.enrollment_id);
+
+    try {
+      await issueTicketsForEnrollment(payment.enrollment_id);
+    } catch (err) {
+      console.error("[tickets] issueTicketsForEnrollment failed:", err);
+    }
 
     // Send notifications (best-effort)
     const { data: enrollment } = (await supabase
