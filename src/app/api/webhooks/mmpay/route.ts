@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import mmpay from "@/lib/mmpay";
+import { issueTicketsForEnrollment } from "@/server/tickets/issueTickets";
 import { sendEmail, enrollmentApprovedEmail } from "@/lib/email";
 import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
@@ -82,6 +83,12 @@ export async function POST(request: NextRequest) {
       .from("enrollments")
       .update({ status: "confirmed" } as never)
       .eq("id", payment.enrollment_id);
+
+    try {
+      await issueTicketsForEnrollment(payment.enrollment_id);
+    } catch (err) {
+      console.error("[tickets] issueTicketsForEnrollment failed:", err);
+    }
 
     // Send notifications (best-effort)
     const { data: enrollment } = (await supabase

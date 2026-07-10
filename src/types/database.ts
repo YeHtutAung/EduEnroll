@@ -292,6 +292,34 @@ export interface EnrollmentItem {
   created_at: string;
 }
 
+export interface Ticket {
+  id: string;
+  tenant_id: string;
+  intake_id: string;
+  enrollment_id: string;
+  class_id: string;
+  tier: string;
+  admits: number;
+  seat_no: number;
+  exp: string;
+  kid: string;
+  status: "valid" | "void";
+  first_scan_at: string | null;
+  first_scan_gate: string | null;
+  created_at: string;
+}
+
+export interface ScannerApiKey {
+  id: string;
+  tenant_id: string;
+  name: string;
+  key_hash: string;
+  key_prefix: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+}
+
 export interface ClassChannel {
   id: string;
   tenant_id: string;

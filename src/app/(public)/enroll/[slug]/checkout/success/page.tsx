@@ -5,6 +5,14 @@ import { useSearchParams } from "next/navigation";
 import TrustedOfficialShell from "@/components/enrollment/TrustedOfficialShell";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
+import QRCode from "qrcode";
+
+interface TicketData {
+  jti: string;
+  tier: string;
+  admits: number;
+  jwt: string;
+}
 
 interface EnrollmentData {
   enrollment_ref: string;
@@ -18,6 +26,7 @@ interface EnrollmentData {
   card_brand?: string | null;
   card_last4?: string | null;
   payment_method?: string | null;
+  tickets?: TicketData[];
 }
 
 function SuccessContent() {
@@ -26,23 +35,59 @@ function SuccessContent() {
   const [data, setData] = useState<EnrollmentData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [ticketQrUrls, setTicketQrUrls] = useState<Record<string, string>>({});
   const receiptRef = useRef<HTMLDivElement>(null);
+  const ticketRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  async function waitForImages(el: HTMLElement) {
+    const imgs = el.querySelectorAll("img");
+    await Promise.all(
+      Array.from(imgs).map(
+        (img) =>
+          new Promise<void>((resolve) => {
+            if (img.complete) return resolve();
+            img.onload = () => resolve();
+            img.onerror = () => resolve();
+          }),
+      ),
+    );
+  }
 
   async function handleDownload() {
-    if (!receiptRef.current || generating || !data) return;
+    if (generating || !data) return;
+    const tickets = data.tickets ?? [];
+
     setGenerating(true);
     try {
-      const imgs = receiptRef.current.querySelectorAll("img");
-      await Promise.all(
-        Array.from(imgs).map(
-          (img) =>
-            new Promise<void>((resolve) => {
-              if (img.complete) return resolve();
-              img.onload = () => resolve();
-              img.onerror = () => resolve();
-            }),
-        ),
-      );
+      if (tickets.length > 0) {
+        const imgWidth = 148;
+        const pages: { dataUrl: string; imgHeight: number }[] = [];
+        for (let i = 0; i < tickets.length; i++) {
+          const el = ticketRefs.current[i];
+          if (!el) continue;
+          await waitForImages(el);
+          const canvas = await html2canvas(el, {
+            scale: 2,
+            useCORS: true,
+            backgroundColor: "#f5f7fa",
+            logging: false,
+          });
+          const imgHeight = (canvas.height * imgWidth) / canvas.width;
+          pages.push({ dataUrl: canvas.toDataURL("image/png"), imgHeight });
+        }
+        if (pages.length === 0) return;
+
+        const pdf = new jsPDF({ unit: "mm", format: [imgWidth, pages[0].imgHeight + 10] });
+        pages.forEach((page, i) => {
+          if (i > 0) pdf.addPage([imgWidth, page.imgHeight + 10]);
+          pdf.addImage(page.dataUrl, "PNG", 0, 5, imgWidth, page.imgHeight);
+        });
+        pdf.save(`eticket-${data.enrollment_ref}.pdf`);
+        return;
+      }
+
+      if (!receiptRef.current) return;
+      await waitForImages(receiptRef.current);
       const canvas = await html2canvas(receiptRef.current, {
         scale: 2,
         useCORS: true,
@@ -86,6 +131,26 @@ function SuccessContent() {
     );
   }, [ref]);
 
+  useEffect(() => {
+    const tickets = data?.tickets ?? [];
+    if (tickets.length === 0) return;
+    let cancelled = false;
+
+    (async () => {
+      const entries = await Promise.all(
+        tickets.map(async (t) => {
+          const dataUrl = await QRCode.toDataURL(t.jwt, { width: 240, margin: 1 });
+          return [t.jti, dataUrl] as const;
+        }),
+      );
+      if (!cancelled) setTicketQrUrls(Object.fromEntries(entries));
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [data]);
+
   if (error || !data) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-5" style={{ background: "#f7f5ef" }}>
@@ -110,6 +175,7 @@ function SuccessContent() {
     : "—";
 
   const ticketSummary = data.items.map((i) => `${i.level} × ${i.quantity}`).join(", ");
+  const tickets = data.tickets ?? [];
 
   return (
     <TrustedOfficialShell orgName={data.event_name} logoUrl={data.logo_url} brandColor={data.brand_color} step="complete">
@@ -135,38 +201,98 @@ function SuccessContent() {
         </p>
       </div>
 
-      {/* Ticket stub */}
-      <div
-        className="rounded-[12px] p-4 mb-4 relative overflow-hidden"
-        style={{ background: "#0f1f42" }}
-      >
-        {/* Perforation strip — right edge */}
+      {/* Ticket stub(s) — one real, scannable e-ticket per admission when confirmed */}
+      {tickets.length > 0 ? (
+        <div className="mb-4 space-y-3">
+          {tickets.map((ticket, i) => (
+            <div
+              key={ticket.jti}
+              ref={(el) => {
+                ticketRefs.current[i] = el;
+              }}
+              className="rounded-[12px] p-4 relative overflow-hidden"
+              style={{ background: "#0f1f42" }}
+            >
+              {/* Perforation strip — right edge */}
+              <div
+                className="absolute right-0 top-0 bottom-0 w-[6px]"
+                style={{
+                  background:
+                    "repeating-linear-gradient(to bottom, #f7f5ef 0px, #f7f5ef 8px, #0f1f42 8px, #0f1f42 14px)",
+                }}
+              />
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[9px] font-bold tracking-[1.8px] uppercase" style={{ color: "#d4af5a" }}>
+                  {data.event_name}
+                </p>
+                <p className="text-[8.5px] font-bold" style={{ color: "#8a90a5" }}>
+                  Ticket {i + 1}/{tickets.length}
+                </p>
+              </div>
+              <p className="text-[14px] font-extrabold text-white mb-1">{ticket.tier}</p>
+              <hr className="my-3" style={{ borderColor: "rgba(255,255,255,.25)", borderStyle: "dashed" }} />
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[8.5px] mb-0.5" style={{ color: "#8a90a5" }}>ORDER REF</p>
+                  <p className="text-[13px] font-extrabold text-white">{data.enrollment_ref}</p>
+                  <p className="text-[8.5px] mt-1.5" style={{ color: "#8a90a5" }}>
+                    Ticket #{ticket.jti.slice(0, 8)}
+                  </p>
+                </div>
+                {ticketQrUrls[ticket.jti] ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={ticketQrUrls[ticket.jti]}
+                    alt={`QR code for ticket ${ticket.jti.slice(0, 8)}`}
+                    className="w-[64px] h-[64px] rounded-[4px] bg-white p-1 shrink-0"
+                  />
+                ) : (
+                  <div
+                    className="w-[64px] h-[64px] rounded-[4px] shrink-0"
+                    style={{
+                      background:
+                        "repeating-linear-gradient(45deg, #fff 0px, #fff 4px, #0f1f42 4px, #0f1f42 8px)",
+                      opacity: 0.2,
+                    }}
+                  />
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
         <div
-          className="absolute right-0 top-0 bottom-0 w-[6px]"
-          style={{
-            background: "repeating-linear-gradient(to bottom, #f7f5ef 0px, #f7f5ef 8px, #0f1f42 8px, #0f1f42 14px)",
-          }}
-        />
-        <p className="text-[9px] font-bold tracking-[1.8px] uppercase mb-2" style={{ color: "#d4af5a" }}>
-          {data.event_name}
-        </p>
-        <p className="text-[14px] font-extrabold text-white mb-1">{ticketSummary}</p>
-        <hr className="my-3" style={{ borderColor: "rgba(255,255,255,.25)", borderStyle: "dashed" }} />
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-[8.5px] mb-0.5" style={{ color: "#8a90a5" }}>ORDER REF</p>
-            <p className="text-[13px] font-extrabold text-white">{data.enrollment_ref}</p>
-          </div>
-          {/* QR placeholder */}
+          className="rounded-[12px] p-4 mb-4 relative overflow-hidden"
+          style={{ background: "#0f1f42" }}
+        >
+          {/* Perforation strip — right edge */}
           <div
-            className="w-[42px] h-[42px] rounded-[4px]"
+            className="absolute right-0 top-0 bottom-0 w-[6px]"
             style={{
-              background: "repeating-linear-gradient(45deg, #fff 0px, #fff 4px, #0f1f42 4px, #0f1f42 8px)",
-              opacity: 0.2,
+              background: "repeating-linear-gradient(to bottom, #f7f5ef 0px, #f7f5ef 8px, #0f1f42 8px, #0f1f42 14px)",
             }}
           />
+          <p className="text-[9px] font-bold tracking-[1.8px] uppercase mb-2" style={{ color: "#d4af5a" }}>
+            {data.event_name}
+          </p>
+          <p className="text-[14px] font-extrabold text-white mb-1">{ticketSummary}</p>
+          <hr className="my-3" style={{ borderColor: "rgba(255,255,255,.25)", borderStyle: "dashed" }} />
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[8.5px] mb-0.5" style={{ color: "#8a90a5" }}>ORDER REF</p>
+              <p className="text-[13px] font-extrabold text-white">{data.enrollment_ref}</p>
+            </div>
+            {/* QR placeholder */}
+            <div
+              className="w-[42px] h-[42px] rounded-[4px]"
+              style={{
+                background: "repeating-linear-gradient(45deg, #fff 0px, #fff 4px, #0f1f42 4px, #0f1f42 8px)",
+                opacity: 0.2,
+              }}
+            />
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Payment summary */}
       <div className="rounded-[9px] p-4 mb-5" style={{ background: "#ffffff", border: "1px solid #e3e0d6" }}>
@@ -180,7 +306,8 @@ function SuccessContent() {
         </div>
       </div>
 
-      {/* Hidden receipt for PDF capture */}
+      {/* Hidden receipt for PDF capture — fallback when no per-ticket QR data is available */}
+      {tickets.length === 0 && (
       <div style={{ position: "absolute", left: "-9999px", top: 0 }}>
         <div
           ref={receiptRef}
@@ -243,6 +370,7 @@ function SuccessContent() {
           </div>
         </div>
       </div>
+      )}
 
       {/* Download CTA */}
       <button
