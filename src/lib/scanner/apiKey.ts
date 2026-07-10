@@ -1,10 +1,9 @@
-import { createHash, timingSafeEqual } from "crypto";
-import { NextRequest } from "next/server";
+import { timingSafeEqual } from "crypto";
+import type { NextRequest } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { hashApiKey } from "@/lib/scanner/hash";
 
-export function hashApiKey(raw: string): string {
-  return createHash("sha256").update(raw).digest("hex");
-}
+export { hashApiKey };
 
 export async function resolveScannerTenant(request: NextRequest): Promise<string | null> {
   const auth = request.headers.get("authorization") ?? "";
