@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import { getStripe } from "@/lib/stripe";
+import { signTicketJwt } from "@/lib/tickets/sign";
 
 // ─── GET /api/public/enrollment/[ref] ────────────────────────────────────────
 // Returns enrollment summary for the Trusted Official checkout flow.
@@ -19,7 +20,7 @@ export async function GET(
   const { data: enrollment, error } = (await supabase
     .from("enrollments")
     .select(`
-      enrollment_ref, status, student_name_en, email,
+      id, enrollment_ref, status, student_name_en, email,
       enrollment_items(quantity, fee_amount, classes(level, intakes(id, name, slug))),
       classes(level, fee_amount, intakes(id, name, slug)),
       quantity,
@@ -96,6 +97,33 @@ export async function GET(
   const tenant = tenantResult.data;
   const bankAccounts = bankResult.data ?? [];
 
+  // Build signed ticket JWTs for confirmed enrollments only.
+  let tickets: { jti: string; tier: string; admits: number; jwt: string }[] = [];
+  if (enrollment.status === "confirmed") {
+    const { data: ticketRows } = (await supabase
+      .from("tickets")
+      .select("id, intake_id, tier, admits, exp, status")
+      .eq("enrollment_id", enrollment.id)) as unknown as {
+      data: TicketRow[] | null;
+      error: unknown;
+    };
+
+    tickets = (ticketRows ?? [])
+      .filter((t) => t.status === "valid")
+      .map((t) => ({
+        jti: t.id,
+        tier: t.tier,
+        admits: t.admits,
+        jwt: signTicketJwt({
+          jti: t.id,
+          eid: t.intake_id,
+          tier: t.tier,
+          admits: t.admits,
+          exp: Math.floor(Date.parse(t.exp) / 1000),
+        }),
+      }));
+  }
+
   return NextResponse.json({
     enrollment_ref: enrollment.enrollment_ref,
     status: enrollment.status,
@@ -119,6 +147,7 @@ export async function GET(
     payment_method: verifiedPayment?.payment_method ?? anyPayment?.payment_method ?? null,
     card_brand: verifiedPayment?.card_brand ?? null,
     card_last4: verifiedPayment?.card_last4 ?? null,
+    tickets,
     ...(stripeClientSecret ? { stripe_client_secret: stripeClientSecret } : {}),
   });
 }
@@ -183,7 +212,17 @@ interface PaymentRow {
   card_last4: string | null;
 }
 
+interface TicketRow {
+  id: string;
+  intake_id: string;
+  tier: string;
+  admits: number;
+  exp: string;
+  status: string;
+}
+
 interface EnrollmentRow {
+  id: string;
   enrollment_ref: string;
   status: string;
   student_name_en: string | null;
