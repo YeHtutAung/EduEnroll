@@ -354,8 +354,8 @@ function HitPayMethodRow({
       className="rounded-[10px] overflow-hidden transition-colors"
       style={{ border: expanded ? "1.5px solid #0f1f42" : "1px solid #e3e0d6", background: "#ffffff" }}
     >
-      <button type="button" className="w-full flex items-center gap-3 px-3.5 py-3 text-left" onClick={onToggle}>
-        <span className="flex items-center justify-center w-8 h-8 rounded-[8px] shrink-0" style={{ background: "#f5f3ec", color: "#0f1f42" }}>
+      <button type="button" className="w-full flex items-center gap-3 px-[14px] py-[11px] text-left" onClick={onToggle}>
+        <span className="flex items-center shrink-0" style={{ height: 34 }}>
           {icon}
         </span>
         <span className="flex-1 text-[13px] font-semibold" style={{ color: "#0f1f42" }}>{name}</span>
@@ -476,12 +476,8 @@ function HitPaySection({
         badgeBg="#e7f7ef"
         badgeColor="#1a6b3c"
         icon={
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <rect x="3" y="3" width="7" height="7" rx="1" />
-            <rect x="14" y="3" width="7" height="7" rx="1" />
-            <rect x="3" y="14" width="7" height="7" rx="1" />
-            <path d="M14 14h3v3M20 14v.01M14 20v.01M20 20v.01M17 17v.01" strokeLinecap="round" />
-          </svg>
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src="/paynow.png" alt="PayNow" className="h-[34px] w-auto object-contain" />
         }
       >
         {qrDataUrl ? (
@@ -533,10 +529,22 @@ function HitPaySection({
         badgeBg="#eef2fb"
         badgeColor="#1a3f8a"
         icon={
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <rect x="2" y="5" width="20" height="14" rx="2" />
-            <path d="M2 10h20" strokeLinecap="round" />
-          </svg>
+          <span className="flex items-center" style={{ gap: 7 }}>
+            <span
+              className="flex items-center justify-center bg-white"
+              style={{ width: 36, height: 24, border: "1px solid #e3e0d6", borderRadius: 4 }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/visa.svg" alt="Visa" className="max-w-[26px] max-h-[15px] object-contain" />
+            </span>
+            <span
+              className="flex items-center justify-center bg-white"
+              style={{ width: 36, height: 24, border: "1px solid #e3e0d6", borderRadius: 4 }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/mastercard.svg" alt="Mastercard" className="max-w-[26px] max-h-[18px] object-contain" />
+            </span>
+          </span>
         }
       >
         <div className="flex flex-col gap-3">
@@ -593,18 +601,29 @@ function PaymentContent() {
   useEffect(() => {
     if (searchParams.get("hitpay") !== "success") return;
     setHitpayReturn(true);
-    // Poll enrollment status until confirmed — webhook confirms asynchronously
-    hitpayReturnPollRef.current = setInterval(async () => {
+
+    let cancelled = false;
+
+    // Webhook confirms asynchronously — but it has usually already landed by the
+    // time HitPay redirects the user back, so check immediately rather than
+    // waiting a full interval, then poll for the rare case it arrives late.
+    async function check() {
       try {
         const res = await fetch(`/api/public/payments/hitpay/status?ref=${ref}`);
         const data = await res.json();
-        if (data.enrollmentStatus === "confirmed") {
-          clearInterval(hitpayReturnPollRef.current!);
+        if (!cancelled && data.enrollmentStatus === "confirmed") {
+          if (hitpayReturnPollRef.current) clearInterval(hitpayReturnPollRef.current);
           router.push(`/enroll/${params.slug}/checkout/success/?ref=${ref}`);
         }
       } catch { /* keep polling */ }
-    }, 3000);
-    return () => { if (hitpayReturnPollRef.current) clearInterval(hitpayReturnPollRef.current); };
+    }
+
+    check();
+    hitpayReturnPollRef.current = setInterval(check, 1500);
+    return () => {
+      cancelled = true;
+      if (hitpayReturnPollRef.current) clearInterval(hitpayReturnPollRef.current);
+    };
   }, [searchParams, ref, params.slug, router]);
 
   useEffect(() => {
