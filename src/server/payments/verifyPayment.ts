@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { restoreSeats } from "./seatRestoration";
+import { issueTicketsForEnrollment } from "@/server/tickets/issueTickets";
 import type { Enrollment, Payment, PaymentStatus, EnrollmentStatus } from "@/types/database";
 
 interface VerifierContext {
@@ -96,12 +97,20 @@ export async function verifyPayment(input: VerifyPaymentInput): Promise<VerifyPa
       } as never)
       .eq("id", payment.id);
 
-    const { data: updatedEnrollment } = await admin
+    const { data: updatedEnrollment, error: enrollmentUpdateError } = await admin
       .from("enrollments")
       .update({ status: "confirmed" as EnrollmentStatus } as never)
       .eq("id", enrollment.id)
       .select()
       .single() as { data: Enrollment | null; error: unknown };
+
+    if (!enrollmentUpdateError) {
+      try {
+        await issueTicketsForEnrollment(enrollment.id);
+      } catch (err) {
+        console.error("[tickets] issueTicketsForEnrollment failed:", err);
+      }
+    }
 
     return {
       enrollment: updatedEnrollment ?? enrollment,

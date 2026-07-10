@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import paypay from "@/lib/paypay";
+import { issueTicketsForEnrollment } from "@/server/tickets/issueTickets";
 import { dispatchPaymentApproved } from "@/server/notifications/dispatchPaymentApproved";
 import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils";
 
@@ -83,6 +84,12 @@ export async function POST(request: NextRequest) {
       .from("enrollments")
       .update({ status: "confirmed" } as never)
       .eq("id", payment.enrollment_id);
+
+    try {
+      await issueTicketsForEnrollment(payment.enrollment_id);
+    } catch (err) {
+      console.error("[tickets] issueTicketsForEnrollment failed:", err);
+    }
 
     // Send notifications
     const { data: enrollment } = (await supabase
