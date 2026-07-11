@@ -60,28 +60,82 @@ function SuccessContent() {
     setGenerating(true);
     try {
       if (tickets.length > 0) {
-        const imgWidth = 148;
-        const pages: { dataUrl: string; imgHeight: number }[] = [];
-        for (let i = 0; i < tickets.length; i++) {
-          const el = ticketRefs.current[i];
-          if (!el) continue;
-          await waitForImages(el);
-          const canvas = await html2canvas(el, {
-            scale: 2,
-            useCORS: true,
-            backgroundColor: "#f5f7fa",
-            logging: false,
-          });
-          const imgHeight = (canvas.height * imgWidth) / canvas.width;
-          pages.push({ dataUrl: canvas.toDataURL("image/png"), imgHeight });
-        }
-        if (pages.length === 0) return;
+        // Ensure a QR data URL exists for every ticket (in case download was
+        // clicked before the render effect populated ticketQrUrls). html2canvas
+        // cannot reliably rasterize a data-URI <img>, so we draw each ticket
+        // with jsPDF primitives and place the QR via addImage instead.
+        const qrMap: Record<string, string> = { ...ticketQrUrls };
+        await Promise.all(
+          tickets.map(async (t) => {
+            if (!qrMap[t.jti]) qrMap[t.jti] = await QRCode.toDataURL(t.jwt, { width: 240, margin: 1 });
+          }),
+        );
 
-        const pdf = new jsPDF({ unit: "mm", format: [imgWidth, pages[0].imgHeight + 10] });
-        pages.forEach((page, i) => {
-          if (i > 0) pdf.addPage([imgWidth, page.imgHeight + 10]);
-          pdf.addImage(page.dataUrl, "PNG", 0, 5, imgWidth, page.imgHeight);
+        const W = 100;
+        const H = 132;
+        const m = 8;
+        const cardW = W - 2 * m;
+        const cardH = H - 2 * m;
+        const pdf = new jsPDF({ unit: "mm", format: [W, H] });
+
+        tickets.forEach((ticket, i) => {
+          if (i > 0) pdf.addPage([W, H]);
+
+          // Navy card
+          pdf.setFillColor(15, 31, 66);
+          pdf.roundedRect(m, m, cardW, cardH, 4, 4, "F");
+
+          const padX = m + 8;
+          // Event name (gold) + ticket index (right)
+          pdf.setFont("helvetica", "bold");
+          pdf.setTextColor(212, 175, 90);
+          pdf.setFontSize(8);
+          pdf.text((data.event_name || "").toUpperCase(), padX, m + 12);
+          pdf.setTextColor(138, 144, 165);
+          pdf.setFontSize(7);
+          pdf.text(`Ticket ${i + 1}/${tickets.length}`, W - padX, m + 12, { align: "right" });
+
+          // Tier (white, large)
+          pdf.setTextColor(255, 255, 255);
+          pdf.setFontSize(20);
+          pdf.text(ticket.tier, padX, m + 25);
+
+          // Dashed divider
+          pdf.setDrawColor(255, 255, 255);
+          pdf.setLineWidth(0.2);
+          pdf.setLineDashPattern([1, 1], 0);
+          pdf.line(padX, m + 31, W - padX, m + 31);
+          pdf.setLineDashPattern([], 0);
+
+          // Order ref + ticket id
+          pdf.setFont("helvetica", "normal");
+          pdf.setTextColor(138, 144, 165);
+          pdf.setFontSize(7);
+          pdf.text("ORDER REF", padX, m + 40);
+          pdf.setFont("helvetica", "bold");
+          pdf.setTextColor(255, 255, 255);
+          pdf.setFontSize(13);
+          pdf.text(data.enrollment_ref, padX, m + 47);
+          pdf.setFont("helvetica", "normal");
+          pdf.setTextColor(138, 144, 165);
+          pdf.setFontSize(7);
+          pdf.text(`Ticket #${ticket.jti.slice(0, 8)}`, padX, m + 53);
+
+          // QR on a white chip, centered near the bottom of the card
+          const qr = qrMap[ticket.jti];
+          if (qr) {
+            const qs = 44;
+            const qx = (W - qs) / 2;
+            const qy = m + cardH - qs - 14;
+            pdf.setFillColor(255, 255, 255);
+            pdf.roundedRect(qx - 3, qy - 3, qs + 6, qs + 6, 2, 2, "F");
+            pdf.addImage(qr, "PNG", qx, qy, qs, qs);
+            pdf.setTextColor(138, 144, 165);
+            pdf.setFontSize(6.5);
+            pdf.text("Scan at entry", W / 2, qy + qs + 7, { align: "center" });
+          }
         });
+
         pdf.save(`eticket-${data.enrollment_ref}.pdf`);
         return;
       }
