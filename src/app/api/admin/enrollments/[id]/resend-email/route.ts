@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, badRequest, notFound } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { tenantOrigin } from "@/lib/origin";
 import {
   sendEmail,
   enrollmentApprovedEmail,
@@ -60,10 +61,10 @@ export async function POST(
   // ── Fetch tenant info for email branding ──────────────────────────────────
   const { data: tenantInfo } = await admin
     .from("tenants")
-    .select("name, org_type, logo_url")
+    .select("name, org_type, logo_url, subdomain")
     .eq("id", tenantId)
     .single() as {
-    data: { name: string; org_type: string; logo_url: string | null } | null;
+    data: { name: string; org_type: string; logo_url: string | null; subdomain: string | null } | null;
     error: unknown;
   };
 
@@ -104,10 +105,9 @@ export async function POST(
     totalFee = (cls?.fee_amount ?? 0) * (enrollment.quantity ?? 1);
   }
 
-  const host = request.headers.get("host") ?? "localhost:3005";
-  const proto = host.startsWith("localhost") ? "http" : "https";
-  const statusUrl = `${proto}://${host}/status?ref=${enrollment.enrollment_ref}`;
-  const paymentUrl = `${proto}://${host}/enroll/payment/${enrollment.enrollment_ref}`;
+  const base = tenantOrigin(tenantInfo?.subdomain);
+  const statusUrl = `${base}/status?ref=${enrollment.enrollment_ref}`;
+  const paymentUrl = `${base}/enroll/payment/${enrollment.enrollment_ref}`;
   const feeFormatted =
     totalFee > 0
       ? `${String(totalFee).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} MMK`

@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { tenantOrigin } from "@/lib/origin";
 import { restoreSeats } from "./seatRestoration";
 import { issueTicketsForEnrollment } from "@/server/tickets/issueTickets";
 import type { Enrollment, Payment, PaymentStatus, EnrollmentStatus } from "@/types/database";
@@ -10,6 +11,7 @@ interface VerifierContext {
 
 interface TenantContext {
   currency: string;
+  subdomain: string | null;
 }
 
 export interface VerifyPaymentInput {
@@ -22,7 +24,6 @@ export interface VerifyPaymentInput {
   rejection_reason?: string;
   admin_note?: string;
   received_amount?: number;
-  requestHost: string;
 }
 
 export interface VerifyPaymentResult {
@@ -43,14 +44,14 @@ export interface VerifyPaymentResult {
 export async function verifyPayment(input: VerifyPaymentInput): Promise<VerifyPaymentResult> {
   const {
     action, payment, enrollment, tenantInfo, verifier,
-    rejection_reason, admin_note, received_amount, requestHost,
+    rejection_reason, admin_note, received_amount,
   } = input;
 
   const admin = createAdminClient();
   const now = new Date().toISOString();
-  const proto = requestHost.startsWith("localhost") ? "http" : "https";
-  const statusUrl = `${proto}://${requestHost}/status?ref=${enrollment.enrollment_ref}`;
-  const paymentUrl = `${proto}://${requestHost}/enroll/payment/${enrollment.enrollment_ref}`;
+  const base = tenantOrigin(tenantInfo.subdomain);
+  const statusUrl = `${base}/status?ref=${enrollment.enrollment_ref}`;
+  const paymentUrl = `${base}/enroll/payment/${enrollment.enrollment_ref}`;
 
   // ── Resolve class level and fee ─────────────────────────────────────────────
   const isCart = enrollment.class_id === null;

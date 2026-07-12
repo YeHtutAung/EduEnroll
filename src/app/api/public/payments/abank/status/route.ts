@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { tenantOrigin } from "@/lib/origin";
 import abank from "@/lib/abank";
 import { sendEmail, enrollmentApprovedEmail } from "@/lib/email";
 import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
@@ -98,9 +99,12 @@ export async function GET(request: NextRequest) {
         // Resolve email: column first, then form_data
         const enrollEmail = enrollment.email
           || resolveEmailFromFormData(enrollment.form_data as Record<string, string> | null);
-        const host = request.headers.get("host") ?? "localhost:3005";
-        const proto = host.startsWith("localhost") ? "http" : "https";
-        const statusUrl = `${proto}://${host}/status?ref=${enrollment.enrollment_ref}`;
+        const { data: originRow } = (await supabase
+          .from("tenants")
+          .select("subdomain")
+          .eq("id", enrollment.tenant_id)
+          .single()) as { data: { subdomain: string | null } | null; error: unknown };
+        const statusUrl = `${tenantOrigin(originRow?.subdomain)}/status?ref=${enrollment.enrollment_ref}`;
 
         // Resolve class level
         let classLevel = "Ticket";
