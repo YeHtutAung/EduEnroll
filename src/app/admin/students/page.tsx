@@ -853,7 +853,7 @@ export default function StudentsPage() {
       } while (currentPage <= totalPages);
       const rows = allRows;
 
-      const XLSX = await import("xlsx");
+      const XLSX = await import("@e965/xlsx");
 
       // Export all form fields (not just the 3 shown in table)
       const exportFields = formFields.filter((f) => f.field_type !== "file");
