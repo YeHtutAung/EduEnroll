@@ -114,9 +114,9 @@ export async function POST(request: NextRequest) {
       // Resolve email: column first, then form_data
       const enrollEmail = enrollment.email
         || resolveEmailFromFormData(enrollment.form_data as Record<string, string> | null);
-      const host = request.headers.get("host") ?? "localhost:3005";
-      const proto = host.startsWith("localhost") ? "http" : "https";
-      const statusUrl = `${proto}://${host}/status?ref=${enrollment.enrollment_ref}`;
+      // Use the configured app origin, not the inbound Host header (spoofable).
+      const appOrigin = process.env.NEXT_PUBLIC_APP_URL ?? "https://kuunyi.com";
+      const statusUrl = `${appOrigin}/status?ref=${enrollment.enrollment_ref}`;
 
       // Resolve class level
       let classLevel = "Ticket";

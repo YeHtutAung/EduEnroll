@@ -174,7 +174,7 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isLanguageSchool]);
 
   useEffect(() => {
     fetchAll();
