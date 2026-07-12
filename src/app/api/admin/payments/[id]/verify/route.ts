@@ -96,9 +96,9 @@ export async function PATCH(
   // ── Fetch tenant info for email branding ───────────────────────────────────
   const { data: tenantInfo } = await admin
     .from("tenants")
-    .select("name, org_type, logo_url, currency, sms_on_payment")
+    .select("name, org_type, logo_url, currency, sms_on_payment, subdomain")
     .eq("id", tenantId)
-    .single() as { data: { name: string; org_type: string; logo_url: string | null; currency: string; sms_on_payment: boolean } | null; error: unknown };
+    .single() as { data: { name: string; org_type: string; logo_url: string | null; currency: string; sms_on_payment: boolean; subdomain: string | null } | null; error: unknown };
 
   const orgType = tenantInfo?.org_type;
   const tenantName = tenantInfo?.name;
@@ -111,12 +111,11 @@ export async function PATCH(
     payment,
     enrollment,
     tenantId,
-    tenantInfo: { currency },
+    tenantInfo: { currency, subdomain: tenantInfo?.subdomain ?? null },
     verifier: { verifiedByHuman, verifiedByAgent },
     rejection_reason: typeof rejection_reason === "string" ? rejection_reason : undefined,
     admin_note: typeof admin_note === "string" ? admin_note : undefined,
     received_amount: typeof received_amount === "number" ? received_amount : undefined,
-    requestHost: request.headers.get("host") ?? "localhost:3005",
   });
 
   const {

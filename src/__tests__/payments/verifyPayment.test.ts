@@ -70,7 +70,7 @@ const BASE_ENROLLMENT = {
   telegram_link_token_expires_at: null,
 } as const;
 
-const TENANT_INFO = { currency: "MMK" };
+const TENANT_INFO = { currency: "MMK", subdomain: "nihonmoment" };
 
 const VERIFIER = { verifiedByHuman: "user-1", verifiedByAgent: null };
 
@@ -89,7 +89,6 @@ function makeInput(
     tenantId: "tenant-abc",
     tenantInfo: TENANT_INFO,
     verifier: VERIFIER,
-    requestHost: "localhost:3005",
     ...overrides,
   };
 }
