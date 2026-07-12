@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { encryptToken } from "@/lib/messenger/crypto";
+import { verifyOAuthState } from "@/lib/messenger/state";
 
 // ─── GET /api/messenger/callback ────────────────────────────────────────────
-// OAuth callback from Meta. Receives authorization code and state (tenant slug).
-// Exchanges for tokens, saves encrypted page token, registers webhook.
+// OAuth callback from Meta. The `state` is a signed token (see state.ts) minted
+// for the authenticated owner's own tenant at connect time — never a raw slug —
+// so the Page can only be bound to the tenant the initiator actually controls.
+// Exchanges the code for tokens, saves the encrypted page token, registers the
+// webhook.
 
 const GRAPH_API = "https://graph.facebook.com/v19.0";
 
@@ -15,7 +19,7 @@ function settingsUrl(slug: string) {
 }
 
 async function savePage(
-  slug: string,
+  tenantId: string,
   pageId: string,
   pageToken: string,
 ): Promise<void> {
@@ -31,7 +35,7 @@ async function savePage(
       messenger_verify_token: verifyToken,
       messenger_enabled: true,
     } as never)
-    .eq("subdomain", slug);
+    .eq("id", tenantId);
 
   if (error) throw new Error(`Failed to save: ${(error as Error).message}`);
 
@@ -47,13 +51,27 @@ async function savePage(
 
 export async function GET(request: NextRequest) {
   const code = request.nextUrl.searchParams.get("code");
-  const state = request.nextUrl.searchParams.get("state"); // tenant slug
+  const stateParam = request.nextUrl.searchParams.get("state");
   const error = request.nextUrl.searchParams.get("error");
 
+  // Verify the signed state first — it identifies the tenant and proves the
+  // flow was initiated by that tenant's authenticated owner.
+  const state = verifyOAuthState(stateParam);
+
+  if (!state) {
+    console.error("[messenger] Invalid or expired OAuth state");
+    const errorUrl = new URL(settingsUrl("www"));
+    errorUrl.searchParams.set("tab", "messenger");
+    errorUrl.searchParams.set("error", "invalid_state");
+    return new NextResponse(null, { status: 302, headers: { Location: errorUrl.toString() } });
+  }
+
+  const { tenantId, slug } = state;
+
   // User denied permissions or error occurred
-  if (error || !code || !state) {
-    console.error("[messenger] OAuth error or missing params:", { error, hasCode: !!code, state });
-    const redirectUrl = new URL(settingsUrl(state ?? "www"));
+  if (error || !code) {
+    console.error("[messenger] OAuth error or missing code:", { error, hasCode: !!code });
+    const redirectUrl = new URL(settingsUrl(slug));
     redirectUrl.searchParams.set("tab", "messenger");
     redirectUrl.searchParams.set("error", error ?? "missing_code");
     return new NextResponse(null, { status: 302, headers: { Location: redirectUrl.toString() } });
@@ -64,7 +82,7 @@ export async function GET(request: NextRequest) {
 
   if (!appId || !appSecret) {
     console.error("[messenger] Missing env vars:", { hasAppId: !!appId, hasAppSecret: !!appSecret });
-    const errorUrl = new URL(settingsUrl(state));
+    const errorUrl = new URL(settingsUrl(slug));
     errorUrl.searchParams.set("tab", "messenger");
     errorUrl.searchParams.set("error", "server_config");
     return new NextResponse(null, { status: 302, headers: { Location: errorUrl.toString() } });
@@ -108,12 +126,12 @@ export async function GET(request: NextRequest) {
     // ── Step 4: Single page → auto-connect; multiple → page picker ──────
     if (pages.length === 1) {
       const page = pages[0];
-      await savePage(state, page.id, page.access_token);
+      await savePage(tenantId, page.id, page.access_token);
 
-      const successUrl = new URL(settingsUrl(state));
+      const successUrl = new URL(settingsUrl(slug));
       successUrl.searchParams.set("tab", "messenger");
       successUrl.searchParams.set("connected", "true");
-      console.log(`[messenger] Auto-connected page ${page.id} (${page.name}) for ${state}`);
+      console.log(`[messenger] Auto-connected page ${page.id} (${page.name}) for ${slug}`);
       return new NextResponse(null, { status: 302, headers: { Location: successUrl.toString() } });
     }
 
@@ -125,7 +143,7 @@ export async function GET(request: NextRequest) {
     await supabase.from("messenger_page_sessions").insert(
       pages.map((p) => ({
         session_id: sessionId,
-        tenant_slug: state,
+        tenant_slug: slug,
         page_id: p.id,
         page_name: p.name,
         page_token_encrypted: encryptToken(p.access_token),
@@ -133,14 +151,14 @@ export async function GET(request: NextRequest) {
       })) as never,
     );
 
-    const pickerUrl = new URL(settingsUrl(state));
+    const pickerUrl = new URL(settingsUrl(slug));
     pickerUrl.searchParams.set("tab", "messenger");
     pickerUrl.searchParams.set("pick_page", sessionId);
-    console.log(`[messenger] ${pages.length} pages found for ${state}, redirecting to picker`);
+    console.log(`[messenger] ${pages.length} pages found for ${slug}, redirecting to picker`);
     return new NextResponse(null, { status: 302, headers: { Location: pickerUrl.toString() } });
   } catch (err) {
     console.error("[messenger] OAuth callback error:", err);
-    const errorUrl = new URL(settingsUrl(state));
+    const errorUrl = new URL(settingsUrl(slug));
     errorUrl.searchParams.set("tab", "messenger");
     errorUrl.searchParams.set("error", "connection_failed");
     return new NextResponse(null, { status: 302, headers: { Location: errorUrl.toString() } });
