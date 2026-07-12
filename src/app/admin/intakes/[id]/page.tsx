@@ -179,7 +179,8 @@ function EditClassModal({
       if (imageFile) {
         const supabase = createClient();
         const ext = imageFile.name.split(".").pop() ?? "png";
-        const path = `${cls.intake_id}/${cls.level.replace(/\s+/g, "-").toLowerCase()}-${Date.now()}.${ext}`;
+        // Tenant-prefixed path — required by the class-images storage RLS policy.
+        const path = `${cls.tenant_id}/${cls.intake_id}/${cls.level.replace(/\s+/g, "-").toLowerCase()}-${Date.now()}.${ext}`;
         const { error: uploadErr } = await supabase.storage
           .from("class-images")
           .upload(path, imageFile, { upsert: true });
@@ -494,11 +495,13 @@ interface AddCustomForm {
 
 function AddCustomClassModal({
   intakeId,
+  tenantId,
   onClose,
   onCreated,
   showEventFields,
 }: {
   intakeId: string;
+  tenantId: string;
   onClose: () => void;
   onCreated: () => void;
   showEventFields: boolean;
@@ -552,7 +555,8 @@ function AddCustomClassModal({
       if (imageFile) {
         const supabase = createClient();
         const ext = imageFile.name.split(".").pop() ?? "png";
-        const path = `${intakeId}/${level.replace(/\s+/g, "-").toLowerCase()}-${Date.now()}.${ext}`;
+        // Tenant-prefixed path — required by the class-images storage RLS policy.
+        const path = `${tenantId}/${intakeId}/${level.replace(/\s+/g, "-").toLowerCase()}-${Date.now()}.${ext}`;
         const { error: uploadErr } = await supabase.storage
           .from("class-images")
           .upload(path, imageFile, { upsert: true });
@@ -1485,9 +1489,10 @@ export default function IntakeDetailPage({
       )}
 
       {/* Add Custom Class modal */}
-      {showAddCustom && (
+      {showAddCustom && intake && (
         <AddCustomClassModal
           intakeId={params.id}
+          tenantId={intake.tenant_id}
           onClose={() => setShowAddCustom(false)}
           onCreated={() => {
             setShowAddCustom(false);
