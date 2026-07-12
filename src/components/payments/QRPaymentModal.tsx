@@ -170,7 +170,7 @@ export default function QRPaymentModal({
     }
 
     createPayment();
-  }, [enrollmentRef, startPolling]);
+  }, [enrollmentRef, startPolling, apiBase]);
 
   function handleRetry() {
     if (pollRef.current) clearInterval(pollRef.current);

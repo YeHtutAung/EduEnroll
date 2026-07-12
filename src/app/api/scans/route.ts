@@ -76,10 +76,14 @@ export async function POST(request: NextRequest) {
   }
 
   // ── 5. Race-safe single-use claim ───────────────────────────────────────────
+  // Re-check status='valid' inside the conditional update so a ticket voided
+  // between step 4 and here cannot still be claimed (validity + first-scan claim
+  // happen in one atomic statement).
   const { data: claimed } = (await supabase
     .from("tickets")
     .update({ first_scan_at: new Date().toISOString(), first_scan_gate: gate } as never)
     .eq("id", jti)
+    .eq("status", "valid")
     .is("first_scan_at", null)
     .select("first_scan_at, first_scan_gate")) as unknown as {
     data: { first_scan_at: string; first_scan_gate: string | null }[] | null;
