@@ -40,6 +40,15 @@ export async function POST(request: NextRequest) {
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
 
+    // Only confirm when Stripe reports the session is actually paid. For
+    // asynchronous payment methods, checkout.session.completed can fire with
+    // payment_status 'unpaid' / 'no_payment_required'; confirming then would
+    // mark an unpaid enrollment as paid.
+    if (session.payment_status !== "paid") {
+      console.warn("[stripe-webhook] session completed but not paid:", session.payment_status);
+      return NextResponse.json({ received: true });
+    }
+
     // Find payment by stripe_session_id
     const { data: payment } = (await supabase
       .from("payments")

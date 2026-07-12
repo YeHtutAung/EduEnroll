@@ -2,13 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
+import { sniffImageMime } from "@/lib/images";
 import type { Enrollment, Class, Payment } from "@/types/database";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const MAX_FILE_SIZE   = 5 * 1024 * 1024; // 5 MB per file
 const MAX_FILES       = 5;
-const ALLOWED_TYPES   = ["image/jpeg", "image/png", "image/webp"] as const;
 const STORAGE_BUCKET  = "payment-proofs";
 
 const MIME_TO_EXT: Record<string, string> = {
@@ -88,23 +88,30 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // ── 2. Validate all files ──────────────────────────────────────
+  // ── 2. Validate all files: size, then actual content via magic bytes ──
+  // Read each file once here and reuse the buffer for upload below.
+  const fileBuffers: Buffer[] = [];
+  const fileMimes: ("image/jpeg" | "image/png" | "image/webp")[] = [];
   for (const file of files) {
-    if (!ALLOWED_TYPES.includes(file.type as (typeof ALLOWED_TYPES)[number])) {
-      return NextResponse.json(
-        {
-          error: "Bad Request",
-          message: `File type '${file.type}' is not allowed. Accepted: jpeg, png, webp.`,
-        },
-        { status: 400 },
-      );
-    }
     if (file.size > MAX_FILE_SIZE) {
       return NextResponse.json(
         { error: "Bad Request", message: "Each file must not exceed 5 MB." },
         { status: 400 },
       );
     }
+    const buf = Buffer.from(await file.arrayBuffer());
+    const sniffed = sniffImageMime(buf);
+    if (!sniffed) {
+      return NextResponse.json(
+        {
+          error: "Bad Request",
+          message: "Each file must be a valid JPEG, PNG, or WebP image.",
+        },
+        { status: 400 },
+      );
+    }
+    fileBuffers.push(buf);
+    fileMimes.push(sniffed);
   }
 
   const supabase = createAdminClient();
@@ -177,17 +184,17 @@ export async function POST(request: NextRequest) {
   const uploadedPaths: string[] = [];
 
   for (let i = 0; i < files.length; i++) {
-    const file = files[i];
-    const ext         = MIME_TO_EXT[file.type] ?? "jpg";
+    const mime        = fileMimes[i];
+    const ext         = MIME_TO_EXT[mime] ?? "jpg";
     const timestamp   = Date.now() + i; // ensure unique timestamps
     const storagePath = `${enrollment.tenant_id}/${enrollmentRef.trim()}/${timestamp}.${ext}`;
 
-    const fileBuffer = Buffer.from(await file.arrayBuffer());
+    const fileBuffer = fileBuffers[i];
 
     const { error: uploadError } = await supabase.storage
       .from(STORAGE_BUCKET)
       .upload(storagePath, fileBuffer, {
-        contentType: file.type,
+        contentType: mime,
         upsert: false,
       });
 
