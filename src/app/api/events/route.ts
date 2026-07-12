@@ -52,25 +52,35 @@ export async function GET(request: NextRequest) {
     .eq("tenant_id", tenantId)
     .in("intake_id", intakeIds)) as unknown as { data: ClassRow[] | null; error: unknown };
 
-  // Group classes by intake_id and pick the earliest non-null event_date per intake.
+  // "Today" in the event timezone (TICKET_TZ, same convention as ticket expiry)
+  // rather than the server's UTC date — otherwise an event that is still today
+  // locally can be dropped as "past" around the UTC midnight boundary. en-CA
+  // formats as YYYY-MM-DD for a safe date-only string compare.
+  const TZ = process.env.TICKET_TZ ?? "Asia/Yangon";
+  const todayStr = new Intl.DateTimeFormat("en-CA", {
+    timeZone: TZ,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+
+  // Group classes by intake_id and pick the earliest *upcoming* event_date per
+  // intake. Past dates are excluded first — otherwise an intake whose earliest
+  // class is in the past would disappear even when it also has a future class.
   const earliestByIntake = new Map<string, { event_date: string; venue: string | null }>();
   for (const row of classes ?? []) {
     if (!row.event_date) continue;
+    if (row.event_date < todayStr) continue;
     const existing = earliestByIntake.get(row.intake_id);
     if (!existing || row.event_date < existing.event_date) {
       earliestByIntake.set(row.intake_id, { event_date: row.event_date, venue: row.venue });
     }
   }
 
-  // Date-only comparison (YYYY-MM-DD string compare) avoids timezone-parsing
-  // pitfalls that `new Date(...)` object comparisons are prone to.
-  const todayStr = new Date().toISOString().slice(0, 10);
-
   const events = intakes
     .map((intake) => {
       const earliest = earliestByIntake.get(intake.id);
       if (!earliest) return null;
-      if (earliest.event_date < todayStr) return null;
 
       return {
         id: intake.id,
