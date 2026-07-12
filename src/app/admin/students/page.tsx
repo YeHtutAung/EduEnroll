@@ -245,7 +245,7 @@ function StudentDetailModal({
     }
     load();
     return () => { cancelled = true; };
-  }, [row.enrollment_id]);
+  }, [row.enrollment_id, isLanguageSchool]);
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -782,7 +782,7 @@ export default function StudentsPage() {
         })
         .catch(() => {/* non-critical */});
     }
-  }, []);
+  }, [isLanguageSchool]);
 
   // ── Fetch form fields for selected intake (or most recent) ────────────────
   useEffect(() => {
