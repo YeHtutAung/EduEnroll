@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import abank from "@/lib/abank";
+import { issueTicketsForEnrollment } from "@/server/tickets/issueTickets";
 import { sendEmail, enrollmentApprovedEmail } from "@/lib/email";
 import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
@@ -66,6 +67,12 @@ export async function GET(request: NextRequest) {
       .update({ status: "confirmed" } as never)
       .eq("id", payment.enrollment_id);
 
+    try {
+      await issueTicketsForEnrollment(payment.enrollment_id);
+    } catch (err) {
+      console.error("[tickets] issueTicketsForEnrollment failed:", err);
+    }
+
     // Send notifications (best-effort)
     const { data: enrollment } = (await supabase
       .from("enrollments")
@@ -90,9 +97,9 @@ export async function GET(request: NextRequest) {
       // Resolve email: column first, then form_data
       const enrollEmail = enrollment.email
         || resolveEmailFromFormData(enrollment.form_data as Record<string, string> | null);
-      const host = request.headers.get("host") ?? "localhost:3005";
-      const proto = host.startsWith("localhost") ? "http" : "https";
-      const statusUrl = `${proto}://${host}/status?ref=${enrollment.enrollment_ref}`;
+      // Use the configured app origin, not the inbound Host header (spoofable).
+      const appOrigin = process.env.NEXT_PUBLIC_APP_URL ?? "https://kuunyi.com";
+      const statusUrl = `${appOrigin}/status?ref=${enrollment.enrollment_ref}`;
 
       // Resolve class level for email
       let classLevel = "Ticket";

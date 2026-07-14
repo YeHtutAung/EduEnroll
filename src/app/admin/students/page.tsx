@@ -245,7 +245,7 @@ function StudentDetailModal({
     }
     load();
     return () => { cancelled = true; };
-  }, [row.enrollment_id]);
+  }, [row.enrollment_id, isLanguageSchool]);
 
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
@@ -782,7 +782,7 @@ export default function StudentsPage() {
         })
         .catch(() => {/* non-critical */});
     }
-  }, []);
+  }, [isLanguageSchool]);
 
   // ── Fetch form fields for selected intake (or most recent) ────────────────
   useEffect(() => {
@@ -853,7 +853,7 @@ export default function StudentsPage() {
       } while (currentPage <= totalPages);
       const rows = allRows;
 
-      const XLSX = await import("xlsx");
+      const XLSX = await import("@e965/xlsx");
 
       // Export all form fields (not just the 3 shown in table)
       const exportFields = formFields.filter((f) => f.field_type !== "file");

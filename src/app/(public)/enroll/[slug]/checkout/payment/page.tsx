@@ -335,13 +335,50 @@ function BankTransferSection({
   );
 }
 
+// ─── HitPay method row (accordion) ────────────────────────────────────────────
+
+function HitPayMethodRow({
+  expanded, onToggle, icon, name, badgeLabel, badgeBg, badgeColor, children,
+}: {
+  expanded: boolean;
+  onToggle: () => void;
+  icon: React.ReactNode;
+  name: string;
+  badgeLabel: string;
+  badgeBg: string;
+  badgeColor: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className="rounded-[10px] overflow-hidden transition-colors"
+      style={{ border: expanded ? "1.5px solid #0f1f42" : "1px solid #e3e0d6", background: "#ffffff" }}
+    >
+      <button type="button" className="w-full flex items-center gap-3 px-[14px] py-[11px] text-left" onClick={onToggle}>
+        <span className="flex items-center shrink-0" style={{ height: 34 }}>
+          {icon}
+        </span>
+        <span className="flex-1 text-[13px] font-semibold" style={{ color: "#0f1f42" }}>{name}</span>
+        <span className="text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full" style={{ background: badgeBg, color: badgeColor }}>
+          {badgeLabel}
+        </span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8b8f9a" strokeWidth="2"
+          style={{ transform: expanded ? "rotate(180deg)" : "none", transition: "transform .15s" }}>
+          <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {expanded && <div className="px-3.5 pb-3.5 pt-1">{children}</div>}
+    </div>
+  );
+}
+
 // ─── HitPay Section ───────────────────────────────────────────────────────────
 
 function HitPaySection({
   enrollmentRef, totalAmount, slug,
 }: { enrollmentRef: string; totalAmount: number; slug: string }) {
   const router = useRouter();
-  const [hitpayTab, setHitpayTab] = useState<"paynow" | "card">("paynow");
+  const [expanded, setExpanded] = useState<"paynow" | "card" | null>("paynow");
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -425,80 +462,95 @@ function HitPaySection({
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      {/* Tab selector */}
-      <div className="flex rounded-[7px] overflow-hidden" style={{ border: "1.5px solid #d8d5c9" }}>
-        {(["paynow", "card"] as const).map((t) => (
-          <button
-            key={t}
-            className="flex-1 py-2 text-[11px] font-bold uppercase tracking-wide transition-colors"
-            style={{
-              background: hitpayTab === t ? "#0f1f42" : "transparent",
-              color: hitpayTab === t ? "#ffffff" : "#43485a",
-            }}
-            onClick={() => { setHitpayTab(t); handleCancel(); }}
-          >
-            {t === "paynow" ? "PAYNOW" : "CARD"}
-          </button>
-        ))}
-      </div>
+    <div className="flex flex-col gap-2.5">
+      <p className="text-[10px] font-bold tracking-[1.4px] uppercase mb-0.5" style={{ color: "#8b8f9a" }}>
+        Payment Method
+      </p>
 
-      {hitpayTab === "paynow" ? (
-        <div className="flex flex-col gap-4">
-          {qrDataUrl ? (
-            <>
-              <div className="rounded-[10px] p-[18px] text-center" style={{ border: "1px solid #e3e0d6" }}>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={qrDataUrl} alt="PayNow QR" className="w-[130px] h-[130px] mx-auto mb-2" />
-                <p className="text-[10.5px]" style={{ color: "#8b8f9a" }}>Scan with your banking app (PayNow)</p>
-                <p className="text-[9.5px]" style={{ color: "#aca795" }}>DBS · OCBC · UOB · and most PayNow banks</p>
-              </div>
-              <div className="flex items-center justify-between px-3 py-2 rounded-[8px]" style={{ background: "#fdf3e0", border: "1px solid #eed9a3" }}>
-                <span className="text-[10.5px]" style={{ color: "#8a6a1f" }}>Waiting for payment</span>
-                <span className="text-[10px] flex items-center gap-1.5" style={{ color: "#8a6a1f" }}>
-                  <span className="w-1.5 h-1.5 rounded-full animate-pulse inline-block" style={{ background: "#8a6a1f" }} />
-                  Confirming
-                </span>
-              </div>
-              <button
-                className="w-full py-2.5 rounded-[8px] text-[11.5px] font-semibold"
-                style={{ border: "1px solid #d8d5c9", color: "#43485a" }}
-                onClick={handleCancel}
-              >
-                Cancel
-              </button>
-            </>
-          ) : (
-            <>
-              <p className="text-[12px] text-center" style={{ color: "#8b8f9a" }}>
-                A PayNow QR code will be generated for {totalAmount.toLocaleString()}.
-              </p>
-              <button
-                className="w-full py-3 rounded-[8px] text-[12.5px] font-bold text-white disabled:opacity-60"
-                style={{ background: "#0f1f42" }}
-                onClick={handlePayNow}
-                disabled={loading}
-              >
-                {loading ? "Generating QR..." : "Pay via PayNow"}
-              </button>
-            </>
-          )}
-          {error && (
-            <div className="p-3 rounded-lg border text-[12px]" style={{ background: "#fff5f5", borderColor: "#fca5a5", color: "#991b1b" }}>
-              {error}
+      {/* PayNow — embedded QR (customer stays on page) */}
+      <HitPayMethodRow
+        expanded={expanded === "paynow"}
+        onToggle={() => setExpanded((p) => (p === "paynow" ? null : "paynow"))}
+        name="PayNow"
+        badgeLabel="QR"
+        badgeBg="#e7f7ef"
+        badgeColor="#1a6b3c"
+        icon={
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src="/paynow.png" alt="PayNow" className="h-[34px] w-auto object-contain" />
+        }
+      >
+        {qrDataUrl ? (
+          <div className="flex flex-col gap-4">
+            <div className="rounded-[10px] p-[18px] text-center" style={{ border: "1px solid #e3e0d6" }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={qrDataUrl} alt="PayNow QR" className="w-[130px] h-[130px] mx-auto mb-2" />
+              <p className="text-[10.5px]" style={{ color: "#8b8f9a" }}>Scan with your banking app (PayNow)</p>
+              <p className="text-[9.5px]" style={{ color: "#aca795" }}>DBS · OCBC · UOB · and most PayNow banks</p>
             </div>
-          )}
-        </div>
-      ) : (
-        <div className="flex flex-col gap-4">
-          <p className="text-[12px] text-center" style={{ color: "#8b8f9a" }}>
-            Pay securely by Visa or Mastercard.
+            <div className="flex items-center justify-between px-3 py-2 rounded-[8px]" style={{ background: "#fdf3e0", border: "1px solid #eed9a3" }}>
+              <span className="text-[10.5px]" style={{ color: "#8a6a1f" }}>Waiting for payment</span>
+              <span className="text-[10px] flex items-center gap-1.5" style={{ color: "#8a6a1f" }}>
+                <span className="w-1.5 h-1.5 rounded-full animate-pulse inline-block" style={{ background: "#8a6a1f" }} />
+                Confirming
+              </span>
+            </div>
+            <button
+              className="w-full py-2.5 rounded-[8px] text-[11.5px] font-semibold"
+              style={{ border: "1px solid #d8d5c9", color: "#43485a" }}
+              onClick={handleCancel}
+            >
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-3">
+            <p className="text-[12px]" style={{ color: "#8b8f9a" }}>
+              A PayNow QR code will be generated for {totalAmount.toLocaleString()}.
+            </p>
+            <button
+              className="w-full py-3 rounded-[8px] text-[12.5px] font-bold text-white disabled:opacity-60"
+              style={{ background: "#0f1f42" }}
+              onClick={handlePayNow}
+              disabled={loading}
+            >
+              {loading ? "Generating QR..." : "Pay via PayNow"}
+            </button>
+          </div>
+        )}
+      </HitPayMethodRow>
+
+      {/* Cards — redirect to HitPay hosted checkout */}
+      <HitPayMethodRow
+        expanded={expanded === "card"}
+        onToggle={() => setExpanded((p) => (p === "card" ? null : "card"))}
+        name="Cards"
+        badgeLabel="Redirect"
+        badgeBg="#eef2fb"
+        badgeColor="#1a3f8a"
+        icon={
+          <span className="flex items-center" style={{ gap: 7 }}>
+            <span
+              className="flex items-center justify-center bg-white"
+              style={{ width: 36, height: 24, border: "1px solid #e3e0d6", borderRadius: 4 }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/visa.svg" alt="Visa" className="max-w-[26px] max-h-[15px] object-contain" />
+            </span>
+            <span
+              className="flex items-center justify-center bg-white"
+              style={{ width: 36, height: 24, border: "1px solid #e3e0d6", borderRadius: 4 }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/mastercard.svg" alt="Mastercard" className="max-w-[26px] max-h-[18px] object-contain" />
+            </span>
+          </span>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <p className="text-[12px]" style={{ color: "#8b8f9a" }}>
+            You&apos;ll be redirected to HitPay to pay securely by Visa or Mastercard.
           </p>
-          {error && (
-            <div className="p-3 rounded-lg border text-[12px]" style={{ background: "#fff5f5", borderColor: "#fca5a5", color: "#991b1b" }}>
-              {error}
-            </div>
-          )}
           <button
             className="w-full py-3 rounded-[8px] text-[12.5px] font-bold text-white disabled:opacity-60"
             style={{ background: "#0f1f42" }}
@@ -510,6 +562,12 @@ function HitPaySection({
           <p className="text-center text-[9.5px]" style={{ color: "#aca795" }}>
             Powered by <span className="font-bold" style={{ color: "#0f1f42" }}>HitPay</span>
           </p>
+        </div>
+      </HitPayMethodRow>
+
+      {error && (
+        <div className="p-3 rounded-lg border text-[12px]" style={{ background: "#fff5f5", borderColor: "#fca5a5", color: "#991b1b" }}>
+          {error}
         </div>
       )}
     </div>
@@ -543,18 +601,29 @@ function PaymentContent() {
   useEffect(() => {
     if (searchParams.get("hitpay") !== "success") return;
     setHitpayReturn(true);
-    // Poll enrollment status until confirmed — webhook confirms asynchronously
-    hitpayReturnPollRef.current = setInterval(async () => {
+
+    let cancelled = false;
+
+    // Webhook confirms asynchronously — but it has usually already landed by the
+    // time HitPay redirects the user back, so check immediately rather than
+    // waiting a full interval, then poll for the rare case it arrives late.
+    async function check() {
       try {
         const res = await fetch(`/api/public/payments/hitpay/status?ref=${ref}`);
         const data = await res.json();
-        if (data.enrollmentStatus === "confirmed") {
-          clearInterval(hitpayReturnPollRef.current!);
+        if (!cancelled && data.enrollmentStatus === "confirmed") {
+          if (hitpayReturnPollRef.current) clearInterval(hitpayReturnPollRef.current);
           router.push(`/enroll/${params.slug}/checkout/success/?ref=${ref}`);
         }
       } catch { /* keep polling */ }
-    }, 3000);
-    return () => { if (hitpayReturnPollRef.current) clearInterval(hitpayReturnPollRef.current); };
+    }
+
+    check();
+    hitpayReturnPollRef.current = setInterval(check, 1500);
+    return () => {
+      cancelled = true;
+      if (hitpayReturnPollRef.current) clearInterval(hitpayReturnPollRef.current);
+    };
   }, [searchParams, ref, params.slug, router]);
 
   useEffect(() => {

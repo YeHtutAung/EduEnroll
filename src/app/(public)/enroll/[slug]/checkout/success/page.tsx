@@ -5,6 +5,14 @@ import { useSearchParams } from "next/navigation";
 import TrustedOfficialShell from "@/components/enrollment/TrustedOfficialShell";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
+import QRCode from "qrcode";
+
+interface TicketData {
+  jti: string;
+  tier: string;
+  admits: number;
+  jwt: string;
+}
 
 interface EnrollmentData {
   enrollment_ref: string;
@@ -18,6 +26,7 @@ interface EnrollmentData {
   card_brand?: string | null;
   card_last4?: string | null;
   payment_method?: string | null;
+  tickets?: TicketData[];
 }
 
 function SuccessContent() {
@@ -26,23 +35,262 @@ function SuccessContent() {
   const [data, setData] = useState<EnrollmentData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
+  const [savingImg, setSavingImg] = useState(false);
+  const [ticketQrUrls, setTicketQrUrls] = useState<Record<string, string>>({});
   const receiptRef = useRef<HTMLDivElement>(null);
+  const ticketRefs = useRef<(HTMLDivElement | null)[]>([]);
+
+  async function waitForImages(el: HTMLElement) {
+    const imgs = el.querySelectorAll("img");
+    await Promise.all(
+      Array.from(imgs).map(
+        (img) =>
+          new Promise<void>((resolve) => {
+            if (img.complete) return resolve();
+            img.onload = () => resolve();
+            img.onerror = () => resolve();
+          }),
+      ),
+    );
+  }
+
+  function loadImage(src: string): Promise<HTMLImageElement> {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = src;
+    });
+  }
+
+  function roundRectPath(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  // Render a single e-ticket to a PNG blob (canvas), mirroring the PDF layout.
+  async function renderTicketBlob(
+    ticket: TicketData,
+    i: number,
+    n: number,
+    qrUrl: string,
+  ): Promise<Blob | null> {
+    if (!data) return null;
+    const S = 6;
+    const W = 100 * S;
+    const H = 132 * S;
+    const m = 8 * S;
+    const cardW = W - 2 * m;
+    const cardH = H - 2 * m;
+    const canvas = document.createElement("canvas");
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    const font = (px: number, weight = "normal") => `${weight} ${px * S}px Helvetica, Arial, sans-serif`;
+
+    ctx.fillStyle = "#f7f5ef";
+    ctx.fillRect(0, 0, W, H);
+    ctx.fillStyle = "#0f1f42";
+    roundRectPath(ctx, m, m, cardW, cardH, 4 * S);
+    ctx.fill();
+
+    const padX = m + 8 * S;
+    ctx.textBaseline = "alphabetic";
+    ctx.fillStyle = "#d4af5a";
+    ctx.font = font(8, "bold");
+    ctx.textAlign = "left";
+    ctx.fillText((data.event_name || "").toUpperCase(), padX, m + 12 * S);
+    ctx.fillStyle = "#8a90a5";
+    ctx.font = font(7, "bold");
+    ctx.textAlign = "right";
+    ctx.fillText(`Ticket ${i + 1}/${n}`, W - padX, m + 12 * S);
+
+    ctx.fillStyle = "#ffffff";
+    ctx.font = font(20, "bold");
+    ctx.textAlign = "left";
+    ctx.fillText(ticket.tier, padX, m + 26 * S);
+
+    ctx.strokeStyle = "rgba(255,255,255,0.5)";
+    ctx.lineWidth = 0.5 * S;
+    ctx.setLineDash([1.5 * S, 1.5 * S]);
+    ctx.beginPath();
+    ctx.moveTo(padX, m + 31 * S);
+    ctx.lineTo(W - padX, m + 31 * S);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = "#8a90a5";
+    ctx.font = font(7);
+    ctx.fillText("ORDER REF", padX, m + 40 * S);
+    ctx.fillStyle = "#ffffff";
+    ctx.font = font(13, "bold");
+    ctx.fillText(data.enrollment_ref, padX, m + 47 * S);
+    ctx.fillStyle = "#8a90a5";
+    ctx.font = font(7);
+    ctx.fillText(`Ticket #${ticket.jti.slice(0, 8)}`, padX, m + 53 * S);
+
+    const qs = 44 * S;
+    const qx = (W - qs) / 2;
+    const qy = m + cardH - qs - 14 * S;
+    ctx.fillStyle = "#ffffff";
+    roundRectPath(ctx, qx - 3 * S, qy - 3 * S, qs + 6 * S, qs + 6 * S, 2 * S);
+    ctx.fill();
+    const qrImg = await loadImage(qrUrl);
+    ctx.drawImage(qrImg, qx, qy, qs, qs);
+    ctx.fillStyle = "#8a90a5";
+    ctx.font = font(6.5);
+    ctx.textAlign = "center";
+    ctx.fillText("Scan at entry", W / 2, qy + qs + 7 * S);
+
+    return new Promise((resolve) => canvas.toBlob((b) => resolve(b), "image/png"));
+  }
+
+  // Mobile-friendly save: PNG per ticket via the native share sheet
+  // (Save to Photos / Files), falling back to a direct image download.
+  async function handleSaveImage() {
+    if (savingImg || !data) return;
+    const tickets = data.tickets ?? [];
+    if (tickets.length === 0) return;
+
+    setSavingImg(true);
+    try {
+      const qrMap: Record<string, string> = { ...ticketQrUrls };
+      await Promise.all(
+        tickets.map(async (t) => {
+          if (!qrMap[t.jti]) qrMap[t.jti] = await QRCode.toDataURL(t.jwt, { width: 240, margin: 1 });
+        }),
+      );
+
+      const files: File[] = [];
+      for (let i = 0; i < tickets.length; i++) {
+        const blob = await renderTicketBlob(tickets[i], i, tickets.length, qrMap[tickets[i].jti]);
+        if (!blob) continue;
+        const suffix = tickets.length > 1 ? `-${i + 1}` : "";
+        files.push(new File([blob], `eticket-${data.enrollment_ref}${suffix}.png`, { type: "image/png" }));
+      }
+      if (files.length === 0) return;
+
+      const nav = navigator as Navigator & {
+        canShare?: (d?: ShareData) => boolean;
+        share?: (d: ShareData) => Promise<void>;
+      };
+      if (nav.canShare && nav.share && nav.canShare({ files })) {
+        await nav.share({ files, title: "E-Ticket", text: `${data.event_name} e-ticket` });
+      } else {
+        for (const file of files) {
+          const url = URL.createObjectURL(file);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = file.name;
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+      }
+    } catch (err) {
+      // User cancelling the share sheet rejects with AbortError — not an error.
+      if ((err as { name?: string })?.name !== "AbortError") {
+        console.error("[ticket] Failed to save e-ticket image:", err);
+      }
+    } finally {
+      setSavingImg(false);
+    }
+  }
 
   async function handleDownload() {
-    if (!receiptRef.current || generating || !data) return;
+    if (generating || !data) return;
+    const tickets = data.tickets ?? [];
+
     setGenerating(true);
     try {
-      const imgs = receiptRef.current.querySelectorAll("img");
-      await Promise.all(
-        Array.from(imgs).map(
-          (img) =>
-            new Promise<void>((resolve) => {
-              if (img.complete) return resolve();
-              img.onload = () => resolve();
-              img.onerror = () => resolve();
-            }),
-        ),
-      );
+      if (tickets.length > 0) {
+        // Ensure a QR data URL exists for every ticket (in case download was
+        // clicked before the render effect populated ticketQrUrls). html2canvas
+        // cannot reliably rasterize a data-URI <img>, so we draw each ticket
+        // with jsPDF primitives and place the QR via addImage instead.
+        const qrMap: Record<string, string> = { ...ticketQrUrls };
+        await Promise.all(
+          tickets.map(async (t) => {
+            if (!qrMap[t.jti]) qrMap[t.jti] = await QRCode.toDataURL(t.jwt, { width: 240, margin: 1 });
+          }),
+        );
+
+        const W = 100;
+        const H = 132;
+        const m = 8;
+        const cardW = W - 2 * m;
+        const cardH = H - 2 * m;
+        const pdf = new jsPDF({ unit: "mm", format: [W, H] });
+
+        tickets.forEach((ticket, i) => {
+          if (i > 0) pdf.addPage([W, H]);
+
+          // Navy card
+          pdf.setFillColor(15, 31, 66);
+          pdf.roundedRect(m, m, cardW, cardH, 4, 4, "F");
+
+          const padX = m + 8;
+          // Event name (gold) + ticket index (right)
+          pdf.setFont("helvetica", "bold");
+          pdf.setTextColor(212, 175, 90);
+          pdf.setFontSize(8);
+          pdf.text((data.event_name || "").toUpperCase(), padX, m + 12);
+          pdf.setTextColor(138, 144, 165);
+          pdf.setFontSize(7);
+          pdf.text(`Ticket ${i + 1}/${tickets.length}`, W - padX, m + 12, { align: "right" });
+
+          // Tier (white, large)
+          pdf.setTextColor(255, 255, 255);
+          pdf.setFontSize(20);
+          pdf.text(ticket.tier, padX, m + 25);
+
+          // Dashed divider
+          pdf.setDrawColor(255, 255, 255);
+          pdf.setLineWidth(0.2);
+          pdf.setLineDashPattern([1, 1], 0);
+          pdf.line(padX, m + 31, W - padX, m + 31);
+          pdf.setLineDashPattern([], 0);
+
+          // Order ref + ticket id
+          pdf.setFont("helvetica", "normal");
+          pdf.setTextColor(138, 144, 165);
+          pdf.setFontSize(7);
+          pdf.text("ORDER REF", padX, m + 40);
+          pdf.setFont("helvetica", "bold");
+          pdf.setTextColor(255, 255, 255);
+          pdf.setFontSize(13);
+          pdf.text(data.enrollment_ref, padX, m + 47);
+          pdf.setFont("helvetica", "normal");
+          pdf.setTextColor(138, 144, 165);
+          pdf.setFontSize(7);
+          pdf.text(`Ticket #${ticket.jti.slice(0, 8)}`, padX, m + 53);
+
+          // QR on a white chip, centered near the bottom of the card
+          const qr = qrMap[ticket.jti];
+          if (qr) {
+            const qs = 44;
+            const qx = (W - qs) / 2;
+            const qy = m + cardH - qs - 14;
+            pdf.setFillColor(255, 255, 255);
+            pdf.roundedRect(qx - 3, qy - 3, qs + 6, qs + 6, 2, 2, "F");
+            pdf.addImage(qr, "PNG", qx, qy, qs, qs);
+            pdf.setTextColor(138, 144, 165);
+            pdf.setFontSize(6.5);
+            pdf.text("Scan at entry", W / 2, qy + qs + 7, { align: "center" });
+          }
+        });
+
+        pdf.save(`eticket-${data.enrollment_ref}.pdf`);
+        return;
+      }
+
+      if (!receiptRef.current) return;
+      await waitForImages(receiptRef.current);
       const canvas = await html2canvas(receiptRef.current, {
         scale: 2,
         useCORS: true,
@@ -86,6 +334,26 @@ function SuccessContent() {
     );
   }, [ref]);
 
+  useEffect(() => {
+    const tickets = data?.tickets ?? [];
+    if (tickets.length === 0) return;
+    let cancelled = false;
+
+    (async () => {
+      const entries = await Promise.all(
+        tickets.map(async (t) => {
+          const dataUrl = await QRCode.toDataURL(t.jwt, { width: 240, margin: 1 });
+          return [t.jti, dataUrl] as const;
+        }),
+      );
+      if (!cancelled) setTicketQrUrls(Object.fromEntries(entries));
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [data]);
+
   if (error || !data) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-5" style={{ background: "#f7f5ef" }}>
@@ -110,6 +378,7 @@ function SuccessContent() {
     : "—";
 
   const ticketSummary = data.items.map((i) => `${i.level} × ${i.quantity}`).join(", ");
+  const tickets = data.tickets ?? [];
 
   return (
     <TrustedOfficialShell orgName={data.event_name} logoUrl={data.logo_url} brandColor={data.brand_color} step="complete">
@@ -135,38 +404,98 @@ function SuccessContent() {
         </p>
       </div>
 
-      {/* Ticket stub */}
-      <div
-        className="rounded-[12px] p-4 mb-4 relative overflow-hidden"
-        style={{ background: "#0f1f42" }}
-      >
-        {/* Perforation strip — right edge */}
+      {/* Ticket stub(s) — one real, scannable e-ticket per admission when confirmed */}
+      {tickets.length > 0 ? (
+        <div className="mb-4 space-y-3">
+          {tickets.map((ticket, i) => (
+            <div
+              key={ticket.jti}
+              ref={(el) => {
+                ticketRefs.current[i] = el;
+              }}
+              className="rounded-[12px] p-4 relative overflow-hidden"
+              style={{ background: "#0f1f42" }}
+            >
+              {/* Perforation strip — right edge */}
+              <div
+                className="absolute right-0 top-0 bottom-0 w-[6px]"
+                style={{
+                  background:
+                    "repeating-linear-gradient(to bottom, #f7f5ef 0px, #f7f5ef 8px, #0f1f42 8px, #0f1f42 14px)",
+                }}
+              />
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[9px] font-bold tracking-[1.8px] uppercase" style={{ color: "#d4af5a" }}>
+                  {data.event_name}
+                </p>
+                <p className="text-[8.5px] font-bold" style={{ color: "#8a90a5" }}>
+                  Ticket {i + 1}/{tickets.length}
+                </p>
+              </div>
+              <p className="text-[14px] font-extrabold text-white mb-1">{ticket.tier}</p>
+              <hr className="my-3" style={{ borderColor: "rgba(255,255,255,.25)", borderStyle: "dashed" }} />
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[8.5px] mb-0.5" style={{ color: "#8a90a5" }}>ORDER REF</p>
+                  <p className="text-[13px] font-extrabold text-white">{data.enrollment_ref}</p>
+                  <p className="text-[8.5px] mt-1.5" style={{ color: "#8a90a5" }}>
+                    Ticket #{ticket.jti.slice(0, 8)}
+                  </p>
+                </div>
+                {ticketQrUrls[ticket.jti] ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={ticketQrUrls[ticket.jti]}
+                    alt={`QR code for ticket ${ticket.jti.slice(0, 8)}`}
+                    className="w-[64px] h-[64px] rounded-[4px] bg-white p-1 shrink-0"
+                  />
+                ) : (
+                  <div
+                    className="w-[64px] h-[64px] rounded-[4px] shrink-0"
+                    style={{
+                      background:
+                        "repeating-linear-gradient(45deg, #fff 0px, #fff 4px, #0f1f42 4px, #0f1f42 8px)",
+                      opacity: 0.2,
+                    }}
+                  />
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
         <div
-          className="absolute right-0 top-0 bottom-0 w-[6px]"
-          style={{
-            background: "repeating-linear-gradient(to bottom, #f7f5ef 0px, #f7f5ef 8px, #0f1f42 8px, #0f1f42 14px)",
-          }}
-        />
-        <p className="text-[9px] font-bold tracking-[1.8px] uppercase mb-2" style={{ color: "#d4af5a" }}>
-          {data.event_name}
-        </p>
-        <p className="text-[14px] font-extrabold text-white mb-1">{ticketSummary}</p>
-        <hr className="my-3" style={{ borderColor: "rgba(255,255,255,.25)", borderStyle: "dashed" }} />
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-[8.5px] mb-0.5" style={{ color: "#8a90a5" }}>ORDER REF</p>
-            <p className="text-[13px] font-extrabold text-white">{data.enrollment_ref}</p>
-          </div>
-          {/* QR placeholder */}
+          className="rounded-[12px] p-4 mb-4 relative overflow-hidden"
+          style={{ background: "#0f1f42" }}
+        >
+          {/* Perforation strip — right edge */}
           <div
-            className="w-[42px] h-[42px] rounded-[4px]"
+            className="absolute right-0 top-0 bottom-0 w-[6px]"
             style={{
-              background: "repeating-linear-gradient(45deg, #fff 0px, #fff 4px, #0f1f42 4px, #0f1f42 8px)",
-              opacity: 0.2,
+              background: "repeating-linear-gradient(to bottom, #f7f5ef 0px, #f7f5ef 8px, #0f1f42 8px, #0f1f42 14px)",
             }}
           />
+          <p className="text-[9px] font-bold tracking-[1.8px] uppercase mb-2" style={{ color: "#d4af5a" }}>
+            {data.event_name}
+          </p>
+          <p className="text-[14px] font-extrabold text-white mb-1">{ticketSummary}</p>
+          <hr className="my-3" style={{ borderColor: "rgba(255,255,255,.25)", borderStyle: "dashed" }} />
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-[8.5px] mb-0.5" style={{ color: "#8a90a5" }}>ORDER REF</p>
+              <p className="text-[13px] font-extrabold text-white">{data.enrollment_ref}</p>
+            </div>
+            {/* QR placeholder */}
+            <div
+              className="w-[42px] h-[42px] rounded-[4px]"
+              style={{
+                background: "repeating-linear-gradient(45deg, #fff 0px, #fff 4px, #0f1f42 4px, #0f1f42 8px)",
+                opacity: 0.2,
+              }}
+            />
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Payment summary */}
       <div className="rounded-[9px] p-4 mb-5" style={{ background: "#ffffff", border: "1px solid #e3e0d6" }}>
@@ -180,7 +509,8 @@ function SuccessContent() {
         </div>
       </div>
 
-      {/* Hidden receipt for PDF capture */}
+      {/* Hidden receipt for PDF capture — fallback when no per-ticket QR data is available */}
+      {tickets.length === 0 && (
       <div style={{ position: "absolute", left: "-9999px", top: 0 }}>
         <div
           ref={receiptRef}
@@ -243,8 +573,25 @@ function SuccessContent() {
           </div>
         </div>
       </div>
+      )}
 
-      {/* Download CTA */}
+      {/* Save to Photos / Files (mobile-friendly, image via native share sheet) */}
+      {tickets.length > 0 && (
+        <button
+          onClick={handleSaveImage}
+          disabled={savingImg}
+          className="w-full py-3 rounded-[8px] text-[11.5px] font-bold text-white mb-2.5"
+          style={{
+            background: "#0f1f42",
+            cursor: savingImg ? "wait" : "pointer",
+            opacity: savingImg ? 0.6 : 1,
+          }}
+        >
+          {savingImg ? "Preparing…" : "SAVE E-TICKET"}
+        </button>
+      )}
+
+      {/* Download CTA (PDF) */}
       <button
         onClick={handleDownload}
         disabled={generating}
@@ -257,7 +604,7 @@ function SuccessContent() {
           opacity: generating ? 0.6 : 1,
         }}
       >
-        {generating ? "Generating..." : "DOWNLOAD E-TICKET"}
+        {generating ? "Generating..." : "DOWNLOAD PDF"}
       </button>
     </TrustedOfficialShell>
   );

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getStripe } from "@/lib/stripe";
+import { issueTicketsForEnrollment } from "@/server/tickets/issueTickets";
 import { sendEmail, enrollmentApprovedEmail } from "@/lib/email";
 import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
@@ -39,6 +40,15 @@ export async function POST(request: NextRequest) {
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
 
+    // Only confirm when Stripe reports the session is actually paid. For
+    // asynchronous payment methods, checkout.session.completed can fire with
+    // payment_status 'unpaid' / 'no_payment_required'; confirming then would
+    // mark an unpaid enrollment as paid.
+    if (session.payment_status !== "paid") {
+      console.warn("[stripe-webhook] session completed but not paid:", session.payment_status);
+      return NextResponse.json({ received: true });
+    }
+
     // Find payment by stripe_session_id
     const { data: payment } = (await supabase
       .from("payments")
@@ -75,6 +85,12 @@ export async function POST(request: NextRequest) {
       .update({ status: "confirmed" } as never)
       .eq("id", payment.enrollment_id);
 
+    try {
+      await issueTicketsForEnrollment(payment.enrollment_id);
+    } catch (err) {
+      console.error("[tickets] issueTicketsForEnrollment failed:", err);
+    }
+
     // ── Send notifications (same pattern as abank callback) ──
     const { data: enrollment } = (await supabase
       .from("enrollments")
@@ -98,9 +114,9 @@ export async function POST(request: NextRequest) {
     if (enrollment) {
       const enrollEmail = enrollment.email
         || resolveEmailFromFormData(enrollment.form_data as Record<string, string> | null);
-      const host = request.headers.get("host") ?? "localhost:3005";
-      const proto = host.startsWith("localhost") ? "http" : "https";
-      const statusUrl = `${proto}://${host}/status?ref=${enrollment.enrollment_ref}`;
+      // Use the configured app origin, not the inbound Host header (spoofable).
+      const appOrigin = process.env.NEXT_PUBLIC_APP_URL ?? "https://kuunyi.com";
+      const statusUrl = `${appOrigin}/status?ref=${enrollment.enrollment_ref}`;
 
       // Resolve class level
       let classLevel = "Class";

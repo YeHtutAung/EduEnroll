@@ -123,9 +123,11 @@ function Toggle({
 // ── Add Bank Account Modal ────────────────────────────────────────────────────
 
 function AddBankModal({
+  tenantId,
   onClose,
   onAdded,
 }: {
+  tenantId: string;
   onClose: () => void;
   onAdded: (account: BankAccount) => void;
 }) {
@@ -163,7 +165,8 @@ function AddBankModal({
       // Upload QR code image if provided
       if (qrFile) {
         const ext = qrFile.name.split(".").pop() ?? "png";
-        const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+        // Tenant-prefixed path — required by the qr-codes storage RLS policy.
+        const path = `${tenantId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
         const { error: uploadErr } = await supabase.storage
           .from("qr-codes")
           .upload(path, qrFile);
@@ -2531,6 +2534,7 @@ function SettingsContent() {
       {/* ── Modals ──────────────────────────────────────────────────────── */}
       {showAddAccount && (
         <AddBankModal
+          tenantId={tenantId}
           onClose={() => setShowAddAccount(false)}
           onAdded={(account) => {
             setAccounts((prev) => [...prev, account]);

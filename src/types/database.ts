@@ -292,6 +292,34 @@ export interface EnrollmentItem {
   created_at: string;
 }
 
+export interface Ticket {
+  id: string;
+  tenant_id: string;
+  intake_id: string;
+  enrollment_id: string;
+  class_id: string;
+  tier: string;
+  admits: number;
+  seat_no: number;
+  exp: string;
+  kid: string;
+  status: "valid" | "void";
+  first_scan_at: string | null;
+  first_scan_gate: string | null;
+  created_at: string;
+}
+
+export interface ScannerApiKey {
+  id: string;
+  tenant_id: string;
+  name: string;
+  key_hash: string;
+  key_prefix: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+}
+
 export interface ClassChannel {
   id: string;
   tenant_id: string;
@@ -312,17 +340,6 @@ export interface BankAccount {
   account_holder: string;
   is_active: boolean;
   qr_code_url: string | null;
-  created_at: string;
-}
-
-export interface StaffInvite {
-  id: string;
-  tenant_id: string;
-  email: string;
-  token: string;
-  invited_by: string | null;
-  accepted_at: string | null;
-  expires_at: string;
   created_at: string;
 }
 
@@ -370,11 +387,6 @@ export interface Database {
         Row: EnrollmentItem;
         Insert: Omit<EnrollmentItem, "id" | "created_at">;
         Update: Partial<Omit<EnrollmentItem, "id" | "created_at">>;
-      };
-      staff_invites: {
-        Row: StaffInvite;
-        Insert: Omit<StaffInvite, "id" | "token" | "accepted_at" | "expires_at" | "created_at">;
-        Update: Partial<Omit<StaffInvite, "id" | "token" | "created_at">>;
       };
     };
     Views: Record<string, never>;
