@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
+import { tenantOrigin } from "@/lib/origin";
 import { createEnrollment } from "@/server/enrollment/createEnrollment";
 import { createCartEnrollment } from "@/server/enrollment/createCartEnrollment";
 import { sendEnrollmentConfirmationEmail } from "@/server/enrollment/enrollmentEmails";
@@ -60,8 +61,6 @@ export async function POST(request: NextRequest) {
     const tenantInfo = await fetchTenantInfo(supabase, result.tenant_id);
     const currency = tenantInfo?.currency ?? "MMK";
 
-    const host = request.headers.get("host") ?? "localhost:3005";
-    const proto = host.startsWith("localhost") ? "http" : "https";
     sendEnrollmentConfirmationEmail({
       fd,
       enrollmentRef: result.enrollment_ref,
@@ -71,7 +70,7 @@ export async function POST(request: NextRequest) {
         )
         .join(", "),
       feeAmount: result.total_fee,
-      baseUrl: `${proto}://${host}`,
+      baseUrl: tenantOrigin(tenantInfo?.subdomain),
       tenant: tenantInfo ?? { name: "", org_type: "", logo_url: null, email_on_enroll: false, currency },
     });
 
@@ -119,14 +118,12 @@ export async function POST(request: NextRequest) {
   const tenantInfo = await fetchTenantInfo(supabase, result.tenant_id);
   const currency = tenantInfo?.currency ?? "MMK";
 
-  const host = request.headers.get("host") ?? "localhost:3005";
-  const proto = host.startsWith("localhost") ? "http" : "https";
   sendEnrollmentConfirmationEmail({
     fd,
     enrollmentRef: result.enrollment_ref,
     classLevel: result.class_level,
     feeAmount: result.fee_amount * (result.quantity ?? 1),
-    baseUrl: `${proto}://${host}`,
+    baseUrl: tenantOrigin(tenantInfo?.subdomain),
     tenant: tenantInfo ?? { name: "", org_type: "", logo_url: null, email_on_enroll: false, currency },
   });
 
@@ -157,10 +154,10 @@ export async function POST(request: NextRequest) {
 async function fetchTenantInfo(supabase: ReturnType<typeof createAdminClient>, tenantId: string) {
   const { data } = await supabase
     .from("tenants")
-    .select("name, org_type, logo_url, email_on_enroll, currency")
+    .select("name, org_type, logo_url, email_on_enroll, currency, subdomain")
     .eq("id", tenantId)
     .single() as {
-    data: { name: string; org_type: string; logo_url: string | null; email_on_enroll: boolean; currency: string } | null;
+    data: { name: string; org_type: string; logo_url: string | null; email_on_enroll: boolean; currency: string; subdomain: string | null } | null;
     error: unknown;
   };
   return data;
