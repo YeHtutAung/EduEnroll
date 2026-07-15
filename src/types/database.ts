@@ -65,7 +65,15 @@ export type SubmitEnrollmentResult =
     }
   | {
       success: false;
-      error: "CLASS_NOT_FOUND" | "CLASS_NOT_OPEN" | "CLASS_FULL" | "NOT_ENOUGH_SEATS" | "EXCEEDS_MAX_TICKETS" | "ENROLLMENT_NOT_OPEN" | "ENROLLMENT_CLOSED" | "INTERNAL_ERROR";
+      error:
+        | "CLASS_NOT_FOUND"
+        | "CLASS_NOT_OPEN"
+        | "CLASS_FULL"
+        | "NOT_ENOUGH_SEATS"
+        | "EXCEEDS_MAX_TICKETS"
+        | "ENROLLMENT_NOT_OPEN"
+        | "ENROLLMENT_CLOSED"
+        | "INTERNAL_ERROR";
       class_status?: ClassStatus;
       opens_at?: string;
       closed_at?: string;
@@ -99,15 +107,15 @@ export interface Tenant {
   name: string;
   subdomain: string;
   logo_url: string | null;
-  currency: string;             // default 'MMK'
-  language: string;             // default 'my+en'
+  currency: string; // default 'MMK'
+  language: string; // default 'my+en'
   plan: PlanType;
-  org_type: string;             // default 'language_school'
-  label_intake: string;         // default 'Intake'
-  label_class: string;          // default 'Class Type'
-  label_student: string;        // default 'Student'
-  label_seat: string;           // default 'Seat'
-  label_fee: string;            // default 'Fee'
+  org_type: string; // default 'language_school'
+  label_intake: string; // default 'Intake'
+  label_class: string; // default 'Class Type'
+  label_student: string; // default 'Student'
+  label_seat: string; // default 'Seat'
+  label_fee: string; // default 'Fee'
   messenger_enabled: boolean;
   messenger_page_id: string | null;
   messenger_page_token: string | null;
@@ -115,8 +123,8 @@ export interface Tenant {
   messenger_greeting: string | null;
   handoff_timeout_min: number;
   menu_buttons: MenuButton[] | null;
-  auto_cancel_hours: number;        // default 72, 0 = disabled
-  email_on_enroll: boolean;         // default false — send confirmation email on enrollment
+  auto_cancel_hours: number; // default 72, 0 = disabled
+  email_on_enroll: boolean; // default false — send confirmation email on enrollment
   payment_mode: "bank_transfer" | "mmqr" | "stripe";
   mmqr_provider: "abank" | "mmpay";
   telegram_auto_send_invite: boolean;
@@ -134,6 +142,37 @@ export type TemplateId =
   | "ev-corporate"
   | "ev-trusted-official";
 
+export type SponsorMark = "square" | "circle" | "diamond" | "ring";
+
+export interface Sponsor {
+  name: string;
+  logo_url?: string | null;
+  url?: string | null;
+  mark?: SponsorMark;
+  mark_color?: string;
+}
+
+export interface SponsorPlacements {
+  presenting: Sponsor | null;
+  partners: Sponsor[];
+  supported_by: Sponsor[];
+}
+
+export const DEFAULT_SPONSOR_PLACEMENTS: SponsorPlacements = {
+  presenting: { name: "Northwind", mark: "circle", mark_color: "#d4af5a" },
+  partners: [
+    { name: "Vertex", mark: "square", mark_color: "#0f1f42" },
+    { name: "Lumen", mark: "circle", mark_color: "#b7912b" },
+    { name: "Nexa", mark: "diamond", mark_color: "#0f1f42" },
+    { name: "Orbit", mark: "ring", mark_color: "#0f1f42" },
+  ],
+  supported_by: [
+    { name: "Vertex", mark: "square", mark_color: "#0f1f42" },
+    { name: "Lumen", mark: "circle", mark_color: "#b7912b" },
+    { name: "Nexa", mark: "diamond", mark_color: "#0f1f42" },
+  ],
+};
+
 export interface TenantAppearance {
   id: string;
   tenant_id: string;
@@ -144,6 +183,7 @@ export interface TenantAppearance {
   cta_button_text: string;
   logo_url: string | null;
   hero_url: string | null;
+  sponsor_config: SponsorPlacements | null;
   updated_at: string;
 }
 
@@ -155,12 +195,13 @@ export const DEFAULT_APPEARANCE: Omit<TenantAppearance, "id" | "tenant_id" | "up
   cta_button_text: "Enroll Now",
   logo_url: null,
   hero_url: null,
+  sponsor_config: null,
 };
 
 export interface TelegramAdminRequest {
   id: string;
   tenant_id: string;
-  chat_id: number;       // bigint in DB
+  chat_id: number; // bigint in DB
   name: string;
   username: string | null;
   status: "pending" | "approved" | "rejected";
@@ -173,7 +214,7 @@ export interface TenantBot {
   id: string;
   tenant_id: string;
   bot_type: BotType;
-  bot_token: string | null;       // AES-256-GCM encrypted
+  bot_token: string | null; // AES-256-GCM encrypted
   bot_username: string | null;
   webhook_secret: string | null;
   enabled: boolean;
@@ -183,7 +224,7 @@ export interface TenantBot {
 
 export interface TenantTelegramConfig {
   tenant_id: string;
-  allowed_chat_ids: number[] | null;  // bigint[] — whitelisted support bot admin chat IDs
+  allowed_chat_ids: number[] | null; // bigint[] — whitelisted support bot admin chat IDs
   enabled: boolean;
   enable_join_requests: boolean;
   enable_phone_flow: boolean;
@@ -192,7 +233,7 @@ export interface TenantTelegramConfig {
 }
 
 export interface User {
-  id: string;                   // matches auth.users.id
+  id: string; // matches auth.users.id
   tenant_id: string;
   email: string;
   role: UserRole;
@@ -204,9 +245,9 @@ export interface User {
 export interface Intake {
   id: string;
   tenant_id: string;
-  name: string;                 // e.g. "April 2026 Intake" / "ဧပြီ ၂၀၂၆ စာရင်းသွင်းမှု"
+  name: string; // e.g. "April 2026 Intake" / "ဧပြီ ၂၀၂၆ စာရင်းသွင်းမှု"
   year: number;
-  slug: string;                 // stable URL slug, set once on creation (e.g. "april-2026")
+  slug: string; // stable URL slug, set once on creation (e.g. "april-2026")
   hero_image_url: string | null; // hero banner for public enrollment page
   status: IntakeStatus;
   created_at: string;
@@ -237,12 +278,12 @@ export interface Class {
 
 export interface Enrollment {
   id: string;
-  enrollment_ref: string;       // e.g. "NM-2026-00042" (auto-generated)
-  class_id: string | null;       // null for cart enrollments (uses enrollment_items)
+  enrollment_ref: string; // e.g. "NM-2026-00042" (auto-generated)
+  class_id: string | null; // null for cart enrollments (uses enrollment_items)
   tenant_id: string;
-  student_name_en: string;      // name in English
+  student_name_en: string; // name in English
   student_name_mm: string | null; // name in Myanmar script
-  nrc_number: string | null;    // Myanmar National Registration Card
+  nrc_number: string | null; // Myanmar National Registration Card
   phone: string;
   email: string | null;
   form_data: Record<string, string> | null;
@@ -267,7 +308,7 @@ export interface Payment {
   bank_reference: string | null;
   admin_note: string | null;
   received_amount: number | null;
-  payment_method: string | null;        // 'manual_upload' | 'abank_mmqr' | 'mmqr' | 'stripe'
+  payment_method: string | null; // 'manual_upload' | 'abank_mmqr' | 'mmqr' | 'stripe'
   payment_ref: string | null;
   mmqr_status: string | null;
   paid_at: string | null;
@@ -275,9 +316,9 @@ export interface Payment {
   stripe_payment_intent_id: string | null;
   payer_institution: string | null;
   status: PaymentStatus;
-  verified_by: string | null;        // references users.id
-  verified_by_agent: number | null;  // telegram chat_id of agent verifier
-  hitpay_payment_id: string | null;  // HitPay payment request ID
+  verified_by: string | null; // references users.id
+  verified_by_agent: number | null; // telegram chat_id of agent verifier
+  hitpay_payment_id: string | null; // HitPay payment request ID
   verified_at: string | null;
   created_at: string;
 }
@@ -405,12 +446,12 @@ export interface Database {
       };
       submit_enrollment: {
         Args: {
-          p_class_id:         string;
-          p_student_name_en:  string;
-          p_phone:            string;
+          p_class_id: string;
+          p_student_name_en: string;
+          p_phone: string;
           p_student_name_mm?: string | null;
-          p_nrc_number?:      string | null;
-          p_email?:           string | null;
+          p_nrc_number?: string | null;
+          p_email?: string | null;
         };
         Returns: SubmitEnrollmentResult;
       };
