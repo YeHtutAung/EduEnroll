@@ -216,21 +216,27 @@ function SuccessContent() {
     ctx.textAlign = "left";
     ctx.fillText((data.event_name || "").toUpperCase(), padX, m + 12 * S);
     if (sponsorConfig.presenting) {
+      const presentingHasLogo = Boolean(sponsorConfig.presenting.logo_url);
       ctx.fillStyle = "#8a90a5";
       ctx.font = font(5.5, "bold");
       ctx.textAlign = "right";
       ctx.fillText("PRESENTED BY", W - padX, m + 8 * S);
+      if (presentingHasLogo) {
+        ctx.fillStyle = "#ffffff";
+        roundRectPath(ctx, W - padX - 38 * S, m + 9 * S, 38 * S, 12 * S, 2 * S);
+        ctx.fill();
+      }
       ctx.font = font(7.5, "bold");
       await drawCanvasSponsor(
         ctx,
         sponsorConfig.presenting,
         W - padX,
-        m + 13 * S,
-        10,
+        m + (presentingHasLogo ? 15 : 13) * S,
+        presentingHasLogo ? 8 : 10,
         34,
         S,
         "right",
-        true,
+        !presentingHasLogo,
       );
     } else {
       ctx.fillStyle = "#8a90a5";
@@ -475,11 +481,24 @@ function SuccessContent() {
           pdf.setFontSize(8);
           pdf.text((data.event_name || "").toUpperCase(), padX, m + 12);
           if (sponsorConfig.presenting) {
+            const presentingHasLogo = Boolean(sponsorConfig.presenting.logo_url);
             pdf.setTextColor(138, 144, 165);
             pdf.setFontSize(5.5);
             pdf.text("PRESENTED BY", W - padX, m + 8, { align: "right" });
+            if (presentingHasLogo) {
+              pdf.setFillColor(255, 255, 255);
+              pdf.roundedRect(W - padX - 38, m + 9, 38, 10, 2, 2, "F");
+            }
             pdf.setFontSize(7.5);
-            drawPdfSponsor(sponsorConfig.presenting, W - padX, m + 13, 3.4, 34, "right", true);
+            drawPdfSponsor(
+              sponsorConfig.presenting,
+              W - padX,
+              m + (presentingHasLogo ? 14 : 13),
+              presentingHasLogo ? 5.5 : 3.4,
+              34,
+              "right",
+              !presentingHasLogo,
+            );
           } else {
             pdf.setTextColor(138, 144, 165);
             pdf.setFontSize(7);
