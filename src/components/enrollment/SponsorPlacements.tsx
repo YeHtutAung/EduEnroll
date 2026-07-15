@@ -113,26 +113,15 @@ function SponsorArtwork({
 
 export function PresentingSponsorBanner({ sponsor }: { sponsor: Sponsor | null }) {
   if (!sponsor) return null;
-  const hasLogo = Boolean(safeLogoUrl(sponsor.logo_url));
   return (
-    <div className="mx-[22px] mb-4 rounded-[10px] bg-[#0f1f42] px-[14px] py-3">
-      <p className="mb-1 text-[8px] font-bold tracking-[1.5px] text-[#d4af5a]">PRESENTED BY</p>
+    <div className="mx-[22px] mb-5 border-y border-[#d4af5a] py-5 text-center">
+      <p className="mb-3 text-[9px] font-bold tracking-[1.8px] text-[#b7912b]">PRESENTED BY</p>
       <SponsorLink
         sponsor={sponsor}
-        className={
-          hasLogo
-            ? "flex min-h-[84px] w-full items-center justify-center rounded-lg bg-white px-5 py-3 no-underline"
-            : "inline-flex min-h-5 items-center gap-[7px] no-underline"
-        }
+        className="flex min-h-[72px] w-full items-center justify-center px-5 no-underline"
       >
-        <span className="inline-flex max-w-full items-center justify-center gap-[7px] text-[13px] font-extrabold tracking-[-0.3px]">
-          <SponsorArtwork
-            sponsor={sponsor}
-            markSize={20}
-            maxLogoWidth={280}
-            maxLogoHeight={60}
-            light
-          />
+        <span className="inline-flex max-w-full items-center justify-center gap-2 text-[15px] font-extrabold tracking-[-0.3px]">
+          <SponsorArtwork sponsor={sponsor} markSize={28} maxLogoWidth={260} maxLogoHeight={72} />
         </span>
       </SponsorLink>
     </div>
@@ -149,19 +138,19 @@ export function SponsorLogoWall({ sponsors }: { sponsors: Sponsor[] }) {
       >
         OUR PARTNERS
       </h2>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-2 gap-x-5 gap-y-6 min-[420px]:grid-cols-3">
         {sponsors.map((sponsor, index) => (
           <SponsorLink
             key={`${sponsor.name}-${index}`}
             sponsor={sponsor}
-            className="flex h-24 min-w-0 items-center justify-center gap-1.5 rounded-[10px] border border-[#e3e0d6] bg-white px-4 no-underline shadow-sm transition-colors hover:border-[#d4af5a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4af5a]"
+            className="flex h-20 min-w-0 items-center justify-center gap-1.5 px-2 no-underline opacity-90 transition-all hover:scale-[1.03] hover:opacity-100 focus-visible:rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#d4af5a]"
           >
             <span className="inline-flex min-w-0 items-center justify-center gap-1.5 overflow-hidden text-[12px] font-extrabold tracking-[-0.3px]">
               <SponsorArtwork
                 sponsor={sponsor}
                 markSize={14}
-                maxLogoWidth={180}
-                maxLogoHeight={64}
+                maxLogoWidth={132}
+                maxLogoHeight={58}
               />
             </span>
           </SponsorLink>

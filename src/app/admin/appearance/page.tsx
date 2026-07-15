@@ -323,6 +323,88 @@ function PublicTemplateThumbnail({ id, primaryColor }: { id: TemplateId; primary
 
 // ─── Image uploader ───────────────────────────────────────────────────────────
 
+async function prepareSponsorLogo(file: File): Promise<File> {
+  if (file.type === "image/gif" || typeof createImageBitmap === "undefined") return file;
+
+  let bitmap: ImageBitmap | null = null;
+  try {
+    bitmap = await createImageBitmap(file);
+    const maxDimension = 2400;
+    const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const source = document.createElement("canvas");
+    source.width = width;
+    source.height = height;
+    const sourceContext = source.getContext("2d", { willReadFrequently: true });
+    if (!sourceContext) return file;
+    sourceContext.drawImage(bitmap, 0, 0, width, height);
+
+    const pixels = sourceContext.getImageData(0, 0, width, height).data;
+    let hasTransparency = false;
+    for (let offset = 3; offset < pixels.length; offset += 4) {
+      if (pixels[offset] < 250) {
+        hasTransparency = true;
+        break;
+      }
+    }
+
+    let minX = width;
+    let minY = height;
+    let maxX = -1;
+    let maxY = -1;
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const offset = (y * width + x) * 4;
+        const alpha = pixels[offset + 3];
+        const nearWhite =
+          pixels[offset] > 245 && pixels[offset + 1] > 245 && pixels[offset + 2] > 245;
+        const isArtwork = hasTransparency ? alpha > 16 : alpha > 16 && !nearWhite;
+        if (!isArtwork) continue;
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+      }
+    }
+    if (maxX < minX || maxY < minY) return file;
+
+    const contentWidth = maxX - minX + 1;
+    const contentHeight = maxY - minY + 1;
+    const padding = Math.max(4, Math.round(Math.max(contentWidth, contentHeight) * 0.04));
+    const cropX = Math.max(0, minX - padding);
+    const cropY = Math.max(0, minY - padding);
+    const cropWidth = Math.min(width - cropX, contentWidth + padding * 2);
+    const cropHeight = Math.min(height - cropY, contentHeight + padding * 2);
+
+    const output = document.createElement("canvas");
+    output.width = cropWidth;
+    output.height = cropHeight;
+    const outputContext = output.getContext("2d");
+    if (!outputContext) return file;
+    outputContext.drawImage(
+      source,
+      cropX,
+      cropY,
+      cropWidth,
+      cropHeight,
+      0,
+      0,
+      cropWidth,
+      cropHeight,
+    );
+
+    const blob = await new Promise<Blob | null>((resolve) => output.toBlob(resolve, "image/png"));
+    if (!blob || blob.size > 5 * 1024 * 1024) return file;
+    const basename = file.name.replace(/\.[^.]+$/, "") || "sponsor-logo";
+    return new File([blob], `${basename}.png`, { type: "image/png" });
+  } catch {
+    return file;
+  } finally {
+    bitmap?.close();
+  }
+}
+
 function ImageUploader({
   label,
   type,
@@ -343,8 +425,9 @@ function ImageUploader({
   async function handleFile(file: File) {
     setUploading(true);
     setError(null);
+    const uploadFile = type === "sponsor" ? await prepareSponsorLogo(file) : file;
     const fd = new FormData();
-    fd.append("file", file);
+    fd.append("file", uploadFile);
     fd.append("type", type);
     const res = await fetch("/api/admin/appearance/upload", { method: "POST", body: fd });
     const data = await res.json();
@@ -809,11 +892,11 @@ export default function AppearancePage() {
             <div className="mb-6 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-xs leading-relaxed text-blue-900">
               <p className="font-semibold">Recommended logo sizes (2× export)</p>
               <p className="mt-1">
-                Presenting: 560×120 px · Partners: 360×128 px · Supported by: 240×56 px
+                Presenting: 520×144 px · Partners: 280×120 px · Supported by: 240×56 px
               </p>
               <p className="mt-1 text-blue-700">
                 Use a landscape transparent PNG or WebP with the artwork tightly cropped and minimal
-                empty padding. Maximum file size: 5 MB.
+                empty padding. New uploads are automatically trimmed. Maximum file size: 5 MB.
               </p>
             </div>
 
@@ -848,7 +931,7 @@ export default function AppearancePage() {
                   <SponsorEditorCard
                     sponsor={config.sponsor_config.presenting}
                     label="Presenting sponsor"
-                    logoHint="Recommended: 560×120 px. Displays up to 280×60 px on a white stage."
+                    logoHint="Recommended: 520×144 px. Displays up to 260×72 px."
                     onChange={(sponsor) =>
                       setConfig((current) => ({
                         ...current,
@@ -892,7 +975,7 @@ export default function AppearancePage() {
                       key={`partner-${index}`}
                       sponsor={sponsor}
                       label={`Partner ${index + 1}`}
-                      logoHint="Recommended: 360×128 px. Displays up to 180×64 px."
+                      logoHint="Recommended: 280×120 px. Displays up to 132×58 px."
                       onChange={(value) => updateSponsorList("partners", index, value)}
                       onRemove={() => removeSponsor("partners", index)}
                     />
