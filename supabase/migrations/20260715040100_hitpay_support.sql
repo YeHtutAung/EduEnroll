@@ -1,4 +1,4 @@
--- supabase/migrations/087_hitpay_support.sql
+-- Add HitPay payment reference support.
 
 -- 1. Add hitpay_payment_id to payments + index for fast webhook lookups
 ALTER TABLE public.payments

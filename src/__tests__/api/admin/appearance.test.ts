@@ -16,7 +16,7 @@ import { PUT } from "@/app/api/admin/appearance/route";
 const mockSingle = vi.fn().mockResolvedValue({ data: { template_id: "ls-classic" }, error: null });
 const mockSelect = vi.fn().mockReturnValue({ single: mockSingle });
 const mockUpsert = vi.fn().mockReturnValue({ select: mockSelect });
-const mockFrom  = vi.fn().mockReturnValue({ upsert: mockUpsert });
+const mockFrom = vi.fn().mockReturnValue({ upsert: mockUpsert });
 const mockSupabase = { from: mockFrom };
 
 function makeRequest(body: unknown) {
@@ -67,9 +67,58 @@ describe("PUT /api/admin/appearance — template_id validation", () => {
     expect(res.status).not.toBe(400);
   });
 
+  it("accepts a valid sponsor placement configuration", async () => {
+    const res = await PUT(
+      makeRequest({
+        sponsor_config: {
+          presenting: {
+            name: "Acme",
+            logo_url: "https://cdn.example.com/acme.svg",
+            url: "https://acme.example",
+          },
+          partners: [{ name: "Partner One", logo_url: "/partner-one.png" }],
+          supported_by: [],
+        },
+      }),
+    );
+    expect(res.status).not.toBe(400);
+  });
+
+  it("rejects unsafe sponsor links", async () => {
+    const res = await PUT(
+      makeRequest({
+        sponsor_config: {
+          presenting: { name: "Unsafe", url: "javascript:alert(1)" },
+          partners: [],
+          supported_by: [],
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/invalid url/i);
+  });
+
+  it("rejects sponsor lists over their placement limits", async () => {
+    const res = await PUT(
+      makeRequest({
+        sponsor_config: {
+          presenting: null,
+          partners: Array.from({ length: 13 }, (_, index) => ({ name: `Partner ${index}` })),
+          supported_by: [],
+        },
+      }),
+    );
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/at most 12/i);
+  });
+
   it("returns 500 when the database rejects the upsert (e.g. CHECK constraint violation)", async () => {
     // Simulate the DB rejecting the value (e.g. template_id not in CHECK constraint)
-    const failSingle = vi.fn().mockResolvedValue({ data: null, error: { message: "check constraint violated" } });
+    const failSingle = vi
+      .fn()
+      .mockResolvedValue({ data: null, error: { message: "check constraint violated" } });
     const failSelect = vi.fn().mockReturnValue({ single: failSingle });
     const failUpsert = vi.fn().mockReturnValue({ select: failSelect });
     vi.mocked(requireOwner).mockResolvedValueOnce({
