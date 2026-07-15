@@ -1,5 +1,5 @@
 -- ============================================================
--- 086_fix_auto_cancel_hours.sql
+-- 20260715040000_fix_auto_cancel_hours.sql
 -- Correct auto_cancel_hours values that were double-multiplied
 -- by migration 058. Each row was verified manually via audit query.
 -- Column stores minutes (despite name). Correct values confirmed by user.

@@ -17,11 +17,14 @@ export async function POST(request: NextRequest) {
   const type = formData.get("type") as string | null;
 
   if (!file) return NextResponse.json({ error: "No file provided." }, { status: 400 });
-  if (!["logo", "hero"].includes(type ?? "")) {
-    return NextResponse.json({ error: "type must be 'logo' or 'hero'." }, { status: 400 });
+  if (!["logo", "hero", "sponsor"].includes(type ?? "")) {
+    return NextResponse.json({ error: "Invalid appearance asset type." }, { status: 400 });
   }
   if (!ALLOWED_TYPES.includes(file.type)) {
-    return NextResponse.json({ error: "Invalid file type. Use JPEG, PNG, WebP, or GIF." }, { status: 400 });
+    return NextResponse.json(
+      { error: "Invalid file type. Use JPEG, PNG, WebP, or GIF." },
+      { status: 400 },
+    );
   }
   if (file.size > MAX_SIZE) {
     return NextResponse.json({ error: "File too large. Max 5 MB." }, { status: 400 });
@@ -36,7 +39,8 @@ export async function POST(request: NextRequest) {
     .from("tenant-assets")
     .upload(path, buffer, { contentType: file.type, upsert: true });
 
-  if (error) return NextResponse.json({ error: "Upload failed. Please try again." }, { status: 500 });
+  if (error)
+    return NextResponse.json({ error: "Upload failed. Please try again." }, { status: 500 });
 
   const { data: urlData } = supabase.storage.from("tenant-assets").getPublicUrl(path);
 

@@ -76,11 +76,13 @@ function SponsorArtwork({
   sponsor,
   markSize,
   maxLogoWidth,
+  maxLogoHeight = markSize,
   light = false,
 }: {
   sponsor: Sponsor;
   markSize: number;
   maxLogoWidth: number;
+  maxLogoHeight?: number;
   light?: boolean;
 }) {
   const logoUrl = safeLogoUrl(sponsor.logo_url);
@@ -92,7 +94,7 @@ function SponsorArtwork({
         alt={sponsor.name}
         style={{
           maxWidth: maxLogoWidth,
-          maxHeight: markSize,
+          maxHeight: maxLogoHeight,
           width: "auto",
           height: "auto",
           objectFit: "contain",
@@ -119,7 +121,13 @@ export function PresentingSponsorBanner({ sponsor }: { sponsor: Sponsor | null }
         className="inline-flex min-h-5 items-center gap-[7px] no-underline"
       >
         <span className="inline-flex items-center gap-[7px] text-[13px] font-extrabold tracking-[-0.3px]">
-          <SponsorArtwork sponsor={sponsor} markSize={20} maxLogoWidth={164} light />
+          <SponsorArtwork
+            sponsor={sponsor}
+            markSize={20}
+            maxLogoWidth={220}
+            maxLogoHeight={36}
+            light
+          />
         </span>
       </SponsorLink>
     </div>
@@ -141,10 +149,15 @@ export function SponsorLogoWall({ sponsors }: { sponsors: Sponsor[] }) {
           <SponsorLink
             key={`${sponsor.name}-${index}`}
             sponsor={sponsor}
-            className="flex h-11 min-w-0 items-center justify-center gap-1.5 rounded-lg border border-[#e3e0d6] bg-white px-2 no-underline transition-colors hover:border-[#d4af5a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4af5a]"
+            className="flex h-[58px] min-w-0 items-center justify-center gap-1.5 rounded-lg border border-[#e3e0d6] bg-white px-2 no-underline transition-colors hover:border-[#d4af5a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4af5a]"
           >
             <span className="inline-flex min-w-0 items-center justify-center gap-1.5 overflow-hidden text-[12px] font-extrabold tracking-[-0.3px]">
-              <SponsorArtwork sponsor={sponsor} markSize={14} maxLogoWidth={108} />
+              <SponsorArtwork
+                sponsor={sponsor}
+                markSize={14}
+                maxLogoWidth={128}
+                maxLogoHeight={32}
+              />
             </span>
           </SponsorLink>
         ))}
@@ -161,7 +174,13 @@ export function TicketPresentingSponsor({ sponsor }: { sponsor: Sponsor | null }
         PRESENTED BY
       </span>
       <span className="inline-flex max-w-[128px] items-center justify-end gap-1 overflow-hidden text-[9.5px] font-extrabold tracking-[-0.2px]">
-        <SponsorArtwork sponsor={sponsor} markSize={12} maxLogoWidth={94} light />
+        <SponsorArtwork
+          sponsor={sponsor}
+          markSize={12}
+          maxLogoWidth={120}
+          maxLogoHeight={22}
+          light
+        />
       </span>
     </SponsorLink>
   );
@@ -194,7 +213,12 @@ export function SupportedByStrip({
             className="inline-flex items-center gap-1 no-underline"
           >
             <span className="inline-flex items-center gap-1 text-[10px] font-extrabold tracking-[-0.2px]">
-              <SponsorArtwork sponsor={sponsor} markSize={11} maxLogoWidth={78} />
+              <SponsorArtwork
+                sponsor={sponsor}
+                markSize={11}
+                maxLogoWidth={96}
+                maxLogoHeight={20}
+              />
             </span>
           </SponsorLink>
         ))}
