@@ -809,11 +809,11 @@ export default function AppearancePage() {
             <div className="mb-6 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-xs leading-relaxed text-blue-900">
               <p className="font-semibold">Recommended logo sizes (2× export)</p>
               <p className="mt-1">
-                Presenting: 440×72 px · Partners: 256×64 px · Supported by: 192×40 px
+                Presenting: 560×120 px · Partners: 360×128 px · Supported by: 240×56 px
               </p>
               <p className="mt-1 text-blue-700">
-                Use a transparent PNG or WebP with the artwork tightly cropped and minimal empty
-                padding. Maximum file size: 5 MB.
+                Use a landscape transparent PNG or WebP with the artwork tightly cropped and minimal
+                empty padding. Maximum file size: 5 MB.
               </p>
             </div>
 
@@ -848,7 +848,7 @@ export default function AppearancePage() {
                   <SponsorEditorCard
                     sponsor={config.sponsor_config.presenting}
                     label="Presenting sponsor"
-                    logoHint="Recommended: 440×72 px. Displays up to 220×36 px."
+                    logoHint="Recommended: 560×120 px. Displays up to 280×60 px on a white stage."
                     onChange={(sponsor) =>
                       setConfig((current) => ({
                         ...current,
@@ -892,7 +892,7 @@ export default function AppearancePage() {
                       key={`partner-${index}`}
                       sponsor={sponsor}
                       label={`Partner ${index + 1}`}
-                      logoHint="Recommended: 256×64 px. Displays up to 128×32 px."
+                      logoHint="Recommended: 360×128 px. Displays up to 180×64 px."
                       onChange={(value) => updateSponsorList("partners", index, value)}
                       onRemove={() => removeSponsor("partners", index)}
                     />
@@ -928,7 +928,7 @@ export default function AppearancePage() {
                       key={`supporter-${index}`}
                       sponsor={sponsor}
                       label={`Supporter ${index + 1}`}
-                      logoHint="Recommended: 192×40 px. Displays up to 96×20 px on tickets."
+                      logoHint="Recommended: 240×56 px. Displays up to 120×28 px on tickets."
                       onChange={(value) => updateSponsorList("supported_by", index, value)}
                       onRemove={() => removeSponsor("supported_by", index)}
                     />
