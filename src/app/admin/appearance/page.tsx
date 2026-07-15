@@ -425,11 +425,13 @@ function ImageUploader({
 function SponsorEditorCard({
   sponsor,
   label,
+  logoHint,
   onChange,
   onRemove,
 }: {
   sponsor: Sponsor;
   label: string;
+  logoHint: string;
   onChange: (sponsor: Sponsor) => void;
   onRemove?: () => void;
 }) {
@@ -448,13 +450,16 @@ function SponsorEditorCard({
         )}
       </div>
       <div className="grid gap-4 sm:grid-cols-[180px_1fr]">
-        <ImageUploader
-          label="Logo"
-          type="sponsor"
-          currentUrl={sponsor.logo_url ?? ""}
-          onUploaded={(url) => onChange({ ...sponsor, logo_url: url })}
-          onRemove={() => onChange({ ...sponsor, logo_url: null })}
-        />
+        <div>
+          <ImageUploader
+            label="Logo"
+            type="sponsor"
+            currentUrl={sponsor.logo_url ?? ""}
+            onUploaded={(url) => onChange({ ...sponsor, logo_url: url })}
+            onRemove={() => onChange({ ...sponsor, logo_url: null })}
+          />
+          <p className="mt-1.5 text-[11px] leading-relaxed text-gray-500">{logoHint}</p>
+        </div>
         <div className="space-y-3">
           <div>
             <label className="mb-1 block text-xs font-medium text-gray-600">Sponsor name</label>
@@ -801,6 +806,17 @@ export default function AppearancePage() {
               subtitle="Manage logos and optional website links shown on the Trusted Official page and e-ticket."
             />
 
+            <div className="mb-6 rounded-lg border border-blue-100 bg-blue-50 px-4 py-3 text-xs leading-relaxed text-blue-900">
+              <p className="font-semibold">Recommended logo sizes (2× export)</p>
+              <p className="mt-1">
+                Presenting: 440×72 px · Partners: 256×64 px · Supported by: 192×40 px
+              </p>
+              <p className="mt-1 text-blue-700">
+                Use a transparent PNG or WebP with the artwork tightly cropped and minimal empty
+                padding. Maximum file size: 5 MB.
+              </p>
+            </div>
+
             <div className="space-y-7">
               <div>
                 <div className="mb-3 flex items-center justify-between gap-3">
@@ -832,6 +848,7 @@ export default function AppearancePage() {
                   <SponsorEditorCard
                     sponsor={config.sponsor_config.presenting}
                     label="Presenting sponsor"
+                    logoHint="Recommended: 440×72 px. Displays up to 220×36 px."
                     onChange={(sponsor) =>
                       setConfig((current) => ({
                         ...current,
@@ -875,6 +892,7 @@ export default function AppearancePage() {
                       key={`partner-${index}`}
                       sponsor={sponsor}
                       label={`Partner ${index + 1}`}
+                      logoHint="Recommended: 256×64 px. Displays up to 128×32 px."
                       onChange={(value) => updateSponsorList("partners", index, value)}
                       onRemove={() => removeSponsor("partners", index)}
                     />
@@ -910,6 +928,7 @@ export default function AppearancePage() {
                       key={`supporter-${index}`}
                       sponsor={sponsor}
                       label={`Supporter ${index + 1}`}
+                      logoHint="Recommended: 192×40 px. Displays up to 96×20 px on tickets."
                       onChange={(value) => updateSponsorList("supported_by", index, value)}
                       onRemove={() => removeSponsor("supported_by", index)}
                     />
