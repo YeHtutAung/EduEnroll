@@ -75,7 +75,7 @@ export async function GET(
   // ── Fetch tenant appearance ────────────────────────────────────
   const { data: appearanceRow } = (await supabase
     .from("tenant_appearance")
-    .select("template_id, primary_color, tagline, cta_button_text, logo_url, hero_url")
+    .select("template_id, primary_color, tagline, cta_button_text, logo_url, hero_url, sponsor_config")
     .eq("tenant_id", tenantId)
     .maybeSingle()) as { data: Omit<TenantAppearance, "id" | "tenant_id" | "updated_at"> | null; error: unknown };
 

@@ -11,14 +11,21 @@ interface TrustedOfficialShellProps {
 }
 
 export default function TrustedOfficialShell({
-  logoUrl, orgName, brandColor, step, children,
+  logoUrl,
+  orgName,
+  brandColor,
+  step,
+  children,
 }: TrustedOfficialShellProps) {
   const brand = brandColor || "#0f1f42";
   const seg1Gold = step === 1 || step === 2 || step === "complete";
   const seg2Gold = step === 2 || step === "complete";
 
   return (
-    <div className="min-h-screen" style={{ background: "#f7f5ef" }}>
+    <div
+      className="min-h-screen"
+      style={{ background: "#f7f5ef", fontFamily: "var(--font-inter), sans-serif" }}
+    >
       {/* Brand row */}
       <div className="px-5 pt-5 pb-3 flex items-center gap-2.5">
         {logoUrl ? (
@@ -32,14 +39,19 @@ export default function TrustedOfficialShell({
             {orgName.charAt(0)}
           </div>
         )}
-        <span className="text-[12.5px] font-semibold" style={{ color: brand }}>{orgName}</span>
+        <span className="text-[12.5px] font-semibold" style={{ color: brand }}>
+          {orgName}
+        </span>
       </div>
 
       {/* Step label + progress bar */}
       {step !== "complete" && (
         <div className="px-5 mb-4">
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[10px] font-bold uppercase tracking-[1.5px]" style={{ color: brand }}>
+            <span
+              className="text-[10px] font-bold uppercase tracking-[1.5px]"
+              style={{ color: brand }}
+            >
               Step {step} of 2
             </span>
             <span className="text-[10px]" style={{ color: "#8b8f9a" }}>
@@ -47,8 +59,14 @@ export default function TrustedOfficialShell({
             </span>
           </div>
           <div className="flex gap-[5px]">
-            <div className="h-[4px] flex-1 rounded-[2px]" style={{ background: seg1Gold ? "#b7912b" : "#e9e6dc" }} />
-            <div className="h-[4px] flex-1 rounded-[2px]" style={{ background: seg2Gold ? "#b7912b" : "#e9e6dc" }} />
+            <div
+              className="h-[4px] flex-1 rounded-[2px]"
+              style={{ background: seg1Gold ? "#b7912b" : "#e9e6dc" }}
+            />
+            <div
+              className="h-[4px] flex-1 rounded-[2px]"
+              style={{ background: seg2Gold ? "#b7912b" : "#e9e6dc" }}
+            />
           </div>
         </div>
       )}

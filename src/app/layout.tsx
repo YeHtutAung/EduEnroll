@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import { Noto_Sans, Noto_Sans_Myanmar, JetBrains_Mono } from "next/font/google";
+import { Inter, Noto_Sans, Noto_Sans_Myanmar, JetBrains_Mono } from "next/font/google";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { extractSubdomainFromHost } from "@/lib/tenant";
 import { Analytics } from "@vercel/analytics/next";
@@ -25,11 +25,16 @@ const jetBrainsMono = JetBrains_Mono({
   weight: ["400", "600", "700"],
 });
 
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+  weight: ["400", "500", "600", "700", "800"],
+});
+
 export async function generateMetadata(): Promise<Metadata> {
   const headersList = headers();
   const slug =
-    headersList.get("x-tenant-slug") ||
-    extractSubdomainFromHost(headersList.get("host") ?? "");
+    headersList.get("x-tenant-slug") || extractSubdomainFromHost(headersList.get("host") ?? "");
 
   let tenantName: string | null = null;
   let logoUrl: string | null = null;
@@ -78,7 +83,7 @@ export default function RootLayout({
   return (
     <html lang="my">
       <body
-        className={`${notoSans.variable} ${notoSansMyanmar.variable} ${jetBrainsMono.variable} font-sans antialiased`}
+        className={`${notoSans.variable} ${notoSansMyanmar.variable} ${jetBrainsMono.variable} ${inter.variable} font-sans antialiased`}
       >
         <MSWProvider>{children}</MSWProvider>
         <Analytics />
