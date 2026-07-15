@@ -77,9 +77,9 @@ export async function GET(
   const [appearanceResult, tenantResult, bankResult] = await Promise.all([
     supabase
       .from("tenant_appearances")
-      .select("logo_url, primary_color")
+      .select("logo_url, primary_color, sponsor_config")
       .eq("tenant_id", tenantId)
-      .single() as unknown as Promise<{ data: { logo_url: string | null; primary_color: string | null } | null; error: unknown }>,
+      .single() as unknown as Promise<{ data: { logo_url: string | null; primary_color: string | null; sponsor_config: unknown } | null; error: unknown }>,
     supabase
       .from("tenants")
       .select("payment_mode, mmqr_provider")
@@ -141,6 +141,7 @@ export async function GET(
       "",
     logo_url: appearance?.logo_url ?? null,
     brand_color: appearance?.primary_color ?? null,
+    sponsor_config: appearance?.sponsor_config ?? null,
     payment_mode: tenant?.payment_mode ?? "bank_transfer",
     mmqr_provider: tenant?.mmqr_provider ?? null,
     bank_accounts: bankAccounts,

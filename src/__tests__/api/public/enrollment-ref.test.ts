@@ -189,7 +189,18 @@ describe("GET /api/public/enrollment/[ref]", () => {
           },
           error: null,
         },
-        appearance: { data: { logo_url: "https://cdn.example.com/logo.png", primary_color: "#1a3f8a" }, error: null },
+        appearance: {
+          data: {
+            logo_url: "https://cdn.example.com/logo.png",
+            primary_color: "#1a3f8a",
+            sponsor_config: {
+              presenting: { name: "Acme", logo_url: "https://cdn.example.com/acme.svg", url: "https://acme.example" },
+              partners: [],
+              supported_by: [],
+            },
+          },
+          error: null,
+        },
         tenant: { data: { payment_mode: "bank_transfer", mmqr_provider: null }, error: null },
         bankAccounts: {
           data: [
@@ -210,6 +221,7 @@ describe("GET /api/public/enrollment/[ref]", () => {
     expect(body.bank_accounts[0].bank_name).toBe("AYA Bank");
     expect(body.logo_url).toBe("https://cdn.example.com/logo.png");
     expect(body.brand_color).toBe("#1a3f8a");
+    expect(body.sponsor_config.presenting.name).toBe("Acme");
   });
 
   it("returns mmqr payment_mode and mmqr_provider", async () => {
