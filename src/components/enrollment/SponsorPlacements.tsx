@@ -113,19 +113,24 @@ function SponsorArtwork({
 
 export function PresentingSponsorBanner({ sponsor }: { sponsor: Sponsor | null }) {
   if (!sponsor) return null;
+  const hasLogo = Boolean(safeLogoUrl(sponsor.logo_url));
   return (
     <div className="mx-[22px] mb-4 rounded-[10px] bg-[#0f1f42] px-[14px] py-3">
       <p className="mb-1 text-[8px] font-bold tracking-[1.5px] text-[#d4af5a]">PRESENTED BY</p>
       <SponsorLink
         sponsor={sponsor}
-        className="inline-flex min-h-5 items-center gap-[7px] no-underline"
+        className={
+          hasLogo
+            ? "flex min-h-[84px] w-full items-center justify-center rounded-lg bg-white px-5 py-3 no-underline"
+            : "inline-flex min-h-5 items-center gap-[7px] no-underline"
+        }
       >
-        <span className="inline-flex items-center gap-[7px] text-[13px] font-extrabold tracking-[-0.3px]">
+        <span className="inline-flex max-w-full items-center justify-center gap-[7px] text-[13px] font-extrabold tracking-[-0.3px]">
           <SponsorArtwork
             sponsor={sponsor}
             markSize={20}
-            maxLogoWidth={220}
-            maxLogoHeight={36}
+            maxLogoWidth={280}
+            maxLogoHeight={60}
             light
           />
         </span>
@@ -144,19 +149,19 @@ export function SponsorLogoWall({ sponsors }: { sponsors: Sponsor[] }) {
       >
         OUR PARTNERS
       </h2>
-      <div className="grid grid-cols-2 gap-[9px] min-[420px]:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3">
         {sponsors.map((sponsor, index) => (
           <SponsorLink
             key={`${sponsor.name}-${index}`}
             sponsor={sponsor}
-            className="flex h-[58px] min-w-0 items-center justify-center gap-1.5 rounded-lg border border-[#e3e0d6] bg-white px-2 no-underline transition-colors hover:border-[#d4af5a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4af5a]"
+            className="flex h-24 min-w-0 items-center justify-center gap-1.5 rounded-[10px] border border-[#e3e0d6] bg-white px-4 no-underline shadow-sm transition-colors hover:border-[#d4af5a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#d4af5a]"
           >
             <span className="inline-flex min-w-0 items-center justify-center gap-1.5 overflow-hidden text-[12px] font-extrabold tracking-[-0.3px]">
               <SponsorArtwork
                 sponsor={sponsor}
                 markSize={14}
-                maxLogoWidth={128}
-                maxLogoHeight={32}
+                maxLogoWidth={180}
+                maxLogoHeight={64}
               />
             </span>
           </SponsorLink>
@@ -168,17 +173,22 @@ export function SponsorLogoWall({ sponsors }: { sponsors: Sponsor[] }) {
 
 export function TicketPresentingSponsor({ sponsor }: { sponsor: Sponsor | null }) {
   if (!sponsor) return null;
+  const hasLogo = Boolean(safeLogoUrl(sponsor.logo_url));
   return (
     <SponsorLink sponsor={sponsor} className="flex min-w-0 flex-col items-end no-underline">
       <span className="mb-[3px] text-[6.5px] font-bold tracking-[1px] text-[#8a90a5]">
         PRESENTED BY
       </span>
-      <span className="inline-flex max-w-[128px] items-center justify-end gap-1 overflow-hidden text-[9.5px] font-extrabold tracking-[-0.2px]">
+      <span
+        className={`inline-flex max-w-[144px] items-center justify-end gap-1 overflow-hidden text-[9.5px] font-extrabold tracking-[-0.2px] ${
+          hasLogo ? "rounded-md bg-white px-2 py-1" : ""
+        }`}
+      >
         <SponsorArtwork
           sponsor={sponsor}
           markSize={12}
-          maxLogoWidth={120}
-          maxLogoHeight={22}
+          maxLogoWidth={124}
+          maxLogoHeight={28}
           light
         />
       </span>
@@ -205,7 +215,7 @@ export function SupportedByStrip({
       >
         SUPPORTED BY
       </h2>
-      <div className="flex flex-wrap items-center justify-center gap-x-[10px] gap-y-2">
+      <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-3">
         {sponsors.map((sponsor, index) => (
           <SponsorLink
             sponsor={sponsor}
@@ -216,8 +226,8 @@ export function SupportedByStrip({
               <SponsorArtwork
                 sponsor={sponsor}
                 markSize={11}
-                maxLogoWidth={96}
-                maxLogoHeight={20}
+                maxLogoWidth={120}
+                maxLogoHeight={28}
               />
             </span>
           </SponsorLink>
