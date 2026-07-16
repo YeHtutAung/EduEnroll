@@ -14,6 +14,15 @@ import { sendSms } from "@/lib/sms";
 //                 endToEndId, transactionDateTime, institutionName
 // Fail adds: errorCode, errorDesc
 
+// new Date("garbage").toISOString() throws, and transactionDateTime arrives
+// from the query string — fall back to now rather than 500 the callback.
+function safeIso(input: string | undefined): string {
+  const parsed = input ? new Date(input) : null;
+  return parsed && !Number.isNaN(parsed.getTime())
+    ? parsed.toISOString()
+    : new Date().toISOString();
+}
+
 export async function GET(request: NextRequest) {
   const params = abank.parseCallback(request.nextUrl.searchParams);
 
@@ -28,10 +37,10 @@ export async function GET(request: NextRequest) {
   // ── Find payment by payment_ref ───────────────────────────
   const { data: payment } = (await supabase
     .from("payments")
-    .select("id, enrollment_id, status")
+    .select("id, enrollment_id, status, amount")
     .eq("payment_ref", params.orderId)
     .single()) as {
-    data: { id: string; enrollment_id: string; status: string } | null;
+    data: { id: string; enrollment_id: string; status: string; amount: number } | null;
     error: unknown;
   };
 
@@ -45,20 +54,57 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ message: "Already processed" }, { status: 200 });
   }
 
-  // ── Update based on callback status ───────────────────────
-  const isSuccess = !params.errorCode && params.status;
+  // ── Confirm with ABank before trusting the callback ───────
+  // This endpoint is a public, unauthenticated GET, and the orderId is handed
+  // to the student when the QR is created — so a forged
+  //   ?orderId=<theirs>&status=SUCCESS
+  // must never confirm anything. Ask ABank directly instead, the same way the
+  // status poller does (src/app/api/public/payments/abank/status/route.ts).
+  // Callback params stay usable for logging and cosmetic fields, never to gate.
+  let enquiry;
+  try {
+    enquiry = await abank.enquiryOrder(params.orderId);
+  } catch (err) {
+    console.error("[abank-callback] Enquiry failed for", params.orderId, err);
+    // Leave the payment untouched — the status poller will settle it.
+    return NextResponse.json({ error: "Enquiry failed" }, { status: 502 });
+  }
 
-  if (isSuccess) {
+  const verdict = abank.verifyEnquiry(enquiry.data, {
+    orderId: params.orderId,
+    amountMmk: payment.amount,
+  });
+
+  if (verdict.outcome === "pending") {
+    return NextResponse.json({ message: "Pending" }, { status: 200 });
+  }
+
+  if (verdict.outcome === "failed") {
+    console.warn("[abank-callback] Refusing to confirm", params.orderId, verdict.reason);
+    await supabase
+      .from("payments")
+      .update({
+        mmqr_status: "FAILED",
+        bank_reference: params.errorCode
+          ? `${verdict.reason}: ${params.errorCode} ${params.errorDesc ?? ""}`.trim()
+          : verdict.reason,
+      } as never)
+      .eq("id", payment.id);
+
+    return NextResponse.json({ message: "OK" }, { status: 200 });
+  }
+
+  // ── Verified by ABank: confirm ────────────────────────────
+  {
     await supabase
       .from("payments")
       .update({
         mmqr_status: "SUCCESS",
         status: "verified",
-        paid_at: params.transactionDateTime
-          ? new Date(params.transactionDateTime).toISOString()
-          : new Date().toISOString(),
-        bank_reference: `CB:${params.transactionId || params.endToEndId || "unknown"}`,
-        payer_institution: params.institutionName || null,
+        paid_at: safeIso(params.transactionDateTime),
+        // Prefer ABank's own values over the callback's.
+        bank_reference: `CB:${verdict.transactionId || params.transactionId || params.endToEndId || "unknown"}`,
+        payer_institution: verdict.institutionName || params.institutionName || null,
       } as never)
       .eq("id", payment.id);
 
@@ -221,16 +267,6 @@ export async function GET(request: NextRequest) {
 
       await Promise.allSettled(notifyTasks);
     }
-  } else {
-    await supabase
-      .from("payments")
-      .update({
-        mmqr_status: "FAILED",
-        bank_reference: params.errorCode
-          ? `${params.errorCode}: ${params.errorDesc ?? ""}`
-          : null,
-      } as never)
-      .eq("id", payment.id);
   }
 
   return NextResponse.json({ message: "OK" }, { status: 200 });
