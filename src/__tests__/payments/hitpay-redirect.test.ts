@@ -268,3 +268,29 @@ describe("HitPay card redirect — tenant custom domain", () => {
     expect(res.status).toBe(400);
   });
 });
+
+// #166 serves www.<custom> as the same tenant, so a student can legitimately
+// land there — window.location.origin is then www, and the return must work.
+describe("HitPay card redirect — www of a custom domain", () => {
+  it("accepts a www return from a student on www", async () => {
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"nihon-moment"}';
+    const url = "https://www.flashtic.com/enroll/x?hitpay=success";
+    const res = await POST(
+      post({ enrollmentRef: "NM-2026-0001", method: "card", redirectUrl: url }, "https://www.flashtic.com"),
+    );
+    expect(res.status).not.toBe(400);
+    expect(sentRedirect()).toBe(url);
+  });
+
+  // Cross-tenant must survive the www allowance: the resolver is the gate.
+  it("rejects www of a custom domain mapped to a different tenant", async () => {
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"some-other-tenant"}';
+    const res = await POST(
+      post(
+        { enrollmentRef: "NM-2026-0001", method: "card", redirectUrl: "https://www.flashtic.com/x" },
+        "https://www.flashtic.com",
+      ),
+    );
+    expect(res.status).toBe(400);
+  });
+});

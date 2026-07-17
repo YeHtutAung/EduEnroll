@@ -197,3 +197,71 @@ describe("isAllowedRedirect — tenant custom origin", () => {
     expect(isAllowedRedirect(`${REQ_ORIGIN}/enroll/x`, "nihon-moment", REQ_ORIGIN)).toBe(true);
   });
 });
+
+// #166 folds www to the apex, so www.flashtic.com resolves to tenant flashtic
+// and Vercel serves it. But customOriginForTenant returns only the apex, so a
+// student who landed on www — window.location.origin is www — would 400.
+describe("isAllowedRedirect — www of a custom domain", () => {
+  it("allows www of the tenant's custom domain", () => {
+    prod();
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"flashtic"}';
+    expect(
+      isAllowedRedirect(
+        "https://www.flashtic.com/enroll/x?hitpay=success",
+        "flashtic",
+        "https://www.flashtic.com",
+      ),
+    ).toBe(true);
+  });
+
+  // The student returns to the origin they started on — the client builds the
+  // URL from window.location.origin, so apex→apex and www→www are the only
+  // combinations that occur. The apex is also allowed from a www request
+  // because it is the configured custom origin.
+  it("allows the apex from a www request", () => {
+    prod();
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"flashtic"}';
+    expect(isAllowedRedirect("https://flashtic.com/x", "flashtic", "https://www.flashtic.com")).toBe(
+      true,
+    );
+  });
+
+  // Deliberately NOT allowed: a student on the apex cannot be sent to www. Same
+  // tenant, but a different origin, and no client produces it — the return goes
+  // back where the student started.
+  it("does not allow www from an apex request", () => {
+    prod();
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"flashtic"}';
+    expect(isAllowedRedirect("https://www.flashtic.com/x", "flashtic", "https://flashtic.com")).toBe(
+      false,
+    );
+  });
+
+  // Cross-tenant must survive the www allowance.
+  it("rejects www of one tenant's custom domain for a different tenant", () => {
+    prod();
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"flashtic"}';
+    expect(
+      isAllowedRedirect("https://www.flashtic.com/x", "nihon-moment", "https://www.flashtic.com"),
+    ).toBe(false);
+  });
+
+  // The resolver is the gate, not the request. An unknown host resolves to null
+  // and must not allow itself — the flaw this pattern is designed to avoid.
+  it("does not let an unconfigured request origin allow itself in production", () => {
+    prod();
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"flashtic"}';
+    expect(isAllowedRedirect("https://evil.com/phish", "flashtic", "https://evil.com")).toBe(false);
+    expect(
+      isAllowedRedirect("https://www.evil.com/phish", "flashtic", "https://www.evil.com"),
+    ).toBe(false);
+  });
+
+  it("rejects a www lookalike", () => {
+    prod();
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"flashtic"}';
+    expect(
+      isAllowedRedirect("https://www.flashtic.com.evil.com/x", "flashtic", "https://flashtic.com"),
+    ).toBe(false);
+  });
+});
