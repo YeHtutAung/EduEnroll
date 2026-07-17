@@ -73,14 +73,22 @@ export async function GET(request: NextRequest) {
   }
 
   if (verdict.outcome === "failed") {
-    console.warn("[abank-callback] Refusing to confirm", params.orderId, verdict.reason);
+    // Callback error fields are diagnostics only — bounded, and logged rather
+    // than stored. They are unauthenticated input and must not reach the audit
+    // record, exactly as on the success path above.
+    console.warn(
+      "[abank-callback] Refusing to confirm orderId=%s reason=%s callbackErrorCode=%s",
+      params.orderId.slice(0, 32),
+      verdict.reason,
+      (params.errorCode ?? "none").slice(0, 32),
+    );
     await supabase
       .from("payments")
       .update({
         mmqr_status: "FAILED",
-        bank_reference: params.errorCode
-          ? `${verdict.reason}: ${params.errorCode} ${params.errorDesc ?? ""}`.trim()
-          : verdict.reason,
+        // Provider verdict only. A caller who knows an order id could otherwise
+        // inject arbitrary text into financial audit data.
+        bank_reference: verdict.reason,
       } as never)
       .eq("id", payment.id);
 

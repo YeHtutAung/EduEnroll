@@ -64,7 +64,8 @@ beforeEach(() => {
   });
 });
 
-// A forged callback: claims success, carries fabricated audit metadata.
+// A forged callback: claims success, carries fabricated audit metadata, and
+// fabricated error fields. Every value here is attacker-supplied.
 function forgedCallback() {
   const qs = new URLSearchParams({
     orderId: "AB-ABC123-999",
@@ -73,8 +74,30 @@ function forgedCallback() {
     endToEndId: "FORGED-E2E",
     institutionName: "Forged Bank",
     transactionDateTime: "1999-01-01 00:00:00",
+    errorCode: "FORGED-CODE",
+    errorDesc: "Forged description",
   });
   return new NextRequest(`https://kuunyi.com/api/webhooks/abank?${qs}`);
+}
+
+// Every value the forged callback carries. No stored field may contain any of
+// them, on ANY verdict path — the success branch and the failed branch are the
+// same trust boundary, and treating them separately is how the failed path kept
+// writing errorCode after the success path was fixed.
+const FORGED_VALUES = [
+  "FORGED-TXN",
+  "FORGED-E2E",
+  "Forged Bank",
+  "1999",
+  "FORGED-CODE",
+  "Forged description",
+];
+
+function expectNoForgedValues(payload: Record<string, unknown> | undefined) {
+  const stored = JSON.stringify(payload ?? {});
+  for (const forged of FORGED_VALUES) {
+    expect(stored, `stored payload leaked "${forged}"`).not.toContain(forged);
+  }
 }
 
 function enquiry(over: Record<string, unknown> = {}) {
@@ -106,18 +129,14 @@ describe("ABank callback route — the provider decides, not the caller", () => 
     expect(enrollmentUpdates[0]).toMatchObject({ status: "confirmed" });
   });
 
-  // The audit-field boundary: even on a genuinely settled payment, nothing the
-  // caller sent may reach stored data.
-  it("never writes callback-supplied audit values", async () => {
+  // The audit-field boundary on the SUCCESS path: even on a genuinely settled
+  // payment, nothing the caller sent may reach stored data.
+  it("never writes callback-supplied audit values on success", async () => {
     mockEnquiryOrder.mockResolvedValue(enquiry()); // no txn id / institution
 
     await GET(forgedCallback());
 
-    const stored = JSON.stringify(paymentUpdates[0]);
-    expect(stored).not.toContain("FORGED-TXN");
-    expect(stored).not.toContain("FORGED-E2E");
-    expect(stored).not.toContain("Forged Bank");
-    expect(stored).not.toContain("1999");
+    expectNoForgedValues(paymentUpdates[0]);
     expect(paymentUpdates[0]).toMatchObject({
       bank_reference: "CB:verified",
       payer_institution: null,
@@ -125,6 +144,40 @@ describe("ABank callback route — the provider decides, not the caller", () => 
     // paid_at is server time, not the caller's 1999 timestamp.
     const paidAt = new Date(paymentUpdates[0].paid_at as string).getFullYear();
     expect(paidAt).toBe(new Date().getFullYear());
+  });
+
+  // The same boundary on the FAILED path. This is the one that regressed: the
+  // success path was corrected while this branch kept writing errorCode and
+  // errorDesc into bank_reference.
+  it("never writes callback-supplied error values on failure", async () => {
+    mockEnquiryOrder.mockResolvedValue(enquiry({ paymentTxnStatus: 500 }));
+
+    await GET(forgedCallback());
+
+    expectNoForgedValues(paymentUpdates[0]);
+    expect(paymentUpdates[0]).toMatchObject({
+      mmqr_status: "FAILED",
+      bank_reference: "provider-failed", // the verdict, nothing else
+    });
+  });
+
+  // Both rejection reasons, same rule — so a future branch can't reintroduce it.
+  it("stores only the verdict reason for every failure kind", async () => {
+    const cases: [Record<string, unknown>, string][] = [
+      [{ paymentTxnStatus: 500 }, "provider-failed"],
+      [{ amount: 1 }, "amount-mismatch"],
+      [{ orderId: "AB-SOMEONE-ELSE" }, "order-id-mismatch"],
+    ];
+
+    for (const [over, reason] of cases) {
+      paymentUpdates = [];
+      mockEnquiryOrder.mockResolvedValue(enquiry(over));
+
+      await GET(forgedCallback());
+
+      expectNoForgedValues(paymentUpdates[0]);
+      expect(paymentUpdates[0]).toMatchObject({ bank_reference: reason });
+    }
   });
 
   it("prefers ABank's transaction id when it supplies one", async () => {
