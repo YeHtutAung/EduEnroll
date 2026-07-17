@@ -14,15 +14,6 @@ import { sendSms } from "@/lib/sms";
 //                 endToEndId, transactionDateTime, institutionName
 // Fail adds: errorCode, errorDesc
 
-// new Date("garbage").toISOString() throws, and transactionDateTime arrives
-// from the query string — fall back to now rather than 500 the callback.
-function safeIso(input: string | undefined): string {
-  const parsed = input ? new Date(input) : null;
-  return parsed && !Number.isNaN(parsed.getTime())
-    ? parsed.toISOString()
-    : new Date().toISOString();
-}
-
 export async function GET(request: NextRequest) {
   const params = abank.parseCallback(request.nextUrl.searchParams);
 
@@ -30,7 +21,9 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Missing orderId" }, { status: 400 });
   }
 
-  console.log("[abank-callback]", params);
+  // Bounded: every param here is unauthenticated caller input, so log a
+  // correlation id and nothing else. The authoritative verdict is logged below.
+  console.log("[abank-callback] orderId=%s", params.orderId.slice(0, 32));
 
   const supabase = createAdminClient();
 
@@ -101,10 +94,16 @@ export async function GET(request: NextRequest) {
       .update({
         mmqr_status: "SUCCESS",
         status: "verified",
-        paid_at: safeIso(params.transactionDateTime),
-        // Prefer ABank's own values over the callback's.
-        bank_reference: `CB:${verdict.transactionId || params.transactionId || params.endToEndId || "unknown"}`,
-        payer_institution: verdict.institutionName || params.institutionName || null,
+        // Server time, never params.transactionDateTime. Once ABank confirms the
+        // payment, a caller who knows their own orderId could otherwise forge the
+        // settlement time — paid_at feeds reporting and reconciliation, so it is
+        // financial data, not decoration.
+        paid_at: new Date().toISOString(),
+        // ABank's enquiry values ONLY — no fallback to callback params. These are
+        // audit fields; an unauthenticated caller must not be able to write them
+        // even on a genuinely settled payment.
+        bank_reference: verdict.transactionId ? `CB:${verdict.transactionId}` : "CB:verified",
+        payer_institution: verdict.institutionName ?? null,
       } as never)
       .eq("id", payment.id);
 
