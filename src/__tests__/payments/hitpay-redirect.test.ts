@@ -29,7 +29,7 @@ const { POST } = await import("@/app/api/public/payments/hitpay/route");
 
 // ── Env ───────────────────────────────────────────────────────────────────
 
-const ENV_KEYS = ["NEXT_PUBLIC_APP_URL", "VERCEL_ENV"] as const;
+const ENV_KEYS = ["NEXT_PUBLIC_APP_URL", "VERCEL_ENV", "TENANT_CUSTOM_DOMAINS"] as const;
 const ORIGINAL = Object.fromEntries(
   ENV_KEYS.map((k) => [k, process.env[k]]),
 ) as Record<(typeof ENV_KEYS)[number], string | undefined>;
@@ -89,6 +89,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   process.env.NEXT_PUBLIC_APP_URL = "https://kuunyi.com";
   process.env.VERCEL_ENV = "production";
+  // Reset, not just restore. afterEach puts back the ORIGINAL value, which may
+  // itself be set on a dev machine or in CI — ambient config must not reach the
+  // allowlist. Custom-domain tests set their own map after this.
+  delete process.env.TENANT_CUSTOM_DOMAINS;
   setupMocks();
 });
 
@@ -242,6 +246,25 @@ describe("HitPay card redirect — development origins", () => {
         "https://edu-enroll-git-abc.vercel.app",
       ),
     );
+    expect(res.status).toBe(400);
+  });
+});
+
+// ── Tenant custom domain (P3) ─────────────────────────────────────────────
+
+describe("HitPay card redirect — tenant custom domain", () => {
+  // The fixture's tenant is nihon-moment; map the domain to it.
+  it("accepts a return to the tenant's custom domain", async () => {
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"nihon-moment"}';
+    const url = "https://flashtic.com/enroll/x?hitpay=success";
+    const res = await POST(card(url));
+    expect(res.status).not.toBe(400);
+    expect(sentRedirect()).toBe(url);
+  });
+
+  it("rejects a custom domain mapped to a different tenant", async () => {
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"some-other-tenant"}';
+    const res = await POST(card("https://flashtic.com/enroll/x"));
     expect(res.status).toBe(400);
   });
 });
