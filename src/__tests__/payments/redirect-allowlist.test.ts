@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { isAllowedRedirect } from "@/lib/payments/redirect-allowlist";
 
-const ENV_KEYS = ["NEXT_PUBLIC_APP_URL", "VERCEL_ENV"] as const;
+const ENV_KEYS = ["NEXT_PUBLIC_APP_URL", "VERCEL_ENV", "TENANT_CUSTOM_DOMAINS"] as const;
 const ORIGINAL = Object.fromEntries(
   ENV_KEYS.map((k) => [k, process.env[k]]),
 ) as Record<(typeof ENV_KEYS)[number], string | undefined>;
@@ -18,6 +18,10 @@ afterEach(() => {
 function prod() {
   process.env.NEXT_PUBLIC_APP_URL = "https://kuunyi.com";
   process.env.VERCEL_ENV = "production";
+  // Reset, not just restore. afterEach puts back the ORIGINAL value, which may
+  // itself be set on a dev machine or in CI — every test would then start with
+  // an ambient map feeding allowedOrigins(). Start from no map.
+  delete process.env.TENANT_CUSTOM_DOMAINS;
 }
 
 const TENANT = "nihon-moment";
@@ -142,5 +146,54 @@ describe("isAllowedRedirect — non-production", () => {
     ]) {
       expect(isAllowedRedirect(`${rogue}/phish`, TENANT, rogue)).toBe(false);
     }
+  });
+});
+
+describe("isAllowedRedirect — tenant custom origin", () => {
+  it("allows a tenant's configured custom origin in production", () => {
+    prod();
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"flashtic"}';
+    expect(
+      isAllowedRedirect("https://flashtic.com/enroll/x?hitpay=success", "flashtic", REQ_ORIGIN),
+    ).toBe(true);
+  });
+
+  // THE REQUIREMENT: the custom origin is allowed for ITS tenant only.
+  it("rejects one tenant's custom origin for a different tenant", () => {
+    prod();
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"flashtic"}';
+    expect(isAllowedRedirect("https://flashtic.com/enroll/x", "nihon-moment", REQ_ORIGIN)).toBe(
+      false,
+    );
+  });
+
+  it("rejects a custom origin lookalike", () => {
+    prod();
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"flashtic"}';
+    expect(isAllowedRedirect("https://flashtic.com.evil.com/x", "flashtic", REQ_ORIGIN)).toBe(false);
+  });
+
+  it("rejects a credential-bearing custom origin", () => {
+    prod();
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"flashtic"}';
+    expect(isAllowedRedirect("https://user:pass@flashtic.com/x", "flashtic", REQ_ORIGIN)).toBe(
+      false,
+    );
+  });
+
+  it("still allows the tenant's canonical origin when it has a custom domain", () => {
+    prod();
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"flashtic"}';
+    expect(isAllowedRedirect("https://flashtic.kuunyi.com/enroll/x", "flashtic", REQ_ORIGIN)).toBe(
+      true,
+    );
+  });
+
+  // No map configured is the state everywhere today: behaviour must not change.
+  it("changes nothing for a tenant with no custom domain", () => {
+    prod();
+    delete process.env.TENANT_CUSTOM_DOMAINS;
+    expect(isAllowedRedirect("https://flashtic.com/x", "flashtic", REQ_ORIGIN)).toBe(false);
+    expect(isAllowedRedirect(`${REQ_ORIGIN}/enroll/x`, "nihon-moment", REQ_ORIGIN)).toBe(true);
   });
 });

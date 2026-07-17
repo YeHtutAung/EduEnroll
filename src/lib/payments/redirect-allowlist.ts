@@ -6,7 +6,7 @@
 // to the platform origin and never follow the client.
 
 import { tenantOrigin } from "@/lib/origin";
-import { isDevHost } from "@/lib/tenant";
+import { customOriginForTenant, isDevHost } from "@/lib/tenant";
 
 /** Origins where a legitimate enrollment page for this tenant can live. */
 function allowedOrigins(tenantSubdomain: string, requestOrigin: string): Set<string> {
@@ -14,6 +14,13 @@ function allowedOrigins(tenantSubdomain: string, requestOrigin: string): Set<str
   // The platform root is deliberately NOT here: no enrollment page exists on
   // kuunyi.com, so allowing it would widen the allowlist for nothing.
   const origins = new Set<string>([tenantOrigin(tenantSubdomain)]);
+
+  // The tenant's own custom domain, when configured. Scoped to THIS tenant by
+  // construction — the lookup is by slug, so another tenant's domain can never
+  // appear here. Unlike the dev-host exception below, this applies in
+  // production: serving students on a branded domain is the entire point.
+  const custom = customOriginForTenant(tenantSubdomain);
+  if (custom) origins.add(custom);
 
   // Off production, also allow the origin the request arrived on — but ONLY if
   // it is a recognized dev host. tenantOrigin() derives from
