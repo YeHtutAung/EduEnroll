@@ -139,7 +139,55 @@ async function enquiryOrder(orderId: string): Promise<EnquiryResponse> {
   return res.json();
 }
 
-// ── 3. Parse callback query params ─────────────────────────────────────────
+// ── 3. Verify a callback against an authoritative enquiry ──────────────────
+// The callback is a public, unauthenticated GET and every one of its query
+// params is attacker-controlled: /api/public/payments/abank hands the orderId
+// to the student when the QR is created, so anyone can replay the callback URL
+// with status=SUCCESS. Only ABank's own enquiry response — fetched
+// server-to-server via enquiryOrder() — may decide whether a payment settled.
+// Callback params are safe to log, and safe to use for cosmetic fields, but
+// must never gate confirmation.
+
+export type VerifyOutcome =
+  | { outcome: "success"; transactionId?: string; institutionName?: string }
+  | { outcome: "failed"; reason: string }
+  | { outcome: "pending" };
+
+export function verifyEnquiry(
+  txn: EnquiryData,
+  expected: { orderId: string; amountMmk: number },
+): VerifyOutcome {
+  // ABank echoes the orderId. When present it must match the payment we looked
+  // up, so a settled order cannot be replayed against a different enrollment.
+  if (txn.orderId && txn.orderId !== expected.orderId) {
+    return { outcome: "failed", reason: "order-id-mismatch" };
+  }
+
+  switch (txn.paymentTxnStatus) {
+    case 200: {
+      // amount is optional in ABank's response. When present it must match, so
+      // a short payment cannot confirm a full enrollment; when absent, status
+      // alone is authoritative — the enquiry is not attacker-controlled.
+      if (typeof txn.amount === "number" && txn.amount !== expected.amountMmk) {
+        return { outcome: "failed", reason: "amount-mismatch" };
+      }
+      return {
+        outcome: "success",
+        transactionId: txn.transactionId,
+        institutionName: txn.institutionName,
+      };
+    }
+    case 500:
+      return { outcome: "failed", reason: "provider-failed" };
+    // 100 pending, 400 refunded, 403 not-found, and anything unrecognised are
+    // deliberately non-destructive: leave the payment for the status poller or
+    // the auto-cancel timer rather than rejecting a payment that may be real.
+    default:
+      return { outcome: "pending" };
+  }
+}
+
+// ── 4. Parse callback query params ─────────────────────────────────────────
 
 function parseCallback(searchParams: URLSearchParams): CallbackParams {
   return {
@@ -162,6 +210,7 @@ const abank = {
   createOrder,
   enquiryOrder,
   parseCallback,
+  verifyEnquiry,
 };
 
 export default abank;
