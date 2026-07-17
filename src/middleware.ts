@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { extractSubdomainFromHost, tenantForCustomHost, isDevHost } from "@/lib/tenant";
 
 // ─── Routes that skip tenant detection ────────────────────────────────────────
 
@@ -10,45 +11,11 @@ function shouldSkipTenant(pathname: string): boolean {
   return SKIP_TENANT_PREFIXES.some((p) => pathname.startsWith(p));
 }
 
-// ─── Extract subdomain from hostname ──────────────────────────────────────────
-// e.g. "nihon-moment.kuunyi.com"                → "nihon-moment"
-// e.g. "nihon-moment.edu-enroll-xi.vercel.app"  → "nihon-moment" (fallback)
-// e.g. "nihon-moment.localhost:3005"             → "nihon-moment"
-
-function extractSubdomain(host: string): string | null {
-  // Remove port
-  const hostname = host.split(":")[0];
-  const parts = hostname.split(".");
-
-  // localhost with subdomain: "nihon-moment.localhost"
-  if (parts.length === 2 && parts[1] === "localhost") {
-    return parts[0];
-  }
-
-  // Production: "tmf.kuunyi.com" (3 parts) → "tmf"
-  // Staging:    "tmf.staging.kuunyi.com" (4 parts) → "tmf"
-  // Bare "kuunyi.com" or "www.kuunyi.com" → no subdomain
-  if (hostname.endsWith(".kuunyi.com")) {
-    const sub = parts[0];
-    if (!sub || sub === "www" || sub === "staging") return null;
-    return sub;
-  }
-
-  // Vercel domains: "nihon-moment.edu-enroll-xi.vercel.app" (4 parts)
-  // The bare "edu-enroll-xi.vercel.app" (3 parts) is NOT a subdomain.
-  if (hostname.endsWith(".vercel.app")) {
-    return parts.length >= 4 ? parts[0] : null;
-  }
-
-  // Other custom domains: "nihon-moment.example.com" (3+ parts)
-  if (parts.length >= 3) {
-    return parts[0];
-  }
-
-  return null;
-}
-
 // ─── Middleware ───────────────────────────────────────────────────────────────
+// Host → tenant resolution lives in @/lib/tenant, which server components also
+// use as a fallback when this middleware's x-tenant-slug header doesn't
+// propagate on Vercel. This file used to carry a byte-identical copy; two
+// resolvers is how a custom domain resolves on some requests and not others.
 
 export async function middleware(request: NextRequest) {
   const requestHeaders = new Headers(request.headers);
@@ -64,12 +31,60 @@ export async function middleware(request: NextRequest) {
     hostname === "staging.kuunyi.com" ||
     hostname === "edu-enroll-xi.vercel.app";
 
-  if (!shouldSkipTenant(pathname)) {
-    tenantSlug = extractSubdomain(host);
+  // ── Custom domain surface split ──────────────────────────────────────────
+  // A tenant's own domain is student-facing only. Staff surfaces stay on the
+  // kuunyi subdomain so sessions live on exactly one origin; platform surfaces
+  // stay on the platform root so a client's domain never serves signup or
+  // superadmin. Runs before shouldSkipTenant(): /superadmin, /register and
+  // /onboarding skip tenant detection and would otherwise slip through.
+  const customTenant = tenantForCustomHost(host);
+  if (customTenant) {
+    const appDomain = process.env.NEXT_PUBLIC_APP_DOMAIN ?? "kuunyi.com";
+    const search = request.nextUrl.search;
 
-    // Fallback chain for localhost only — ?tenant= param → cookie → env var
-    // Do NOT apply fallback on production root domains (www.kuunyi.com, edu-enroll-xi.vercel.app)
-    if (!tenantSlug && !isRootDomain) {
+    // app/page.tsx renders the KuuNyi SaaS landing for every host — not
+    // something to serve on a client's homepage. Send the root to their
+    // enrollment index.
+    if (pathname === "/") {
+      return NextResponse.redirect(new URL("/enroll", request.url));
+    }
+
+    // Root-platform surfaces: the platform's, not this tenant's.
+    if (/^\/(register|superadmin)(\/|$)/.test(pathname)) {
+      return NextResponse.redirect(`https://${appDomain}${pathname}${search}`);
+    }
+
+    // Tenant staff surfaces.
+    if (/^\/(admin|login|onboarding)(\/|$)/.test(pathname)) {
+      return NextResponse.redirect(`https://${customTenant}.${appDomain}${pathname}${search}`);
+    }
+
+    // Not a security control: tenant-scoped authorization is. This only avoids
+    // answering platform calls on a client's domain.
+    if (/^\/api\/(admin|saas|superadmin)(\/|$)/.test(pathname)) {
+      return new NextResponse("Not Found", { status: 404 });
+    }
+  }
+
+  // "/" is in the matcher only for the redirect above. The landing page needs no
+  // session, so skip the Supabase round-trip the rest of this middleware does.
+  if (pathname === "/") return NextResponse.next();
+
+  if (!shouldSkipTenant(pathname)) {
+    tenantSlug = extractSubdomainFromHost(host);
+
+    // Dev conveniences — ?tenant=, the cookie, NEXT_PUBLIC_DEV_TENANT — must
+    // never establish tenant context on a host we do not control. The old guard
+    // was `!isRootDomain`, a four-host literal list, so every UNKNOWN host
+    // qualified: https://flashtic.evil.com/enroll?tenant=flashtic got tenant
+    // context even after the resolver correctly returned null. Gate on the host
+    // instead.
+    //
+    // VERCEL_ENV, not NODE_ENV: Vercel preview deployments run
+    // NODE_ENV=production, and staging CI targets a 3-part *.vercel.app preview
+    // host that resolves to null and relies on this fallback. VERCEL_ENV is
+    // production|preview|development and is unset locally.
+    if (!tenantSlug && process.env.VERCEL_ENV !== "production" && isDevHost(hostname)) {
       tenantSlug =
         request.nextUrl.searchParams.get("tenant") ??
         request.cookies.get("x-tenant-slug")?.value ??
@@ -165,7 +180,12 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
+    // "/" and "/register" are here only so the custom-domain surface split can
+    // redirect them; without these entries middleware never runs there and the
+    // redirects silently no-op.
+    "/",
     "/login",
+    "/register",
     "/admin/:path*",
     "/superadmin",
     "/superadmin/:path*",

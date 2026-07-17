@@ -5,6 +5,11 @@ import { useRouter } from "next/navigation";
 import type { TenantAppearance } from "@/types/database";
 import type { TemplateClass, TemplateIntake, TemplateLabels } from "./types";
 import { getCardState } from "./types";
+import {
+  PresentingSponsorBanner,
+  SponsorLogoWall,
+} from "@/components/enrollment/SponsorPlacements";
+import { resolveSponsorPlacements } from "@/lib/sponsors";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -167,6 +172,7 @@ export default function EvTrustedOfficialTemplate({
   const logoUrl = appearance.logo_url;
   const brand = appearance.primary_color || "#0f1f42";
   const tagline = appearance.tagline ?? null;
+  const sponsors = resolveSponsorPlacements(appearance.sponsor_config);
   // Event ticketing template: the CTA always reads "Buy Ticket" (ignores the
   // generic tenant cta_button_text, which defaults to "Enroll Now").
   const ctaText = "Buy Ticket";
@@ -217,10 +223,13 @@ export default function EvTrustedOfficialTemplate({
   }
 
   return (
-    <div className="min-h-screen" style={{ background: "#f7f5ef" }}>
+    <div
+      className="min-h-screen"
+      style={{ background: "#f7f5ef", fontFamily: "var(--font-inter), sans-serif" }}
+    >
       <div className="max-w-[480px] mx-auto pb-32">
         {/* ── Brand row ────────────────────────────────────── */}
-        <div className="px-5 pt-5 pb-4 flex items-center gap-2.5">
+        <div className="px-[22px] pt-5 pb-[14px] flex items-center gap-2.5">
           {logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={logoUrl} alt="" className="w-[30px] h-[30px] rounded-[6px] object-cover" />
@@ -237,9 +246,11 @@ export default function EvTrustedOfficialTemplate({
           </span>
         </div>
 
+        <PresentingSponsorBanner sponsor={sponsors.presenting} />
+
         {/* ── Title block ──────────────────────────────────── */}
         <div
-          className="mx-5 px-4 py-4 mb-5"
+          className="mx-[22px] px-4 py-[14px] mb-[18px] text-center"
           style={{ borderTop: "1.5px solid #d4af5a", borderBottom: "1.5px solid #d4af5a" }}
         >
           <p
@@ -259,7 +270,7 @@ export default function EvTrustedOfficialTemplate({
         </div>
 
         {/* ── Ticket cards ─────────────────────────────────── */}
-        <div className="px-5 flex flex-col gap-3">
+        <div className="px-[22px] flex flex-col gap-3">
           {classes.length === 0 ? (
             <p className="text-center py-12 text-sm" style={{ color: "#8b8f9a" }}>
               No tickets available at this time.
@@ -278,10 +289,12 @@ export default function EvTrustedOfficialTemplate({
           )}
         </div>
 
+        <SponsorLogoWall sponsors={sponsors.partners} />
+
         {/* ── Error ────────────────────────────────────────── */}
         {error && (
           <div
-            className="mx-5 mt-4 p-3 rounded-lg border text-[12px]"
+            className="mx-[22px] mt-4 p-3 rounded-lg border text-[12px]"
             style={{ background: "#fff5f5", borderColor: "#fca5a5", color: "#991b1b" }}
           >
             {error}

@@ -1,4 +1,4 @@
--- tickets: one row per admission
+-- Tickets: one row per admission.
 create table if not exists public.tickets (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,

@@ -21,17 +21,19 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Missing orderId" }, { status: 400 });
   }
 
-  console.log("[abank-callback]", params);
+  // Bounded: every param here is unauthenticated caller input, so log a
+  // correlation id and nothing else. The authoritative verdict is logged below.
+  console.log("[abank-callback] orderId=%s", params.orderId.slice(0, 32));
 
   const supabase = createAdminClient();
 
   // ── Find payment by payment_ref ───────────────────────────
   const { data: payment } = (await supabase
     .from("payments")
-    .select("id, enrollment_id, status")
+    .select("id, enrollment_id, status, amount")
     .eq("payment_ref", params.orderId)
     .single()) as {
-    data: { id: string; enrollment_id: string; status: string } | null;
+    data: { id: string; enrollment_id: string; status: string; amount: number } | null;
     error: unknown;
   };
 
@@ -45,20 +47,71 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ message: "Already processed" }, { status: 200 });
   }
 
-  // ── Update based on callback status ───────────────────────
-  const isSuccess = !params.errorCode && params.status;
+  // ── Confirm with ABank before trusting the callback ───────
+  // This endpoint is a public, unauthenticated GET, and the orderId is handed
+  // to the student when the QR is created — so a forged
+  //   ?orderId=<theirs>&status=SUCCESS
+  // must never confirm anything. Ask ABank directly instead, the same way the
+  // status poller does (src/app/api/public/payments/abank/status/route.ts).
+  // Callback params stay usable for logging and cosmetic fields, never to gate.
+  let enquiry;
+  try {
+    enquiry = await abank.enquiryOrder(params.orderId);
+  } catch (err) {
+    console.error("[abank-callback] Enquiry failed for", params.orderId, err);
+    // Leave the payment untouched — the status poller will settle it.
+    return NextResponse.json({ error: "Enquiry failed" }, { status: 502 });
+  }
 
-  if (isSuccess) {
+  const verdict = abank.verifyEnquiry(enquiry.data, {
+    orderId: params.orderId,
+    amountMmk: payment.amount,
+  });
+
+  if (verdict.outcome === "pending") {
+    return NextResponse.json({ message: "Pending" }, { status: 200 });
+  }
+
+  if (verdict.outcome === "failed") {
+    // Callback error fields are diagnostics only — bounded, and logged rather
+    // than stored. They are unauthenticated input and must not reach the audit
+    // record, exactly as on the success path above.
+    console.warn(
+      "[abank-callback] Refusing to confirm orderId=%s reason=%s callbackErrorCode=%s",
+      params.orderId.slice(0, 32),
+      verdict.reason,
+      (params.errorCode ?? "none").slice(0, 32),
+    );
+    await supabase
+      .from("payments")
+      .update({
+        mmqr_status: "FAILED",
+        // Provider verdict only. A caller who knows an order id could otherwise
+        // inject arbitrary text into financial audit data.
+        bank_reference: verdict.reason,
+      } as never)
+      .eq("id", payment.id);
+
+    return NextResponse.json({ message: "OK" }, { status: 200 });
+  }
+
+  // ── Verified by ABank: confirm ────────────────────────────
+  {
     await supabase
       .from("payments")
       .update({
         mmqr_status: "SUCCESS",
         status: "verified",
-        paid_at: params.transactionDateTime
-          ? new Date(params.transactionDateTime).toISOString()
-          : new Date().toISOString(),
-        bank_reference: `CB:${params.transactionId || params.endToEndId || "unknown"}`,
-        payer_institution: params.institutionName || null,
+        // Server time, never params.transactionDateTime. Once ABank confirms the
+        // payment, a caller who knows their own orderId could otherwise forge the
+        // settlement time — paid_at feeds reporting and reconciliation, so it is
+        // financial data, not decoration.
+        paid_at: new Date().toISOString(),
+        // ABank's enquiry values ONLY — no fallback to callback params. These are
+        // audit fields; an unauthenticated caller must not be able to write them
+        // even on a genuinely settled payment.
+        bank_reference: verdict.transactionId ? `CB:${verdict.transactionId}` : "CB:verified",
+        payer_institution: verdict.institutionName ?? null,
       } as never)
       .eq("id", payment.id);
 
@@ -221,16 +274,6 @@ export async function GET(request: NextRequest) {
 
       await Promise.allSettled(notifyTasks);
     }
-  } else {
-    await supabase
-      .from("payments")
-      .update({
-        mmqr_status: "FAILED",
-        bank_reference: params.errorCode
-          ? `${params.errorCode}: ${params.errorDesc ?? ""}`
-          : null,
-      } as never)
-      .eq("id", payment.id);
   }
 
   return NextResponse.json({ message: "OK" }, { status: 200 });
