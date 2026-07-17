@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
+import { platformOrigin } from "@/lib/origin";
 import mmpay from "@/lib/mmpay";
 
 // ─── POST /api/public/payments/mmqr ─────────────────────────────────────────
@@ -125,14 +126,15 @@ export async function POST(request: NextRequest) {
   // ── 6. Generate orderId and call MyanMyanPay ───────────────
   const orderId = `KNY-${tenantId.slice(0, 8)}-${enrollment.id.slice(0, 8)}-${Date.now()}`;
 
-  // Derive callback URL from the incoming request host
-  const host = request.headers.get("host") ?? "kuunyi.com";
-  const protocol = host.includes("localhost") ? "http" : "https";
-
   // Use sandbox or production based on env var (default: sandbox)
   const useProd = process.env.MMPAY_MODE === "production";
   const callbackPath = useProd ? "/api/payments/webhook" : "/api/sandbox/payments/webhook";
-  const callbackUrl = `${protocol}://${host}${callbackPath}`;
+
+  // Never the inbound Host. On a tenant custom domain that would aim settlement
+  // at a domain the client controls and could remove, stranding in-flight
+  // payments — and would need every custom domain registered with MyanMyanPay.
+  // platformOrigin() takes no tenant, so it cannot drift onto tenant DNS.
+  const callbackUrl = `${platformOrigin()}${callbackPath}`;
 
   try {
     const pay = useProd ? mmpay.pay : mmpay.sandboxPay;
