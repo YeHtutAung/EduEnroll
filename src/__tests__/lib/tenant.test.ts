@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { extractSubdomainFromHost } from "@/lib/tenant";
+import { customOriginForTenant, extractSubdomainFromHost } from "@/lib/tenant";
 
 const original = process.env.TENANT_CUSTOM_DOMAINS;
 
@@ -115,5 +115,40 @@ describe("extractSubdomainFromHost — env hardening", () => {
     expect(extractSubdomainFromHost("constructor")).toBeNull();
     expect(extractSubdomainFromHost("__proto__")).toBeNull();
     expect(extractSubdomainFromHost("toString")).toBeNull();
+  });
+});
+
+describe("customOriginForTenant", () => {
+  it("returns the tenant's configured custom origin", () => {
+    withMap('{"flashtic.com":"flashtic"}');
+    expect(customOriginForTenant("flashtic")).toBe("https://flashtic.com");
+  });
+
+  it("returns null for a tenant without one", () => {
+    withMap('{"flashtic.com":"flashtic"}');
+    expect(customOriginForTenant("nihon-moment")).toBeNull();
+  });
+
+  it("returns null when the map is unset, empty or invalid", () => {
+    delete process.env.TENANT_CUSTOM_DOMAINS;
+    expect(customOriginForTenant("flashtic")).toBeNull();
+    withMap(""); // set-but-empty is a distinct case from unset
+    expect(customOriginForTenant("flashtic")).toBeNull();
+    withMap("{not json");
+    expect(customOriginForTenant("flashtic")).toBeNull();
+  });
+
+  // Entries the parser drops must not be reachable through the back door.
+  it("returns null for a tenant whose entry was rejected", () => {
+    withMap('{"kuunyi.com":"evil","bad host":"broken"}');
+    expect(customOriginForTenant("evil")).toBeNull();
+    expect(customOriginForTenant("broken")).toBeNull();
+  });
+
+  // parseTenantCustomDomains keeps only the first host per tenant, so this is
+  // unambiguous by construction rather than by luck.
+  it("is unambiguous when two hosts name the same tenant", () => {
+    withMap('{"one.com":"flashtic","two.com":"flashtic"}');
+    expect(customOriginForTenant("flashtic")).toBe("https://one.com");
   });
 });
