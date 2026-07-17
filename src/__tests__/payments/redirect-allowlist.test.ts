@@ -265,3 +265,73 @@ describe("isAllowedRedirect — www of a custom domain", () => {
     ).toBe(false);
   });
 });
+
+// The resolver only ever sees a HOSTNAME, so it cannot vouch for scheme or
+// port. A custom domain is an https origin provisioned through Vercel; adding
+// the raw request origin would let the request dictate the parts exact-origin
+// comparison exists to pin.
+describe("isAllowedRedirect — custom-domain request origin must be canonical https", () => {
+  it("rejects http for a configured custom host", () => {
+    prod();
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"flashtic"}';
+    expect(
+      isAllowedRedirect("http://www.flashtic.com/x", "flashtic", "http://www.flashtic.com"),
+    ).toBe(false);
+    expect(isAllowedRedirect("http://flashtic.com/x", "flashtic", "http://flashtic.com")).toBe(
+      false,
+    );
+  });
+
+  it("rejects a non-default port for a configured custom host", () => {
+    prod();
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"flashtic"}';
+    expect(
+      isAllowedRedirect(
+        "https://www.flashtic.com:8443/x",
+        "flashtic",
+        "https://www.flashtic.com:8443",
+      ),
+    ).toBe(false);
+  });
+
+  // :443 is the https default — WHATWG URL normalises it away, so this is the
+  // same origin as the bare host and must still work.
+  it("still allows the explicit https default port", () => {
+    prod();
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"flashtic"}';
+    expect(
+      isAllowedRedirect("https://www.flashtic.com/x", "flashtic", "https://www.flashtic.com:443"),
+    ).toBe(true);
+  });
+
+  // A credential-bearing request origin contributes nothing, even for a clean
+  // candidate. nextUrl.origin strips credentials so the route never produces
+  // one; if something else does, it is suspicious input and gets no say.
+  it("a credential-bearing request origin contributes nothing", () => {
+    prod();
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"flashtic"}';
+    expect(
+      isAllowedRedirect(
+        "https://www.flashtic.com/x",
+        "flashtic",
+        "https://user:pass@www.flashtic.com",
+      ),
+    ).toBe(false);
+    // The apex stays allowed — it comes from the configured map, not the request.
+    expect(
+      isAllowedRedirect("https://flashtic.com/x", "flashtic", "https://user:pass@www.flashtic.com"),
+    ).toBe(true);
+  });
+
+  it("rejects a credential-bearing candidate regardless of the request origin", () => {
+    prod();
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"flashtic"}';
+    expect(
+      isAllowedRedirect(
+        "https://user:pass@www.flashtic.com/x",
+        "flashtic",
+        "https://www.flashtic.com",
+      ),
+    ).toBe(false);
+  });
+});

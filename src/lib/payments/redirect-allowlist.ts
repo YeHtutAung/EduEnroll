@@ -23,20 +23,38 @@ function allowedOrigins(tenantSubdomain: string, requestOrigin: string): Set<str
   if (custom) origins.add(custom);
 
   // ...and the origin the request actually arrived on, IF the custom-domain
-  // resolver independently maps that host to THIS tenant.
+  // resolver independently maps that host to THIS tenant AND that origin is a
+  // canonical https one.
   //
   // Needed because the resolver folds www to the apex — www.flashtic.com
   // resolves to tenant "flashtic" and Vercel serves it — while
   // customOriginForTenant() returns only the apex the map is keyed on. A student
   // who landed on www sends window.location.origin === www and would 400.
   //
-  // The RESOLVER is the gate here, not the request. This is not "trust the
-  // request origin": evil.com resolves to null, null !== the tenant, rejected.
-  // A host only qualifies if the same allowlist that routes it to this tenant
-  // says it belongs to this tenant.
+  // The RESOLVER is the gate, not the request. This is not "trust the request
+  // origin": evil.com resolves to null, null !== the tenant, rejected. A host
+  // only qualifies if the same allowlist that routes it to this tenant says it
+  // belongs to this tenant.
+  //
+  // But the resolver only ever sees a HOSTNAME, so it cannot vouch for scheme
+  // or port — adding the raw origin would let the request dictate exactly the
+  // parts exact-origin comparison exists to pin, and would contradict
+  // customOriginForTenant(), which only ever yields https. A custom domain is
+  // an https origin provisioned through Vercel, so require that here. (The
+  // dev-host branch below is deliberately different: localhost and LAN hosts
+  // legitimately use http and a port.)
   try {
-    const requestTenant = tenantForCustomHost(new URL(requestOrigin).hostname);
-    if (requestTenant && requestTenant === tenantSubdomain) origins.add(requestOrigin);
+    const url = new URL(requestOrigin);
+    if (
+      tenantForCustomHost(url.hostname) === tenantSubdomain &&
+      tenantSubdomain &&
+      url.protocol === "https:" &&
+      url.port === "" && // :443 normalises away; anything else is not canonical
+      !url.username &&
+      !url.password
+    ) {
+      origins.add(url.origin); // normalised, never the raw string
+    }
   } catch {
     // An unparseable request origin contributes nothing.
   }
