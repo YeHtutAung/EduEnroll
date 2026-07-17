@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
+import { platformOrigin } from "@/lib/origin";
 import abank from "@/lib/abank";
 
 // ─── POST /api/public/payments/abank ────────────────────────────────────────
@@ -114,9 +115,12 @@ export async function POST(request: NextRequest) {
   const orderId = `AB-${shortEnroll}-${ts}`.slice(0, 20);
 
   // ── Build callback URL ────────────────────────────────────
-  const host = request.headers.get("host") ?? "localhost:3005";
-  const proto = host.startsWith("localhost") ? "http" : "https";
-  const callbackUrl = `${proto}://${host}/api/webhooks/abank`;
+  // Never the inbound Host. On a tenant custom domain that would aim settlement
+  // at a domain the client controls and could remove, stranding in-flight
+  // payments — and would need every custom domain added to ABank's callback
+  // allowlist. platformOrigin() takes no tenant, so it cannot drift onto
+  // tenant-controlled DNS the way a custom-domain-aware tenantOrigin() could.
+  const callbackUrl = `${platformOrigin()}/api/webhooks/abank`;
 
   try {
     const result = await abank.createOrder({
