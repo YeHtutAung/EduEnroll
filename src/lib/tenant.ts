@@ -1,3 +1,24 @@
+// ─── Host classification ────────────────────────────────────────────────────
+
+/**
+ * Hosts that only ever appear in development: the local machine, LAN testing,
+ * or a Vercel preview deployment. Never a production host.
+ *
+ * Exported and shared on purpose. The HitPay redirect allowlist and the tenant
+ * middleware need the identical rule, and two divergent host classifiers is the
+ * kind of drift that makes a security check pass in one place and fail in
+ * another. Import this; do not re-inline it.
+ */
+export function isDevHost(hostname: string): boolean {
+  const host = hostname.split(":")[0].trim().toLowerCase().replace(/\.$/, "");
+  return (
+    host === "localhost" ||
+    host.endsWith(".localhost") ||
+    /^\d{1,3}(?:\.\d{1,3}){3}$/.test(host) ||
+    host.endsWith(".vercel.app")
+  );
+}
+
 // ─── Extract subdomain from host header ─────────────────────────────────────
 // Shared helper used by server components as a fallback when middleware's
 // x-tenant-slug header doesn't propagate on Vercel.
