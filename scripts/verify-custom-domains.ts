@@ -69,37 +69,57 @@ async function main(): Promise<void> {
   }
 
   const supabase = createAdminClient();
-  let missing = 0;
+  const notInDev: string[] = [];
 
   console.log(`\nResolving ${map.size} custom domain(s) against EduEnroll-dev:\n`);
 
-  for (const [host, slug] of map) {
+  // Array.from, not `of map` — tsconfig sets no "target", so it defaults to ES5
+  // and direct Map iteration needs --downlevelIteration. Raising the project
+  // target to satisfy one script would be a far wider change than this needs.
+  for (const [host, slug] of Array.from(map.entries())) {
     const { data: tenant } = (await supabase
       .from("tenants")
       .select("id, name")
       .eq("subdomain", slug)
       .maybeSingle()) as { data: { id: string; name: string } | null; error: unknown };
 
-    if (!tenant) {
-      console.error(`  ${host} → ${slug} → NO TENANT FOUND IN DEV`);
-      missing++;
-    } else {
+    if (tenant) {
       console.log(`  ${host} → ${slug} → "${tenant.name}"`);
+    } else {
+      // NOT an error. A production-only tenant legitimately has no dev row —
+      // the first real custom domain always lands here. Failing on it would
+      // block the correct config and teach operators to ignore the exit code,
+      // which is worse than not checking at all.
+      console.log(`  ${host} → ${slug} → (no dev tenant — production-only?)`);
+      notInDev.push(slug);
     }
   }
 
-  if (missing > 0 || issues.length > 0) {
+  // Only the parser is authoritative: it is environment-independent, so a
+  // rejected entry is wrong everywhere and the runtime will drop it too.
+  // Tenant existence is not — this database is not the one that will serve the
+  // domain.
+  if (issues.length > 0) {
     console.error(
-      `\nFAILED: ${issues.length} invalid entr${issues.length === 1 ? "y" : "ies"}, ` +
-        `${missing} slug(s) with no tenant in dev.`,
+      `\nFAILED: ${issues.length} invalid entr${issues.length === 1 ? "y" : "ies"}. ` +
+        `The runtime drops ${issues.length === 1 ? "it" : "them"} too — fix before deploying.`,
     );
     process.exitCode = 1;
     return;
   }
 
+  console.log("\nParser: OK — every entry is well-formed and will load at runtime.");
+
+  if (notInDev.length > 0) {
+    console.log(
+      `\nNote: ${notInDev.join(", ")} ${notInDev.length === 1 ? "has" : "have"} no tenant in dev.\n` +
+        "  Expected for a production-only tenant, and not a failure — but it means\n" +
+        "  the check below is the ONLY thing standing between you and a wrong slug.",
+    );
+  }
+
   console.log(
-    "\nParser and dev tenant lookup passed.\n" +
-      "\nSTILL REQUIRED — dev tenants are not production tenants:\n" +
+    "\nSTILL REQUIRED — this database is not the one that will serve the domain:\n" +
       "  In the superadmin UI ON PRODUCTION, look up each slug above and confirm\n" +
       "  the school name is the client who owns that domain. A slug that exists\n" +
       "  but belongs to a different school is the failure this cannot catch, and\n" +
