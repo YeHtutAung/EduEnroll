@@ -1175,10 +1175,14 @@ export default function PaymentInstructionsPage() {
     setHitpayError(null);
 
     try {
+      // Send our own return URL: the server validates it against the tenant's
+      // allowed origins and only falls back to the canonical tenant origin when
+      // none is supplied — which would leave a preview deployment.
+      const redirectUrl = `${window.location.origin}/enroll/payment/${encodeURIComponent(params.ref)}?hitpay=success`;
       const res = await fetch("/api/public/payments/hitpay", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enrollmentRef: params.ref, method: "card" }),
+        body: JSON.stringify({ enrollmentRef: params.ref, method: "card", redirectUrl }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message ?? "Failed to initiate card payment.");
