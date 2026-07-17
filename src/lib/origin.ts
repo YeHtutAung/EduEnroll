@@ -4,6 +4,18 @@
 // inbound Host header, which a client can spoof to inject attacker-controlled
 // links into outbound notifications (emails / SMS / Telegram).
 
+// ─── Stable platform origin ──────────────────────────────────────────────────
+// For machine-to-machine URLs (payment callbacks) that must never point at a
+// tenant-controlled domain. Deliberately takes no tenant argument: unlike
+// tenantOrigin(), which may become custom-domain-aware, this cannot be made to
+// return a host a client can remove or repoint. Removing a custom domain must
+// never strand an in-flight payment.
+
+export function platformOrigin(): string {
+  const configured = process.env.NEXT_PUBLIC_APP_URL ?? "https://kuunyi.com";
+  return new URL(configured).origin;
+}
+
 export function tenantOrigin(subdomain: string | null | undefined): string {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://kuunyi.com";
   const url = new URL(appUrl);
