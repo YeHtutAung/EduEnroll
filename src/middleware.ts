@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { extractSubdomainFromHost } from "@/lib/tenant";
 
 // ─── Routes that skip tenant detection ────────────────────────────────────────
 
@@ -10,45 +11,11 @@ function shouldSkipTenant(pathname: string): boolean {
   return SKIP_TENANT_PREFIXES.some((p) => pathname.startsWith(p));
 }
 
-// ─── Extract subdomain from hostname ──────────────────────────────────────────
-// e.g. "nihon-moment.kuunyi.com"                → "nihon-moment"
-// e.g. "nihon-moment.edu-enroll-xi.vercel.app"  → "nihon-moment" (fallback)
-// e.g. "nihon-moment.localhost:3005"             → "nihon-moment"
-
-function extractSubdomain(host: string): string | null {
-  // Remove port
-  const hostname = host.split(":")[0];
-  const parts = hostname.split(".");
-
-  // localhost with subdomain: "nihon-moment.localhost"
-  if (parts.length === 2 && parts[1] === "localhost") {
-    return parts[0];
-  }
-
-  // Production: "tmf.kuunyi.com" (3 parts) → "tmf"
-  // Staging:    "tmf.staging.kuunyi.com" (4 parts) → "tmf"
-  // Bare "kuunyi.com" or "www.kuunyi.com" → no subdomain
-  if (hostname.endsWith(".kuunyi.com")) {
-    const sub = parts[0];
-    if (!sub || sub === "www" || sub === "staging") return null;
-    return sub;
-  }
-
-  // Vercel domains: "nihon-moment.edu-enroll-xi.vercel.app" (4 parts)
-  // The bare "edu-enroll-xi.vercel.app" (3 parts) is NOT a subdomain.
-  if (hostname.endsWith(".vercel.app")) {
-    return parts.length >= 4 ? parts[0] : null;
-  }
-
-  // Other custom domains: "nihon-moment.example.com" (3+ parts)
-  if (parts.length >= 3) {
-    return parts[0];
-  }
-
-  return null;
-}
-
 // ─── Middleware ───────────────────────────────────────────────────────────────
+// Host → tenant resolution lives in @/lib/tenant, which server components also
+// use as a fallback when this middleware's x-tenant-slug header doesn't
+// propagate on Vercel. This file used to carry a byte-identical copy; two
+// resolvers is how a custom domain resolves on some requests and not others.
 
 export async function middleware(request: NextRequest) {
   const requestHeaders = new Headers(request.headers);
@@ -65,7 +32,7 @@ export async function middleware(request: NextRequest) {
     hostname === "edu-enroll-xi.vercel.app";
 
   if (!shouldSkipTenant(pathname)) {
-    tenantSlug = extractSubdomain(host);
+    tenantSlug = extractSubdomainFromHost(host);
 
     // Fallback chain for localhost only — ?tenant= param → cookie → env var
     // Do NOT apply fallback on production root domains (www.kuunyi.com, edu-enroll-xi.vercel.app)
