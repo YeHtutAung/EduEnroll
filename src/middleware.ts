@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { extractSubdomainFromHost } from "@/lib/tenant";
+import { extractSubdomainFromHost, isDevHost } from "@/lib/tenant";
 
 // ─── Routes that skip tenant detection ────────────────────────────────────────
 
@@ -34,9 +34,18 @@ export async function middleware(request: NextRequest) {
   if (!shouldSkipTenant(pathname)) {
     tenantSlug = extractSubdomainFromHost(host);
 
-    // Fallback chain for localhost only — ?tenant= param → cookie → env var
-    // Do NOT apply fallback on production root domains (www.kuunyi.com, edu-enroll-xi.vercel.app)
-    if (!tenantSlug && !isRootDomain) {
+    // Dev conveniences — ?tenant=, the cookie, NEXT_PUBLIC_DEV_TENANT — must
+    // never establish tenant context on a host we do not control. The old guard
+    // was `!isRootDomain`, a four-host literal list, so every UNKNOWN host
+    // qualified: https://flashtic.evil.com/enroll?tenant=flashtic got tenant
+    // context even after the resolver correctly returned null. Gate on the host
+    // instead.
+    //
+    // VERCEL_ENV, not NODE_ENV: Vercel preview deployments run
+    // NODE_ENV=production, and staging CI targets a 3-part *.vercel.app preview
+    // host that resolves to null and relies on this fallback. VERCEL_ENV is
+    // production|preview|development and is unset locally.
+    if (!tenantSlug && process.env.VERCEL_ENV !== "production" && isDevHost(hostname)) {
       tenantSlug =
         request.nextUrl.searchParams.get("tenant") ??
         request.cookies.get("x-tenant-slug")?.value ??
