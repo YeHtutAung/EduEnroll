@@ -29,7 +29,7 @@ const { POST } = await import("@/app/api/public/payments/hitpay/route");
 
 // ── Env ───────────────────────────────────────────────────────────────────
 
-const ENV_KEYS = ["NEXT_PUBLIC_APP_URL", "VERCEL_ENV"] as const;
+const ENV_KEYS = ["NEXT_PUBLIC_APP_URL", "VERCEL_ENV", "TENANT_CUSTOM_DOMAINS"] as const;
 const ORIGINAL = Object.fromEntries(
   ENV_KEYS.map((k) => [k, process.env[k]]),
 ) as Record<(typeof ENV_KEYS)[number], string | undefined>;
@@ -89,6 +89,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   process.env.NEXT_PUBLIC_APP_URL = "https://kuunyi.com";
   process.env.VERCEL_ENV = "production";
+  // Reset, not just restore. afterEach puts back the ORIGINAL value, which may
+  // itself be set on a dev machine or in CI — ambient config must not reach the
+  // allowlist. Custom-domain tests set their own map after this.
+  delete process.env.TENANT_CUSTOM_DOMAINS;
   setupMocks();
 });
 
@@ -240,6 +244,51 @@ describe("HitPay card redirect — development origins", () => {
       post(
         { enrollmentRef: "NM-2026-0001", method: "card", redirectUrl: "https://evil.com/phish" },
         "https://edu-enroll-git-abc.vercel.app",
+      ),
+    );
+    expect(res.status).toBe(400);
+  });
+});
+
+// ── Tenant custom domain (P3) ─────────────────────────────────────────────
+
+describe("HitPay card redirect — tenant custom domain", () => {
+  // The fixture's tenant is nihon-moment; map the domain to it.
+  it("accepts a return to the tenant's custom domain", async () => {
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"nihon-moment"}';
+    const url = "https://flashtic.com/enroll/x?hitpay=success";
+    const res = await POST(card(url));
+    expect(res.status).not.toBe(400);
+    expect(sentRedirect()).toBe(url);
+  });
+
+  it("rejects a custom domain mapped to a different tenant", async () => {
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"some-other-tenant"}';
+    const res = await POST(card("https://flashtic.com/enroll/x"));
+    expect(res.status).toBe(400);
+  });
+});
+
+// #166 serves www.<custom> as the same tenant, so a student can legitimately
+// land there — window.location.origin is then www, and the return must work.
+describe("HitPay card redirect — www of a custom domain", () => {
+  it("accepts a www return from a student on www", async () => {
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"nihon-moment"}';
+    const url = "https://www.flashtic.com/enroll/x?hitpay=success";
+    const res = await POST(
+      post({ enrollmentRef: "NM-2026-0001", method: "card", redirectUrl: url }, "https://www.flashtic.com"),
+    );
+    expect(res.status).not.toBe(400);
+    expect(sentRedirect()).toBe(url);
+  });
+
+  // Cross-tenant must survive the www allowance: the resolver is the gate.
+  it("rejects www of a custom domain mapped to a different tenant", async () => {
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"some-other-tenant"}';
+    const res = await POST(
+      post(
+        { enrollmentRef: "NM-2026-0001", method: "card", redirectUrl: "https://www.flashtic.com/x" },
+        "https://www.flashtic.com",
       ),
     );
     expect(res.status).toBe(400);

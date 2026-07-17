@@ -164,6 +164,23 @@ export function tenantForCustomHost(host: string): string | null {
   return domainMap().get(normalizeHost(host)) ?? null;
 }
 
+/**
+ * The tenant's configured custom origin, or null. Always https — a custom
+ * domain only exists in production, where Vercel provisions TLS.
+ *
+ * Unambiguous by construction: parseTenantCustomDomains() keeps only the first
+ * host per tenant, so there is never a canonical choice to make here.
+ */
+export function customOriginForTenant(slug: string): string | null {
+  // Array.from, not `of map` — tsconfig sets no "target", so it defaults to ES5
+  // and direct Map iteration needs --downlevelIteration. This exact pattern
+  // already broke the build once.
+  for (const [host, mapped] of Array.from(domainMap().entries())) {
+    if (mapped === slug) return `https://${host}`;
+  }
+  return null;
+}
+
 // ─── Extract subdomain from host header ─────────────────────────────────────
 
 export function extractSubdomainFromHost(host: string): string | null {
