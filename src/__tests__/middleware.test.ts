@@ -148,6 +148,92 @@ describe("middleware — dev fallback still works off production", () => {
   });
 });
 
+// Uses the middlewareRequest() factory and ENV_KEYS restoration above.
+function get(url: string) {
+  process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"flashtic"}';
+  return middleware(middlewareRequest(url));
+}
+
+describe("middleware — custom domain tenant resolution", () => {
+  it("resolves a custom domain, and www of it, to its tenant", async () => {
+    for (const host of ["flashtic.com", "www.flashtic.com"]) {
+      const res = await get(`https://${host}/enroll/spring`);
+      expect(slug(res)).toBe("flashtic");
+    }
+  });
+
+  // The security property this design leans on.
+  it("ignores ?tenant= on a custom domain", async () => {
+    expect(slug(await get("https://flashtic.com/enroll/spring?tenant=rival"))).toBe("flashtic");
+  });
+
+  it("leaves kuunyi subdomain routing unchanged", async () => {
+    expect(slug(await get("https://nihon-moment.kuunyi.com/enroll/spring"))).toBe("nihon-moment");
+  });
+});
+
+describe("middleware — custom domain surface split", () => {
+  it("sends the custom domain root to the tenant's enroll index", async () => {
+    const res = await get("https://flashtic.com/");
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe("https://flashtic.com/enroll");
+  });
+
+  it("redirects tenant staff pages to the tenant subdomain", async () => {
+    for (const path of ["/admin/dashboard", "/login", "/onboarding"]) {
+      const res = await get(`https://flashtic.com${path}`);
+      expect(res.status).toBe(307);
+      expect(res.headers.get("location")).toBe(`https://flashtic.kuunyi.com${path}`);
+    }
+  });
+
+  // Root-platform surfaces belong to the platform, not to a tenant.
+  it("redirects platform pages to the platform root", async () => {
+    for (const path of ["/register", "/superadmin"]) {
+      const res = await get(`https://flashtic.com${path}`);
+      expect(res.status).toBe(307);
+      expect(res.headers.get("location")).toBe(`https://kuunyi.com${path}`);
+    }
+  });
+
+  it("preserves the query string when redirecting", async () => {
+    const res = await get("https://flashtic.com/login?next=%2Fadmin");
+    expect(res.headers.get("location")).toBe("https://flashtic.kuunyi.com/login?next=%2Fadmin");
+  });
+
+  // APIs 404 rather than redirect: a cross-origin redirect fails opaquely under
+  // CORS for a fetch(), and an API client expects a status, not a host hop.
+  it("404s platform APIs instead of redirecting them", async () => {
+    for (const path of ["/api/admin/students", "/api/saas/tenants", "/api/superadmin/stats"]) {
+      const res = await get(`https://flashtic.com${path}`);
+      expect(res.status).toBe(404);
+    }
+  });
+
+  it("still serves student pages, public APIs and webhooks on the custom domain", async () => {
+    for (const path of [
+      "/enroll/spring",
+      "/status",
+      "/api/public/form-fields",
+      "/api/webhooks/hitpay",
+    ]) {
+      const res = await get(`https://flashtic.com${path}`);
+      expect(res.status).not.toBe(404);
+      expect(res.status).not.toBe(307);
+    }
+  });
+
+  it("blocks nothing on the tenant's own kuunyi subdomain", async () => {
+    const res = await get("https://flashtic.kuunyi.com/admin/dashboard");
+    expect(res.headers.get("location")).not.toContain("flashtic.com/admin");
+  });
+
+  it("leaves the kuunyi root landing page alone", async () => {
+    const res = await get("https://kuunyi.com/");
+    expect(res.status).not.toBe(307);
+  });
+});
+
 // TEMPORARY — pinned to Follow-up F2.
 // requireAuth() (api.ts:60-66) requires an inbound x-tenant-slug for signed
 // agent requests and grants role:"owner" on the named tenant. This plan

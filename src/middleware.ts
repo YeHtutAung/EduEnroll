@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { extractSubdomainFromHost, isDevHost } from "@/lib/tenant";
+import { extractSubdomainFromHost, tenantForCustomHost, isDevHost } from "@/lib/tenant";
 
 // ─── Routes that skip tenant detection ────────────────────────────────────────
 
@@ -30,6 +30,45 @@ export async function middleware(request: NextRequest) {
     hostname === "www.kuunyi.com" ||
     hostname === "staging.kuunyi.com" ||
     hostname === "edu-enroll-xi.vercel.app";
+
+  // ── Custom domain surface split ──────────────────────────────────────────
+  // A tenant's own domain is student-facing only. Staff surfaces stay on the
+  // kuunyi subdomain so sessions live on exactly one origin; platform surfaces
+  // stay on the platform root so a client's domain never serves signup or
+  // superadmin. Runs before shouldSkipTenant(): /superadmin, /register and
+  // /onboarding skip tenant detection and would otherwise slip through.
+  const customTenant = tenantForCustomHost(host);
+  if (customTenant) {
+    const appDomain = process.env.NEXT_PUBLIC_APP_DOMAIN ?? "kuunyi.com";
+    const search = request.nextUrl.search;
+
+    // app/page.tsx renders the KuuNyi SaaS landing for every host — not
+    // something to serve on a client's homepage. Send the root to their
+    // enrollment index.
+    if (pathname === "/") {
+      return NextResponse.redirect(new URL("/enroll", request.url));
+    }
+
+    // Root-platform surfaces: the platform's, not this tenant's.
+    if (/^\/(register|superadmin)(\/|$)/.test(pathname)) {
+      return NextResponse.redirect(`https://${appDomain}${pathname}${search}`);
+    }
+
+    // Tenant staff surfaces.
+    if (/^\/(admin|login|onboarding)(\/|$)/.test(pathname)) {
+      return NextResponse.redirect(`https://${customTenant}.${appDomain}${pathname}${search}`);
+    }
+
+    // Not a security control: tenant-scoped authorization is. This only avoids
+    // answering platform calls on a client's domain.
+    if (/^\/api\/(admin|saas|superadmin)(\/|$)/.test(pathname)) {
+      return new NextResponse("Not Found", { status: 404 });
+    }
+  }
+
+  // "/" is in the matcher only for the redirect above. The landing page needs no
+  // session, so skip the Supabase round-trip the rest of this middleware does.
+  if (pathname === "/") return NextResponse.next();
 
   if (!shouldSkipTenant(pathname)) {
     tenantSlug = extractSubdomainFromHost(host);
@@ -141,7 +180,12 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
+    // "/" and "/register" are here only so the custom-domain surface split can
+    // redirect them; without these entries middleware never runs there and the
+    // redirects silently no-op.
+    "/",
     "/login",
+    "/register",
     "/admin/:path*",
     "/superadmin",
     "/superadmin/:path*",
