@@ -183,6 +183,18 @@ describe("HitPay PayNow", () => {
     expect(res.status).not.toBe(400);
     expect(sentRedirect()).toBeUndefined();
   });
+
+  // PayNow must not depend on ANY redirect machinery — including the tenant
+  // subdomain the allowlist needs. A data anomaly that only affects card
+  // returns must not take PayNow down with it.
+  it("still works when the tenant join is missing", async () => {
+    setupMocks({ ...ENROLLMENT, tenants: null });
+    const res = await POST(post({ enrollmentRef: "NM-2026-0001", method: "paynow_online" }));
+    expect(res.status).not.toBe(500);
+    expect(mockCreatePaymentRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ redirectUrl: undefined }),
+    );
+  });
 });
 
 // ── Fail closed ───────────────────────────────────────────────────────────

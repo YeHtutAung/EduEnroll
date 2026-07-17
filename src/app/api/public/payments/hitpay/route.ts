@@ -154,37 +154,37 @@ export async function POST(request: NextRequest) {
   //   2. The fallback used to take its origin from the inbound Host, which is
   //      also request data.
 
-  // Fail closed. `?? ""` would fail OPEN: tenantOrigin() returns the PLATFORM
-  // ROOT for a falsy subdomain, so a join that came back missing or reshaped
-  // would silently allowlist kuunyi.com — the one origin this design excludes —
-  // and aim the fallback at a page that does not exist. The column is non-null,
-  // so this should be unreachable; if it fires, the join shape is wrong.
-  const subdomain = enrollment.tenants?.subdomain;
-  if (!subdomain) {
-    console.error("[hitpay] Tenant subdomain missing for enrollment", enrollment.id);
-    return NextResponse.json(
-      { error: "Internal Server Error", message: "Tenant origin could not be resolved." },
-      { status: 500 },
-    );
-  }
-
-  // nextUrl.origin, NOT a host/proto guess: `host.startsWith("localhost")` would
-  // label tenant.localhost:3005 and 192.168.50.3:3005 as https while the browser
-  // sends http, and exact-origin comparison would then reject real dev traffic.
-  const requestOrigin = request.nextUrl.origin;
-
-  // Trusted origin + the canonical DB ref (the client's enrollmentRef is only
-  // trimmed for the lookup, so the raw value can differ from what we matched).
-  const fallbackRedirectUrl =
-    `${tenantOrigin(subdomain)}/enroll/payment/` +
-    `${encodeURIComponent(enrollment.enrollment_ref)}?hitpay=success`;
-
-  // Card only, structurally. PayNow never receives a redirectUrl, so it must not
-  // validate the body field either — otherwise a rogue value 400s a PayNow
-  // request that would have ignored it.
+  // Card only, structurally — and that includes every dependency the redirect
+  // needs, not just the validation. PayNow never receives a redirectUrl, so
+  // nothing here may run for it: neither a rogue body field nor a missing
+  // tenant join may affect a PayNow payment.
   let redirectUrl: string | undefined;
   if (hitpayMethod === "card") {
-    redirectUrl = fallbackRedirectUrl;
+    // Fail closed. `?? ""` would fail OPEN: tenantOrigin() returns the PLATFORM
+    // ROOT for a falsy subdomain, so a join that came back missing or reshaped
+    // would silently allowlist kuunyi.com — the one origin this design excludes
+    // — and aim the fallback at a page that does not exist. The column is
+    // non-null, so this should be unreachable; if it fires, the join is wrong.
+    const subdomain = enrollment.tenants?.subdomain;
+    if (!subdomain) {
+      console.error("[hitpay] Tenant subdomain missing for enrollment", enrollment.id);
+      return NextResponse.json(
+        { error: "Internal Server Error", message: "Tenant origin could not be resolved." },
+        { status: 500 },
+      );
+    }
+
+    // nextUrl.origin, NOT a host/proto guess: `host.startsWith("localhost")`
+    // would label tenant.localhost:3005 and 192.168.50.3:3005 as https while the
+    // browser sends http, and exact-origin comparison would reject real dev
+    // traffic.
+    const requestOrigin = request.nextUrl.origin;
+
+    // Trusted origin + the canonical DB ref (the client's enrollmentRef is only
+    // trimmed for the lookup, so the raw value can differ from what matched).
+    redirectUrl =
+      `${tenantOrigin(subdomain)}/enroll/payment/` +
+      `${encodeURIComponent(enrollment.enrollment_ref)}?hitpay=success`;
 
     if (clientRedirectUrl !== undefined) {
       if (
