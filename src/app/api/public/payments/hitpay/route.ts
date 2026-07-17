@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
   const { data: enrollment, error: enrollmentError } = (await supabase
     .from("enrollments")
     .select(
-      "id, enrollment_ref, tenant_id, status, student_name_en, email, class_id, quantity, classes(id, fee_amount, level), enrollment_items(class_id, quantity, fee_amount)",
+      "id, enrollment_ref, tenant_id, status, student_name_en, email, class_id, quantity, classes(id, fee_amount, level), enrollment_items(class_id, quantity, fee_amount), tenants(subdomain)",
     )
     .eq("enrollment_ref", enrollmentRef.trim())
     .eq("tenant_id", tenantId)
@@ -66,6 +66,9 @@ export async function POST(request: NextRequest) {
       quantity: number | null;
       classes: { id: string; fee_amount: number; level: string } | null;
       enrollment_items: { class_id: string; quantity: number; fee_amount: number }[] | null;
+      // Joined so the redirect allowlist can build the tenant's canonical
+      // origin without a second round trip.
+      tenants: { subdomain: string } | null;
     } | null;
     error: unknown;
   };
