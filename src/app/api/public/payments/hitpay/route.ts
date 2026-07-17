@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import hitpay from "@/lib/hitpay";
+import { tenantOrigin } from "@/lib/origin";
+import { isAllowedRedirect } from "@/lib/payments/redirect-allowlist";
 
 // ─── POST /api/public/payments/hitpay ─────────────────────────────────────────
 // Creates a HitPay payment request for PayNow QR or Card.
@@ -146,12 +148,59 @@ export async function POST(request: NextRequest) {
   }
 
   // ── 7. Build redirect URL (card only) ──────────────────────────────────────
-  // Prefer client-supplied redirectUrl (the client knows its own page path).
-  // Fall back to the generic payment page path for backwards compatibility.
-  const host = request.headers.get("host") ?? "localhost:3005";
-  const proto = host.startsWith("localhost") ? "http" : "https";
-  const fallbackRedirectUrl = `${proto}://${host}/enroll/payment/${encodeURIComponent(enrollmentRef)}?hitpay=success`;
-  const redirectUrl = clientRedirectUrl ?? fallbackRedirectUrl;
+  // Two untrusted paths, both closed here:
+  //   1. A supplied redirectUrl is client input — unvalidated it turns a genuine
+  //      HitPay link into a phishing redirect.
+  //   2. The fallback used to take its origin from the inbound Host, which is
+  //      also request data.
+
+  // Fail closed. `?? ""` would fail OPEN: tenantOrigin() returns the PLATFORM
+  // ROOT for a falsy subdomain, so a join that came back missing or reshaped
+  // would silently allowlist kuunyi.com — the one origin this design excludes —
+  // and aim the fallback at a page that does not exist. The column is non-null,
+  // so this should be unreachable; if it fires, the join shape is wrong.
+  const subdomain = enrollment.tenants?.subdomain;
+  if (!subdomain) {
+    console.error("[hitpay] Tenant subdomain missing for enrollment", enrollment.id);
+    return NextResponse.json(
+      { error: "Internal Server Error", message: "Tenant origin could not be resolved." },
+      { status: 500 },
+    );
+  }
+
+  // nextUrl.origin, NOT a host/proto guess: `host.startsWith("localhost")` would
+  // label tenant.localhost:3005 and 192.168.50.3:3005 as https while the browser
+  // sends http, and exact-origin comparison would then reject real dev traffic.
+  const requestOrigin = request.nextUrl.origin;
+
+  // Trusted origin + the canonical DB ref (the client's enrollmentRef is only
+  // trimmed for the lookup, so the raw value can differ from what we matched).
+  const fallbackRedirectUrl =
+    `${tenantOrigin(subdomain)}/enroll/payment/` +
+    `${encodeURIComponent(enrollment.enrollment_ref)}?hitpay=success`;
+
+  // Card only, structurally. PayNow never receives a redirectUrl, so it must not
+  // validate the body field either — otherwise a rogue value 400s a PayNow
+  // request that would have ignored it.
+  let redirectUrl: string | undefined;
+  if (hitpayMethod === "card") {
+    redirectUrl = fallbackRedirectUrl;
+
+    if (clientRedirectUrl !== undefined) {
+      if (
+        typeof clientRedirectUrl !== "string" ||
+        !isAllowedRedirect(clientRedirectUrl, subdomain, requestOrigin)
+      ) {
+        // Reject rather than silently substituting the fallback: a rejected
+        // value is either an attack or a broken client, and both should surface.
+        return NextResponse.json(
+          { error: "Bad Request", message: "Invalid redirect origin." },
+          { status: 400 },
+        );
+      }
+      redirectUrl = clientRedirectUrl;
+    }
+  }
 
   // ── 8. Call HitPay API ─────────────────────────────────────────────────────
   try {
@@ -162,7 +211,7 @@ export async function POST(request: NextRequest) {
       referenceNumber: enrollment.enrollment_ref,
       name: enrollment.student_name_en || undefined,
       email: enrollment.email || undefined,
-      redirectUrl: hitpayMethod === "card" ? redirectUrl : undefined,
+      redirectUrl,
     });
 
     // ── 9. Insert payment record ───────────────────────────────────────────────

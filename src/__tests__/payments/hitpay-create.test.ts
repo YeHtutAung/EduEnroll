@@ -35,6 +35,9 @@ const ENROLLMENT = {
   quantity: 1,
   enrollment_items: null,
   classes: { id: "class-1", fee_amount: 50, level: "N5" },
+  // Joined by the route to build the redirect allowlist; the handler fails
+  // closed without it rather than falling back to the platform root.
+  tenants: { subdomain: "nihon-moment" },
 };
 
 // ── Helper ────────────────────────────────────────────────────────────────
