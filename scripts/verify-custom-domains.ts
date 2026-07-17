@@ -70,6 +70,7 @@ async function main(): Promise<void> {
 
   const supabase = createAdminClient();
   const notInDev: string[] = [];
+  const queryFailures: { slug: string; message: string }[] = [];
 
   console.log(`\nResolving ${map.size} custom domain(s) against EduEnroll-dev:\n`);
 
@@ -77,13 +78,23 @@ async function main(): Promise<void> {
   // and direct Map iteration needs --downlevelIteration. Raising the project
   // target to satisfy one script would be a far wider change than this needs.
   for (const [host, slug] of Array.from(map.entries())) {
-    const { data: tenant } = (await supabase
+    // Keep `error`. Discarding it makes a failed query (auth, network,
+    // PostgREST) indistinguishable from a missing row, so a preflight that
+    // checked NOTHING would report a clean production-only tenant and exit 0.
+    // "No answer" and "the answer is no" are different facts.
+    const { data: tenant, error } = (await supabase
       .from("tenants")
       .select("id, name")
       .eq("subdomain", slug)
-      .maybeSingle()) as { data: { id: string; name: string } | null; error: unknown };
+      .maybeSingle()) as {
+      data: { id: string; name: string } | null;
+      error: { message?: string } | null;
+    };
 
-    if (tenant) {
+    if (error) {
+      console.error(`  ${host} → ${slug} → QUERY FAILED: ${error.message ?? String(error)}`);
+      queryFailures.push({ slug, message: error.message ?? String(error) });
+    } else if (tenant) {
       console.log(`  ${host} → ${slug} → "${tenant.name}"`);
     } else {
       // NOT an error. A production-only tenant legitimately has no dev row —
@@ -95,10 +106,10 @@ async function main(): Promise<void> {
     }
   }
 
-  // Only the parser is authoritative: it is environment-independent, so a
-  // rejected entry is wrong everywhere and the runtime will drop it too.
-  // Tenant existence is not — this database is not the one that will serve the
-  // domain.
+  // Only the parser is authoritative about the CONFIG: it is
+  // environment-independent, so a rejected entry is wrong everywhere and the
+  // runtime will drop it too. Tenant existence is not — this database is not
+  // the one that will serve the domain.
   if (issues.length > 0) {
     console.error(
       `\nFAILED: ${issues.length} invalid entr${issues.length === 1 ? "y" : "ies"}. ` +
@@ -109,6 +120,20 @@ async function main(): Promise<void> {
   }
 
   console.log("\nParser: OK — every entry is well-formed and will load at runtime.");
+
+  // A query failure is fatal for a different reason than a bad entry: it means
+  // the check did not run. Reporting success would claim a verification that
+  // never happened.
+  if (queryFailures.length > 0) {
+    console.error(
+      `\nFAILED: ${queryFailures.length} tenant lookup(s) errored, so they were not checked at all.\n` +
+        queryFailures.map((f) => `  ${f.slug}: ${f.message}`).join("\n") +
+        "\n\n  This is NOT the same as a production-only tenant. Fix the connection\n" +
+        "  or credentials and re-run — do not read this as a pass.",
+    );
+    process.exitCode = 1;
+    return;
+  }
 
   if (notInDev.length > 0) {
     console.log(
