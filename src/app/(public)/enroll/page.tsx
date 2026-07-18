@@ -34,18 +34,29 @@ export default async function EnrollPage() {
     extractSubdomainFromHost(headersList.get("host") ?? "");
 
   let intakes: OpenIntake[] = [];
+  // A query that FAILED is not a tenant with nothing on sale. Keeping these
+  // apart matters: telling visitors "No open events" during a database
+  // incident reads as "this school closed enrolment", which is a different
+  // and damaging claim.
+  let loadFailed = false;
 
   if (tenantSlug) {
     const supabase = createAdminClient();
 
-    const { data: tenant } = (await supabase
+    const { data: tenant, error: tenantError } = (await supabase
       .from("tenants")
       .select("id")
       .eq("subdomain", tenantSlug)
-      .maybeSingle()) as { data: { id: string } | null; error: unknown };
+      .maybeSingle()) as {
+      data: { id: string } | null;
+      error: { message?: string } | null;
+    };
 
-    if (tenant) {
-      const { data } = (await supabase
+    if (tenantError) {
+      console.error("[enroll-index] tenant lookup failed for", tenantSlug, tenantError);
+      loadFailed = true;
+    } else if (tenant) {
+      const { data, error: intakeError } = (await supabase
         .from("intakes")
         .select("id, name, year, slug")
         .eq("tenant_id", tenant.id)
@@ -53,13 +64,37 @@ export default async function EnrollPage() {
         .order("year", { ascending: false })
         .order("created_at", { ascending: false })) as {
         data: OpenIntake[] | null;
-        error: unknown;
+        error: { message?: string } | null;
       };
 
-      // An intake with no slug has no page to link to — skip rather than
-      // render a dead link.
-      intakes = (data ?? []).filter((i) => i.slug);
+      if (intakeError) {
+        console.error("[enroll-index] intake lookup failed for", tenantSlug, intakeError);
+        loadFailed = true;
+      } else {
+        // An intake with no slug has no page to link to — skip rather than
+        // render a dead link.
+        intakes = (data ?? []).filter((i) => i.slug);
+      }
     }
+    // A tenant that resolved to no row is not a failure: an unconfigured or
+    // unknown slug legitimately has nothing to show.
+  }
+
+  if (loadFailed) {
+    return (
+      <main className="mx-auto max-w-2xl px-6 py-20 text-center">
+        <h1 className="text-2xl font-semibold text-slate-900">
+          Events can&rsquo;t be loaded right now
+        </h1>
+        <p className="mt-3 text-slate-600">
+          This is a temporary problem on our side, not a closed enrolment. Please try again
+          shortly.
+        </p>
+        <p className="mt-1 font-myanmar text-slate-600">
+          ယာယီ ပြဿနာဖြစ်နေပါသည်။ ခဏအကြာတွင် ပြန်လည်ကြိုးစားပါ။
+        </p>
+      </main>
+    );
   }
 
   // Exactly one open intake: send them straight there. redirect() throws, so
