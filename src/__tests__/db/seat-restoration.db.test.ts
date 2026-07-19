@@ -75,14 +75,15 @@ async function createClassRow(
   intakeId: string,
   seatTotal = 10,
   seatRemaining = 7,
+  status = "open",
 ): Promise<string> {
   // (intake_id, level) is UNIQUE, so a test needing two classes in one intake
   // must not reuse the level. Generated rather than passed in, so the
   // constraint cannot be tripped by a caller that forgets.
   const [row] = await sql<{ id: string }>(
     `INSERT INTO classes (tenant_id, intake_id, level, fee_amount, seat_total, seat_remaining, status)
-     VALUES ($1, $2, $5, 100, $3, $4, 'open') RETURNING id`,
-    [tenantId, intakeId, seatTotal, seatRemaining, `L${uniq()}`],
+     VALUES ($1, $2, $5, 100, $3, $4, $6::class_status) RETURNING id`,
+    [tenantId, intakeId, seatTotal, seatRemaining, `L${uniq()}`, status],
   );
   made.classes.push(row.id);
   return row.id;
@@ -137,6 +138,9 @@ const seats = async (classId: string) =>
     `SELECT seat_remaining FROM classes WHERE id = $1`, [classId],
   ))[0].seat_remaining);
 
+const classStatus = async (classId: string) =>
+  (await sql<{ status: string }>(`SELECT status FROM classes WHERE id = $1`, [classId]))[0].status;
+
 const enrollmentRow = async (id: string) =>
   (await sql<Record<string, unknown>>(`SELECT * FROM enrollments WHERE id = $1`, [id]))[0];
 
@@ -158,9 +162,13 @@ afterEach(async () => {
   // FK-safe order. Runs even when the test failed, hence the recorded ids.
   // BEGIN..ROLLBACK is unavailable: verifyPayment() goes through PostgREST on
   // a separate connection, which a SQL transaction cannot roll back.
+  // Cleanup failures are NOT swallowed. A leaked pending_payment enrollment is
+  // swept up by the next test's expiry call — check_expired_enrollments is
+  // global — so a silent teardown failure surfaces as an unrelated test
+  // failing, which is far harder to diagnose than a loud one here.
   const { tenants, intakes, classes, enrollments, payments, authUsers } = made;
   if (enrollments.length) {
-    await sql(`DELETE FROM tickets WHERE enrollment_id = ANY($1::uuid[])`, [enrollments]).catch(() => {});
+    await sql(`DELETE FROM tickets WHERE enrollment_id = ANY($1::uuid[])`, [enrollments]);
     await sql(`DELETE FROM payments WHERE enrollment_id = ANY($1::uuid[])`, [enrollments]);
     await sql(`DELETE FROM enrollment_items WHERE enrollment_id = ANY($1::uuid[])`, [enrollments]);
     await sql(`DELETE FROM enrollments WHERE id = ANY($1::uuid[])`, [enrollments]);
@@ -169,7 +177,13 @@ afterEach(async () => {
   if (classes.length) await sql(`DELETE FROM classes WHERE id = ANY($1::uuid[])`, [classes]);
   if (intakes.length) await sql(`DELETE FROM intakes WHERE id = ANY($1::uuid[])`, [intakes]);
   if (tenants.length) await sql(`DELETE FROM tenants WHERE id = ANY($1::uuid[])`, [tenants]);
-  for (const uid of authUsers) await admin.auth.admin.deleteUser(uid).catch(() => {});
+
+  // deleteUser RESOLVES with { error } rather than rejecting, so a .catch()
+  // would never see an API failure and local auth users would accumulate.
+  for (const uid of authUsers) {
+    const { error } = await admin.auth.admin.deleteUser(uid);
+    if (error) throw new Error(`Failed to delete auth user ${uid}: ${error.message}`);
+  }
   made = fresh();
 });
 
@@ -194,10 +208,12 @@ afterAll(async () => {
  * their assertions, yet the totals still read 11 failures. Headroom is what
  * makes an over-restoration observable.
  */
-async function scenario(opts: { autoCancelMinutes?: number; seatTotal?: number; seatRemaining?: number } = {}) {
+async function scenario(opts: { autoCancelMinutes?: number; seatTotal?: number; seatRemaining?: number; classStatus?: string } = {}) {
   const tenantId = await createTenant(opts.autoCancelMinutes ?? 0);
   const intakeId = await createIntake(tenantId);
-  const classId = await createClassRow(tenantId, intakeId, opts.seatTotal ?? 100, opts.seatRemaining ?? 7);
+  const classId = await createClassRow(
+    tenantId, intakeId, opts.seatTotal ?? 100, opts.seatRemaining ?? 7, opts.classStatus ?? "open",
+  );
   return { tenantId, intakeId, classId };
 }
 
@@ -243,6 +259,22 @@ describe("A. expiry sweep", () => {
     await expireNow();
 
     expect(await seats(classId)).toBe(afterFirst);
+  });
+
+  it("A6 reopens a full class when expiry frees seats", async () => {
+    // The sweep no longer sets class status itself — it is delegated to
+    // trg_auto_reopen_class, which fires on the seat update the status trigger
+    // makes. Untested, this PR could restore capacity while leaving the class
+    // closed to enrolment.
+    const { tenantId, classId } = await scenario({
+      autoCancelMinutes: 30, seatTotal: 10, seatRemaining: 0, classStatus: "full",
+    });
+    await createEnrollment({ tenantId, classId, quantity: 2, minutesAgo: 60 });
+
+    await expireNow();
+
+    expect(await seats(classId)).toBe(2);
+    expect(await classStatus(classId)).toBe("open");
   });
 
   it("A5 rolls back completely when the sweep raises, and recovers", async () => {
@@ -444,6 +476,19 @@ describe("E. deletion", () => {
     await sql(`DELETE FROM enrollments WHERE id = $1`, [enrollId]);
 
     expect(await seats(classId)).toBe(afterReject);
+  });
+
+  it("E7 reopens a full class when a deletion frees seats", async () => {
+    // The delete trigger no longer sets status either — same delegation.
+    const { tenantId, classId } = await scenario({
+      seatTotal: 10, seatRemaining: 0, classStatus: "full",
+    });
+    const enrollId = await createEnrollment({ tenantId, classId, quantity: 2 });
+
+    await sql(`DELETE FROM enrollments WHERE id = $1`, [enrollId]);
+
+    expect(await seats(classId)).toBe(2);
+    expect(await classStatus(classId)).toBe("open");
   });
 
   it("E6 restores exactly `quantity` when an active enrollment is deleted", async () => {

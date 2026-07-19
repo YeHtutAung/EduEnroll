@@ -12,7 +12,12 @@ import path from "path";
 // another way later.
 const envFile = path.join(process.cwd(), ".env.test.local");
 if (fs.existsSync(envFile)) {
-  for (const line of fs.readFileSync(envFile, "utf8").split(/\r?\n/)) {
+  // Strip the UTF-8 BOM. PowerShell 5.1's Out-File -Encoding utf8 writes one,
+  // so without this the first variable is named "﻿DATABASE_URL" — which
+  // then fails the presence check below with a message naming a variable the
+  // file appears to contain.
+  const contents = fs.readFileSync(envFile, "utf8").replace(/^﻿/, "");
+  for (const line of contents.split(/\r?\n/)) {
     const i = line.indexOf("=");
     if (i < 1 || line.startsWith("#")) continue;
     const name = line.slice(0, i).trim();
