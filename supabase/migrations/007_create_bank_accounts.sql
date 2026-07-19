@@ -1,54 +1,23 @@
 -- ============================================================
 -- 007_create_bank_accounts.sql
--- Bank accounts — payment destinations shown to students
--- Supported Myanmar banks: KBZ, AYA, CB, UAB, Yoma, Other
+--
+-- INTENTIONALLY EMPTY — superseded by 000_combined_schema.sql
+--
+-- This migration originally created: bank_accounts table, myanmar_bank enum, RLS policies.
+-- 000_combined_schema.sql already creates all of it and is the source of
+-- truth. Running both in order fails: 000 creates the objects, then this file
+-- tried to create them again (e.g. `CREATE TYPE ... already exists`), which
+-- aborted any rebuild of the migration chain from scratch.
+--
+-- The file is kept, not deleted: versions 000-011 are recorded in
+-- supabase_migrations.schema_migrations on the remote databases, and removing
+-- the file would leave that history referencing a migration that no longer
+-- exists. Emptying it keeps history valid while letting a fresh database
+-- build cleanly.
+--
+-- The original statements remain in git history and are duplicated verbatim
+-- in 000_combined_schema.sql. Do not re-add DDL here — put schema changes in
+-- a new timestamped migration.
 -- ============================================================
 
--- Enum -------------------------------------------------------
-CREATE TYPE myanmar_bank AS ENUM ('KBZ', 'AYA', 'CB', 'UAB', 'Yoma', 'Other');
-
--- Table ------------------------------------------------------
-CREATE TABLE IF NOT EXISTS public.bank_accounts (
-  id               uuid          PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id        uuid          NOT NULL REFERENCES public.tenants (id) ON DELETE CASCADE,
-  bank_name        myanmar_bank  NOT NULL,
-  account_number   varchar       NOT NULL,
-  account_holder   varchar       NOT NULL,
-  is_active        boolean       NOT NULL DEFAULT true,
-  created_at       timestamptz   NOT NULL DEFAULT now()
-);
-
--- Indexes ----------------------------------------------------
-CREATE INDEX IF NOT EXISTS idx_bank_accounts_tenant_id  ON public.bank_accounts (tenant_id);
-CREATE INDEX IF NOT EXISTS idx_bank_accounts_active     ON public.bank_accounts (tenant_id, is_active);
-
--- ============================================================
--- Row Level Security
--- ============================================================
-ALTER TABLE public.bank_accounts ENABLE ROW LEVEL SECURITY;
-
--- SELECT: authenticated staff AND anonymous public (students need to see bank details)
-CREATE POLICY "bank_accounts_select_authenticated"
-  ON public.bank_accounts
-  FOR SELECT
-  TO authenticated
-  USING (tenant_id = public.get_my_tenant_id());
-
-CREATE POLICY "bank_accounts_select_anon"
-  ON public.bank_accounts
-  FOR SELECT
-  TO anon
-  USING (is_active = true);
-
-CREATE POLICY "bank_accounts_insert"
-  ON public.bank_accounts
-  FOR INSERT
-  TO authenticated
-  WITH CHECK (tenant_id = public.get_my_tenant_id());
-
-CREATE POLICY "bank_accounts_update"
-  ON public.bank_accounts
-  FOR UPDATE
-  TO authenticated
-  USING   (tenant_id = public.get_my_tenant_id())
-  WITH CHECK (tenant_id = public.get_my_tenant_id());
+-- No-op.

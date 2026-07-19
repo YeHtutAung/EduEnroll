@@ -1,49 +1,23 @@
 -- ============================================================
 -- 002_create_users.sql
--- Application users — linked to Supabase auth.users
+--
+-- INTENTIONALLY EMPTY — superseded by 000_combined_schema.sql
+--
+-- This migration originally created: users table, user_role enum, RLS policies.
+-- 000_combined_schema.sql already creates all of it and is the source of
+-- truth. Running both in order fails: 000 creates the objects, then this file
+-- tried to create them again (e.g. `CREATE TYPE ... already exists`), which
+-- aborted any rebuild of the migration chain from scratch.
+--
+-- The file is kept, not deleted: versions 000-011 are recorded in
+-- supabase_migrations.schema_migrations on the remote databases, and removing
+-- the file would leave that history referencing a migration that no longer
+-- exists. Emptying it keeps history valid while letting a fresh database
+-- build cleanly.
+--
+-- The original statements remain in git history and are duplicated verbatim
+-- in 000_combined_schema.sql. Do not re-add DDL here — put schema changes in
+-- a new timestamped migration.
 -- ============================================================
 
--- Enum -------------------------------------------------------
-CREATE TYPE user_role AS ENUM ('owner', 'admin', 'student');
-
--- Table ------------------------------------------------------
-CREATE TABLE IF NOT EXISTS public.users (
-  id          uuid        PRIMARY KEY REFERENCES auth.users (id) ON DELETE CASCADE,
-  tenant_id   uuid        NOT NULL REFERENCES public.tenants (id) ON DELETE CASCADE,
-  email       varchar     NOT NULL,
-  role        user_role   NOT NULL DEFAULT 'student',
-  full_name   varchar,
-  phone       varchar,
-  created_at  timestamptz NOT NULL DEFAULT now()
-);
-
--- Indexes ----------------------------------------------------
-CREATE INDEX IF NOT EXISTS idx_users_tenant_id ON public.users (tenant_id);
-CREATE INDEX IF NOT EXISTS idx_users_email     ON public.users (email);
-
--- ============================================================
--- Row Level Security
--- ============================================================
-ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
-
--- SELECT: see only users in the same tenant
-CREATE POLICY "users_select"
-  ON public.users
-  FOR SELECT
-  TO authenticated
-  USING (tenant_id = public.get_my_tenant_id());
-
--- INSERT: may only insert users into own tenant
-CREATE POLICY "users_insert"
-  ON public.users
-  FOR INSERT
-  TO authenticated
-  WITH CHECK (tenant_id = public.get_my_tenant_id());
-
--- UPDATE: may only update users in own tenant
-CREATE POLICY "users_update"
-  ON public.users
-  FOR UPDATE
-  TO authenticated
-  USING   (tenant_id = public.get_my_tenant_id())
-  WITH CHECK (tenant_id = public.get_my_tenant_id());
+-- No-op.
