@@ -10,11 +10,7 @@ vi.mock("@/lib/supabase/admin", () => ({
   }),
 }));
 
-const mockRestoreSeats = vi.fn().mockResolvedValue(undefined);
 
-vi.mock("@/server/payments/seatRestoration", () => ({
-  restoreSeats: mockRestoreSeats,
-}));
 
 vi.mock("@/server/tickets/issueTickets", () => ({
   issueTicketsForEnrollment: vi.fn().mockResolvedValue(undefined),
@@ -172,11 +168,6 @@ describe("verifyPayment", () => {
       expect(result.paymentUrl).toContain("NM-2026-0001");
     });
 
-    it("does NOT call restoreSeats", async () => {
-      setupTableMocks({ enrollmentStatus: "confirmed" });
-      await verifyPayment(makeInput("approve"));
-      expect(mockRestoreSeats).not.toHaveBeenCalled();
-    });
 
     it("formats feeFormatted with currency", async () => {
       setupTableMocks({ enrollmentStatus: "confirmed" });
@@ -192,28 +183,6 @@ describe("verifyPayment", () => {
       setupTableMocks({ enrollmentStatus: "rejected" });
       const result = await verifyPayment(makeInput("reject"));
       expect(result.payment.status).toBe("rejected");
-    });
-
-    it("calls restoreSeats when enrollment was not already rejected", async () => {
-      setupTableMocks({ enrollmentStatus: "rejected" });
-      await verifyPayment(makeInput("reject"));
-      expect(mockRestoreSeats).toHaveBeenCalledOnce();
-      expect(mockRestoreSeats).toHaveBeenCalledWith({
-        id: "enroll-1",
-        class_id: "class-1",
-        quantity: 1,
-      });
-    });
-
-    it("does NOT call restoreSeats when enrollment.status is already 'rejected'", async () => {
-      setupTableMocks({ enrollmentStatus: "rejected" });
-      // Override enrollment to already be rejected
-      await verifyPayment(
-        makeInput("reject", {
-          enrollment: { ...BASE_ENROLLMENT, status: "rejected" } as never,
-        }),
-      );
-      expect(mockRestoreSeats).not.toHaveBeenCalled();
     });
 
     it("includes rejection_reason in result when provided", async () => {
@@ -263,12 +232,5 @@ describe("verifyPayment", () => {
       expect(result.payment).not.toHaveProperty("received_amount", 45000);
     });
 
-    it("does NOT call restoreSeats", async () => {
-      setupTableMocks({ enrollmentStatus: "partial_payment" });
-      await verifyPayment(
-        makeInput("request_remaining", { admin_note: "Pay the rest" }),
-      );
-      expect(mockRestoreSeats).not.toHaveBeenCalled();
-    });
   });
 });

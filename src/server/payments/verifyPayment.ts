@@ -1,6 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { tenantOrigin } from "@/lib/origin";
-import { restoreSeats } from "./seatRestoration";
 import { issueTicketsForEnrollment } from "@/server/tickets/issueTickets";
 import type { Enrollment, Payment, PaymentStatus, EnrollmentStatus } from "@/types/database";
 
@@ -185,13 +184,10 @@ export async function verifyPayment(input: VerifyPaymentInput): Promise<VerifyPa
     .select()
     .single() as { data: Enrollment | null; error: unknown };
 
-  if (enrollment.status !== "rejected") {
-    await restoreSeats({
-      id: enrollment.id,
-      class_id: enrollment.class_id,
-      quantity: enrollment.quantity,
-    });
-  }
+  // Seats are restored by the status trigger, which fires on the enrollment
+  // update above. This route used to call restoreSeats() as well, restoring
+  // twice — the guard read the pre-update snapshot, so it passed in exactly
+  // the case where the trigger had just fired.
 
   return {
     enrollment: updatedEnrollment ?? enrollment,

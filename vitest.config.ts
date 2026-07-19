@@ -14,7 +14,12 @@ export default defineConfig({
     setupFiles: ["./src/__tests__/setup.ts"],
     // Playwright specs live in e2e/ and import @playwright/test, which is not
     // compatible with the vitest runner — exclude them from `vitest run`.
-    exclude: [...configDefaults.exclude, "e2e/**"],
+    //
+    // src/__tests__/db/** needs a running local Supabase stack and must run
+    // sequentially, so it has its own config (vitest.db.config.ts) and is
+    // excluded here. Otherwise `npm test` would fail on any machine without
+    // the stack.
+    exclude: [...configDefaults.exclude, "e2e/**", "src/__tests__/db/**"],
   },
   resolve: {
     alias: {
