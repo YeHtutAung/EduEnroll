@@ -738,8 +738,53 @@ test_cart_receipt_upload() {
 }
 
 # ── 5d. MMQR Payment Flow ──────────────────────────────────────
+
+test_mmqr_webhook_signature() {
+  header "MMQR Webhook Signature"
+
+  # Runs regardless of whether the MyanMyanPay *flow* is exercised: this
+  # handler is shared with the live callback paths, and it is the check
+  # that was silently dead for months while pointed at a deleted route.
+  local CODE
+  # Checks every path that reaches the handler, not only the canonical one.
+  # /api/payments/webhook and /api/sandbox/payments/webhook are re-exports of
+  # /api/webhooks/mmpay, and they are the URLs MyanMyanPay is configured to
+  # call. Testing only the canonical path would keep passing if a re-export
+  # were deleted while real provider callbacks 404 — which is how this test
+  # came to be pointed at a dead path in the first place.
+  local WEBHOOK_PATH
+  for WEBHOOK_PATH in "/api/webhooks/mmpay" "/api/payments/webhook" "/api/sandbox/payments/webhook"; do
+    CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
+      -H "x-mmpay-signature: invalidsignature" \
+      -H "x-mmpay-nonce: 1234567890" \
+      -d '{"orderId":"fake","status":"SUCCESS"}' \
+      "${BASE_URL}${WEBHOOK_PATH}")
+    if [[ "$CODE" == "403" ]]; then
+      pass "POST ${WEBHOOK_PATH} — 403 on invalid signature"
+    else
+      fail "POST ${WEBHOOK_PATH} — expected 403, got ${CODE}"
+    fi
+  done
+}
 test_mmqr_payment() {
   header "MMQR Payment Flow"
+
+  # MyanMyanPay (payment_method "mmqr") is not in active use. Production has
+  # taken 2 payments through it, the last in March 2026, against 2005 through
+  # abank_mmqr. Its credentials are not configured for staging, so creating a
+  # QR returns 502 and this block failed on every staging run. A permanently
+  # red check trains everyone to ignore the suite, which is how a real
+  # regression gets waved through.
+  #
+  # Skipped unless explicitly enabled. Set MMPAY_TEST_ENABLED=1, and provide
+  # MMPAY_* credentials to the deployment, to run it again if the provider is
+  # revived. The webhook signature checks are NOT skipped — they are
+  # covered separately by test_mmqr_webhook_signature, which always runs.
+  # See #178.
+  if [[ -z "${MMPAY_TEST_ENABLED:-}" ]]; then
+    skip "MyanMyanPay flow — provider not in active use (set MMPAY_TEST_ENABLED=1 to run)"
+    return
+  fi
 
   # Need a fresh enrollment in pending_payment status for MMQR tests
   if [[ -z "$CLASS_N2_ID" ]]; then
@@ -844,17 +889,6 @@ test_mmqr_payment() {
     fail "GET /api/public/payments/mmpay/status — expected 400, got ${CODE}"
   fi
 
-  # ── Test 7: Webhook with invalid signature — should 403 ──
-  CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
-    -H "x-mmpay-signature: invalidsignature" \
-    -H "x-mmpay-nonce: 1234567890" \
-    -d '{"orderId":"fake","status":"SUCCESS"}' \
-    "$BASE_URL/api/public/payments/mmpay/webhook")
-  if [[ "$CODE" == "403" ]]; then
-    pass "POST /api/public/payments/mmpay/webhook — 403 on invalid signature"
-  else
-    fail "POST /api/public/payments/mmpay/webhook — expected 403, got ${CODE}"
-  fi
 
   # ── Test 8: Non-pending enrollment should 409 ─────────────
   # The MMQR_ENROLLMENT_REF enrollment now has a payment record, so creating
@@ -1140,6 +1174,7 @@ main() {
   test_receipt_upload
   test_cart_receipt_upload
   test_mmqr_payment
+  test_mmqr_webhook_signature
   test_admin_stats
   test_admin_students
   test_admin_pending_payments
