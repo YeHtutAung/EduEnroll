@@ -447,11 +447,8 @@ export interface Database {
       submit_enrollment: {
         Args: {
           p_class_id: string;
-          p_student_name_en: string;
-          p_phone: string;
-          p_student_name_mm?: string | null;
-          p_nrc_number?: string | null;
-          p_email?: string | null;
+          p_idempotency_key?: string | null;
+          p_quantity?: number;
         };
         Returns: SubmitEnrollmentResult;
       };
