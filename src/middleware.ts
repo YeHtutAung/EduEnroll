@@ -1,7 +1,12 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { extractSubdomainFromHost, tenantForCustomHost, isDevHost } from "@/lib/tenant";
+import {
+  extractSubdomainFromHost,
+  tenantForCustomHost,
+  isDevHost,
+  isPlatformRootHost,
+} from "@/lib/tenant";
 
 // ─── Routes that skip tenant detection ────────────────────────────────────────
 
@@ -17,19 +22,66 @@ function shouldSkipTenant(pathname: string): boolean {
 // propagate on Vercel. This file used to carry a byte-identical copy; two
 // resolvers is how a custom domain resolves on some requests and not others.
 
+// ─── Transitional agent allowlist (#164 Phase 1) ─────────────────────────────
+// x-tenant-slug is caller-supplied until middleware overwrites it, and it was
+// only ever overwritten when a tenant resolved — so on the platform root, an
+// unknown host, or a skipped prefix, a forged value survived downstream.
+//
+// It is deleted everywhere except these prefixes, which the Telegram bot signs
+// requests to while it still calls the platform root. Every route beneath them
+// goes through requireAuth()/requireOwner(): a session user's tenant comes from
+// their profile (so the header is inert), and an agent request is HMAC-verified.
+//
+// Gated on PATH, never on the presence of x-agent-signature — anyone can send
+// that header, which would make the sanitization bypassable by exactly the
+// callers it exists to stop.
+//
+// Removed once the bot moves to tenant hosts; see the Phase 2 signing plan.
+// ONE classifier, used both to decide the exception and to label the telemetry.
+// Two functions encoding the same rules is how they drift apart.
+//
+// Matched on SEGMENT boundaries, and only the shapes the documented agent
+// contract actually needs. A generalised `root || root + "/"` rule would also
+// allowlist exact /api/admin and /api/classes, which no route serves today —
+// and a future one would silently inherit the exception, the same failure that
+// prefix matching had.
+//
+// Exact /api/intakes IS required: the agent reference documents GET /api/intakes.
+function agentRouteFamily(pathname: string): string | null {
+  if (pathname.startsWith("/api/admin/")) return "admin";
+  if (pathname === "/api/intakes" || pathname.startsWith("/api/intakes/")) return "intakes";
+  if (pathname.startsWith("/api/classes/")) return "classes";
+  return null;
+}
+
 export async function middleware(request: NextRequest) {
   const requestHeaders = new Headers(request.headers);
   const { pathname } = request.nextUrl;
+
+  // Before shouldSkipTenant(), so /api/messenger/*, /api/saas/*, /api/events,
+  // /api/scans and /superadmin are covered too.
+  const routeFamily = agentRouteFamily(pathname);
+  if (!routeFamily) {
+    requestHeaders.delete("x-tenant-slug");
+  }
+
+  // Route family for the transitional telemetry in requireAuth(), which cannot
+  // see the path: it reads headers() only. A fixed enum, never the raw path —
+  // no uuids, query strings or slugs.
+  //
+  // Deleted unconditionally first so it is middleware-written or absent; a
+  // caller-supplied value would be another client-controlled input, which is
+  // the defect this change exists to remove.
+  requestHeaders.delete("x-agent-route-family");
+  if (routeFamily) {
+    requestHeaders.set("x-agent-route-family", routeFamily);
+  }
 
   // ── Tenant detection (subdomain or localhost fallback) ───────────────────
   let tenantSlug: string | null = null;
   const host = request.headers.get("host") ?? "";
   const hostname = host.split(":")[0];
-  const isRootDomain =
-    hostname === "kuunyi.com" ||
-    hostname === "www.kuunyi.com" ||
-    hostname === "staging.kuunyi.com" ||
-    hostname === "edu-enroll-xi.vercel.app";
+  const isRootDomain = isPlatformRootHost(host);
 
   // ── Custom domain surface split ──────────────────────────────────────────
   // A tenant's own domain is student-facing only. Staff surfaces stay on the
@@ -68,7 +120,13 @@ export async function middleware(request: NextRequest) {
 
   // "/" is in the matcher only for the redirect above. The landing page needs no
   // session, so skip the Supabase round-trip the rest of this middleware does.
-  if (pathname === "/") return NextResponse.next();
+  // Must forward the sanitized headers: a bare NextResponse.next() carries the
+  // ORIGINAL request headers, so a forged slug would still reach app/layout.tsx
+  // on the platform root — the deletion above would be bypassed on the most
+  // obvious host to attack.
+  if (pathname === "/") {
+    return NextResponse.next({ request: { headers: requestHeaders } });
+  }
 
   if (!shouldSkipTenant(pathname)) {
     tenantSlug = extractSubdomainFromHost(host);

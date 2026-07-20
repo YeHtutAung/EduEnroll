@@ -63,10 +63,10 @@ const slug = (res: Response) => res.headers.get("x-middleware-request-x-tenant-s
 // An unknown production host cannot acquire tenant context through the
 // development fallback: query parameter, cookie, or NEXT_PUBLIC_DEV_TENANT.
 //
-// Scope, deliberately: a caller-supplied x-tenant-slug header IS still honoured
-// where no tenant resolves. That is acknowledged debt (Follow-up F2) — it
-// collides with requireAuth()'s agent contract, which requires that header.
-// Do not read this group as "unknown hosts cannot get a tenant, full stop".
+// Scope: since #164 Phase 1 a caller-supplied x-tenant-slug is deleted
+// everywhere EXCEPT the transitional agent allowlist (/api/admin, /api/intakes,
+// /api/classes), which the Telegram bot still calls on the platform root. The
+// paths in this group are outside it, so the header is sanitized here.
 describe("middleware — unknown hosts cannot use the dev fallback", () => {
   function prodGet(url: string, init?: RequestInit) {
     process.env.VERCEL_ENV = "production";
@@ -94,9 +94,10 @@ describe("middleware — unknown hosts cannot use the dev fallback", () => {
     expect(slug(await prodGet("https://192.168.50.3/enroll?tenant=flashtic"))).toBeNull();
   });
 
-  // A configured custom domain overwrites any inbound header — which is why the
-  // header trust boundary (Follow-up F2) is not this plan's problem. Where a
-  // tenant DOES resolve, the resolver wins; where it doesn't, F2 applies.
+  // A configured custom domain overwrites any inbound header, so this held even
+  // before #164: where a tenant DOES resolve, the resolver wins. Since Phase 1
+  // the header is also deleted where no tenant resolves, outside the
+  // transitional agent allowlist.
   it("overwrites a forged tenant header on a configured custom domain", async () => {
     const res = await prodGet("https://flashtic.com/enroll", {
       headers: { "x-tenant-slug": "victim-tenant" },
@@ -234,15 +235,17 @@ describe("middleware — custom domain surface split", () => {
   });
 });
 
-// TEMPORARY — pinned to Follow-up F2.
-// requireAuth() (api.ts:60-66) requires an inbound x-tenant-slug for signed
-// agent requests and grants role:"owner" on the named tenant. This plan
-// deliberately does not sanitize that header, so this test pins the contract it
-// leaves intact. When F2 lands host-derived tenant identity, this expectation
-// FLIPS to null and this test should be deleted — a failure here after F2 is
-// expected, not a regression.
-describe("middleware — agent contract (temporary, see F2)", () => {
-  it("preserves the root-host agent tenant header pending F2", async () => {
+// TEMPORARY — the transitional agent allowlist from #164 Phase 1.
+// requireAuth() requires an inbound x-tenant-slug for signed agent requests and
+// grants role:"owner" on the named tenant, so the header is still trusted on
+// /api/admin, /api/intakes and /api/classes while the bot calls the platform
+// root. This pins that exception.
+//
+// It disappears in Phase 2, when the bot moves to tenant hosts and the tenant
+// is bound into the signature: this expectation FLIPS to null and the test
+// should be deleted. A failure here after Phase 2 is expected, not a regression.
+describe("middleware — transitional agent allowlist (temporary, #164)", () => {
+  it("preserves the root-host agent tenant header on an allowlisted path", async () => {
     process.env.VERCEL_ENV = "production";
     const res = await middleware(
       middlewareRequest("https://kuunyi.com/api/admin/payments/payment-id/verify", {
@@ -254,5 +257,134 @@ describe("middleware — agent contract (temporary, see F2)", () => {
       }),
     );
     expect(slug(res)).toBe("flashtic");
+  });
+});
+
+// ─── Platform-root routing (guard for the extracted classifier) ─────────────
+// isPlatformRootHost() was inline in middleware. It decides more than
+// telemetry: on a platform root there is no tenant, so /admin has no dashboard
+// to show and must go to /register. Extracting it must not change that.
+describe("middleware — platform-root /admin redirect", () => {
+  const ENV = process.env.VERCEL_ENV;
+  afterEach(() => {
+    if (ENV === undefined) delete process.env.VERCEL_ENV;
+    else process.env.VERCEL_ENV = ENV;
+  });
+
+  it("redirects /admin to /register on the platform root", async () => {
+    process.env.VERCEL_ENV = "production";
+    const res = await middleware(middlewareRequest("https://kuunyi.com/admin/dashboard"));
+    expect(res.headers.get("location")).toContain("/register");
+  });
+
+  it("does NOT send /admin to /register on a tenant subdomain", async () => {
+    process.env.VERCEL_ENV = "production";
+    const res = await middleware(middlewareRequest("https://flashtic.kuunyi.com/admin/dashboard"));
+    // Deliberately not asserting the resolved slug here: with no session this
+    // returns a redirect to /login, and a redirect carries no
+    // x-middleware-request-* headers, so slug() is null by construction rather
+    // than by behaviour. Tenant resolution on a subdomain is covered above.
+    expect(res.headers.get("location") ?? "").not.toContain("/register");
+  });
+});
+
+// ─── Tenant header trust boundary — Phase 1 (#164) ──────────────────────────
+// Middleware copies inbound headers and only ever SETS x-tenant-slug when a
+// tenant resolves; it never deletes. So on the platform root, an unknown host,
+// or a skipped prefix, the caller's own value survives downstream.
+//
+// NOTE ON ASSERTIONS: slug(res) reads x-middleware-request-x-tenant-slug, which
+// Next emits only when middleware passes `request: { headers }`. Asserting it is
+// null does NOT prove sanitization — on branches that return a bare
+// NextResponse.next() it is absent regardless. Where that matters (T10) the
+// override mechanism itself is asserted.
+describe("middleware — forged tenant header is not honoured (#164)", () => {
+  const ENV = process.env.VERCEL_ENV;
+  afterEach(() => {
+    if (ENV === undefined) delete process.env.VERCEL_ENV;
+    else process.env.VERCEL_ENV = ENV;
+  });
+
+  const forged = (url: string) =>
+    middleware(middlewareRequest(url, { headers: { "x-tenant-slug": "victim" } }));
+
+  it("T1 ignores a forged header on the platform root", async () => {
+    process.env.VERCEL_ENV = "production";
+    expect(slug(await forged("https://kuunyi.com/enroll"))).not.toBe("victim");
+  });
+
+  it("T2 ignores a forged header on a skipped prefix", async () => {
+    process.env.VERCEL_ENV = "production";
+    expect(slug(await forged("https://kuunyi.com/api/events"))).not.toBe("victim");
+  });
+
+  it("T3 ignores a forged header on an unknown host", async () => {
+    process.env.VERCEL_ENV = "production";
+    expect(slug(await forged("https://flashtic.evil.example/enroll"))).not.toBe("victim");
+  });
+
+  it("T10 sanitizes the request headers on the platform root '/'", async () => {
+    process.env.VERCEL_ENV = "production";
+    const res = await forged("https://kuunyi.com/");
+
+    // The mechanism, not the absence: '/' returns early, and a bare
+    // NextResponse.next() carries no override at all — which would satisfy a
+    // naive `slug(res) === null` while the forged header flows downstream.
+    const overridden = res.headers.get("x-middleware-override-headers");
+    expect(overridden).not.toBeNull();
+    const names = overridden!.split(",").map((n) => n.trim().toLowerCase());
+    expect(names).toContain("host");            // a real override, not an empty one
+    expect(names).not.toContain("x-tenant-slug");
+  });
+
+  it("T6c trusts the header on each allowlisted root and its children", async () => {
+    process.env.VERCEL_ENV = "production";
+    for (const path of [
+      "/api/intakes",
+      "/api/intakes/intake-1",
+      "/api/intakes/intake-1/classes",
+      "/api/classes/class-1",
+      "/api/admin/payments/pending",
+    ]) {
+      expect(slug(await forged(`https://kuunyi.com${path}`)), path).toBe("victim");
+    }
+  });
+
+  it("T6d sanitizes lookalike paths that merely share a prefix", async () => {
+    process.env.VERCEL_ENV = "production";
+    // startsWith("/api/intakes") would trust these. None exists today; the
+    // point is that a future public route must not inherit the exception by
+    // accident.
+    for (const path of [
+      "/api/intakes-public",
+      "/api/intakes-old",
+      "/api/classesx",
+      // Exact roots the documented contract does not include. No route serves
+      // them today; a future one must not inherit the exception.
+      "/api/admin",
+      "/api/classes",
+    ]) {
+      const res = await forged(`https://kuunyi.com${path}`);
+      expect(slug(res), path).not.toBe("victim");
+      expect(res.headers.get("x-middleware-request-x-agent-route-family"), path).toBeNull();
+    }
+  });
+
+  it("T6b does not honour a forged x-agent-route-family", async () => {
+    process.env.VERCEL_ENV = "production";
+    const res = await middleware(
+      middlewareRequest("https://kuunyi.com/api/admin/payments/pending", {
+        headers: { "x-tenant-slug": "victim", "x-agent-route-family": "classes" },
+      }),
+    );
+    // Middleware is the only writer: the caller claimed "classes" on an
+    // /api/admin path, which would misdirect the migration telemetry.
+    expect(res.headers.get("x-middleware-request-x-agent-route-family")).toBe("admin");
+  });
+
+  it("T6 retains the inbound header on the transitional agent allowlist", async () => {
+    process.env.VERCEL_ENV = "production";
+    const res = await forged("https://kuunyi.com/api/admin/payments/pending");
+    expect(slug(res)).toBe("victim");
   });
 });

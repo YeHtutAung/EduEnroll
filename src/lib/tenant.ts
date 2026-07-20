@@ -30,6 +30,29 @@ export function isDevHost(hostname: string): boolean {
   );
 }
 
+/**
+ * Hosts belonging to the platform itself rather than to any tenant: the
+ * marketing root, staging, and the bare Vercel deployment.
+ *
+ * Exported and shared for the same reason as isDevHost(). Middleware uses it to
+ * decide whether /admin has any tenant to show, and requireAuth() uses it to
+ * decide whether a signed agent request arrived on a host the bot should no
+ * longer be calling. Two copies of that list is how one of them quietly stops
+ * matching after a domain change.
+ *
+ * Normalises port, case and a trailing dot, which the previous inline copy in
+ * middleware did not: "KUUNYI.COM." and "kuunyi.com:443" are the same host.
+ */
+export function isPlatformRootHost(host: string): boolean {
+  const hostname = host.split(":")[0].trim().toLowerCase().replace(/\.$/, "");
+  return (
+    hostname === "kuunyi.com" ||
+    hostname === "www.kuunyi.com" ||
+    hostname === "staging.kuunyi.com" ||
+    hostname === "edu-enroll-xi.vercel.app"
+  );
+}
+
 // ─── Tenant custom domains ──────────────────────────────────────────────────
 // Maps a client-owned domain ("flashtic.com") to the tenant slug that owns it
 // ("flashtic"), configured via TENANT_CUSTOM_DOMAINS as JSON host → slug:
