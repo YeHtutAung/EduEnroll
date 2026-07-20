@@ -256,3 +256,31 @@ describe("middleware — agent contract (temporary, see F2)", () => {
     expect(slug(res)).toBe("flashtic");
   });
 });
+
+// ─── Platform-root routing (guard for the extracted classifier) ─────────────
+// isPlatformRootHost() was inline in middleware. It decides more than
+// telemetry: on a platform root there is no tenant, so /admin has no dashboard
+// to show and must go to /register. Extracting it must not change that.
+describe("middleware — platform-root /admin redirect", () => {
+  const ENV = process.env.VERCEL_ENV;
+  afterEach(() => {
+    if (ENV === undefined) delete process.env.VERCEL_ENV;
+    else process.env.VERCEL_ENV = ENV;
+  });
+
+  it("redirects /admin to /register on the platform root", async () => {
+    process.env.VERCEL_ENV = "production";
+    const res = await middleware(middlewareRequest("https://kuunyi.com/admin/dashboard"));
+    expect(res.headers.get("location")).toContain("/register");
+  });
+
+  it("does NOT send /admin to /register on a tenant subdomain", async () => {
+    process.env.VERCEL_ENV = "production";
+    const res = await middleware(middlewareRequest("https://flashtic.kuunyi.com/admin/dashboard"));
+    // Deliberately not asserting the resolved slug here: with no session this
+    // returns a redirect to /login, and a redirect carries no
+    // x-middleware-request-* headers, so slug() is null by construction rather
+    // than by behaviour. Tenant resolution on a subdomain is covered above.
+    expect(res.headers.get("location") ?? "").not.toContain("/register");
+  });
+});

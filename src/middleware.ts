@@ -1,7 +1,12 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
-import { extractSubdomainFromHost, tenantForCustomHost, isDevHost } from "@/lib/tenant";
+import {
+  extractSubdomainFromHost,
+  tenantForCustomHost,
+  isDevHost,
+  isPlatformRootHost,
+} from "@/lib/tenant";
 
 // ─── Routes that skip tenant detection ────────────────────────────────────────
 
@@ -25,11 +30,7 @@ export async function middleware(request: NextRequest) {
   let tenantSlug: string | null = null;
   const host = request.headers.get("host") ?? "";
   const hostname = host.split(":")[0];
-  const isRootDomain =
-    hostname === "kuunyi.com" ||
-    hostname === "www.kuunyi.com" ||
-    hostname === "staging.kuunyi.com" ||
-    hostname === "edu-enroll-xi.vercel.app";
+  const isRootDomain = isPlatformRootHost(host);
 
   // ── Custom domain surface split ──────────────────────────────────────────
   // A tenant's own domain is student-facing only. Staff surfaces stay on the
