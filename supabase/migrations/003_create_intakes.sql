@@ -1,46 +1,23 @@
 -- ============================================================
 -- 003_create_intakes.sql
--- Intakes — enrolment cohorts (e.g. "April 2026 Intake" /
--- "ဧပြီ ၂၀၂၆ စာရင်းသွင်းမှု")
+--
+-- INTENTIONALLY EMPTY — superseded by 000_combined_schema.sql
+--
+-- This migration originally created: intakes table, intake_status enum, RLS policies.
+-- 000_combined_schema.sql already creates all of it and is the source of
+-- truth. Running both in order fails: 000 creates the objects, then this file
+-- tried to create them again (e.g. `CREATE TYPE ... already exists`), which
+-- aborted any rebuild of the migration chain from scratch.
+--
+-- The file is kept, not deleted: versions 000-011 are recorded in
+-- supabase_migrations.schema_migrations on the remote databases, and removing
+-- the file would leave that history referencing a migration that no longer
+-- exists. Emptying it keeps history valid while letting a fresh database
+-- build cleanly.
+--
+-- The original statements remain in git history and are duplicated verbatim
+-- in 000_combined_schema.sql. Do not re-add DDL here — put schema changes in
+-- a new timestamped migration.
 -- ============================================================
 
--- Enum -------------------------------------------------------
-CREATE TYPE intake_status AS ENUM ('draft', 'open', 'closed');
-
--- Table ------------------------------------------------------
-CREATE TABLE IF NOT EXISTS public.intakes (
-  id          uuid           PRIMARY KEY DEFAULT gen_random_uuid(),
-  tenant_id   uuid           NOT NULL REFERENCES public.tenants (id) ON DELETE CASCADE,
-  name        varchar        NOT NULL,   -- bilingual label stored as-is
-  year        integer        NOT NULL,
-  status      intake_status  NOT NULL DEFAULT 'draft',
-  created_at  timestamptz    NOT NULL DEFAULT now()
-);
-
--- Indexes ----------------------------------------------------
-CREATE INDEX IF NOT EXISTS idx_intakes_tenant_id ON public.intakes (tenant_id);
-CREATE INDEX IF NOT EXISTS idx_intakes_year      ON public.intakes (tenant_id, year);
-
--- ============================================================
--- Row Level Security
--- ============================================================
-ALTER TABLE public.intakes ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY "intakes_select"
-  ON public.intakes
-  FOR SELECT
-  TO authenticated
-  USING (tenant_id = public.get_my_tenant_id());
-
-CREATE POLICY "intakes_insert"
-  ON public.intakes
-  FOR INSERT
-  TO authenticated
-  WITH CHECK (tenant_id = public.get_my_tenant_id());
-
-CREATE POLICY "intakes_update"
-  ON public.intakes
-  FOR UPDATE
-  TO authenticated
-  USING   (tenant_id = public.get_my_tenant_id())
-  WITH CHECK (tenant_id = public.get_my_tenant_id());
+-- No-op.
