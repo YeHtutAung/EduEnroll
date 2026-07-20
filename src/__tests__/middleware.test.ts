@@ -63,10 +63,10 @@ const slug = (res: Response) => res.headers.get("x-middleware-request-x-tenant-s
 // An unknown production host cannot acquire tenant context through the
 // development fallback: query parameter, cookie, or NEXT_PUBLIC_DEV_TENANT.
 //
-// Scope, deliberately: a caller-supplied x-tenant-slug header IS still honoured
-// where no tenant resolves. That is acknowledged debt (Follow-up F2) — it
-// collides with requireAuth()'s agent contract, which requires that header.
-// Do not read this group as "unknown hosts cannot get a tenant, full stop".
+// Scope: since #164 Phase 1 a caller-supplied x-tenant-slug is deleted
+// everywhere EXCEPT the transitional agent allowlist (/api/admin, /api/intakes,
+// /api/classes), which the Telegram bot still calls on the platform root. The
+// paths in this group are outside it, so the header is sanitized here.
 describe("middleware — unknown hosts cannot use the dev fallback", () => {
   function prodGet(url: string, init?: RequestInit) {
     process.env.VERCEL_ENV = "production";
@@ -94,9 +94,10 @@ describe("middleware — unknown hosts cannot use the dev fallback", () => {
     expect(slug(await prodGet("https://192.168.50.3/enroll?tenant=flashtic"))).toBeNull();
   });
 
-  // A configured custom domain overwrites any inbound header — which is why the
-  // header trust boundary (Follow-up F2) is not this plan's problem. Where a
-  // tenant DOES resolve, the resolver wins; where it doesn't, F2 applies.
+  // A configured custom domain overwrites any inbound header, so this held even
+  // before #164: where a tenant DOES resolve, the resolver wins. Since Phase 1
+  // the header is also deleted where no tenant resolves, outside the
+  // transitional agent allowlist.
   it("overwrites a forged tenant header on a configured custom domain", async () => {
     const res = await prodGet("https://flashtic.com/enroll", {
       headers: { "x-tenant-slug": "victim-tenant" },
@@ -234,15 +235,17 @@ describe("middleware — custom domain surface split", () => {
   });
 });
 
-// TEMPORARY — pinned to Follow-up F2.
-// requireAuth() (api.ts:60-66) requires an inbound x-tenant-slug for signed
-// agent requests and grants role:"owner" on the named tenant. This plan
-// deliberately does not sanitize that header, so this test pins the contract it
-// leaves intact. When F2 lands host-derived tenant identity, this expectation
-// FLIPS to null and this test should be deleted — a failure here after F2 is
-// expected, not a regression.
-describe("middleware — agent contract (temporary, see F2)", () => {
-  it("preserves the root-host agent tenant header pending F2", async () => {
+// TEMPORARY — the transitional agent allowlist from #164 Phase 1.
+// requireAuth() requires an inbound x-tenant-slug for signed agent requests and
+// grants role:"owner" on the named tenant, so the header is still trusted on
+// /api/admin, /api/intakes and /api/classes while the bot calls the platform
+// root. This pins that exception.
+//
+// It disappears in Phase 2, when the bot moves to tenant hosts and the tenant
+// is bound into the signature: this expectation FLIPS to null and the test
+// should be deleted. A failure here after Phase 2 is expected, not a regression.
+describe("middleware — transitional agent allowlist (temporary, #164)", () => {
+  it("preserves the root-host agent tenant header on an allowlisted path", async () => {
     process.env.VERCEL_ENV = "production";
     const res = await middleware(
       middlewareRequest("https://kuunyi.com/api/admin/payments/payment-id/verify", {
@@ -332,6 +335,31 @@ describe("middleware — forged tenant header is not honoured (#164)", () => {
     const names = overridden!.split(",").map((n) => n.trim().toLowerCase());
     expect(names).toContain("host");            // a real override, not an empty one
     expect(names).not.toContain("x-tenant-slug");
+  });
+
+  it("T6c trusts the header on each allowlisted root and its children", async () => {
+    process.env.VERCEL_ENV = "production";
+    for (const path of [
+      "/api/intakes",
+      "/api/intakes/intake-1",
+      "/api/intakes/intake-1/classes",
+      "/api/classes/class-1",
+      "/api/admin/payments/pending",
+    ]) {
+      expect(slug(await forged(`https://kuunyi.com${path}`)), path).toBe("victim");
+    }
+  });
+
+  it("T6d sanitizes lookalike paths that merely share a prefix", async () => {
+    process.env.VERCEL_ENV = "production";
+    // startsWith("/api/intakes") would trust these. None exists today; the
+    // point is that a future public route must not inherit the exception by
+    // accident.
+    for (const path of ["/api/intakes-public", "/api/intakes-old", "/api/classesx"]) {
+      const res = await forged(`https://kuunyi.com${path}`);
+      expect(slug(res), path).not.toBe("victim");
+      expect(res.headers.get("x-middleware-request-x-agent-route-family"), path).toBeNull();
+    }
   });
 
   it("T6b does not honour a forged x-agent-route-family", async () => {
