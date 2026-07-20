@@ -22,9 +22,59 @@ function shouldSkipTenant(pathname: string): boolean {
 // propagate on Vercel. This file used to carry a byte-identical copy; two
 // resolvers is how a custom domain resolves on some requests and not others.
 
+// ─── Transitional agent allowlist (#164 Phase 1) ─────────────────────────────
+// x-tenant-slug is caller-supplied until middleware overwrites it, and it was
+// only ever overwritten when a tenant resolved — so on the platform root, an
+// unknown host, or a skipped prefix, a forged value survived downstream.
+//
+// It is deleted everywhere except these prefixes, which the Telegram bot signs
+// requests to while it still calls the platform root. Every route beneath them
+// goes through requireAuth()/requireOwner(): a session user's tenant comes from
+// their profile (so the header is inert), and an agent request is HMAC-verified.
+//
+// Gated on PATH, never on the presence of x-agent-signature — anyone can send
+// that header, which would make the sanitization bypassable by exactly the
+// callers it exists to stop.
+//
+// Removed once the bot moves to tenant hosts; see the Phase 2 signing plan.
+const AGENT_TRANSITIONAL_PREFIXES = [
+  "/api/admin/",
+  "/api/intakes",
+  "/api/classes/",
+];
+
+function isTransitionalAgentPath(pathname: string): boolean {
+  return AGENT_TRANSITIONAL_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
+
 export async function middleware(request: NextRequest) {
   const requestHeaders = new Headers(request.headers);
   const { pathname } = request.nextUrl;
+
+  // Before shouldSkipTenant(), so /api/messenger/*, /api/saas/*, /api/events,
+  // /api/scans and /superadmin are covered too.
+  if (!isTransitionalAgentPath(pathname)) {
+    requestHeaders.delete("x-tenant-slug");
+  }
+
+  // Route family for the transitional telemetry in requireAuth(), which cannot
+  // see the path: it reads headers() only. A fixed enum, never the raw path —
+  // no uuids, query strings or slugs.
+  //
+  // Deleted unconditionally first so it is middleware-written or absent; a
+  // caller-supplied value would be another client-controlled input, which is
+  // the defect this change exists to remove.
+  requestHeaders.delete("x-agent-route-family");
+  if (isTransitionalAgentPath(pathname)) {
+    requestHeaders.set(
+      "x-agent-route-family",
+      pathname.startsWith("/api/admin/")
+        ? "admin"
+        : pathname.startsWith("/api/intakes")
+          ? "intakes"
+          : "classes",
+    );
+  }
 
   // ── Tenant detection (subdomain or localhost fallback) ───────────────────
   let tenantSlug: string | null = null;
@@ -69,7 +119,13 @@ export async function middleware(request: NextRequest) {
 
   // "/" is in the matcher only for the redirect above. The landing page needs no
   // session, so skip the Supabase round-trip the rest of this middleware does.
-  if (pathname === "/") return NextResponse.next();
+  // Must forward the sanitized headers: a bare NextResponse.next() carries the
+  // ORIGINAL request headers, so a forged slug would still reach app/layout.tsx
+  // on the platform root — the deletion above would be bypassed on the most
+  // obvious host to attack.
+  if (pathname === "/") {
+    return NextResponse.next({ request: { headers: requestHeaders } });
+  }
 
   if (!shouldSkipTenant(pathname)) {
     tenantSlug = extractSubdomainFromHost(host);

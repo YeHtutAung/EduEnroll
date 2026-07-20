@@ -284,3 +284,71 @@ describe("middleware — platform-root /admin redirect", () => {
     expect(res.headers.get("location") ?? "").not.toContain("/register");
   });
 });
+
+// ─── Tenant header trust boundary — Phase 1 (#164) ──────────────────────────
+// Middleware copies inbound headers and only ever SETS x-tenant-slug when a
+// tenant resolves; it never deletes. So on the platform root, an unknown host,
+// or a skipped prefix, the caller's own value survives downstream.
+//
+// NOTE ON ASSERTIONS: slug(res) reads x-middleware-request-x-tenant-slug, which
+// Next emits only when middleware passes `request: { headers }`. Asserting it is
+// null does NOT prove sanitization — on branches that return a bare
+// NextResponse.next() it is absent regardless. Where that matters (T10) the
+// override mechanism itself is asserted.
+describe("middleware — forged tenant header is not honoured (#164)", () => {
+  const ENV = process.env.VERCEL_ENV;
+  afterEach(() => {
+    if (ENV === undefined) delete process.env.VERCEL_ENV;
+    else process.env.VERCEL_ENV = ENV;
+  });
+
+  const forged = (url: string) =>
+    middleware(middlewareRequest(url, { headers: { "x-tenant-slug": "victim" } }));
+
+  it("T1 ignores a forged header on the platform root", async () => {
+    process.env.VERCEL_ENV = "production";
+    expect(slug(await forged("https://kuunyi.com/enroll"))).not.toBe("victim");
+  });
+
+  it("T2 ignores a forged header on a skipped prefix", async () => {
+    process.env.VERCEL_ENV = "production";
+    expect(slug(await forged("https://kuunyi.com/api/events"))).not.toBe("victim");
+  });
+
+  it("T3 ignores a forged header on an unknown host", async () => {
+    process.env.VERCEL_ENV = "production";
+    expect(slug(await forged("https://flashtic.evil.example/enroll"))).not.toBe("victim");
+  });
+
+  it("T10 sanitizes the request headers on the platform root '/'", async () => {
+    process.env.VERCEL_ENV = "production";
+    const res = await forged("https://kuunyi.com/");
+
+    // The mechanism, not the absence: '/' returns early, and a bare
+    // NextResponse.next() carries no override at all — which would satisfy a
+    // naive `slug(res) === null` while the forged header flows downstream.
+    const overridden = res.headers.get("x-middleware-override-headers");
+    expect(overridden).not.toBeNull();
+    const names = overridden!.split(",").map((n) => n.trim().toLowerCase());
+    expect(names).toContain("host");            // a real override, not an empty one
+    expect(names).not.toContain("x-tenant-slug");
+  });
+
+  it("T6b does not honour a forged x-agent-route-family", async () => {
+    process.env.VERCEL_ENV = "production";
+    const res = await middleware(
+      middlewareRequest("https://kuunyi.com/api/admin/payments/pending", {
+        headers: { "x-tenant-slug": "victim", "x-agent-route-family": "classes" },
+      }),
+    );
+    // Middleware is the only writer: the caller claimed "classes" on an
+    // /api/admin path, which would misdirect the migration telemetry.
+    expect(res.headers.get("x-middleware-request-x-agent-route-family")).toBe("admin");
+  });
+
+  it("T6 retains the inbound header on the transitional agent allowlist", async () => {
+    process.env.VERCEL_ENV = "production";
+    const res = await forged("https://kuunyi.com/api/admin/payments/pending");
+    expect(slug(res)).toBe("victim");
+  });
+});
