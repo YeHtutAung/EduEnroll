@@ -37,22 +37,20 @@ function shouldSkipTenant(pathname: string): boolean {
 // callers it exists to stop.
 //
 // Removed once the bot moves to tenant hosts; see the Phase 2 signing plan.
-// Matched on SEGMENT boundaries, not raw prefixes: startsWith("/api/intakes")
-// would also trust "/api/intakes-public". No such route exists today, but a
-// future public one would silently inherit the exception — the failure would be
-// a new route quietly opting into forged tenant headers.
-const AGENT_TRANSITIONAL_ROOTS = ["/api/admin", "/api/intakes", "/api/classes"];
-
-function isTransitionalAgentPath(pathname: string): boolean {
-  return AGENT_TRANSITIONAL_ROOTS.some(
-    (root) => pathname === root || pathname.startsWith(`${root}/`),
-  );
-}
-
+// ONE classifier, used both to decide the exception and to label the telemetry.
+// Two functions encoding the same rules is how they drift apart.
+//
+// Matched on SEGMENT boundaries, and only the shapes the documented agent
+// contract actually needs. A generalised `root || root + "/"` rule would also
+// allowlist exact /api/admin and /api/classes, which no route serves today —
+// and a future one would silently inherit the exception, the same failure that
+// prefix matching had.
+//
+// Exact /api/intakes IS required: the agent reference documents GET /api/intakes.
 function agentRouteFamily(pathname: string): string | null {
-  if (pathname === "/api/admin" || pathname.startsWith("/api/admin/")) return "admin";
+  if (pathname.startsWith("/api/admin/")) return "admin";
   if (pathname === "/api/intakes" || pathname.startsWith("/api/intakes/")) return "intakes";
-  if (pathname === "/api/classes" || pathname.startsWith("/api/classes/")) return "classes";
+  if (pathname.startsWith("/api/classes/")) return "classes";
   return null;
 }
 
@@ -62,7 +60,8 @@ export async function middleware(request: NextRequest) {
 
   // Before shouldSkipTenant(), so /api/messenger/*, /api/saas/*, /api/events,
   // /api/scans and /superadmin are covered too.
-  if (!isTransitionalAgentPath(pathname)) {
+  const routeFamily = agentRouteFamily(pathname);
+  if (!routeFamily) {
     requestHeaders.delete("x-tenant-slug");
   }
 
@@ -74,7 +73,6 @@ export async function middleware(request: NextRequest) {
   // caller-supplied value would be another client-controlled input, which is
   // the defect this change exists to remove.
   requestHeaders.delete("x-agent-route-family");
-  const routeFamily = agentRouteFamily(pathname);
   if (routeFamily) {
     requestHeaders.set("x-agent-route-family", routeFamily);
   }

@@ -355,7 +355,15 @@ describe("middleware — forged tenant header is not honoured (#164)", () => {
     // startsWith("/api/intakes") would trust these. None exists today; the
     // point is that a future public route must not inherit the exception by
     // accident.
-    for (const path of ["/api/intakes-public", "/api/intakes-old", "/api/classesx"]) {
+    for (const path of [
+      "/api/intakes-public",
+      "/api/intakes-old",
+      "/api/classesx",
+      // Exact roots the documented contract does not include. No route serves
+      // them today; a future one must not inherit the exception.
+      "/api/admin",
+      "/api/classes",
+    ]) {
       const res = await forged(`https://kuunyi.com${path}`);
       expect(slug(res), path).not.toBe("victim");
       expect(res.headers.get("x-middleware-request-x-agent-route-family"), path).toBeNull();
