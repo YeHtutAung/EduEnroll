@@ -575,3 +575,149 @@ describe("G. invariant", () => {
     expect(row.seat_remaining).toBeLessThanOrEqual(row.seat_total);
   });
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// H. Enrollment RPC execute privileges
+//
+// Both callers use the service-role client, so anon/authenticated EXECUTE
+// serves no application purpose. These assert that only service_role (and the
+// owner) can invoke the enrollment RPCs, and that exactly one
+// submit_enrollment signature survives.
+//
+// FIXTURE WARNING: the denial tests mutate during the RED phase. Before the
+// migration the calls SUCCEED — that is the point of the red run — creating
+// enrollments and decrementing seats, and only then failing the assertion.
+// Because the assertion throws, anything after it never runs. Every call is
+// therefore tracked BEFORE asserting, or teardown never learns about the row
+// and a later global-expiry test sweeps it up and fails for an unrelated
+// reason.
+// ════════════════════════════════════════════════════════════════════════════
+
+const ANON_KEY = process.env.SUPABASE_TEST_ANON_KEY!;
+const API_URL = process.env.SUPABASE_TEST_URL!;
+
+const anonClient = () =>
+  createClient(API_URL, ANON_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+
+/** A real signed-in user. A failed sign-in must not masquerade as a denial. */
+async function authedClient() {
+  const email = `${uniq()}@example.test`;
+  const password = `Pw-${uniq()}!`;
+  const { data: created, error: createErr } = await admin.auth.admin.createUser({
+    email, password, email_confirm: true,
+  });
+  expect(createErr).toBeNull();
+  made.authUsers.push(created!.user!.id);
+
+  const client = anonClient();
+  const { data: session, error: signInErr } = await client.auth.signInWithPassword({ email, password });
+  expect(signInErr).toBeNull();
+  expect(session.session?.access_token).toBeTruthy();
+  return client;
+}
+
+/** Record any enrollment the RPC created, so teardown can remove it. */
+function trackEnrollment(data: unknown) {
+  if (data && typeof data === "object" && "enrollment_id" in (data as Record<string, unknown>)) {
+    const id = (data as Record<string, unknown>).enrollment_id;
+    if (id) made.enrollments.push(String(id));
+  }
+}
+
+// INSUFFICIENT_PRIVILEGE is declared with the F-group above.
+
+describe("H. enrollment RPC execute privileges", () => {
+  it("H1 allows service_role to call submit_enrollment", async () => {
+    const { tenantId, classId } = await scenario();
+    const { data, error } = await admin.rpc("submit_enrollment" as never, {
+      p_class_id: classId, p_idempotency_key: null, p_quantity: 1,
+    } as never);
+    trackEnrollment(data);
+
+    expect(error).toBeNull();
+    expect(data).toMatchObject({ success: true });
+    expect(tenantId).toBeTruthy();
+  });
+
+  it("H2 denies anon on submit_enrollment", async () => {
+    const { classId } = await scenario();
+    const { data, error } = await anonClient().rpc("submit_enrollment" as never, {
+      p_class_id: classId, p_idempotency_key: null, p_quantity: 1,
+    } as never);
+    trackEnrollment(data); // red phase: this call SUCCEEDS and creates a row
+
+    expect(error?.code).toBe(INSUFFICIENT_PRIVILEGE);
+  });
+
+  it("H3 denies an authenticated user on submit_enrollment", async () => {
+    const { classId } = await scenario();
+    const client = await authedClient();
+    const { data, error } = await client.rpc("submit_enrollment" as never, {
+      p_class_id: classId, p_idempotency_key: null, p_quantity: 1,
+    } as never);
+    trackEnrollment(data);
+
+    expect(error?.code).toBe(INSUFFICIENT_PRIVILEGE);
+  });
+
+  it("H4 allows service_role to call submit_cart_enrollment", async () => {
+    const { classId } = await scenario();
+    const { data, error } = await admin.rpc("submit_cart_enrollment" as never, {
+      p_items: [{ class_id: classId, quantity: 1 }],
+    } as never);
+    trackEnrollment(data);
+
+    expect(error).toBeNull();
+    expect(data).toMatchObject({ success: true });
+  });
+
+  it("H5 denies anon on submit_cart_enrollment", async () => {
+    const { classId } = await scenario();
+    const { data, error } = await anonClient().rpc("submit_cart_enrollment" as never, {
+      p_items: [{ class_id: classId, quantity: 1 }],
+    } as never);
+    trackEnrollment(data);
+
+    expect(error?.code).toBe(INSUFFICIENT_PRIVILEGE);
+  });
+
+  it("H6 denies an authenticated user on submit_cart_enrollment", async () => {
+    const { classId } = await scenario();
+    const client = await authedClient();
+    const { data, error } = await client.rpc("submit_cart_enrollment" as never, {
+      p_items: [{ class_id: classId, quantity: 1 }],
+    } as never);
+    trackEnrollment(data);
+
+    expect(error?.code).toBe(INSUFFICIENT_PRIVILEGE);
+  });
+
+  it("H7 leaves exactly one submit_enrollment signature", async () => {
+    // Pins the overload count. A future CREATE OR REPLACE with a changed
+    // signature then fails loudly instead of silently adding another path.
+    const rows = await sql<{ n: string }>(
+      `SELECT count(*)::text AS n FROM pg_proc p
+       JOIN pg_namespace ns ON ns.oid = p.pronamespace
+       WHERE ns.nspname = 'public' AND p.proname = 'submit_enrollment'`,
+    );
+    expect(Number(rows[0].n)).toBe(1);
+  });
+
+  it("H8 still enrolls normally through service_role, decrementing seats once", async () => {
+    const { classId } = await scenario();
+    // classes.max_tickets_per_person defaults to 1, so a quantity of 2 is
+    // legitimately rejected with EXCEEDS_MAX_TICKETS. Raise the cap for this
+    // fixture: the point here is seat arithmetic, not the cap.
+    await sql(`UPDATE classes SET max_tickets_per_person = 5 WHERE id = $1`, [classId]);
+    const before = await seats(classId);
+
+    const { data, error } = await admin.rpc("submit_enrollment" as never, {
+      p_class_id: classId, p_idempotency_key: null, p_quantity: 2,
+    } as never);
+    trackEnrollment(data);
+
+    expect(error).toBeNull();
+    expect(data).toMatchObject({ success: true });
+    expect(await seats(classId)).toBe(before - 2);
+  });
+});
