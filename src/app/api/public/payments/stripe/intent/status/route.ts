@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getStripe } from "@/lib/stripe";
+import { issueTicketsForEnrollment } from "@/server/tickets/issueTickets";
 
 // ─── GET /api/public/payments/stripe/intent/status?pi=pi_xxx ─────────────────
 // Polls Stripe for PaymentIntent status. Used by PayNow QR polling loop.
@@ -47,6 +48,22 @@ export async function GET(request: NextRequest) {
 
         // Notifications intentionally omitted: Stripe checkout is browser-driven.
         // The user is already on the success page. No push notification is needed.
+      }
+
+      // Fulfil on every succeeded poll, not only when this call settled: the
+      // webhook's replay guard means whoever settles second never issues, so
+      // this path was leaving orders ticketless. Idempotent, and #187's guard
+      // declines anything not confirmed.
+      //
+      // Caught deliberately: the helper now throws on query failure, and this
+      // route must keep returning its existing Stripe-status shape rather than
+      // 500 after the customer has been charged. Retry is #186.
+      if (payment) {
+        try {
+          await issueTicketsForEnrollment(payment.enrollment_id);
+        } catch (err) {
+          console.error("[tickets] intent/status fulfilment failed:", err);
+        }
       }
 
       return NextResponse.json({ status: "succeeded" });

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getStripe } from "@/lib/stripe";
+import { issueTicketsForEnrollment } from "@/server/tickets/issueTickets";
 
 // ─── GET /api/public/payments/stripe/verify?session_id=cs_xxx ────────────────
 // Called by the client after Stripe redirects back with ?stripe=success.
@@ -49,6 +50,19 @@ export async function GET(request: NextRequest) {
         .from("enrollments")
         .update({ status: "confirmed" } as never)
         .eq("id", payment.enrollment_id);
+    }
+
+    // Fulfil whenever Stripe reports the session paid, not only when this call
+    // settled: the webhook's replay guard means whoever settles second never
+    // issues. Idempotent; #187's guard declines anything not confirmed.
+    //
+    // Caught deliberately — this route returns the ENROLLMENT status and its
+    // consumer maps that to a label, so it must keep that exact shape rather
+    // than 500 after the customer has been charged. Retry is #186.
+    try {
+      await issueTicketsForEnrollment(payment.enrollment_id);
+    } catch (err) {
+      console.error("[tickets] stripe/verify fulfilment failed:", err);
     }
 
     const { data: enrollment } = (await supabase

@@ -215,7 +215,7 @@ export async function POST(request: NextRequest) {
     });
 
     // ── 9. Insert payment record ───────────────────────────────────────────────
-    await supabase.from("payments").insert({
+    const { error: insertError } = await supabase.from("payments").insert({
       enrollment_id: enrollment.id,
       tenant_id: enrollment.tenant_id,
       amount: totalFee,
@@ -223,6 +223,18 @@ export async function POST(request: NextRequest) {
       hitpay_payment_id: result.id,
       status: "awaiting_payment",
     } as never);
+
+    // Never hand out a QR or card URL we could not record. Cleanup is deferred:
+    // the HitPay wrapper exposes create/verify/parse only, with no cancellation
+    // (#186). No `detail` field here — a database error must not reach the
+    // public body.
+    if (insertError) {
+      console.error("[hitpay] payment insert failed for request", result.id);
+      return NextResponse.json(
+      { error: "Internal Server Error", message: "Payment could not be recorded. No payment link was issued." },
+      { status: 500 },
+      );
+    }
 
     if (hitpayMethod === "paynow_online") {
       return NextResponse.json({
