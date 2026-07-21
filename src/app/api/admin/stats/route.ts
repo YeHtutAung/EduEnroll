@@ -4,6 +4,12 @@ import type { Class } from "@/types/database";
 
 type ClassRow = Pick<Class, "level" | "seat_remaining" | "seat_total">;
 
+// Only an intake that is actually running belongs in the overview. `draft` is
+// not published yet and `closed` is over, so counting either reports capacity
+// nobody can buy — and the panel is the at-a-glance answer to "how are we
+// selling right now".
+const LIVE_INTAKE_STATUS = "open";
+
 // ─── GET /api/admin/stats ─────────────────────────────────────────────────────
 // Dashboard statistics for the authenticated admin's tenant.
 //
@@ -21,8 +27,15 @@ export async function GET() {
   const { supabase, tenantId } = auth;
 
   // Use COUNT queries for enrollment status — avoids the 1000-row PostgREST default limit
-  const [totalRes, confirmedRes, pendingRes, submittedRes, paymentsRes, classesRes] =
-    await Promise.all([
+  const [
+    totalRes,
+    confirmedRes,
+    pendingRes,
+    submittedRes,
+    paymentsRes,
+    openIntakesRes,
+    classesRes,
+  ] = await Promise.all([
       supabase
         .from("enrollments")
         .select("*", { count: "exact", head: true })
@@ -49,14 +62,30 @@ export async function GET() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (supabase.rpc as any)("get_tenant_revenue", { p_tenant_id: tenantId }) as Promise<{ data: number | null; error: unknown }>,
 
+      // An empty seats_by_class is ambiguous on its own — no open intake at
+      // all, or an open intake with no classes yet. Those need different
+      // advice, and the UI cannot tell them apart without this.
+      supabase
+        .from("intakes")
+        .select("*", { count: "exact", head: true })
+        .eq("tenant_id", tenantId)
+        .eq("status", LIVE_INTAKE_STATUS),
+
+      // `!inner` is load-bearing, not stylistic. A plain `intakes(status)` embed
+      // LEFT-joins, so the `.eq` filters only the embedded object and every
+      // class still comes back — the filter silently does nothing. Verified:
+      // that variant returns the draft and closed rows too.
+      // classes.intake_id is NOT NULL, so the inner join drops nothing a left
+      // join would have kept.
       supabase
         .from("classes")
-        .select("level, seat_remaining, seat_total")
+        .select("level, seat_remaining, seat_total, intakes!inner(status)")
+        .eq("intakes.status", LIVE_INTAKE_STATUS)
         .eq("tenant_id", tenantId)
         .order("level", { ascending: true }) as unknown as Promise<{ data: ClassRow[] | null; error: unknown }>,
     ]);
 
-  for (const res of [totalRes, confirmedRes, pendingRes, submittedRes]) {
+  for (const res of [totalRes, confirmedRes, pendingRes, submittedRes, openIntakesRes]) {
     if (res.error) {
       return NextResponse.json({ error: (res.error as Error).message }, { status: 500 });
     }
@@ -84,6 +113,7 @@ export async function GET() {
     pending_payment_count:   pendingRes.count ?? 0,
     payment_submitted_count: submittedRes.count ?? 0,
     total_revenue,
+    has_open_intake: (openIntakesRes.count ?? 0) > 0,
     seats_by_class,
   });
 }
