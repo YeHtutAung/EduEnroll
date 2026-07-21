@@ -7,7 +7,7 @@
   O1, O2, O3, O4 and G8, each failing for its named reason
   (`expected 'confirmed' to be 'rejected'`, `expected 1 to be +0`,
   `promise resolved "undefined" instead of rejecting`).
-- Green: **12/12**; full database suite **45/45**; ordinary suite
+- Green: **12/12**; full database suite **46/46**; ordinary suite
   **385 collected / 384 passed** (1 pre-existing unrelated, `scanner/events`);
   lint clean; build exit 0.
 **Supersedes:** v5 (existing unit tests unaccounted for; collection step ran the suite), v4 (red tests written after the red run; migration pushed before PR), v3 (guard laundered via `partial_payment`; G8 misclassified), v2
