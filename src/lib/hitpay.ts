@@ -89,10 +89,23 @@ async function createPaymentRequest(
     // ends up in persistent logs and truncating it is not sanitizing it. The
     // HTTP status is the only safe diagnostic, and it travels as a structured
     // field so callers do not have to parse the message.
+    const status = res.status;
+
+    // Discard it rather than abandon it. The previous `await res.text()` drained
+    // the body as a side effect of building the message; dropping that read
+    // leaves the stream unconsumed, and undici holds the connection open for an
+    // abandoned body — during a provider error burst that exhausts the pool.
+    // Cancelling discards without buffering, so nothing is read into memory.
+    try {
+      await res.body?.cancel();
+    } catch {
+      // Cleanup must never replace the provider failure being reported.
+    }
+
     const err = new Error(
-      `HitPay createPaymentRequest failed (HTTP ${res.status})`,
+      `HitPay createPaymentRequest failed (HTTP ${status})`,
     ) as Error & { status: number };
-    err.status = res.status;
+    err.status = status;
     throw err;
   }
 

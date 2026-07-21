@@ -21,29 +21,41 @@ afterEach(() => {
   global.fetch = originalFetch;
 });
 
+const BODY = '{"errors":{"amount":"internal-token-abc123"},"customer":"a@b.test"}';
+
+/** A failing response whose body records whether it was cancelled. */
+function failingResponse(cancel: () => Promise<void>) {
+  return {
+    ok: false,
+    status: 422,
+    body: { cancel },
+    text: async () => BODY,
+    json: async () => JSON.parse(BODY),
+  };
+}
+
+const createRequest = async () => {
+  const { default: hitpay } = await import("@/lib/hitpay");
+  return hitpay
+    .createPaymentRequest({
+      amount: "100.00",
+      currency: "SGD",
+      method: "paynow_online",
+      referenceNumber: "F-0001",
+    })
+    .then(
+      () => null,
+      (e: unknown) => e as Error & { status?: number },
+    );
+};
+
 describe("hitpay.createPaymentRequest — error carries no provider body", () => {
   it("omits the response body and exposes the HTTP status as a field", async () => {
-    const BODY = '{"errors":{"amount":"internal-token-abc123"},"customer":"a@b.test"}';
-    global.fetch = vi.fn(async () => ({
-      ok: false,
-      status: 422,
-      text: async () => BODY,
-      json: async () => JSON.parse(BODY),
-    })) as unknown as typeof fetch;
+    global.fetch = vi.fn(async () =>
+      failingResponse(async () => {}),
+    ) as unknown as typeof fetch;
 
-    const { default: hitpay } = await import("@/lib/hitpay");
-
-    const err = await hitpay
-      .createPaymentRequest({
-        amount: "100.00",
-        currency: "SGD",
-        method: "paynow_online",
-        referenceNumber: "F-0001",
-      })
-      .then(
-        () => null,
-        (e: unknown) => e as Error & { status?: number },
-      );
+    const err = await createRequest();
 
     expect(err).toBeInstanceOf(Error);
     expect(err!.message).not.toContain("internal-token-abc123");
@@ -53,5 +65,37 @@ describe("hitpay.createPaymentRequest — error carries no provider body", () =>
     // diagnostic without parsing the message.
     expect(err!.status).toBe(422);
     expect(err!.message).toContain("HTTP 422");
+  });
+
+  it("discards the unread body so the connection is not abandoned", async () => {
+    // Not cosmetic: undici keeps the connection open for an unconsumed body,
+    // and a provider error burst would then exhaust the pool. Cancelling
+    // discards without buffering, so the body is never read into memory.
+    const cancel = vi.fn(async () => {});
+    global.fetch = vi.fn(async () => failingResponse(cancel)) as unknown as typeof fetch;
+
+    const err = await createRequest();
+
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(err!.status).toBe(422);
+  });
+
+  it("still reports the provider failure when cancelling the body fails", async () => {
+    // Cleanup must never mask what actually went wrong upstream.
+    const cancel = vi.fn(async () => {
+      throw new Error("stream already locked");
+    });
+    global.fetch = vi.fn(async () => failingResponse(cancel)) as unknown as typeof fetch;
+
+    const err = await createRequest();
+
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(err).toBeInstanceOf(Error);
+    expect(err!.status).toBe(422);
+    expect(err!.message).toContain("HTTP 422");
+    // The cleanup failure must not surface in place of the provider failure,
+    // and must not smuggle the body back in.
+    expect(err!.message).not.toContain("stream already locked");
+    expect(err!.message).not.toContain("internal-token-abc123");
   });
 });
