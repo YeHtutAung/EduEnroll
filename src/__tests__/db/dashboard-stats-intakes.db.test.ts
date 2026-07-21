@@ -32,6 +32,17 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
+/** An intake with no classes attached. */
+async function makeEmptyIntake(status: "draft" | "open" | "closed") {
+  const [i] = await sql<{ id: string }>(
+    `INSERT INTO intakes (tenant_id, name, year, status)
+     VALUES ($1, $2, 2026, $3::intake_status) RETURNING id`,
+    [tenantId, `Empty ${status} ${uniq()}`, status],
+  );
+  made.intakes.push(i.id);
+  return i.id;
+}
+
 async function makeIntake(status: "draft" | "open" | "closed", level: string) {
   const [i] = await sql<{ id: string }>(
     `INSERT INTO intakes (tenant_id, name, year, status)
@@ -49,7 +60,7 @@ async function makeIntake(status: "draft" | "open" | "closed", level: string) {
   return c.id;
 }
 
-const levelsInOverview = async (): Promise<string[]> => {
+const statsBody = async (): Promise<{ seats_by_class: { level: string }[]; has_open_intake: boolean }> => {
   const { GET } = await import("@/app/api/admin/stats/route");
   const res = await GET();
   const body = await res.json();
@@ -58,8 +69,11 @@ const levelsInOverview = async (): Promise<string[]> => {
   if (res.status !== 200 || !body.seats_by_class) {
     throw new Error(`stats route returned ${res.status}: ${JSON.stringify(body)}`);
   }
-  return (body.seats_by_class as { level: string }[]).map((r) => r.level);
+  return body;
 };
+
+const levelsInOverview = async (): Promise<string[]> =>
+  (await statsBody()).seats_by_class.map((r) => r.level);
 
 beforeAll(async () => {
   await pool.query("SELECT 1");
@@ -126,5 +140,47 @@ describe("GET /api/admin/stats — seats_by_class respects intake status", () =>
     await makeIntake("closed", "MIX-CLOSED");
 
     expect(await levelsInOverview()).toEqual(["MIX-OPEN"]);
+  });
+});
+
+describe("GET /api/admin/stats — has_open_intake disambiguates the empty overview", () => {
+  // An empty seats_by_class has two causes needing different advice. Without
+  // this flag the dashboard cannot tell them apart, and its empty state made
+  // the stronger claim ("no open intake") in both cases — wrong in the second.
+
+  it("D5 an OPEN intake with no classes reports empty seats but has_open_intake true", async () => {
+    await makeEmptyIntake("open");
+
+    const body = await statsBody();
+
+    expect(body.seats_by_class).toEqual([]);
+    expect(body.has_open_intake).toBe(true);
+  });
+
+  it("D6 only draft and closed intakes report has_open_intake false", async () => {
+    await makeIntake("draft", "D6-DRAFT");
+    await makeIntake("closed", "D6-CLOSED");
+
+    const body = await statsBody();
+
+    expect(body.seats_by_class).toEqual([]);
+    expect(body.has_open_intake).toBe(false);
+  });
+
+  it("D7 no intakes at all reports has_open_intake false", async () => {
+    const body = await statsBody();
+
+    expect(body.seats_by_class).toEqual([]);
+    expect(body.has_open_intake).toBe(false);
+  });
+
+  it("D8 an open intake WITH classes still reports has_open_intake true", async () => {
+    // Guards against a flag that only ever reads true in the empty case.
+    await makeIntake("open", "D8-OPEN");
+
+    const body = await statsBody();
+
+    expect(body.seats_by_class.map((r) => r.level)).toEqual(["D8-OPEN"]);
+    expect(body.has_open_intake).toBe(true);
   });
 });

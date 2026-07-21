@@ -23,6 +23,9 @@ interface StatsData {
   pending_payment_count: number;
   payment_submitted_count: number;
   total_revenue: number;
+  /** Distinguishes "no open intake" from "open intake, no classes yet" — an
+   *  empty seats_by_class alone cannot tell those apart. */
+  has_open_intake: boolean;
   seats_by_class: SeatRow[];
 }
 
@@ -307,11 +310,16 @@ export default function DashboardPage() {
             </div>
           ) : (
             <div className="py-10 text-center text-sm text-gray-400">
-              {/* Not "no classes configured": the overview counts open intakes
-                  only, so a tenant whose intakes are all draft or closed does
-                  have classes, just nothing live. The old copy sent them
-                  looking for data they had already entered. */}
-              No open {tl.intake.toLowerCase()}s.
+              {/* Two different situations, and they need different advice.
+                  "No classes configured yet" was wrong for both once the
+                  overview started filtering by intake status.
+
+                  Every label is used in the SINGULAR. Labels are tenant-defined
+                  — fitness maps intake to "Batch", and custom tenants can set
+                  anything — so appending "s" produces "batchs". */}
+              {stats?.has_open_intake
+                ? `No ${tl.class.toLowerCase()} configured in the open ${tl.intake.toLowerCase()} yet.`
+                : `No open ${tl.intake.toLowerCase()} right now.`}
             </div>
           )}
         </section>
