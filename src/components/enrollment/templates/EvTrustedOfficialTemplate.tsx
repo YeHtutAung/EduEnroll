@@ -53,108 +53,114 @@ function TicketCard({
 
   return (
     <div
-      className="rounded-[10px] p-[13px] text-sm"
+      className="rounded-[10px] text-sm overflow-hidden"
       style={{
         background: featured ? "#fbf8ee" : "#ffffff",
         border: featured ? "1.5px solid #d4af5a" : "1px solid #e3e0d6",
         boxShadow: "0 1px 2px rgba(15,31,66,.05)",
       }}
     >
-      <div style={{ display: "flex", gap: 12 }}>
-        {/* Ticket image */}
-        {cls.image_url && (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={cls.image_url}
-            alt={`${cls.level} ticket`}
-            style={{
-              width: 74,
-              height: 100,
-              flex: "0 0 74px",
-              borderRadius: 7,
-              objectFit: "cover",
-            }}
-          />
-        )}
+      {/* Ticket image — full width at its own aspect ratio.
+          It was a 74x100 portrait box with objectFit:cover, which centre-cropped
+          the artwork: event posters are landscape (~1.91:1), so roughly a
+          quarter of the width survived and the title, date, venue and price were
+          all cropped away.
 
-        {/* Card body */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          {/* Header row */}
-          <div className="flex items-start justify-between mb-1">
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-[13px]" style={{ color: brand }}>
-                {cls.level}
-              </span>
-              {featured && (
-                <span
-                  className="text-[8.5px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded text-white"
-                  style={{ background: "#b7912b", borderRadius: 4 }}
-                >
-                  POPULAR
-                </span>
-              )}
-            </div>
-            <span className="text-[12.5px] font-bold" style={{ color: brand }}>
-              {cls.fee_formatted}
+          `w-full` + `h-auto` and NO object-fit is what keeps it whole — the
+          image scales to the card and computes its own height, so it stays
+          uncropped at every width without hard-coding a ratio (each ticket type
+          uploads its own image, and they need not share one).
+
+          `block` kills the inline-element baseline gap under the image;
+          `overflow-hidden` on the card clips the top corners to its radius. */}
+      {cls.image_url && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={cls.image_url}
+          alt={`${cls.level} ticket`}
+          className="block w-full h-auto"
+          loading="lazy"
+          decoding="async"
+        />
+      )}
+
+      {/* Card body */}
+      <div className="p-[13px]" style={{ minWidth: 0 }}>
+        {/* Header row */}
+        <div className="flex items-start justify-between mb-1">
+          <div className="flex items-center gap-2">
+            <span className="font-bold text-[13px]" style={{ color: brand }}>
+              {cls.level}
             </span>
-          </div>
-
-          {/* Seats remaining */}
-          <p className="text-[10.5px] mb-3" style={{ color: "#8b8f9a" }}>
-            {cls.seat_remaining} seats remaining
-          </p>
-
-          {/* Controls */}
-          {overlayLabel ? (
-            <div
-              className="text-center text-[11px] py-2 rounded"
-              style={{ background: "#f5f5f5", color: "#9a9484" }}
-            >
-              {overlayLabel}
-            </div>
-          ) : isDisabled ? null : (
-            <div className="flex items-center justify-between">
-              {/* Stepper */}
-              <div
-                className="flex items-center overflow-hidden rounded-full"
-                style={{ border: "1px solid #d8d5c9" }}
+            {featured && (
+              <span
+                className="text-[8.5px] font-bold tracking-wider uppercase px-1.5 py-0.5 rounded text-white"
+                style={{ background: "#b7912b", borderRadius: 4 }}
               >
-                <button
-                  className="w-[26px] h-[26px] flex items-center justify-center text-sm font-bold hover:bg-gray-50"
-                  style={{ color: brand }}
-                  onClick={() => onQtyChange(cls.id, -1)}
-                  disabled={qty === 0}
-                >
-                  −
-                </button>
-                <span
-                  className="w-[26px] text-center text-[12px] font-bold"
-                  style={{
-                    color: brand,
-                    borderLeft: "1px solid #d8d5c9",
-                    borderRight: "1px solid #d8d5c9",
-                  }}
-                >
-                  {qty}
-                </span>
-                <button
-                  className="w-[26px] h-[26px] flex items-center justify-center text-sm font-bold hover:bg-gray-50"
-                  style={{ color: brand }}
-                  onClick={() => onQtyChange(cls.id, 1)}
-                  disabled={qty >= max}
-                >
-                  +
-                </button>
-              </div>
-              {/* Subtotal */}
-              {qty > 0 && (
-                <span className="text-[11.5px] font-semibold" style={{ color: brand }}>
-                  {cls.fee_formatted.replace(/[\d,]+/, String(subtotal.toLocaleString()))}
-                </span>
-              )}
-            </div>
-          )}
+                POPULAR
+              </span>
+            )}
+          </div>
+          <span className="text-[12.5px] font-bold" style={{ color: brand }}>
+            {cls.fee_formatted}
+          </span>
         </div>
+
+        {/* Seats remaining */}
+        <p className="text-[10.5px] mb-3" style={{ color: "#8b8f9a" }}>
+          {cls.seat_remaining} seats remaining
+        </p>
+
+        {/* Controls */}
+        {overlayLabel ? (
+          <div
+            className="text-center text-[11px] py-2 rounded"
+            style={{ background: "#f5f5f5", color: "#9a9484" }}
+          >
+            {overlayLabel}
+          </div>
+        ) : isDisabled ? null : (
+          <div className="flex items-center justify-between">
+            {/* Stepper */}
+            <div
+              className="flex items-center overflow-hidden rounded-full"
+              style={{ border: "1px solid #d8d5c9" }}
+            >
+              <button
+                className="w-[26px] h-[26px] flex items-center justify-center text-sm font-bold hover:bg-gray-50"
+                style={{ color: brand }}
+                onClick={() => onQtyChange(cls.id, -1)}
+                disabled={qty === 0}
+              >
+                −
+              </button>
+              <span
+                className="w-[26px] text-center text-[12px] font-bold"
+                style={{
+                  color: brand,
+                  borderLeft: "1px solid #d8d5c9",
+                  borderRight: "1px solid #d8d5c9",
+                }}
+              >
+                {qty}
+              </span>
+              <button
+                className="w-[26px] h-[26px] flex items-center justify-center text-sm font-bold hover:bg-gray-50"
+                style={{ color: brand }}
+                onClick={() => onQtyChange(cls.id, 1)}
+                disabled={qty >= max}
+              >
+                +
+              </button>
+            </div>
+            {/* Subtotal */}
+            {qty > 0 && (
+              <span className="text-[11.5px] font-semibold" style={{ color: brand }}>
+                {cls.fee_formatted.replace(/[\d,]+/, String(subtotal.toLocaleString()))}
+              </span>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
