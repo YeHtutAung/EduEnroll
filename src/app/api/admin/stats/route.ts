@@ -4,6 +4,12 @@ import type { Class } from "@/types/database";
 
 type ClassRow = Pick<Class, "level" | "seat_remaining" | "seat_total">;
 
+// Only an intake that is actually running belongs in the overview. `draft` is
+// not published yet and `closed` is over, so counting either reports capacity
+// nobody can buy — and the panel is the at-a-glance answer to "how are we
+// selling right now".
+const LIVE_INTAKE_STATUS = "open";
+
 // ─── GET /api/admin/stats ─────────────────────────────────────────────────────
 // Dashboard statistics for the authenticated admin's tenant.
 //
@@ -49,9 +55,16 @@ export async function GET() {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (supabase.rpc as any)("get_tenant_revenue", { p_tenant_id: tenantId }) as Promise<{ data: number | null; error: unknown }>,
 
+      // `!inner` is load-bearing, not stylistic. A plain `intakes(status)` embed
+      // LEFT-joins, so the `.eq` filters only the embedded object and every
+      // class still comes back — the filter silently does nothing. Verified:
+      // that variant returns the draft and closed rows too.
+      // classes.intake_id is NOT NULL, so the inner join drops nothing a left
+      // join would have kept.
       supabase
         .from("classes")
-        .select("level, seat_remaining, seat_total")
+        .select("level, seat_remaining, seat_total, intakes!inner(status)")
+        .eq("intakes.status", LIVE_INTAKE_STATUS)
         .eq("tenant_id", tenantId)
         .order("level", { ascending: true }) as unknown as Promise<{ data: ClassRow[] | null; error: unknown }>,
     ]);

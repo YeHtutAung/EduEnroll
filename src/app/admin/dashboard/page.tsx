@@ -307,7 +307,11 @@ export default function DashboardPage() {
             </div>
           ) : (
             <div className="py-10 text-center text-sm text-gray-400">
-              No classes configured yet.
+              {/* Not "no classes configured": the overview counts open intakes
+                  only, so a tenant whose intakes are all draft or closed does
+                  have classes, just nothing live. The old copy sent them
+                  looking for data they had already entered. */}
+              No open {tl.intake.toLowerCase()}s.
             </div>
           )}
         </section>
