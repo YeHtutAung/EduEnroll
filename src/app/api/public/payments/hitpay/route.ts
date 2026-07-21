@@ -250,11 +250,15 @@ export async function POST(request: NextRequest) {
       });
     }
   } catch (err) {
-    // The upstream message can carry the raw HitPay response body. It is a
-    // server-side diagnostic only — truncated here, and never returned to the
-    // caller. A public `detail` field would leak the provider body verbatim.
-    const errMsg = err instanceof Error ? err.message : String(err);
-    console.error("[hitpay] createPaymentRequest error:", errMsg.slice(0, 500));
+    // Neither returned nor logged. The provider body can carry customer data
+    // and internal tokens, so the only diagnostic recorded is the HTTP status
+    // the wrapper attaches — the error message itself is never logged, since
+    // truncating a body is not the same as sanitizing it.
+    const status = (err as { status?: number } | null)?.status;
+    console.error(
+      "[hitpay] createPaymentRequest failed",
+      typeof status === "number" ? `(HTTP ${status})` : "(no status)",
+    );
     return NextResponse.json(
       {
         error: "Payment Gateway Error",

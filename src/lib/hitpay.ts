@@ -84,8 +84,16 @@ async function createPaymentRequest(
   });
 
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`HitPay createPaymentRequest failed (${res.status}): ${text}`);
+    // The response body can carry customer data, internal tokens and provider
+    // diagnostics. It is never attached to the error, because an error message
+    // ends up in persistent logs and truncating it is not sanitizing it. The
+    // HTTP status is the only safe diagnostic, and it travels as a structured
+    // field so callers do not have to parse the message.
+    const err = new Error(
+      `HitPay createPaymentRequest failed (HTTP ${res.status})`,
+    ) as Error & { status: number };
+    err.status = res.status;
+    throw err;
   }
 
   return res.json();

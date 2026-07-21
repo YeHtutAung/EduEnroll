@@ -247,21 +247,46 @@ describe("payment creation — success paths are unchanged", () => {
 });
 
 describe("payment creation — provider failures stay internal", () => {
-  it("C10 HitPay provider rejection does not leak the upstream body", async () => {
-    // The wrapper surfaces the raw HitPay response in the Error message. The
-    // route used to return it as a public `detail` field.
+  it("C10 HitPay provider rejection leaks the upstream body to neither the response nor the logs", async () => {
+    // Persistent logs are an exfiltration surface too. Truncating the provider
+    // body is not sanitizing it, so the route must never log the message at
+    // all — this asserts against a hostile message that still carries a token.
     const UPSTREAM = 'HitPay 422: {"errors":{"amount":"internal-token-abc123"}}';
-    mockCreatePaymentRequest.mockRejectedValue(new Error(UPSTREAM));
+    const hostile = new Error(UPSTREAM) as Error & { status: number };
+    hostile.status = 422;
+    mockCreatePaymentRequest.mockRejectedValue(hostile);
 
-    const res = await hitpay("paynow_online");
-    const body = await res.json();
+    // Collected as they happen: mockRestore() also resets the recorded calls,
+    // so reading them afterwards yields nothing.
+    const logLines: string[] = [];
+    const errSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation((...args: unknown[]) => {
+        logLines.push(args.map((a) => String(a)).join(" "));
+      });
+    let res: Response;
+    try {
+      res = await hitpay("paynow_online");
+    } finally {
+      errSpy.mockRestore();
+    }
+    const body = await res!.json();
 
-    expect(res.status).toBe(502);
+    expect(res!.status).toBe(502);
     const serialised = JSON.stringify(body);
     expect(serialised).not.toContain("internal-token-abc123");
     expect(serialised).not.toContain("HitPay 422");
     expect(body.detail).toBeUndefined();
     // A generic, actionable message is still returned.
     expect(body.error).toBe("Payment Gateway Error");
+
+    // Nothing logged may carry the body either.
+    const logged = logLines.join("\n");
+    expect(logged).not.toBe(""); // the route must actually log, or this is vacuous
+    expect(logged).not.toContain("internal-token-abc123");
+    expect(logged).not.toContain("HitPay 422");
+    expect(logged).not.toContain(UPSTREAM);
+    // The safe structured status is still recorded, so failures stay diagnosable.
+    expect(logged).toContain("HTTP 422");
   });
 });
