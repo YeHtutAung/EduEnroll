@@ -64,8 +64,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ received: true });
     }
 
-    // Idempotency: skip if already verified
+    // Idempotency: settlement happens once. Fulfilment does not — a browser
+    // confirm path usually settles first, so this replay was returning before
+    // reaching issuance and the order stayed ticketless. Failure is logged and
+    // acknowledged, not retried: durable retry is deliberately out of scope
+    // (#186), and returning 5xx here would introduce it by accident.
     if (payment.status === "verified") {
+      try {
+        await issueTicketsForEnrollment(payment.enrollment_id);
+      } catch (err) {
+        console.error("[tickets] replay fulfilment failed:", err);
+      }
       return NextResponse.json({ received: true });
     }
 

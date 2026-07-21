@@ -13,6 +13,12 @@ let enrollmentData: {
 // Configurable so the enrollment-load failure branch can be exercised: a DB
 // error must throw, not be mistaken for "no tickets needed".
 let enrollmentError: unknown = null;
+// Ticket issuance is an event-tenant feature, so the helper now resolves
+// org_type. Configurable so the eligibility and failure branches can be driven.
+let tenantData: { org_type: string | null } | null = { org_type: "event" };
+let tenantError: unknown = null;
+let itemsError: unknown = null;
+let classesError: unknown = null;
 let enrollmentItemsData: { class_id: string; quantity: number }[] = [];
 let classesData: { id: string; level: string; intake_id: string; event_date: string | null }[] = [];
 
@@ -38,16 +44,22 @@ const mockAdminFrom = vi.fn((table: string) => {
         eq: vi.fn().mockReturnThis(),
         maybeSingle: vi.fn().mockResolvedValue({ data: enrollmentData, error: enrollmentError }),
       };
+    case "tenants":
+      return {
+        select: vi.fn().mockReturnThis(),
+        eq: vi.fn().mockReturnThis(),
+        maybeSingle: vi.fn().mockResolvedValue({ data: tenantData, error: tenantError }),
+      };
     case "enrollment_items":
       return {
         select: vi.fn().mockReturnValue({
-          eq: vi.fn().mockResolvedValue({ data: enrollmentItemsData, error: null }),
+          eq: vi.fn().mockResolvedValue({ data: enrollmentItemsData, error: itemsError }),
         }),
       };
     case "classes":
       return {
         select: vi.fn().mockReturnValue({
-          in: vi.fn().mockResolvedValue({ data: classesData, error: null }),
+          in: vi.fn().mockResolvedValue({ data: classesData, error: classesError }),
         }),
       };
     default:
@@ -75,6 +87,10 @@ beforeEach(() => {
   ticketsCount = 0;
   enrollmentData = null;
   enrollmentError = null;
+  tenantData = { org_type: "event" };
+  tenantError = null;
+  itemsError = null;
+  classesError = null;
   enrollmentItemsData = [];
   classesData = [];
 });
@@ -198,6 +214,94 @@ describe("issueTicketsForEnrollment — admission guard", () => {
 
     const { issueTicketsForEnrollment } = await import("@/server/tickets/issueTickets");
     await expect(issueTicketsForEnrollment("missing")).resolves.toBeUndefined();
+    expect(mockUpsert).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Fulfilment hardening: failures a real database cannot construct ────────
+// Valid foreign keys and a service-role client cannot produce a tenant-lookup
+// failure after a valid enrollment load, a partial classes result, or a
+// transport error. These branches matter because this codebase has repeatedly
+// destructured `data` and dropped `error` — "it succeeded" and "it never
+// answered" must not look alike.
+describe("issueTicketsForEnrollment — query failures and anomalies", () => {
+  const confirmedEvent = () => {
+    enrollmentData = { id: "e1", tenant_id: "t1", class_id: "c1", quantity: 2, status: "confirmed" };
+    classesData = [{ id: "c1", level: "VIP", intake_id: "i1", event_date: null }];
+  };
+
+  it("U1 throws when the tenant query errors", async () => {
+    confirmedEvent();
+    tenantError = { message: "connection reset" };
+    tenantData = null;
+
+    const { issueTicketsForEnrollment } = await import("@/server/tickets/issueTickets");
+    await expect(issueTicketsForEnrollment("e1")).rejects.toThrow(/tenant load failed/);
+    expect(mockUpsert).not.toHaveBeenCalled();
+  });
+
+  it("U1b throws when the tenant does not exist", async () => {
+    // Distinct from "not an event": a missing tenant is a failure, not a no-op.
+    confirmedEvent();
+    tenantData = null;
+    tenantError = null;
+
+    const { issueTicketsForEnrollment } = await import("@/server/tickets/issueTickets");
+    await expect(issueTicketsForEnrollment("e1")).rejects.toThrow(/not found/);
+    expect(mockUpsert).not.toHaveBeenCalled();
+  });
+
+  it("U2 throws when the enrollment_items query errors", async () => {
+    enrollmentData = { id: "e1", tenant_id: "t1", class_id: null, quantity: null, status: "confirmed" };
+    itemsError = { message: "connection reset" };
+
+    const { issueTicketsForEnrollment } = await import("@/server/tickets/issueTickets");
+    await expect(issueTicketsForEnrollment("e1")).rejects.toThrow(/enrollment_items load failed/);
+    expect(mockUpsert).not.toHaveBeenCalled();
+  });
+
+  it("U3 throws when the classes query errors", async () => {
+    confirmedEvent();
+    classesError = { message: "connection reset" };
+    classesData = [];
+
+    const { issueTicketsForEnrollment } = await import("@/server/tickets/issueTickets");
+    await expect(issueTicketsForEnrollment("e1")).rejects.toThrow(/classes load failed/);
+    expect(mockUpsert).not.toHaveBeenCalled();
+  });
+
+  it("U4 throws when the classes query returns fewer rows than referenced", async () => {
+    // Previously the missing line was skipped silently, producing fewer tickets
+    // than paid for while reporting success.
+    enrollmentData = { id: "e1", tenant_id: "t1", class_id: null, quantity: null, status: "confirmed" };
+    enrollmentItemsData = [
+      { class_id: "c1", quantity: 1 },
+      { class_id: "c2", quantity: 1 },
+    ];
+    classesData = [{ id: "c1", level: "VIP", intake_id: "i1", event_date: null }];
+
+    const { issueTicketsForEnrollment } = await import("@/server/tickets/issueTickets");
+    await expect(issueTicketsForEnrollment("e1")).rejects.toThrow(/did not load/);
+    expect(mockUpsert).not.toHaveBeenCalled();
+  });
+
+  it("U5 throws on a zero quantity rather than manufacturing an admission", async () => {
+    // Math.max(1, quantity) previously turned a zero quantity into one ticket.
+    enrollmentData = { id: "e1", tenant_id: "t1", class_id: null, quantity: null, status: "confirmed" };
+    enrollmentItemsData = [{ class_id: "c1", quantity: 0 }];
+    classesData = [{ id: "c1", level: "VIP", intake_id: "i1", event_date: null }];
+
+    const { issueTicketsForEnrollment } = await import("@/server/tickets/issueTickets");
+    await expect(issueTicketsForEnrollment("e1")).rejects.toThrow(/invalid quantity/);
+    expect(mockUpsert).not.toHaveBeenCalled();
+  });
+
+  it("U6 issues nothing for a non-event tenant", async () => {
+    confirmedEvent();
+    tenantData = { org_type: "language_school" };
+
+    const { issueTicketsForEnrollment } = await import("@/server/tickets/issueTickets");
+    await expect(issueTicketsForEnrollment("e1")).resolves.toBeUndefined();
     expect(mockUpsert).not.toHaveBeenCalled();
   });
 });

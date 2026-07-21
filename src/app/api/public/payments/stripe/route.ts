@@ -204,7 +204,7 @@ export async function POST(request: NextRequest) {
     });
 
     // ── 10. Create payment record ────────────────────────────
-    await supabase.from("payments").insert({
+    const { error: insertError } = await supabase.from("payments").insert({
       enrollment_id: enrollment.id,
       tenant_id: enrollment.tenant_id,
       amount: totalFee,
@@ -212,6 +212,25 @@ export async function POST(request: NextRequest) {
       status: "awaiting_payment",
       stripe_session_id: session.id,
     } as never);
+
+    // Never hand out a checkout URL we could not record: the customer would pay
+    // against a session no webhook can resolve to an enrollment.
+    //
+    // A local 500, not the provider 502 below — Stripe succeeded, our database
+    // did not, and mislabelling would send someone debugging the wrong system.
+    if (insertError) {
+      console.error("[stripe] payment insert failed for session", session.id);
+      try {
+        await getStripe().checkout.sessions.expire(session.id);
+      } catch {
+        // Best-effort; must not replace the original failure.
+        console.error("[stripe] session expire failed for", session.id);
+      }
+      return NextResponse.json(
+      { error: "Internal Server Error", message: "Payment could not be recorded. No payment link was issued." },
+      { status: 500 },
+      );
+    }
 
     return NextResponse.json({ url: session.url });
   } catch (err) {
