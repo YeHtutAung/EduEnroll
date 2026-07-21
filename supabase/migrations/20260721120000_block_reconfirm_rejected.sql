@@ -27,9 +27,16 @@ BEGIN;
 -- rule — the second hop's OLD.status is 'partial_payment', not 'rejected'.
 --
 -- Keeps the row rejected rather than RAISE: the payment may already be
--- verified, so raising would error a customer after money moved. Because the
--- status does not actually change, the AFTER seat trigger never fires and the
--- resold seat is left alone. The result — a verified payment against a rejected
+-- verified, so raising would error a customer after money moved.
+--
+-- The resold seat is left alone, but NOT because the AFTER trigger is skipped:
+-- an AFTER UPDATE OF status trigger still fires when status appears in the SET
+-- list, even though this BEFORE trigger restores the old value. What prevents a
+-- seat change is update_seat_remaining()'s own predicate — it restores only when
+-- NEW.status = 'rejected' AND OLD.status IN (active states), and here OLD is
+-- already 'rejected', so no branch matches. Worth stating precisely: a future
+-- edit to that predicate could change this outcome even though the trigger
+-- still fires. The result — a verified payment against a rejected
 -- enrollment — is a refund case, detectable by query, and strictly better than
 -- a silent double booking.
 --

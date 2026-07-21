@@ -1,6 +1,15 @@
 # Oversell guard — plan v6
 
-**Status:** for review. Do not implement.
+**Status:** IMPLEMENTED in PR #187; awaiting review and deployment.
+
+**Observed results** (not predictions):
+- Red, against the pre-fix schema: **12 collected / 7 passed / 5 failed** —
+  O1, O2, O3, O4 and G8, each failing for its named reason
+  (`expected 'confirmed' to be 'rejected'`, `expected 1 to be +0`,
+  `promise resolved "undefined" instead of rejecting`).
+- Green: **12/12**; full database suite **45/45**; ordinary suite
+  **385 collected / 384 passed** (1 pre-existing unrelated, `scanner/events`);
+  lint clean; build exit 0.
 **Supersedes:** v5 (existing unit tests unaccounted for; collection step ran the suite), v4 (red tests written after the red run; migration pushed before PR), v3 (guard laundered via `partial_payment`; G8 misclassified), v2
 (admission oversell left open), v1.
 **Deferred work tracked in:** #186 (notifications, outbox, reconciliation, RPC).
@@ -64,8 +73,9 @@ BEGIN
   -- A rejected enrollment's seat was restored and possibly resold. Rejection is
   -- terminal: no automatic transition out of it. Silently keep it rejected
   -- rather than RAISE — the payment may already be verified, so raising would
-  -- error a customer after money moved, and no status change means the AFTER
-  -- seat trigger does not fire, leaving the resold seat intact.
+  -- error a customer after money moved. The resold seat is safe because
+  -- update_seat_remaining()'s predicate no longer matches (OLD is already
+  -- rejected), not because the AFTER trigger is skipped — it still fires.
   IF OLD.status = 'rejected' AND NEW.status IS DISTINCT FROM OLD.status THEN
     NEW.status := OLD.status;
   END IF;

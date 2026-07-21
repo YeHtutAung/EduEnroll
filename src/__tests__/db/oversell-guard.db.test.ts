@@ -14,9 +14,9 @@ import { Pool } from "pg";
 //      for a rejected enrollment scans as valid.
 //
 // The invariant these tests protect is capacity, not the status flip:
-// `seat_remaining` is NOT a witness (update_seat_remaining only restores on
-// → rejected; it never decrements on reconfirm), so it reads the same whether
-// or not the bug fires. Confirmed DEMAND vs seat_total is the real observable.
+// `seat_remaining` is NOT a witness: update_seat_remaining() only restores on
+// → rejected and never decrements on reconfirm, so it reads the same whether or
+// not the bug fires. Confirmed DEMAND vs seat_total is the real observable.
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const sql = async <T = Record<string, unknown>>(text: string, params: unknown[] = []) =>
@@ -327,6 +327,16 @@ describe("G. existing behaviour is preserved", () => {
     await sql(`UPDATE enrollments SET status = 'rejected' WHERE id = $1`, [enrollId]);
     expect(await seatRemaining(classA)).toBe(10);
     expect(await seatRemaining(classB)).toBe(10);
+  });
+
+  it("G8 throws when the real enrollment query fails", async () => {
+    // A genuine PostgREST/Postgres failure, not a mock: an invalid uuid makes
+    // the lookup error (22P02). maybeSingle() surfaces that as an error, and
+    // issueTickets must THROW rather than treat it as "enrollment not found"
+    // and silently skip fulfillment for what may be a paid, confirmed order.
+    await expect(issueTickets("not-a-uuid")).rejects.toThrow(
+      "issueTickets: enrollment load failed",
+    );
   });
 
   it("G7 issueTickets still issues one ticket per seat for a confirmed enrollment", async () => {
