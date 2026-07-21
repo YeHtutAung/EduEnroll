@@ -215,7 +215,7 @@ export async function POST(request: NextRequest) {
     });
 
     // ── 9. Insert payment record ───────────────────────────────────────────────
-    await supabase.from("payments").insert({
+    const { error: insertError } = await supabase.from("payments").insert({
       enrollment_id: enrollment.id,
       tenant_id: enrollment.tenant_id,
       amount: totalFee,
@@ -223,6 +223,18 @@ export async function POST(request: NextRequest) {
       hitpay_payment_id: result.id,
       status: "awaiting_payment",
     } as never);
+
+    // Never hand out a QR or card URL we could not record. Cleanup is deferred:
+    // the HitPay wrapper exposes create/verify/parse only, with no cancellation
+    // (#186). No `detail` field here — a database error must not reach the
+    // public body.
+    if (insertError) {
+      console.error("[hitpay] payment insert failed for request", result.id);
+      return NextResponse.json(
+      { error: "Internal Server Error", message: "Payment could not be recorded. No payment link was issued." },
+      { status: 500 },
+      );
+    }
 
     if (hitpayMethod === "paynow_online") {
       return NextResponse.json({
@@ -238,13 +250,19 @@ export async function POST(request: NextRequest) {
       });
     }
   } catch (err) {
-    const errMsg = err instanceof Error ? err.message : String(err);
-    console.error("[hitpay] createPaymentRequest error:", errMsg);
+    // Neither returned nor logged. The provider body can carry customer data
+    // and internal tokens, so the only diagnostic recorded is the HTTP status
+    // the wrapper attaches — the error message itself is never logged, since
+    // truncating a body is not the same as sanitizing it.
+    const status = (err as { status?: number } | null)?.status;
+    console.error(
+      "[hitpay] createPaymentRequest failed",
+      typeof status === "number" ? `(HTTP ${status})` : "(no status)",
+    );
     return NextResponse.json(
       {
         error: "Payment Gateway Error",
         message: "Failed to create HitPay payment. Please try again.",
-        detail: errMsg,
       },
       { status: 502 },
     );

@@ -3,7 +3,7 @@ import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createBareClient, type SupabaseClient } from "@supabase/supabase-js";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { extractSubdomainFromHost } from "@/lib/tenant";
+import { extractSubdomainFromHost, isPlatformRootHost } from "@/lib/tenant";
 import { verifyAgentSignature } from "@/lib/agent-auth";
 import type { User, Database } from "@/types/database";
 
@@ -57,6 +57,30 @@ export async function requireAuth(rawBody = ""): Promise<AuthContext | NextRespo
       );
     }
 
+    // ── Transitional telemetry (#164) ───────────────────────────────────────
+    // Gates removal of the middleware allowlist: the absence of these events is
+    // the evidence the bot has migrated to tenant hosts.
+    //
+    // Emitted only AFTER the signature verifies — a check keyed on the mere
+    // presence of x-agent-signature would let anyone manufacture false "legacy
+    // bot" events and keep the gate from ever clearing.
+    //
+    // Placed before the missing-slug 400 below so it still fires once Phase 2
+    // deletes the header unconditionally and a regressed bot arrives with no
+    // tenant context at all.
+    //
+    // A fixed route family, never the raw path: no slug, chat id, uuid, query
+    // string, body or signature.
+    const agentHost = headersList.get("host") ?? "";
+    if (isPlatformRootHost(agentHost)) {
+      // Set by middleware, which knows the pathname; requireAuth() sees only
+      // headers(). "other" means the request reached here from outside the
+      // transitional allowlist — worth seeing, since that is a route the bot
+      // was not known to call.
+      const routeFamily = headersList.get("x-agent-route-family") ?? "other";
+      console.warn(`[agent-auth] platform-root agent request (routeFamily=${routeFamily})`);
+    }
+
     const slug = headersList.get("x-tenant-slug");
     if (!slug) {
       return NextResponse.json(
@@ -67,22 +91,37 @@ export async function requireAuth(rawBody = ""): Promise<AuthContext | NextRespo
 
     const adminSupabase = createAdminClient();
 
-    const { data: tenant } = (await adminSupabase
+    // maybeSingle(), not single(): single() returns an ERROR for zero rows, so
+    // "the query failed" and "no such tenant" would be indistinguishable and a
+    // database incident would report 404.
+    const { data: tenant, error: tenantError } = (await adminSupabase
       .from("tenants")
       .select("id")
       .eq("subdomain", slug)
-      .single()) as { data: { id: string } | null; error: unknown };
+      .maybeSingle()) as { data: { id: string } | null; error: unknown };
+
+    if (tenantError) {
+      console.error("[agent-auth] tenant lookup failed");
+      return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    }
 
     if (!tenant) {
       return NextResponse.json({ error: "Not Found", message: "Tenant not found." }, { status: 404 });
     }
 
     // Verify chat_id is still in allowed_chat_ids (revocation check)
-    const { data: config } = (await adminSupabase
+    const { data: config, error: configError } = (await adminSupabase
       .from("tenant_telegram_configs")
       .select("allowed_chat_ids")
       .eq("tenant_id", tenant.id)
-      .single()) as { data: { allowed_chat_ids: number[] | null } | null; error: unknown };
+      .maybeSingle()) as { data: { allowed_chat_ids: number[] | null } | null; error: unknown };
+
+    // Same reasoning: without this a database failure reports "agent access has
+    // been revoked", which reads as a deliberate authorization decision.
+    if (configError) {
+      console.error("[agent-auth] telegram config lookup failed");
+      return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    }
 
     const allowed = (config?.allowed_chat_ids ?? []).map(Number);
     if (!allowed.includes(chatId)) {

@@ -98,7 +98,24 @@ for (const name of ["DATABASE_URL", "SUPABASE_TEST_URL"] as const) {
   }
 }
 
-// ── 4. Map onto the names createAdminClient() reads ─────────────────────────
+// ── 4. Test-only ticket signing key ─────────────────────────────────────────
+// Tests that issue real tickets call loadSigningKey(), which reads
+// TICKET_SIGNING_KEY (base64 DER pkcs8) and TICKET_KID.
+//
+// Generated in-process and assigned UNCONDITIONALLY with `=`. Deliberately not
+// `??=` or `if (!process.env.X)`: an ambient-preserving pattern would let a
+// developer's — or a hosted environment's — real signing key sign test tickets.
+// The key never leaves this process and is never printed.
+{
+  const { generateKeyPairSync } = await import("crypto");
+  const { privateKey } = generateKeyPairSync("ed25519");
+  process.env.TICKET_SIGNING_KEY = privateKey
+    .export({ type: "pkcs8", format: "der" })
+    .toString("base64");
+  process.env.TICKET_KID = "test-kid";
+}
+
+// ── 5. Map onto the names createAdminClient() reads ─────────────────────────
 // It resolves these at call time, not import time. Without this it would pick
 // up .env.local and run against the shared dev project — silently, because
 // both are valid Supabase clients.

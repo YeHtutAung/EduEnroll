@@ -1,5 +1,9 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { customOriginForTenant, extractSubdomainFromHost } from "@/lib/tenant";
+import {
+  customOriginForTenant,
+  extractSubdomainFromHost,
+  isPlatformRootHost,
+} from "@/lib/tenant";
 
 const original = process.env.TENANT_CUSTOM_DOMAINS;
 
@@ -150,5 +154,46 @@ describe("customOriginForTenant", () => {
   it("is unambiguous when two hosts name the same tenant", () => {
     withMap('{"one.com":"flashtic","two.com":"flashtic"}');
     expect(customOriginForTenant("flashtic")).toBe("https://one.com");
+  });
+});
+
+// ─── isPlatformRootHost ─────────────────────────────────────────────────────
+// Extracted from middleware, where it was an inline four-host literal list.
+// It is not telemetry-only: middleware uses it to decide whether /admin has a
+// tenant to show, so a wrong answer changes routing.
+describe("isPlatformRootHost", () => {
+  it("recognises the platform's own hosts", () => {
+    for (const host of [
+      "kuunyi.com",
+      "www.kuunyi.com",
+      "staging.kuunyi.com",
+      "edu-enroll-xi.vercel.app",
+    ]) {
+      expect(isPlatformRootHost(host)).toBe(true);
+    }
+  });
+
+  it("normalises port, case and a trailing dot", () => {
+    // The inline copy in middleware did none of these: it compared the raw
+    // hostname, so "KUUNYI.COM" was treated as a tenant host.
+    expect(isPlatformRootHost("kuunyi.com:443")).toBe(true);
+    expect(isPlatformRootHost("KUUNYI.COM")).toBe(true);
+    expect(isPlatformRootHost("kuunyi.com.")).toBe(true);
+    expect(isPlatformRootHost("  kuunyi.com  ")).toBe(true);
+  });
+
+  it("does not treat a tenant subdomain or custom domain as the root", () => {
+    expect(isPlatformRootHost("flashtic.kuunyi.com")).toBe(false);
+    expect(isPlatformRootHost("nihon-moment.kuunyi.com")).toBe(false);
+    expect(isPlatformRootHost("flashtic.com")).toBe(false);
+  });
+
+  it("rejects lookalike hosts that merely contain the platform domain", () => {
+    // A suffix check rather than an equality check would accept these, and the
+    // attacker controls the whole label to the right.
+    expect(isPlatformRootHost("kuunyi.com.evil.example")).toBe(false);
+    expect(isPlatformRootHost("evil-kuunyi.com")).toBe(false);
+    expect(isPlatformRootHost("notkuunyi.com")).toBe(false);
+    expect(isPlatformRootHost("kuunyi.com.attacker.net")).toBe(false);
   });
 });
