@@ -28,19 +28,43 @@ export async function issueTicketsForEnrollment(enrollmentId: string): Promise<v
   }
   if ((count ?? 0) > 0) return;
 
-  const { data: enrollment } = (await supabase
+  // maybeSingle(), not single(): single() reports zero rows as an ERROR, which
+  // would make "this enrollment is gone" indistinguishable from "the query
+  // failed" — and the error was previously discarded entirely.
+  const { data: enrollment, error: enrollmentError } = (await supabase
     .from("enrollments")
-    .select("id, tenant_id, class_id, quantity")
+    .select("id, tenant_id, class_id, quantity, status")
     .eq("id", enrollmentId)
-    .single()) as unknown as {
+    .maybeSingle()) as unknown as {
     data: {
       id: string;
       tenant_id: string;
       class_id: string | null;
       quantity: number | null;
+      status: string;
     } | null;
+    error: unknown;
   };
+
+  // Throw rather than return: a database failure must not be read as "no
+  // tickets needed", which would silently skip fulfillment for a legitimately
+  // confirmed enrollment and look identical to success.
+  if (enrollmentError) {
+    throw new Error(`issueTickets: enrollment load failed: ${JSON.stringify(enrollmentError)}`);
+  }
   if (!enrollment) return;
+
+  // ── Admission guard ───────────────────────────────────────────────────────
+  // A ticket is an admission. A rejected enrollment has had its seat restored
+  // and possibly resold, so issuing one would admit a second customer for that
+  // seat — the scanner validates the ticket's own status, not the enrollment's.
+  // Declining is correct behaviour, not an error, so return rather than throw.
+  if (enrollment.status !== "confirmed") {
+    console.warn(
+      `[tickets] skipped issuance for non-confirmed enrollment ${enrollmentId} (${enrollment.status})`,
+    );
+    return;
+  }
 
   // Build (class_id, quantity) lines from either the single class or cart items.
   let lines: { class_id: string; quantity: number }[] = [];
