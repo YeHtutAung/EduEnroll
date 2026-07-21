@@ -250,13 +250,15 @@ export async function POST(request: NextRequest) {
       });
     }
   } catch (err) {
+    // The upstream message can carry the raw HitPay response body. It is a
+    // server-side diagnostic only — truncated here, and never returned to the
+    // caller. A public `detail` field would leak the provider body verbatim.
     const errMsg = err instanceof Error ? err.message : String(err);
-    console.error("[hitpay] createPaymentRequest error:", errMsg);
+    console.error("[hitpay] createPaymentRequest error:", errMsg.slice(0, 500));
     return NextResponse.json(
       {
         error: "Payment Gateway Error",
         message: "Failed to create HitPay payment. Please try again.",
-        detail: errMsg,
       },
       { status: 502 },
     );

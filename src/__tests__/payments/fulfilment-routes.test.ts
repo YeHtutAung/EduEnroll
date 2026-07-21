@@ -3,14 +3,21 @@ import { NextRequest } from "next/server";
 
 // ─── Route fulfilment posture (mocked helper) ───────────────────────────────
 //
-// These prove WHEN the helper is invoked and what each route does when it
-// throws. They deliberately do NOT assert ticket rows — a mocked helper can
-// only prove it was called. Real rows are asserted in the database suite.
+// These prove WHEN the helper is invoked, whether notifications accompany it,
+// and what each route does when issuance throws. They deliberately do NOT
+// assert ticket rows — a mocked helper can only prove it was called. Real rows
+// are asserted in the database suite.
+//
+// SIGNATURE VERIFICATION IS MOCKED. `Stripe.webhooks.constructEvent` and
+// `hitpay.verifyWebhook` are stubbed, so these exercise the post-verification
+// route boundary only. They generate no real HMAC and prove nothing about
+// signature checking — that code is unchanged by this branch. The
+// `stripe-signature` / `hitpay-signature` headers below are present because the
+// routes read them, not because anything here validates them.
 //
 // The invocation assertion is the point. Before this change neither browser
-// route called the helper at all, so "mock throws → response unchanged, no 500"
-// passes with the mock never invoked, proving nothing. Asserting *invoked
-// exactly once with the expected enrollment id* is what makes these meaningful.
+// route called the helper at all, so "mock throws → response unchanged" passes
+// with the mock never invoked, proving nothing.
 
 const mockAdminFrom = vi.fn();
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ from: mockAdminFrom }) }));
@@ -21,20 +28,26 @@ vi.mock("@/server/tickets/issueTickets", () => ({
   voidTicketsForEnrollment: vi.fn().mockResolvedValue(undefined),
 }));
 
-// Every external transport mocked — "no provider network" includes notifications.
+// Every external transport is mocked AND observable — "did a notification go
+// out?" is an assertion here, not an assumption.
+const mockDispatch = vi.fn();
 vi.mock("@/server/notifications/dispatchPaymentApproved", () => ({
-  dispatchPaymentApproved: vi.fn().mockResolvedValue(undefined),
+  dispatchPaymentApproved: (...a: unknown[]) => mockDispatch(...a),
 }));
+const mockSendEmail = vi.fn();
 vi.mock("@/lib/email", () => ({
-  sendEmail: vi.fn().mockResolvedValue(undefined),
+  sendEmail: (...a: unknown[]) => mockSendEmail(...a),
   enrollmentApprovedEmail: vi.fn().mockReturnValue({ subject: "s", html: "h" }),
 }));
-vi.mock("@/lib/sms", () => ({ sendSms: vi.fn().mockResolvedValue(undefined) }));
+const mockSendSms = vi.fn();
+vi.mock("@/lib/sms", () => ({ sendSms: (...a: unknown[]) => mockSendSms(...a) }));
+const mockTelegram = vi.fn();
 vi.mock("@/lib/telegram/notify", () => ({
-  sendTelegramStatusNotification: vi.fn().mockResolvedValue(undefined),
+  sendTelegramStatusNotification: (...a: unknown[]) => mockTelegram(...a),
 }));
+const mockChannelInvite = vi.fn();
 vi.mock("@/lib/telegram/channel-invite", () => ({
-  sendChannelInviteIfEligible: vi.fn().mockResolvedValue(undefined),
+  sendChannelInviteIfEligible: (...a: unknown[]) => mockChannelInvite(...a),
 }));
 vi.mock("@/lib/utils", () => ({
   resolveEmailFromFormData: vi.fn().mockReturnValue(null),
@@ -65,37 +78,74 @@ vi.mock("@/lib/hitpay", () => ({
   },
 }));
 
-// ── Supabase table stub ─────────────────────────────────────────────────────
-// `payment` drives the replay-vs-transition branch under test.
+// ── Supabase table stubs ────────────────────────────────────────────────────
+// Table-specific, deliberately. A single stub that returned the payment row for
+// every table left the enrollment without email/phone/telegram_chat_id, so
+// EVERY notification branch was skipped — a "notifications still run" test then
+// passed with no transport ever called.
 let paymentRow: { id: string; enrollment_id: string; status: string } | null = null;
 
-function tableStub() {
+/** Carries every destination the Stripe webhook's notification block gates on. */
+const NOTIFIABLE_ENROLLMENT = {
+  id: "enr-1",
+  tenant_id: "tenant-1",
+  telegram_chat_id: "tg-123",
+  email: "student@example.test",
+  phone: "09000000000",
+  enrollment_ref: "F-0001",
+  student_name_en: "Test Student",
+  class_id: "class-1",
+  quantity: 1,
+  form_data: null,
+};
+
+function stubFor(data: unknown) {
   const q: Record<string, unknown> = {};
   q.select = vi.fn(() => q);
   q.eq = vi.fn(() => q);
   q.update = vi.fn(() => q);
-  q.single = vi.fn(async () => ({ data: paymentRow, error: null }));
-  q.maybeSingle = vi.fn(async () => ({ data: paymentRow, error: null }));
+  q.single = vi.fn(async () => ({ data, error: null }));
+  q.maybeSingle = vi.fn(async () => ({ data, error: null }));
   return q;
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   mockIssue.mockResolvedValue(undefined);
+  mockDispatch.mockResolvedValue(undefined);
+  mockSendEmail.mockResolvedValue(undefined);
+  mockSendSms.mockResolvedValue(undefined);
+  mockTelegram.mockResolvedValue(undefined);
+  mockChannelInvite.mockResolvedValue(undefined);
   mockVerifyWebhook.mockReturnValue(true);
   process.env.STRIPE_WEBHOOK_SECRET = "whsec_test_only";
   process.env.HITPAY_SALT = "test_salt_only";
   paymentRow = { id: "pay-1", enrollment_id: "enr-1", status: "verified" };
 
   mockAdminFrom.mockImplementation((table: string) => {
-    if (table === "payments" || table === "enrollments") return tableStub();
-    // tenants / bank_accounts / anything the notification block touches
-    const q = tableStub();
-    q.single = vi.fn(async () => ({ data: null, error: null }));
-    q.maybeSingle = vi.fn(async () => ({ data: null, error: null }));
-    return q;
+    if (table === "payments") return stubFor(paymentRow);
+    if (table === "enrollments") return stubFor(NOTIFIABLE_ENROLLMENT);
+    if (table === "classes") return stubFor({ level: "VIP", fee_amount: 100 });
+    if (table === "tenants")
+      return stubFor({
+        name: "Ev",
+        org_type: "event",
+        logo_url: null,
+        currency: "SGD",
+        sms_on_payment: true,
+      });
+    return stubFor(null);
   });
 });
+
+/** No transport fired. Used to prove a replay does not re-notify a customer. */
+function expectNoNotifications() {
+  expect(mockSendEmail).not.toHaveBeenCalled();
+  expect(mockSendSms).not.toHaveBeenCalled();
+  expect(mockTelegram).not.toHaveBeenCalled();
+  expect(mockChannelInvite).not.toHaveBeenCalled();
+  expect(mockDispatch).not.toHaveBeenCalled();
+}
 
 const stripeReq = () =>
   new NextRequest(
@@ -123,7 +173,7 @@ function stripeSessionEvent() {
 }
 
 describe("webhook fulfilment posture", () => {
-  it("F1a Stripe verified replay invokes the helper once and preserves its 2xx", async () => {
+  it("F1a Stripe verified replay fulfils once and notifies nobody", async () => {
     stripeSessionEvent();
     paymentRow = { id: "pay-1", enrollment_id: "enr-1", status: "verified" };
     mockIssue.mockRejectedValue(new Error("fulfilment boom"));
@@ -134,11 +184,15 @@ describe("webhook fulfilment posture", () => {
     expect(mockIssue).toHaveBeenCalledTimes(1);
     expect(mockIssue).toHaveBeenCalledWith("enr-1");
     expect(res.status).toBe(200);
+    // A replay repairs tickets; it must not re-notify an already-notified customer.
+    expectNoNotifications();
   });
 
-  it("F1b Stripe new transition keeps notifications and its response when fulfilment throws", async () => {
-    // Guard: the transition path already wrapped issuance, so this passes both
-    // before and after the change. Its job is to prove notifications did not move.
+  it("F1b Stripe new transition still notifies when fulfilment throws", async () => {
+    // Regression guard: issuance must not be able to suppress notifications.
+    // The fixture carries email, phone and telegram_chat_id, so every branch of
+    // the notification block is reachable — without that this test passes
+    // vacuously.
     stripeSessionEvent();
     paymentRow = { id: "pay-1", enrollment_id: "enr-1", status: "awaiting_payment" };
     mockIssue.mockRejectedValue(new Error("fulfilment boom"));
@@ -148,9 +202,16 @@ describe("webhook fulfilment posture", () => {
 
     expect(mockIssue).toHaveBeenCalledTimes(1);
     expect(res.status).toBe(200);
+    expect(mockSendEmail).toHaveBeenCalledTimes(1);
+    expect(mockSendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "student@example.test" }),
+    );
+    expect(mockSendSms).toHaveBeenCalledTimes(1);
+    expect(mockTelegram).toHaveBeenCalledTimes(1);
+    expect(mockChannelInvite).toHaveBeenCalledTimes(1);
   });
 
-  it("F2a HitPay verified replay invokes the helper once and preserves its response", async () => {
+  it("F2a HitPay verified replay fulfils once and notifies nobody", async () => {
     mockParseWebhookPayload.mockReturnValue({ id: "hp-1", status: "completed" });
     paymentRow = { id: "pay-1", enrollment_id: "enr-1", status: "verified" };
     mockIssue.mockRejectedValue(new Error("fulfilment boom"));
@@ -161,9 +222,25 @@ describe("webhook fulfilment posture", () => {
     expect(mockIssue).toHaveBeenCalledTimes(1);
     expect(mockIssue).toHaveBeenCalledWith("enr-1");
     expect(res.status).toBe(200);
+    expectNoNotifications();
   });
 
-  it("F2b HitPay rejected replay never invokes the helper", async () => {
+  it("F2b HitPay new transition still dispatches approval when fulfilment throws", async () => {
+    // The transition regression guard: a thrown issuance must not swallow the
+    // customer's approval notification.
+    mockParseWebhookPayload.mockReturnValue({ id: "hp-1", status: "completed" });
+    paymentRow = { id: "pay-1", enrollment_id: "enr-1", status: "awaiting_payment" };
+    mockIssue.mockRejectedValue(new Error("fulfilment boom"));
+
+    const { POST } = await import("@/app/api/webhooks/hitpay/route");
+    const res = await POST(hitpayReq());
+
+    expect(mockIssue).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(200);
+    expect(mockDispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("F2c HitPay rejected replay never invokes the helper", async () => {
     // A rejected payment must not mint an admission even on replay.
     mockParseWebhookPayload.mockReturnValue({ id: "hp-1", status: "completed" });
     paymentRow = { id: "pay-1", enrollment_id: "enr-1", status: "rejected" };
