@@ -76,7 +76,11 @@ export async function GET(
   // Fetch branding + payment config in parallel
   const [appearanceResult, tenantResult, bankResult] = await Promise.all([
     supabase
-      .from("tenant_appearances")
+      // `tenant_appearance`, singular. The plural name here silently returned
+      // nothing, so every e-ticket lost its tenant logo, brand colour and
+      // sponsor settings — and the sponsor resolver then substituted demo
+      // placeholders, which is why fake sponsor names appeared on real tickets.
+      .from("tenant_appearance")
       .select("logo_url, primary_color, sponsor_config")
       .eq("tenant_id", tenantId)
       .single() as unknown as Promise<{ data: { logo_url: string | null; primary_color: string | null; sponsor_config: unknown } | null; error: unknown }>,
@@ -92,6 +96,17 @@ export async function GET(
       .eq("is_active", true)
       .order("bank_name") as unknown as Promise<{ data: { bank_name: string; account_number: string; account_holder: string; qr_code_url: string | null }[] | null; error: unknown }>,
   ]);
+
+  // Logged, not swallowed. `appearance?.x ?? null` turns a failed lookup into
+  // "this tenant has no branding", which is indistinguishable from the real
+  // thing — that is how a wrong table name went unnoticed. A missing row is
+  // legitimate (PGRST116 from .single()); anything else is a fault worth seeing.
+  if (appearanceResult.error) {
+    const code = (appearanceResult.error as { code?: string } | null)?.code;
+    if (code !== "PGRST116") {
+      console.error("[enrollment] tenant_appearance lookup failed:", code ?? "unknown");
+    }
+  }
 
   const appearance = appearanceResult.data;
   const tenant = tenantResult.data;

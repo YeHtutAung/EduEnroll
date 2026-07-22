@@ -80,7 +80,18 @@ export async function POST(request: NextRequest) {
   }
 
   // ── 6. Replay guard ────────────────────────────────────────────────────────
+  // Settlement happens once; fulfilment does not. This branch was returning
+  // before reaching issuance, leaving verified orders ticketless. Only a
+  // verified payment fulfils — a rejected one must never mint an admission.
+  // Failure is logged and acknowledged, not retried (durable retry is #186).
   if (payment.status === "verified" || payment.status === "rejected") {
+    if (payment.status === "verified") {
+      try {
+        await issueTicketsForEnrollment(payment.enrollment_id);
+      } catch (err) {
+        console.error("[tickets] replay fulfilment failed:", err);
+      }
+    }
     return NextResponse.json({ ok: true });
   }
 

@@ -15,7 +15,7 @@ import { GET, PATCH } from "@/app/api/public/enrollment/[ref]/route";
 interface MockOptions {
   /** Result for enrollments.select().eq().eq().single() */
   enrollment?: { data: unknown; error: unknown };
-  /** Result for tenant_appearances.select().eq().single() */
+  /** Result for tenant_appearance.select().eq().single() */
   appearance?: { data: unknown; error: unknown };
   /** Result for tenants.select().eq().single() */
   tenant?: { data: unknown; error: unknown };
@@ -46,7 +46,9 @@ function makeSupabaseMock(options: MockOptions | { data: unknown; error: unknown
 
   return {
     from: vi.fn().mockImplementation((table: string) => {
-      if (table === "tenant_appearances") return makeChain(appearanceResult);
+      // Singular — the real table. This mock answered the route's typo, so the
+      // suite passed while production returned no branding.
+      if (table === "tenant_appearance") return makeChain(appearanceResult);
       if (table === "tenants")            return makeChain(tenantResult);
       if (table === "bank_accounts")      return makeChain(bankResult);
       return makeChain(enrollmentResult); // enrollments (and any other table)

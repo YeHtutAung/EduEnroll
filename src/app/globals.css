@@ -5,13 +5,22 @@
 :root {
   --background: #ffffff;
   --foreground: #171717;
-}
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  /* This product has no dark theme: `dark:` appears nowhere in the codebase and
+     Tailwind's darkMode is unconfigured. Every surface hardcodes a light colour
+     (cream panels, white cards), so declaring the scheme keeps the parts we do
+     NOT paint — form control internals, scrollbars, the caret — from being
+     auto-darkened by the OS to match a theme we never implemented.
+
+     There was a `prefers-color-scheme: dark` block here, inherited from the
+     create-next-app scaffold, that flipped --foreground to #ededed. Tailwind's
+     preflight sets `color: inherit` on form controls, so on a dark-mode phone
+     every input that did not set its own colour rendered near-white text on its
+     hardcoded white background — about 1.2:1 contrast, against a 4.5:1 minimum.
+     On the checkout form that meant buyers could not read what they typed while
+     paying. The page still looked light, because only the inherited text colour
+     changed. */
+  color-scheme: light;
 }
 
 body {

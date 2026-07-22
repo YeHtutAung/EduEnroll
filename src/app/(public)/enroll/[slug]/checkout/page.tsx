@@ -41,7 +41,19 @@ function DynamicField({
 }) {
   const isEmail = field.field_key === "email";
   const baseInput = "w-full h-[33px] px-3 rounded-[7px] text-[12px] outline-none";
-  const borderStyle = (v: string) => ({ border: `1.5px solid ${v ? "#0f1f42" : "#d8d5c9"}` });
+
+  // Colour and background are stated, never inherited. Tailwind's preflight puts
+  // `color: inherit` on form controls, so an input that sets only a border takes
+  // whatever the body happens to carry. When a dark-mode override flipped the
+  // body colour to near-white, that rendered invisible text on these hardcoded
+  // white fields — buyers could not read what they typed at the payment step.
+  // globals.css no longer flips it, and stating both here means a future theme
+  // change cannot blank the checkout form again.
+  const borderStyle = (v: string) => ({
+    border: `1.5px solid ${v ? "#0f1f42" : "#d8d5c9"}`,
+    color: "#0f1f42",
+    background: "#ffffff",
+  });
 
   const label = (
     <label className="block text-[11px] font-semibold mb-1" style={{ color: "#43485a" }}>
@@ -128,7 +140,7 @@ function DynamicField({
           {label}
           <textarea
             className="w-full px-3 py-2 rounded-[7px] text-[12px] outline-none resize-none"
-            style={{ border: `1.5px solid ${value ? "#0f1f42" : "#d8d5c9"}`, minHeight: "64px" }}
+            style={{ ...borderStyle(value), minHeight: "64px" }}
             value={value}
             onChange={(e) => onChange(e.target.value)}
             placeholder={field.field_label}

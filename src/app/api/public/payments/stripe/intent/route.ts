@@ -99,7 +99,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    await supabase.from("payments").insert({
+    const { error: insertError } = await supabase.from("payments").insert({
       enrollment_id: enrollment.id,
       tenant_id: tenantId,
       amount: totalCents / 100,
@@ -107,6 +107,24 @@ export async function POST(request: NextRequest) {
       status: "awaiting_payment",
       stripe_payment_intent_id: pi.id,
     } as never);
+
+    // Never hand out a client secret we could not record. This flow resolves
+    // payments by stripe_payment_intent_id and has no payment_intent.succeeded
+    // handler (#186), so with no row NEITHER the browser NOR any webhook can
+    // find the payment — the customer is charged and nothing can be recovered.
+    if (insertError) {
+      console.error("[stripe/intent] payment insert failed for pi", pi.id);
+      try {
+        await getStripe().paymentIntents.cancel(pi.id);
+      } catch {
+        // Cleanup is best-effort and must not replace the original failure.
+        console.error("[stripe/intent] cancel failed for pi", pi.id);
+      }
+      return NextResponse.json(
+      { error: "Internal Server Error", message: "Payment could not be recorded. No payment link was issued." },
+      { status: 500 },
+      );
+    }
 
     return NextResponse.json({ clientSecret: pi.client_secret, paymentIntentId: pi.id });
   } catch (err) {
