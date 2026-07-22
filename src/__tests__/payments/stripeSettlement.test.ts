@@ -95,14 +95,36 @@ describe("settlePaidPayment — happy path and replay", () => {
     expect(mockRpc).not.toHaveBeenCalled(); // no conflict recorded
   });
 
-  it("S3: already-verified replay falls through to fulfilment repair (already_settled)", async () => {
+  it("S3: already-verified replay goes straight to fulfilment repair (already_settled)", async () => {
     queue("payments", { data: { ...PAYMENT, status: "verified" }, error: null });
-    queue("payments", { data: [], error: null }); // update matched zero
-    queue("payments", { data: { id: "pay-1", status: "verified" }, error: null }); // reload
     queue("enrollments", { data: { id: "enr-1", status: "confirmed" }, error: null });
     const out = await settlePaidPayment(paidInput());
     expect(out.kind).toBe("already_settled");
     expect(mockIssue).toHaveBeenCalledExactlyOnceWith("enr-1"); // repair runs
+  });
+
+  it("S3b: verified row with NULL snapshot still repairs — snapshot gates the transition, not the replay", async () => {
+    // Every pre-plan verified row has a null snapshot. Blocking the replay
+    // branch on it would break #188's fulfilment repair for exactly the
+    // historical orders it shipped to fix.
+    queue("payments", {
+      data: { ...PAYMENT, status: "verified", provider_amount_minor: null, provider_currency: null },
+      error: null,
+    });
+    queue("enrollments", { data: { id: "enr-1", status: "confirmed" }, error: null });
+    const out = await settlePaidPayment(paidInput());
+    expect(out.kind).toBe("already_settled");
+    expect(mockIssue).toHaveBeenCalledExactlyOnceWith("enr-1");
+    expect(mockRpc).not.toHaveBeenCalled(); // no missing_contract_snapshot conflict
+  });
+
+  it("zero-row race: reload finds verified → already_settled via the shared path", async () => {
+    queue("payments", { data: PAYMENT, error: null }); // active at locate
+    queue("payments", { data: [], error: null }); // update lost the race
+    queue("payments", { data: { id: "pay-1", status: "verified" }, error: null }); // reload
+    queue("enrollments", { data: { id: "enr-1", status: "confirmed" }, error: null });
+    const out = await settlePaidPayment(paidInput());
+    expect(out.kind).toBe("already_settled");
   });
 });
 
@@ -176,8 +198,6 @@ describe("settlePaidPayment — zero-row reload table (S4, S5)", () => {
 describe("settlePaidPayment — post-settlement classification (S1, S2, S6)", () => {
   it("S6: already-verified + rejected enrollment → conflict, no silent success", async () => {
     queue("payments", { data: { ...PAYMENT, status: "verified" }, error: null });
-    queue("payments", { data: [], error: null });
-    queue("payments", { data: { id: "pay-1", status: "verified" }, error: null });
     queue("enrollments", { data: { id: "enr-1", status: "rejected" }, error: null });
     const out = await settlePaidPayment(paidInput());
     expect(out).toEqual({ kind: "conflict", conflictType: "rejected_enrollment" });

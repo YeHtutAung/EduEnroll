@@ -80,9 +80,21 @@ async function ticketlessConfirmedOrder(providerCol: "stripe_session_id" | "hitp
     `INSERT INTO enrollments (enrollment_ref,tenant_id,student_name_en,phone,class_id,quantity,status)
      VALUES ('',$1,'Route Test','09000000000',$2,2,'confirmed') RETURNING id`, [t.id, c.id]);
   made.enrollments.push(e.id);
-  const [p] = await sql<{ id: string }>(
-    `INSERT INTO payments (enrollment_id,tenant_id,amount,payment_method,status,${providerCol})
-     VALUES ($1,$2,100,'stripe','verified',$3) RETURNING id`, [e.id, t.id, providerId]);
+  // 20260722180000's row contracts: a Stripe row must carry attempt_seq +
+  // integration_flow, and only Stripe rows may carry Stripe provider ids —
+  // so the HitPay fixture now records its TRUE method (the old 'stripe' was
+  // fixture sloppiness the constraints no longer tolerate).
+  const [p] =
+    providerCol === "stripe_session_id"
+      ? await sql<{ id: string }>(
+          `INSERT INTO payments (enrollment_id,tenant_id,amount,payment_method,status,
+                                 stripe_session_id,attempt_seq,integration_flow)
+           VALUES ($1,$2,100,'stripe','verified',$3,1,'hosted_checkout') RETURNING id`,
+          [e.id, t.id, providerId])
+      : await sql<{ id: string }>(
+          `INSERT INTO payments (enrollment_id,tenant_id,amount,payment_method,status,hitpay_payment_id)
+           VALUES ($1,$2,100,'hitpay','verified',$3) RETURNING id`,
+          [e.id, t.id, providerId]);
   return { tenantId: t.id, classId: c.id, enrollmentId: e.id, paymentId: p.id };
 }
 

@@ -20,7 +20,10 @@ import { NextRequest } from "next/server";
 // with the mock never invoked, proving nothing.
 
 const mockAdminFrom = vi.fn();
-vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ from: mockAdminFrom }) }));
+const mockAdminRpc = vi.fn();
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: () => ({ from: mockAdminFrom, rpc: mockAdminRpc }),
+}));
 
 const mockIssue = vi.fn();
 vi.mock("@/server/tickets/issueTickets", () => ({
@@ -83,7 +86,14 @@ vi.mock("@/lib/hitpay", () => ({
 // every table left the enrollment without email/phone/telegram_chat_id, so
 // EVERY notification branch was skipped — a "notifications still run" test then
 // passed with no transport ever called.
-let paymentRow: { id: string; enrollment_id: string; status: string } | null = null;
+let paymentRow: {
+  id: string;
+  enrollment_id: string;
+  tenant_id?: string;
+  status: string;
+  provider_amount_minor?: number | null;
+  provider_currency?: string | null;
+} | null = null;
 
 /** Carries every destination the Stripe webhook's notification block gates on. */
 const NOTIFIABLE_ENROLLMENT = {
@@ -99,11 +109,18 @@ const NOTIFIABLE_ENROLLMENT = {
   form_data: null,
 };
 
-function stubFor(data: unknown) {
+function stubFor(data: unknown, updateResult: unknown[] = []) {
   const q: Record<string, unknown> = {};
-  q.select = vi.fn(() => q);
+  let updating = false;
+  q.select = vi.fn(() =>
+    updating ? Promise.resolve({ data: updateResult, error: null }) : q,
+  );
   q.eq = vi.fn(() => q);
-  q.update = vi.fn(() => q);
+  q.in = vi.fn(() => q);
+  q.update = vi.fn(() => {
+    updating = true;
+    return q;
+  });
   q.single = vi.fn(async () => ({ data, error: null }));
   q.maybeSingle = vi.fn(async () => ({ data, error: null }));
   return q;
@@ -120,11 +137,25 @@ beforeEach(() => {
   mockVerifyWebhook.mockReturnValue(true);
   process.env.STRIPE_WEBHOOK_SECRET = "whsec_test_only";
   process.env.HITPAY_SALT = "test_salt_only";
-  paymentRow = { id: "pay-1", enrollment_id: "enr-1", status: "verified" };
+  paymentRow = {
+    id: "pay-1", enrollment_id: "enr-1", tenant_id: "tenant-1", status: "verified",
+    provider_amount_minor: 10000, provider_currency: "sgd",
+  };
+  mockAdminRpc.mockResolvedValue({ data: null, error: null });
 
   mockAdminFrom.mockImplementation((table: string) => {
-    if (table === "payments") return stubFor(paymentRow);
-    if (table === "enrollments") return stubFor(NOTIFIABLE_ENROLLMENT);
+    if (table === "payments")
+      return stubFor(
+        paymentRow,
+        // The conditional settlement UPDATE only matches active rows.
+        paymentRow && ["awaiting_payment", "pending"].includes(paymentRow.status)
+          ? [{ id: paymentRow.id }]
+          : [],
+      );
+    // The settlement op re-reads the enrollment for classification; the
+    // notification block reads the full notifiable shape. One stub serves
+    // both — status 'confirmed' is the classify gate.
+    if (table === "enrollments") return stubFor({ ...NOTIFIABLE_ENROLLMENT, status: "confirmed" });
     if (table === "classes") return stubFor({ level: "VIP", fee_amount: 100 });
     if (table === "tenants")
       return stubFor({
@@ -167,16 +198,21 @@ const hitpayReq = () =>
 
 function stripeSessionEvent() {
   mockConstructEvent.mockReturnValue({
+    id: "evt_f",
     type: "checkout.session.completed",
-    data: { object: { id: "cs_1", payment_status: "paid", payment_intent: "pi_1" } },
+    data: {
+      object: {
+        id: "cs_1", payment_status: "paid", payment_intent: "pi_1",
+        amount_total: 10000, currency: "sgd",
+      },
+    },
   });
 }
 
 describe("webhook fulfilment posture", () => {
   it("F1a Stripe verified replay fulfils once and notifies nobody", async () => {
     stripeSessionEvent();
-    paymentRow = { id: "pay-1", enrollment_id: "enr-1", status: "verified" };
-    mockIssue.mockRejectedValue(new Error("fulfilment boom"));
+    paymentRow!.status = "verified";
 
     const { POST } = await import("@/app/api/webhooks/stripe/route");
     const res = await POST(stripeReq());
@@ -188,14 +224,45 @@ describe("webhook fulfilment posture", () => {
     expectNoNotifications();
   });
 
-  it("F1b Stripe new transition still notifies when fulfilment throws", async () => {
-    // Regression guard: issuance must not be able to suppress notifications.
-    // The fixture carries email, phone and telegram_chat_id, so every branch of
-    // the notification block is reachable — without that this test passes
+  it("F1a-2 replay repair failure is RETRYABLE now — 500, Stripe redelivers (Plan v18 §5/§7)", async () => {
+    // Pre-plan behaviour was log-and-200 because durable retry was out of
+    // scope (#186). Plan v18 makes Stripe's schedule the retry mechanism, so
+    // a failed repair returns 500 instead of being dropped.
+    stripeSessionEvent();
+    paymentRow!.status = "verified";
+    mockIssue.mockRejectedValue(new Error("fulfilment boom"));
+
+    const { POST } = await import("@/app/api/webhooks/stripe/route");
+    const res = await POST(stripeReq());
+
+    expect(mockIssue).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(500);
+    expectNoNotifications();
+  });
+
+  it("F1b fulfilment failure on a NEW transition suppresses notification and returns 500", async () => {
+    // Plan v18 sec 6 inverts the old contract: the order is settle, fulfil,
+    // notify. A fulfilment throw means notify never runs and the route
+    // returns 500 — notifying before tickets exist would tell a customer
+    // "confirmed" while retry-repair is still owed.
+    stripeSessionEvent();
+    paymentRow!.status = "awaiting_payment";
+    mockIssue.mockRejectedValue(new Error("fulfilment boom"));
+
+    const { POST } = await import("@/app/api/webhooks/stripe/route");
+    const res = await POST(stripeReq());
+
+    expect(mockIssue).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(500);
+    expectNoNotifications();
+  });
+
+  it("F1b-2 new transition with fulfilment success notifies every reachable branch", async () => {
+    // The fixture carries email, phone and telegram_chat_id, so every branch
+    // of the notification block is reachable — without that this passes
     // vacuously.
     stripeSessionEvent();
-    paymentRow = { id: "pay-1", enrollment_id: "enr-1", status: "awaiting_payment" };
-    mockIssue.mockRejectedValue(new Error("fulfilment boom"));
+    paymentRow!.status = "awaiting_payment";
 
     const { POST } = await import("@/app/api/webhooks/stripe/route");
     const res = await POST(stripeReq());

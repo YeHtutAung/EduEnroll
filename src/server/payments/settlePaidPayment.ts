@@ -35,6 +35,13 @@ export type SettleInput = {
    * later events reference it).
    */
   backfillPaymentIntentId?: string | null;
+  /**
+   * Card metadata when the event carries it (R1). PayNow and other
+   * non-card methods leave these null (R2); the browser status route may
+   * backfill them later when the buyer does return.
+   */
+  cardBrand?: string | null;
+  cardLast4?: string | null;
 };
 
 export type SettleOutcome =
@@ -97,6 +104,16 @@ export async function settlePaidPayment(input: SettleInput): Promise<SettleOutco
     return { kind: "conflict", conflictType };
   };
 
+  // ── 0. Already verified → replay repair, no snapshot gate ─────────────────
+  // Snapshot validation gates the SETTLEMENT TRANSITION, not the repair of an
+  // already-settled payment: every pre-plan verified row has a null snapshot,
+  // and blocking the replay branch on it would break #188's fulfilment repair
+  // for exactly the historical orders it was shipped to fix. There is no
+  // money decision left to validate on a verified row.
+  if (payment.status === "verified") {
+    return classifyAndFulfil(false);
+  }
+
   // ── 1. Contract snapshot validation ───────────────────────────────────────
   if (payment.provider_amount_minor === null || payment.provider_currency === null) {
     return conflict("missing_contract_snapshot");
@@ -122,6 +139,8 @@ export async function settlePaidPayment(input: SettleInput): Promise<SettleOutco
   if (input.backfillPaymentIntentId) {
     updatePayload.stripe_payment_intent_id = input.backfillPaymentIntentId;
   }
+  if (input.cardBrand) updatePayload.card_brand = input.cardBrand;
+  if (input.cardLast4) updatePayload.card_last4 = input.cardLast4;
   const { data: updated, error: updateError } = (await supabase
     .from("payments")
     .update(updatePayload as never)
@@ -135,7 +154,7 @@ export async function settlePaidPayment(input: SettleInput): Promise<SettleOutco
     return { kind: "retryable", reason: `settlement update failed: ${updateError.message}` };
   }
 
-  let transitionWon = (updated?.length ?? 0) > 0;
+  const transitionWon = (updated?.length ?? 0) > 0;
 
   // ── 3. Zero rows → fail-closed reload ─────────────────────────────────────
   if (!transitionWon) {
@@ -151,42 +170,47 @@ export async function settlePaidPayment(input: SettleInput): Promise<SettleOutco
     if (!reloaded) return { kind: "retryable", reason: `payment ${payment.id} vanished` };
     if (reloaded.status === "rejected") return conflict("payment_already_rejected");
     if (reloaded.status !== "verified") return conflict("unexpected_payment_state");
-    // verified → already_settled: falls through to the same path below.
-    transitionWon = false;
+    // verified → already_settled: same classification path, never notifies.
+    return classifyAndFulfil(false);
   }
 
-  // ── 4. Post-settlement classification (same path for both) ────────────────
-  const { data: enrollment, error: enrollmentError } = (await supabase
-    .from("enrollments")
-    .select("id, status")
-    .eq("id", payment.enrollment_id)
-    .maybeSingle()) as unknown as {
-    data: { id: string; status: string } | null;
-    error: { message: string } | null;
-  };
-  if (enrollmentError) {
-    return { kind: "retryable", reason: `enrollment reload failed: ${enrollmentError.message}` };
-  }
-  if (!enrollment) {
-    return { kind: "retryable", reason: `enrollment ${payment.enrollment_id} absent` };
-  }
-  if (enrollment.status === "rejected") {
-    // No ticket, no notification — money verified against a rejected
-    // enrollment is an operator decision (refund vs reinstate), never
-    // an automatic one.
-    return conflict("rejected_enrollment");
-  }
-  if (enrollment.status !== "confirmed") {
-    return conflict("unexpected_enrollment_state");
-  }
+  return classifyAndFulfil(true);
 
-  // ── 5. Fulfilment (retryable) ──────────────────────────────────────────────
-  // issueTicketsForEnrollment repairs partial sets and declines non-confirmed
-  // enrollments; it throws on query failure. A throw here is a 500: the money
-  // is recorded, the retry repairs tickets.
-  await issueTicketsForEnrollment(payment.enrollment_id);
+  // ── 4+5. Post-settlement classification + fulfilment (shared) ─────────────
+  // settled and already_settled take the SAME path; only the notification
+  // decision (made by the caller from the outcome kind) differs.
+  async function classifyAndFulfil(won: boolean): Promise<SettleOutcome> {
+    const { data: enrollment, error: enrollmentError } = (await supabase
+      .from("enrollments")
+      .select("id, status")
+      .eq("id", payment!.enrollment_id)
+      .maybeSingle()) as unknown as {
+      data: { id: string; status: string } | null;
+      error: { message: string } | null;
+    };
+    if (enrollmentError) {
+      return { kind: "retryable", reason: `enrollment reload failed: ${enrollmentError.message}` };
+    }
+    if (!enrollment) {
+      return { kind: "retryable", reason: `enrollment ${payment!.enrollment_id} absent` };
+    }
+    if (enrollment.status === "rejected") {
+      // No ticket, no notification — money verified against a rejected
+      // enrollment is an operator decision (refund vs reinstate), never
+      // an automatic one.
+      return conflict("rejected_enrollment");
+    }
+    if (enrollment.status !== "confirmed") {
+      return conflict("unexpected_enrollment_state");
+    }
 
-  return transitionWon
-    ? { kind: "settled", paymentId: payment.id, enrollmentId: payment.enrollment_id }
-    : { kind: "already_settled", paymentId: payment.id, enrollmentId: payment.enrollment_id };
+    // issueTicketsForEnrollment repairs partial sets and declines
+    // non-confirmed enrollments; it throws on query failure. A throw here is
+    // a 500: the money is recorded, the retry repairs tickets.
+    await issueTicketsForEnrollment(payment!.enrollment_id);
+
+    return won
+      ? { kind: "settled", paymentId: payment!.id, enrollmentId: payment!.enrollment_id }
+      : { kind: "already_settled", paymentId: payment!.id, enrollmentId: payment!.enrollment_id };
+  }
 }
