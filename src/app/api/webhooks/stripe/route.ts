@@ -4,11 +4,10 @@ import { getStripe } from "@/lib/stripe";
 import { settlePaidPayment, type SettleOutcome } from "@/server/payments/settlePaidPayment";
 import { handleStripePaymentFailure } from "@/server/payments/handleStripePaymentFailure";
 import { recordConflict } from "@/server/payments/settlementConflicts";
-import { sendEmail, enrollmentApprovedEmail } from "@/lib/email";
-import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
-import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
-import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils";
-import { sendSms } from "@/lib/sms";
+import {
+  reconcileStripeRefund,
+  refundRejectedStripePayment,
+} from "@/server/payments/refundRejectedStripePayment";
 import type Stripe from "stripe";
 
 // ─── POST /api/webhooks/stripe ───────────────────────────────────────────────
@@ -71,6 +70,14 @@ export async function POST(request: NextRequest) {
         backfillPaymentIntentId:
           typeof session.payment_intent === "string" ? session.payment_intent : null,
       });
+      if (outcome.kind === "conflict" && outcome.conflictType === "rejected_enrollment") {
+        const paymentIntentId =
+          typeof session.payment_intent === "string"
+            ? session.payment_intent
+            : session.payment_intent?.id;
+        if (!paymentIntentId) throw new Error(`paid session ${session.id} has no PaymentIntent`);
+        await refundRejectedStripePayment(paymentIntentId, session.id);
+      }
       return respond(outcome);
     }
 
@@ -145,7 +152,17 @@ export async function POST(request: NextRequest) {
         cardBrand: card?.brand ?? null,
         cardLast4: card?.last4 ?? null,
       });
+      if (outcome.kind === "conflict" && outcome.conflictType === "rejected_enrollment") {
+        await refundRejectedStripePayment(pi.id);
+      }
       return respond(outcome);
+    }
+
+    // PayNow refunds are asynchronous. The initial refund remains an open
+    // conflict until Stripe reports its terminal state here.
+    if (event.type === "refund.updated" || event.type === "refund.failed") {
+      await reconcileStripeRefund(event.data.object as Stripe.Refund);
+      return NextResponse.json({ received: true });
     }
 
     // Unhandled event types are acknowledged.
@@ -157,19 +174,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "retry" }, { status: 500 });
   }
 }
-
-// ── Outcome → HTTP (§7), plus the notification boundary (§6) ────────────────
-// Only the transition WINNER notifies: settled may notify, already_settled
-// never does — under 500-and-retry, notifying on replay would resend on every
-// redelivery. Notification failures are caught and never change the status.
+// ── Outcome → HTTP (§7) ─────────────────────────────────────────────────────
+// Notification belongs to settlePaidPayment's transition-winner boundary so
+// browser settlement and webhook settlement cannot diverge again.
 async function respond(outcome: SettleOutcome): Promise<NextResponse> {
   switch (outcome.kind) {
     case "settled":
-      try {
-        await notifyEnrollmentConfirmed(outcome.enrollmentId);
-      } catch (err) {
-        console.error("[stripe-webhook] notification failed:", err);
-      }
       return NextResponse.json({ received: true });
     case "already_settled":
     case "conflict":
@@ -178,161 +188,4 @@ async function respond(outcome: SettleOutcome): Promise<NextResponse> {
       console.error("[stripe-webhook] settlement retryable:", outcome.reason);
       return NextResponse.json({ error: "retry" }, { status: 500 });
   }
-}
-
-// ── Notifications (behaviour unchanged, moved behind the winner gate) ────────
-async function notifyEnrollmentConfirmed(enrollmentId: string): Promise<void> {
-  const supabase = createAdminClient();
-
-  const { data: enrollment } = (await supabase
-    .from("enrollments")
-    .select(
-      "tenant_id, telegram_chat_id, email, phone, enrollment_ref, student_name_en, class_id, quantity, form_data",
-    )
-    .eq("id", enrollmentId)
-    .single()) as {
-    data: {
-      tenant_id: string;
-      telegram_chat_id: string | null;
-      email: string | null;
-      phone: string | null;
-      enrollment_ref: string;
-      student_name_en: string;
-      class_id: string | null;
-      quantity: number | null;
-      form_data: Record<string, string> | null;
-    } | null;
-    error: unknown;
-  };
-  if (!enrollment) return;
-
-  const enrollEmail =
-    enrollment.email ||
-    resolveEmailFromFormData(enrollment.form_data as Record<string, string> | null);
-  // Use the configured app origin, not the inbound Host header (spoofable).
-  const appOrigin = process.env.NEXT_PUBLIC_APP_URL ?? "https://kuunyi.com";
-  const statusUrl = `${appOrigin}/status?ref=${enrollment.enrollment_ref}`;
-
-  let classLevel = "Class";
-  let feeFormatted: string | undefined;
-  const isCart = enrollment.class_id === null;
-
-  if (isCart) {
-    const { data: items } = (await supabase
-      .from("enrollment_items")
-      .select("quantity, fee_amount, classes(level)")
-      .eq("enrollment_id", enrollmentId)) as {
-      data: { quantity: number; fee_amount: number; classes: { level: string } | null }[] | null;
-      error: unknown;
-    };
-    if (items && items.length > 0) {
-      classLevel = items
-        .map((i) =>
-          i.quantity > 1 ? `${i.classes?.level ?? "?"} x${i.quantity}` : (i.classes?.level ?? "?"),
-        )
-        .join(", ");
-      const total = items.reduce((s, i) => s + i.fee_amount * i.quantity, 0);
-      feeFormatted = `${String(total).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
-    }
-  } else {
-    const { data: cls } = (await supabase
-      .from("classes")
-      .select("level, fee_amount")
-      .eq("id", enrollment.class_id!)
-      .single()) as { data: { level: string; fee_amount: number } | null; error: unknown };
-    if (cls) {
-      classLevel = cls.level;
-      const total = cls.fee_amount * (enrollment.quantity ?? 1);
-      feeFormatted = `${String(total).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
-    }
-  }
-
-  const { data: tenantInfo } = (await supabase
-    .from("tenants")
-    .select("name, org_type, logo_url, currency, sms_on_payment")
-    .eq("id", enrollment.tenant_id)
-    .single()) as {
-    data: {
-      name: string;
-      org_type: string;
-      logo_url: string | null;
-      currency: string;
-      sms_on_payment: boolean;
-    } | null;
-    error: unknown;
-  };
-
-  if (feeFormatted && tenantInfo?.currency) {
-    feeFormatted = `${feeFormatted} ${tenantInfo.currency}`;
-  }
-
-  const notifyTasks: Promise<unknown>[] = [];
-
-  if (enrollment.telegram_chat_id) {
-    notifyTasks.push(
-      sendTelegramStatusNotification({
-        tenantId: enrollment.tenant_id,
-        telegramChatId: enrollment.telegram_chat_id,
-        action: "approve",
-        studentName: enrollment.student_name_en || "Student",
-        enrollmentRef: enrollment.enrollment_ref,
-        classLevel,
-        statusUrl,
-        paymentUrl: statusUrl,
-        currency: tenantInfo?.currency ?? "MMK",
-      }).catch((err) => {
-        console.error("[stripe-webhook] Telegram notification failed:", err);
-      }),
-    );
-  }
-
-  if (enrollEmail) {
-    const emailData = enrollmentApprovedEmail({
-      studentName: enrollment.student_name_en || "Student",
-      enrollmentRef: enrollment.enrollment_ref,
-      classLevel,
-      statusUrl,
-      feeFormatted,
-      orgType: tenantInfo?.org_type,
-      tenantName: tenantInfo?.name,
-      logoUrl: tenantInfo?.logo_url ?? undefined,
-    });
-    notifyTasks.push(
-      sendEmail({ to: enrollEmail, ...emailData }).catch((err) => {
-        console.error("[stripe-webhook] Approval email failed:", err);
-      }),
-    );
-  }
-
-  const enrollPhone =
-    enrollment.phone ||
-    resolvePhoneFromFormData(enrollment.form_data as Record<string, string> | null);
-  if (enrollPhone && tenantInfo?.sms_on_payment !== false) {
-    const name = enrollment.student_name_en || "Student";
-    notifyTasks.push(
-      sendSms({
-        to: enrollPhone,
-        message: `Hi ${name}, your payment for ${enrollment.enrollment_ref} has been confirmed. Welcome to class!`,
-        clientReference: enrollment.enrollment_ref,
-      }).catch((err) => {
-        console.error("[stripe-webhook] Approval SMS failed:", err);
-      }),
-    );
-  }
-
-  if (enrollment.telegram_chat_id) {
-    notifyTasks.push(
-      sendChannelInviteIfEligible({
-        tenantId: enrollment.tenant_id,
-        enrollmentId,
-        classId: enrollment.class_id,
-        telegramChatId: enrollment.telegram_chat_id,
-        studentName: enrollment.student_name_en || "Student",
-      }).catch((err) => {
-        console.error("[stripe-webhook] Channel invite failed:", err);
-      }),
-    );
-  }
-
-  await Promise.allSettled(notifyTasks);
 }

@@ -58,7 +58,7 @@ export async function GET(
   const activePayment = payments?.find(
     (p) => p.payment_method === "stripe" && p.status === "awaiting_payment" && p.stripe_payment_intent_id,
   );
-  if (activePayment?.stripe_payment_intent_id) {
+  if (enrollment.status === "pending_payment" && activePayment?.stripe_payment_intent_id) {
     try {
       const pi = await getStripe().paymentIntents.retrieve(activePayment.stripe_payment_intent_id);
       if (["requires_payment_method", "requires_confirmation", "requires_action"].includes(pi.status)) {

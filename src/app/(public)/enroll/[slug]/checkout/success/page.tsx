@@ -853,6 +853,8 @@ function SuccessContent() {
 
   const ticketSummary = data.items.map((i) => `${i.level} × ${i.quantity}`).join(", ");
   const tickets = data.tickets ?? [];
+  const ticketReady = tickets.length > 0;
+  const paymentNeedsAttention = data.status === "rejected";
   const sponsors = resolveSponsorPlacements(data.sponsor_config);
 
   return (
@@ -879,16 +881,24 @@ function SuccessContent() {
           </svg>
         </div>
         <h1 className="text-[14px] font-extrabold" style={{ color: "#0f1f42" }}>
-          {isPayNow
-            ? "PayNow payment received"
-            : data.status === "payment_submitted"
-              ? "Payment proof submitted"
-              : "Payment successful"}
+          {paymentNeedsAttention
+            ? "Payment needs attention"
+            : ticketReady
+              ? "Payment successful"
+              : isPayNow
+                ? "PayNow confirmation is processing"
+                : data.status === "payment_submitted"
+                  ? "Payment proof submitted"
+                  : "Payment confirmation is processing"}
         </h1>
         <p className="text-[10.5px] mt-0.5" style={{ color: "#8b8f9a" }}>
-          {data.status === "payment_submitted"
-            ? "We'll verify and send your e-ticket shortly"
-            : "E-tickets sent to your email"}
+          {paymentNeedsAttention
+            ? `No ticket was issued. Contact support and quote ${data.enrollment_ref}.`
+            : ticketReady
+              ? "Your e-ticket is ready below"
+              : data.status === "payment_submitted"
+                ? "We'll verify your payment before issuing a ticket"
+                : "Do not submit another payment — check again shortly"}
         </p>
       </div>
 
@@ -991,15 +1001,19 @@ function SuccessContent() {
               </p>
               <p className="text-[13px] font-extrabold text-white">{data.enrollment_ref}</p>
             </div>
-            {/* QR placeholder */}
+            {/* Honest pending state — never imitate a QR code. */}
             <div
-              className="w-[42px] h-[42px] rounded-[4px]"
+              className="w-[72px] min-h-[42px] rounded-[4px] flex items-center justify-center px-2 text-center"
               style={{
-                background:
-                  "repeating-linear-gradient(45deg, #fff 0px, #fff 4px, #0f1f42 4px, #0f1f42 8px)",
-                opacity: 0.2,
+                border: "1px solid rgba(255,255,255,.35)",
+                color: "rgba(255,255,255,.7)",
+                fontSize: "8px",
+                fontWeight: 700,
+                letterSpacing: ".5px",
               }}
-            />
+            >
+              TICKET PENDING
+            </div>
           </div>
         </div>
       )}
@@ -1230,20 +1244,22 @@ function SuccessContent() {
       )}
 
       {/* Download CTA (PDF) */}
-      <button
-        onClick={handleDownload}
-        disabled={generating}
-        className="w-full py-3 rounded-[8px] text-[11.5px] font-bold"
-        style={{
-          border: "1.5px solid #0f1f42",
-          color: generating ? "#8b8f9a" : "#0f1f42",
-          background: "transparent",
-          cursor: generating ? "wait" : "pointer",
-          opacity: generating ? 0.6 : 1,
-        }}
-      >
-        {generating ? "Generating..." : "DOWNLOAD PDF"}
-      </button>
+      {ticketReady && (
+        <button
+          onClick={handleDownload}
+          disabled={generating}
+          className="w-full py-3 rounded-[8px] text-[11.5px] font-bold"
+          style={{
+            border: "1.5px solid #0f1f42",
+            color: generating ? "#8b8f9a" : "#0f1f42",
+            background: "transparent",
+            cursor: generating ? "wait" : "pointer",
+            opacity: generating ? 0.6 : 1,
+          }}
+        >
+          {generating ? "Generating..." : "DOWNLOAD PDF"}
+        </button>
+      )}
     </TrustedOfficialShell>
   );
 }
