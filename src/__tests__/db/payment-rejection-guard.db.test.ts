@@ -173,10 +173,14 @@ describe("payment rejection guard — behaviour", () => {
     await sql(`UPDATE payments SET status='rejected' WHERE id=$1`, [pay]);
 
     expect(await enrollmentStatus(w.enrollmentId)).toBe("rejected");
-    // Seat restoration on rejection is owned by update_seat_remaining; assert
-    // the delta rather than an absolute so this stays a regression guard for
-    // "rejection still releases capacity".
-    expect(await seatRemaining(w.classId)).toBeGreaterThanOrEqual(seatsBefore);
+    // EXACT delta, not >=. `toBeGreaterThanOrEqual(seatsBefore)` passes on
+    // equality, so the restoration path could be deleted entirely and this
+    // would stay green — the guard would then be asserting nothing.
+    //
+    // update_seat_remaining() restores
+    // LEAST(seat_remaining + COALESCE(NEW.quantity, 1), seat_total). The
+    // fixture is quantity 1 with 40/50 headroom, so no clamping: exactly +1.
+    expect(await seatRemaining(w.classId)).toBe(seatsBefore + 1);
   });
 
   it("T3 rejection is blocked while another payment is awaiting_payment", async () => {
@@ -225,32 +229,47 @@ describe("payment rejection guard — behaviour", () => {
           await c1.query("BEGIN");
           await c1.query(`UPDATE payments SET status='verified' WHERE id=$1`, [payA]);
 
-          // B is issued strictly inside A's open transaction — that is the
-          // synchronisation point, established by construction (A's UPDATE has
-          // returned; COMMIT has not been sent).
+          // B is issued strictly inside A's open transaction — the
+          // synchronisation point, established by construction: A's UPDATE has
+          // returned and COMMIT has not been sent.
           //
-          // Whether B then BLOCKS is a mechanism, not the contract, and the
-          // first version of this test wrongly asserted it. Pre-fix, B's
-          // unguarded UPDATE matched the enrollment row and blocked on A's
+          // Whether B then BLOCKS is a mechanism, not the contract. Pre-fix,
+          // B's unguarded UPDATE matched the enrollment row and waited on A's
           // lock. Post-fix, the predicate's NOT EXISTS sees payA at its
-          // VISIBLE state — awaiting_payment — filters the row out, and B
-          // completes immediately as a no-op. B finishing while A is still
-          // uncommitted is itself proof the race interleaving occurred.
-          let bDone = false;
+          // committed pre-update state — awaiting_payment — filters the row
+          // out, and B completes immediately as a no-op.
+          //
+          // Both are acceptable; what must never happen is B rejecting. So
+          // record which occurred and assert the matching invariant, rather
+          // than asserting conditionally and proving nothing when the timer
+          // wins.
           const bPromise = c2
             .query(`UPDATE payments SET status='rejected' WHERE id=$1`, [payB])
-            .then(() => {
-              bDone = true;
-            });
-          await new Promise((r) => setTimeout(r, 300));
+            .then(() => "completed" as const);
+          const outcome = await Promise.race([
+            bPromise,
+            new Promise<"blocked">((r) => setTimeout(() => r("blocked"), 1000)),
+          ]);
 
-          if (bDone) {
-            // B ran to completion against A's uncommitted state: the guard
-            // must have declined already, while A was still in flight.
-            expect(await enrollmentStatus(w.enrollmentId)).not.toBe("rejected");
-          }
+          // Read on a THIRD connection while A is still uncommitted. If B had
+          // rejected, that write is committed and visible here.
+          const duringWindow =
+            outcome === "completed" ? await enrollmentStatus(w.enrollmentId) : null;
+
           await c1.query("COMMIT");
-          await bPromise;
+          await bPromise; // release the waiter in the blocked case
+
+          if (outcome === "completed") {
+            // B evaluated against A's uncommitted state and declined.
+            expect(
+              duringWindow,
+              "B completed inside the uncommitted window and must not have rejected",
+            ).not.toBe("rejected");
+          } else {
+            // B was still waiting on A's lock, so it re-evaluated after commit
+            // — against a confirmed enrollment, which condition 1 excludes.
+            expect(await enrollmentStatus(w.enrollmentId)).toBe("confirmed");
+          }
         } else {
           // B open-but-uncommitted BEFORE A is issued.
           await c2.query("BEGIN");
