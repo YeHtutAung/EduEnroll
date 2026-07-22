@@ -286,6 +286,8 @@ export interface Enrollment {
   quantity: number;
   status: EnrollmentStatus;
   enrolled_at: string;
+  internal_test_at: string | null;
+  internal_test_reason: string | null;
   messenger_psid: string | null;
   telegram_chat_id: string | null;
   telegram_link_pending_chat_id: string | null;
@@ -441,7 +443,10 @@ export interface Database {
       };
       enrollments: {
         Row: Enrollment;
-        Insert: Omit<Enrollment, "id" | "enrollment_ref" | "enrolled_at">;
+        Insert: Omit<
+          Enrollment,
+          "id" | "enrollment_ref" | "enrolled_at" | "internal_test_at" | "internal_test_reason"
+        >;
         Update: Partial<Omit<Enrollment, "id" | "enrollment_ref" | "enrolled_at">>;
       };
       payments: {

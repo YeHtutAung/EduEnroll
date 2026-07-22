@@ -47,6 +47,7 @@ export async function GET() {
     `,
     )
     .eq("tenant_id", tenantId)
+    .is("internal_test_at", null)
     .eq("status", "payment_submitted")
     .order("enrolled_at", { ascending: true }) as {
     data:
