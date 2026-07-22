@@ -12,7 +12,12 @@ import {
   TicketPresentingSponsor,
 } from "@/components/enrollment/SponsorPlacements";
 import { resolveSponsorPlacements } from "@/lib/sponsors";
-import { headerRightReserve } from "@/lib/tickets/ticketLayout";
+import {
+  headerRightReserve,
+  TICKET_ROWS,
+  TICKET_CARD,
+  qrTop,
+} from "@/lib/tickets/ticketLayout";
 
 interface TicketData {
   jti: string;
@@ -287,7 +292,7 @@ function SuccessContent() {
       8,
       "bold",
     );
-    ctx.fillText(eventNameText, padX, m + 12 * S);
+    ctx.fillText(eventNameText, padX, m + TICKET_ROWS.eventName * S);
     if (sponsorConfig.presenting) {
       const presentingHasLogo = Boolean(sponsorConfig.presenting.logo_url);
       ctx.fillStyle = "#8a90a5";
@@ -318,7 +323,7 @@ function SuccessContent() {
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "left";
     const tierText = fitText(ticket.tier, W - padX * 2, 20, "bold");
-    ctx.fillText(tierText, padX, m + 26 * S);
+    ctx.fillText(tierText, padX, m + TICKET_ROWS.tier * S);
 
     ctx.strokeStyle = "rgba(255,255,255,0.5)";
     ctx.lineWidth = 0.5 * S;
@@ -332,10 +337,10 @@ function SuccessContent() {
     ctx.fillStyle = "#8a90a5";
     ctx.font = font(7);
     // 38, not 40: the caption's box ended 6px BELOW the ref's top at 40.
-    ctx.fillText("ORDER REF", padX, m + 38 * S);
+    ctx.fillText("ORDER REF", padX, m + TICKET_ROWS.orderRefLabel * S);
     ctx.fillStyle = "#ffffff";
     const refText = fitText(data.enrollment_ref, W - padX * 2, 13, "bold");
-    ctx.fillText(refText, padX, m + 47 * S);
+    ctx.fillText(refText, padX, m + TICKET_ROWS.orderRef * S);
     ctx.fillStyle = "#8a90a5";
     ctx.font = font(7);
     // The index rides the existing metadata line rather than getting its own.
@@ -346,14 +351,13 @@ function SuccessContent() {
     const idLine = showIndex
       ? `Ticket #${ticket.jti.slice(0, 8)} · ${i + 1} of ${n}`
       : `Ticket #${ticket.jti.slice(0, 8)}`;
-    ctx.fillText(fitText(idLine, W - padX * 2, 7), padX, m + 54 * S);
+    ctx.fillText(fitText(idLine, W - padX * 2, 7), padX, m + TICKET_ROWS.ticketId * S);
 
-    const qs = 44 * S;
+    const qs = TICKET_CARD.qrSize * S;
     const qx = (W - qs) / 2;
     // The QR's white panel starts 3*S above qy, which sat above the "Ticket #"
     // baseline and covered it. Push the code down if the panel would collide.
-    const ticketLineBottom = m + 54 * S + 2 * S; // baseline + descender
-    const qy = Math.max(m + cardH - qs - 14 * S, ticketLineBottom + 5 * S);
+    const qy = qrTop(S);
     ctx.fillStyle = "#ffffff";
     roundRectPath(ctx, qx - 3 * S, qy - 3 * S, qs + 6 * S, qs + 6 * S, 2 * S);
     ctx.fill();
@@ -362,7 +366,7 @@ function SuccessContent() {
     ctx.fillStyle = "#8a90a5";
     ctx.font = font(6.5);
     ctx.textAlign = "center";
-    ctx.fillText("Scan at entry", W / 2, qy + qs + 7 * S);
+    ctx.fillText("Scan at entry", W / 2, qy + qs + TICKET_CARD.qrCaptionGap * S);
 
     if (sponsorConfig.supported_by.length > 0) {
       const stripY = m + cardH + 4 * S;
@@ -618,7 +622,7 @@ function SuccessContent() {
           pdf.text(
             fitPdf((data.event_name || "").toUpperCase(), W - padX * 2 - headerReserve, 8),
             padX,
-            m + 12,
+            m + TICKET_ROWS.eventName,
           );
           if (sponsorConfig.presenting) {
             const presentingHasLogo = Boolean(sponsorConfig.presenting.logo_url);
@@ -647,7 +651,7 @@ function SuccessContent() {
 
           // Tier (white, large)
           pdf.setTextColor(255, 255, 255);
-          pdf.text(fitPdf(ticket.tier, W - padX * 2, 20), padX, m + 25);
+          pdf.text(fitPdf(ticket.tier, W - padX * 2, 20), padX, m + TICKET_ROWS.tier);
 
           // Dashed divider
           pdf.setDrawColor(255, 255, 255);
@@ -660,32 +664,32 @@ function SuccessContent() {
           pdf.setFont("helvetica", "normal");
           pdf.setTextColor(138, 144, 165);
           pdf.setFontSize(7);
-          pdf.text("ORDER REF", padX, m + 38);
+          pdf.text("ORDER REF", padX, m + TICKET_ROWS.orderRefLabel);
           pdf.setFont("helvetica", "bold");
           pdf.setTextColor(255, 255, 255);
-          pdf.text(fitPdf(data.enrollment_ref, W - padX * 2, 13), padX, m + 47);
+          pdf.text(fitPdf(data.enrollment_ref, W - padX * 2, 13), padX, m + TICKET_ROWS.orderRef);
           pdf.setFont("helvetica", "normal");
           pdf.setTextColor(138, 144, 165);
           pdf.setFontSize(7);
           const pdfIdLine = pdfShowIndex
             ? `Ticket #${ticket.jti.slice(0, 8)} - ${i + 1} of ${tickets.length}`
             : `Ticket #${ticket.jti.slice(0, 8)}`;
-          pdf.text(fitPdf(pdfIdLine, W - padX * 2, 7), padX, m + 54);
+          pdf.text(fitPdf(pdfIdLine, W - padX * 2, 7), padX, m + TICKET_ROWS.ticketId);
 
           // QR on a white chip, centered near the bottom of the card
           const qr = qrMap[ticket.jti];
           if (qr) {
-            const qs = 44;
+            const qs = TICKET_CARD.qrSize;
             const qx = (W - qs) / 2;
             // Same collision as the canvas: the QR's white chip starts 3 above
             // qy, which sat over the "Ticket #" line.
-            const qy = Math.max(m + cardH - qs - 14, m + 54 + 2 + 5);
+            const qy = qrTop();
             pdf.setFillColor(255, 255, 255);
             pdf.roundedRect(qx - 3, qy - 3, qs + 6, qs + 6, 2, 2, "F");
             pdf.addImage(qr, "PNG", qx, qy, qs, qs);
             pdf.setTextColor(138, 144, 165);
             pdf.setFontSize(6.5);
-            pdf.text("Scan at entry", W / 2, qy + qs + 7, { align: "center" });
+            pdf.text("Scan at entry", W / 2, qy + qs + TICKET_CARD.qrCaptionGap, { align: "center" });
           }
 
           if (sponsorConfig.supported_by.length > 0) {

@@ -117,3 +117,48 @@ export const TICKET_ROWS = {
   /** Ticket id, and the "N of M" index when there is more than one ticket. */
   ticketId: 54,
 } as const;
+
+/**
+ * Every other position on the card, in the same layout units.
+ *
+ * These live here, not in the renderers, because a guard that reads its
+ * constants from a different place than production can go green while the
+ * layout drifts. Both renderers import these.
+ */
+export const TICKET_CARD = {
+  /** Page and card box. */
+  pageWidth: 100,
+  pageHeight: 150,
+  margin: 8,
+  cardHeight: 112,
+  padX: 16, // margin + 8
+
+  /** QR panel. 44 pushed the caption 8px below the card once the metadata line
+   *  moved down; 40 restores clearance and stays comfortably scannable. */
+  qrSize: 40,
+  qrWhitePad: 3,
+  /** Distance from the card bottom, before the id-line clearance floor wins. */
+  qrBottomInset: 14,
+  /** Baseline of "Scan at entry", measured down from the QR's bottom edge.
+   *  8.5, not 7: at 7 the caption's ascender rose into the QR's white panel,
+   *  which extends 3 units past the code itself. */
+  qrCaptionGap: 8.5,
+  qrCaptionSize: 6.5,
+
+  /** Clearance the QR panel keeps below the ticket-id line. */
+  idLineClearance: 5,
+  idLineDescender: 2,
+
+  /** Sponsor strip, drawn below the card. */
+  sponsorStripTop: 4,
+  sponsorStripHeight: 18,
+} as const;
+
+/** Y of the QR's top edge: bottom-anchored, but never over the id line. */
+export function qrTop(rowScale = 1): number {
+  const { margin, cardHeight, qrSize, qrBottomInset, idLineClearance, idLineDescender } =
+    TICKET_CARD;
+  const bottomAnchored = margin + cardHeight - qrSize - qrBottomInset;
+  const belowIdLine = margin + TICKET_ROWS.ticketId + idLineDescender + idLineClearance;
+  return Math.max(bottomAnchored, belowIdLine) * rowScale;
+}
