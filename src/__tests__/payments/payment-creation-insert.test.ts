@@ -15,11 +15,23 @@ import { NextRequest } from "next/server";
 // so the guard cannot regress into breaking the happy path, and C10 covers the
 // provider-failure branch, which leaked the raw upstream body.
 
-let insertError: unknown = null;
+let insertError: unknown = null; // HitPay routes still insert directly
+
+// Stripe routes now record rows through finalize_stripe_payment_attempt();
+// rpcError simulates its failure (ambiguous, non-ST-coded).
+let rpcError: { message: string; code?: string } | null = null;
 
 const mockInsert = vi.fn(async () => ({ error: insertError }));
 const mockAdminFrom = vi.fn();
-vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ from: mockAdminFrom }) }));
+const mockAdminRpc = vi.fn(async (name: string) => {
+  if (name === "finalize_stripe_payment_attempt" && rpcError) {
+    return { data: null, error: rpcError };
+  }
+  return { data: { id: "pay-new" }, error: null };
+});
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: () => ({ from: mockAdminFrom, rpc: mockAdminRpc }),
+}));
 
 const mockSessionsCreate = vi.fn();
 const mockSessionsExpire = vi.fn();
@@ -77,8 +89,12 @@ function readStub(data: unknown) {
   q.not = vi.fn(() => q);
   q.order = vi.fn(() => q);
   q.limit = vi.fn(() => q);
+  q.or = vi.fn(() => q);
   q.single = vi.fn(async () => ({ data, error: null }));
   q.maybeSingle = vi.fn(async () => ({ data, error: null }));
+  // selectAttemptContext awaits the chain itself (terminal .order): thenable.
+  q.then = (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
+    Promise.resolve({ data, error: null }).then(resolve, reject);
   q.insert = mockInsert;
   return q;
 }
@@ -86,12 +102,15 @@ function readStub(data: unknown) {
 beforeEach(() => {
   vi.clearAllMocks();
   insertError = null;
+  rpcError = null;
   process.env.STRIPE_SECRET_KEY = "sk_test_only";
   process.env.HITPAY_API_KEY = "test_only";
+  process.env.STRIPE_SALES_OPEN = "true"; // launch gate open for these suites
 
   mockAdminFrom.mockImplementation((table: string) => {
     if (table === "enrollments") return readStub(ENROLLMENT);
-    if (table === "payments") return readStub(null);
+    // Attempt-context query resolves to an empty LIST (no prior attempts).
+    if (table === "payments") return readStub([]);
     if (table === "tenants") return readStub({ currency: "SGD", name: "Ev", org_type: "event" });
     return readStub(null);
   });
@@ -147,9 +166,14 @@ function assertNoCredentialsLeaked(body: Record<string, unknown>) {
   expect(body.detail).toBeUndefined();
 }
 
-describe("payment creation — insert failure withholds credentials", () => {
-  it("C1 Checkout: no URL, local 500, session expiration attempted", async () => {
-    insertError = { message: "insert failed: connection reset" };
+describe("payment creation — record failure withholds credentials", () => {
+  // Plan v18 L9 INVERTS the old cleanup decision: with Stripe idempotency in
+  // play, a generic database error is ambiguous — the object MAY be owned by
+  // a row this request cannot see, so it is left alone (the retry converges
+  // on the same object via the same idempotency key). Only typed no-owner
+  // failures cancel, and that path is pinned in stripeCreation.test.ts.
+  it("C1 Checkout: record fails → no URL, 500, session NOT expired (ambiguity = may be owned)", async () => {
+    rpcError = { message: "insert failed: connection reset" };
 
     const res = await checkout();
     const body = await res.json();
@@ -157,18 +181,7 @@ describe("payment creation — insert failure withholds credentials", () => {
     expect(res.status).toBe(500);
     expect(body.url).toBeUndefined();
     assertNoCredentialsLeaked(body);
-    expect(mockSessionsExpire).toHaveBeenCalledWith("cs_1");
-  });
-
-  it("C2 Checkout: expiration failure does not replace the original safe 500", async () => {
-    insertError = { message: "insert failed" };
-    mockSessionsExpire.mockRejectedValue(new Error("expire boom"));
-
-    const res = await checkout();
-    const body = await res.json();
-
-    expect(res.status).toBe(500);
-    assertNoCredentialsLeaked(body);
+    expect(mockSessionsExpire).not.toHaveBeenCalled();
   });
 
   it("C3 HitPay: no QR and no URL when the insert fails", async () => {
@@ -183,8 +196,8 @@ describe("payment creation — insert failure withholds credentials", () => {
     assertNoCredentialsLeaked(body);
   });
 
-  it("C4 PaymentIntent: no client secret, local 500, cancel attempted", async () => {
-    insertError = { message: "insert failed: connection reset" };
+  it("C4 PaymentIntent: record fails → no client secret, 500, object NOT cancelled", async () => {
+    rpcError = { message: "insert failed: connection reset" };
 
     const res = await intent();
     const body = await res.json();
@@ -193,36 +206,27 @@ describe("payment creation — insert failure withholds credentials", () => {
     expect(body.clientSecret).toBeUndefined();
     expect(body.paymentIntentId).toBeUndefined();
     assertNoCredentialsLeaked(body);
-    expect(mockPiCancel).toHaveBeenCalledWith("pi_1");
-  });
-
-  it("C5 PaymentIntent: cancel failure does not replace the original safe 500", async () => {
-    insertError = { message: "insert failed" };
-    mockPiCancel.mockRejectedValue(new Error("cancel boom"));
-
-    const res = await intent();
-    const body = await res.json();
-
-    expect(res.status).toBe(500);
-    assertNoCredentialsLeaked(body);
+    expect(mockPiCancel).not.toHaveBeenCalled();
   });
 });
 
 describe("payment creation — success paths are unchanged", () => {
-  it("C6 PaymentIntent returns its client secret and does not cancel", async () => {
+  it("C6 PaymentIntent returns its client secret (discriminated) and does not cancel", async () => {
     const res = await intent();
     const body = await res.json();
 
     expect(res.status).toBe(200);
+    expect(body.kind).toBe("requires_payment");
     expect(body.clientSecret).toBe("pi_1_secret");
     expect(mockPiCancel).not.toHaveBeenCalled();
   });
 
-  it("C7 Checkout returns its URL and does not expire the session", async () => {
+  it("C7 Checkout returns its URL (discriminated) and does not expire the session", async () => {
     const res = await checkout();
     const body = await res.json();
 
     expect(res.status).toBe(200);
+    expect(body.kind).toBe("redirect");
     expect(body.url).toBe("https://stripe.test/cs_1");
     expect(mockSessionsExpire).not.toHaveBeenCalled();
   });

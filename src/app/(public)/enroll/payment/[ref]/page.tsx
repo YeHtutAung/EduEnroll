@@ -1133,9 +1133,25 @@ export default function PaymentInstructionsPage() {
         setStripeError(data.message || "Failed to create payment session.");
         return;
       }
-      if (data.url) {
+      // Discriminated result (Plan v18 §3c).
+      if (data.kind === "redirect" && data.url) {
         window.location.href = data.url;
+        return;
       }
+      if (data.kind === "succeeded") {
+        // Already paid — show the confirmed state rather than re-charging.
+        window.location.href = `/enroll/payment/${encodeURIComponent(enrollment.enrollment_ref)}?stripe=success`;
+        return;
+      }
+      if (data.kind === "processing") {
+        setStripeError("A payment is already being processed. Please wait a moment and refresh this page.");
+        return;
+      }
+      if (data.kind === "settlement_conflict") {
+        setStripeError(`This payment needs attention. Contact support and quote reference ${data.reference ?? enrollment.enrollment_ref}.`);
+        return;
+      }
+      setStripeError("Failed to create payment session.");
     } catch {
       setStripeError("Something went wrong. Please try again.");
     } finally {
