@@ -30,12 +30,16 @@ function TicketCard({
   onQtyChange,
   featured,
   brand,
+  priority,
 }: {
   cls: TemplateClass;
   qty: number;
   onQtyChange: (classId: string, delta: number) => void;
   featured: boolean;
   brand: string;
+  /** First card in the list — its artwork is above the fold, so it must not
+   *  be lazy-loaded. */
+  priority: boolean;
 }) {
   const { isDisabled, overlayState } = getCardState(cls);
   const max = cls.max_tickets_per_person ?? 10;
@@ -60,16 +64,28 @@ function TicketCard({
         boxShadow: "0 1px 2px rgba(15,31,66,.05)",
       }}
     >
-      {/* Ticket image — full width at its own aspect ratio.
+      {/* Ticket image — whole artwork, bounded height.
           It was a 74x100 portrait box with objectFit:cover, which centre-cropped
           the artwork: event posters are landscape (~1.91:1), so roughly a
           quarter of the width survived and the title, date, venue and price were
           all cropped away.
 
-          `w-full` + `h-auto` and NO object-fit is what keeps it whole — the
-          image scales to the card and computes its own height, so it stays
-          uncropped at every width without hard-coding a ratio (each ticket type
-          uploads its own image, and they need not share one).
+          Three properties together, each load-bearing:
+
+          `w-full h-auto` lets a normal landscape poster compute its own height,
+          so it is shown whole without hard-coding a ratio — each ticket type
+          uploads its own image and they need not share one.
+
+          `max-h` bounds it. Upload validation only checks file size (5 MB) and
+          MIME type, never dimensions, so a portrait or panoramic image is
+          accepted. Unbounded, a 1000x4000 upload would render a card several
+          screens tall and push the quantity controls out of reach — with one
+          such card per ticket type, the page stops being usable.
+
+          `object-contain` is what keeps the image WHOLE once max-h clamps it.
+          Height-clamping alone would squash it, and `cover` would crop it right
+          back. Contain letterboxes instead: the bars are the card's own
+          background, so they read as intentional padding.
 
           `block` kills the inline-element baseline gap under the image;
           `overflow-hidden` on the card clips the top corners to its radius. */}
@@ -78,8 +94,10 @@ function TicketCard({
         <img
           src={cls.image_url}
           alt={`${cls.level} ticket`}
-          className="block w-full h-auto"
-          loading="lazy"
+          className="block w-full h-auto max-h-[420px] object-contain"
+          // The first card's artwork is above the fold. Lazy-loading it delays
+          // the main image and shifts the controls when it lands.
+          loading={priority ? "eager" : "lazy"}
           decoding="async"
         />
       )}
@@ -290,6 +308,7 @@ export default function EvTrustedOfficialTemplate({
                 onQtyChange={handleQtyChange}
                 featured={i === 0 && classes.length > 1}
                 brand={brand}
+                priority={i === 0}
               />
             ))
           )}
