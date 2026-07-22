@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
 import QRCode from "qrcode";
+import { verifyStripeReturn } from "@/lib/payments/verifyStripeReturn";
 import { formatCurrencySimple, formatAmount } from "@/lib/utils";
 import QRPaymentModal from "@/components/payments/QRPaymentModal";
 import BrandHeader from "@/components/enrollment/BrandHeader";
@@ -1026,35 +1027,39 @@ export default function PaymentInstructionsPage() {
       setStripeReturn("success");
       window.history.replaceState({}, "", window.location.pathname);
 
-      // Verify payment with Stripe directly — one call, no polling
-      fetch(`/api/public/payments/stripe/verify?session_id=${encodeURIComponent(sessionId)}`)
-        .then((res) => res.json())
-        .then((data) => {
-          if (data.status === "settlement_conflict") {
-            // Terminal (Plan v18 §3c): recorded server-side; polling or
-            // re-verifying cannot resolve it. Surface support, stop treating
-            // it as a pending payment.
-            setStripeReturn(null);
-            setStripeError(`This payment needs attention. Contact support and quote reference ${params.ref}.`);
-            return;
-          }
-          if (data.status && data.status !== "pending") {
-            const STATUS_LABELS: Record<string, { en: string; mm: string }> = {
-              confirmed:       { en: "Enrollment Confirmed",       mm: "စာရင်းသွင်းမှု အတည်ပြုပြီး" },
-              payment_submitted: { en: "Payment Under Review",     mm: "ငွေပေးချေမှု စစ်ဆေးနေဆဲ" },
-              partial_payment: { en: "Partial Payment — Please Complete", mm: "ငွေတစ်စိတ်တစ်ပိုင်း — ကျန်ငွေ ပေးချေပါ" },
-              rejected:        { en: "Enrollment Rejected",        mm: "စာရင်းသွင်းမှု ငြင်းဆိုထားသည်" },
-            };
-            const label = STATUS_LABELS[data.status];
-            setEnrollment((prev) => prev ? {
-              ...prev,
-              status: data.status,
-              ...(label ? { status_label_en: label.en, status_label_mm: label.mm } : {}),
-            } : prev);
-            setStripeReturn(null);
-          }
-        })
-        .catch(() => {});
+      // Verify with bounded backoff (Plan v18 §3c / #205 review): the route
+      // now returns 500 for RETRYABLE settlement states, fetch() does not
+      // reject on HTTP errors, and "pending" can persist while the webhook
+      // lands — none of those may leave the spinner up forever.
+      verifyStripeReturn({ sessionId }).then((outcome) => {
+        if (outcome.kind === "conflict") {
+          // Terminal: recorded server-side; retrying cannot resolve it.
+          setStripeReturn(null);
+          setStripeError(`This payment needs attention. Contact support and quote reference ${params.ref}.`);
+          return;
+        }
+        if (outcome.kind === "pending_confirmation") {
+          // Retries exhausted (500s, network, or still-pending). The money
+          // decision is safe server-side — only the confirmation display is
+          // owed. Clear the spinner; the status page shows it once settled.
+          setStripeReturn(null);
+          setStripeError("Payment received — confirmation is still processing. Check this page again in a few minutes; no further payment is needed.");
+          return;
+        }
+        const STATUS_LABELS: Record<string, { en: string; mm: string }> = {
+          confirmed:       { en: "Enrollment Confirmed",       mm: "စာရင်းသွင်းမှု အတည်ပြုပြီး" },
+          payment_submitted: { en: "Payment Under Review",     mm: "ငွေပေးချေမှု စစ်ဆေးနေဆဲ" },
+          partial_payment: { en: "Partial Payment — Please Complete", mm: "ငွေတစ်စိတ်တစ်ပိုင်း — ကျန်ငွေ ပေးချေပါ" },
+          rejected:        { en: "Enrollment Rejected",        mm: "စာရင်းသွင်းမှု ငြင်းဆိုထားသည်" },
+        };
+        const label = STATUS_LABELS[outcome.status];
+        setEnrollment((prev) => prev ? {
+          ...prev,
+          status: outcome.status,
+          ...(label ? { status_label_en: label.en, status_label_mm: label.mm } : {}),
+        } : prev);
+        setStripeReturn(null);
+      });
     } else if (stripeParam === "cancelled") {
       setStripeReturn("cancelled");
       window.history.replaceState({}, "", window.location.pathname);
