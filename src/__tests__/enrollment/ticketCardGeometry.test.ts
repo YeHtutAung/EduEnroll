@@ -1,6 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { jsPDF } from "jspdf";
-import { boxFor, overlaps, TICKET_ROWS, TICKET_CARD, qrTop, type Box } from "@/lib/tickets/ticketLayout";
+import {
+  boxFor,
+  overlaps,
+  TICKET_ROWS,
+  TICKET_CARD,
+  TICKET_FONT,
+  qrTop,
+  type Box,
+} from "@/lib/tickets/ticketLayout";
 
 // ─── Whole-card geometry, measured per renderer ─────────────────────────────
 //
@@ -40,12 +48,12 @@ const CAPTION = "Scan at entry";
 // ── Canvas metrics, measured in a real browser on Helvetica ────────────────
 // (actualBoundingBoxAscent / actualBoundingBoxDescent ÷ font size)
 const CANVAS_METRICS: Record<string, { size: number; asc: number; desc: number; width: number }> = {
-  eventName: { size: 6.5, asc: 0.7179, desc: 0, width: 67.2 },
-  tier: { size: 14.5, asc: 0.7241, desc: 0.2069, width: 66.9 },
-  orderRefLabel: { size: 7, asc: 0.7143, desc: 0, width: 32.1 },
-  orderRef: { size: 10.75, asc: 0.7442, desc: 0.0775, width: 66.9 },
-  ticketId: { size: 6, asc: 0.7222, desc: 0, width: 67.4 },
-  caption: { size: TICKET_CARD.qrCaptionSize, asc: 0.7179, desc: 0.2069, width: 22.4 },
+  eventName: { size: 6.5, asc: 0.7179, desc: 0, width: 67.19 },
+  tier: { size: 14.5, asc: 0.7241, desc: 0.2069, width: 66.89 },
+  orderRefLabel: { size: 6, asc: 0.7222, desc: 0, width: 35.33 },
+  orderRef: { size: 10.75, asc: 0.7442, desc: 0.0775, width: 66.91 },
+  ticketId: { size: 6, asc: 0.7222, desc: 0, width: 67.49 },
+  caption: { size: TICKET_CARD.qrCaptionSize, asc: 0.7222, desc: 0.1944, width: 35.35 },
 };
 
 function canvasBoxes(): Record<string, Box> {
@@ -111,11 +119,11 @@ function pdfBoxes(): Record<string, Box> {
   };
 
   const out: Record<string, Box> = {
-    eventName: row("eventName", "AUGUST 2026 EVENT", 8, "bold"),
-    tier: row("tier", "Early bird", 20, "bold"),
-    orderRefLabel: row("orderRefLabel", "ORDER REF", 7, "normal"),
-    orderRef: row("orderRef", "F-0722-CEQ7", 13, "bold"),
-    ticketId: row("ticketId", ID_LINE, 7, "normal"),
+    eventName: row("eventName", "AUGUST 2026 EVENT", TICKET_FONT.eventName, "bold"),
+    tier: row("tier", "Early bird", TICKET_FONT.tier, "bold"),
+    orderRefLabel: row("orderRefLabel", "ORDER REF", TICKET_FONT.orderRefLabel, "normal"),
+    orderRef: row("orderRef", "F-0722-CEQ7", TICKET_FONT.orderRef, "bold"),
+    ticketId: row("ticketId", ID_LINE, TICKET_FONT.ticketId, "normal"),
   };
 
   const top = qrTop();
@@ -172,6 +180,27 @@ describe.each([
     // (canvas) below the navy card in both renderers.
     const { caption } = build();
     expect(caption.bottom).toBeLessThan(CARD.bottom);
+  });
+});
+
+describe("measured metrics stay in step with the font constants", () => {
+  // The canvas pass reads a hardcoded table of MEASURED metrics, so it cannot
+  // notice a change to TICKET_FONT on its own — lower a base size and the table
+  // silently describes a card that is no longer rendered. A fitted size can
+  // never exceed its base, so this catches exactly that drift and forces a
+  // re-measure.
+  it.each(Object.keys(TICKET_FONT) as (keyof typeof TICKET_FONT)[])(
+    "%s: recorded size does not exceed its base",
+    (key) => {
+      expect(
+        CANVAS_METRICS[key].size,
+        `CANVAS_METRICS.${key} was measured at ${CANVAS_METRICS[key].size} but TICKET_FONT.${key} is now ${TICKET_FONT[key]} — re-measure the table`,
+      ).toBeLessThanOrEqual(TICKET_FONT[key]);
+    },
+  );
+
+  it("caption metrics match the configured caption size", () => {
+    expect(CANVAS_METRICS.caption.size).toBe(TICKET_CARD.qrCaptionSize);
   });
 });
 
