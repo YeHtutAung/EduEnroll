@@ -154,9 +154,22 @@ async function seed() {
   // 8. Payments — delete old records then insert fresh ones so status is reproducible.
   //    E2E-BANK-001 intentionally has NO payment: inserting a pending payment would
   //    trigger the DB to move it to payment_submitted, breaking the PATCH in the submit test.
+  //    The synthetic Stripe success row carries the complete provider-attempt contract;
+  //    otherwise the production CHECK constraints correctly reject the fixture.
   const paymentSeeds = [
     { ref: "E2E-SUBMITTED-001", payment_method: "bank_transfer", status: "pending",  card_brand: null,   card_last4: null   },
-    { ref: "E2E-VERIFIED-001",  payment_method: "stripe",        status: "verified", card_brand: "visa", card_last4: "4242" },
+    {
+      ref: "E2E-VERIFIED-001",
+      payment_method: "stripe",
+      status: "verified",
+      card_brand: "visa",
+      card_last4: "4242",
+      stripe_payment_intent_id: "pi_e2e_verified_001",
+      integration_flow: "direct_payment_intent",
+      attempt_seq: 1,
+      provider_amount_minor: 500000,
+      provider_currency: "sgd",
+    },
   ];
 
   // Clean up any payments left on E2E-BANK-001 by previous upload tests
