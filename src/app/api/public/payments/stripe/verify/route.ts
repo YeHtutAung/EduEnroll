@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getStripe } from "@/lib/stripe";
-import { issueTicketsForEnrollment } from "@/server/tickets/issueTickets";
+import { settlePaidPayment } from "@/server/payments/settlePaidPayment";
 
 // ─── GET /api/public/payments/stripe/verify?session_id=cs_xxx ────────────────
 // Called by the client after Stripe redirects back with ?stripe=success.
-// Retrieves the Checkout Session from Stripe, confirms the enrollment if paid,
-// and returns the current enrollment status. Idempotent — safe to call multiple times.
+//
+// This route is an ADAPTER over the shared settlement operation (Plan v18 §5):
+// its old inline verified/confirmed writes bypassed snapshot validation, the
+// conditional transition, conflict recording and the trigger-owned enrollment
+// decision — the exact contract #203 introduced. It keeps only its response
+// shape: `{status: <enrollment status>}`, plus the terminal
+// `settlement_conflict` the client maps to a support state.
 
 export async function GET(request: NextRequest) {
   const sessionId = request.nextUrl.searchParams.get("session_id");
@@ -24,45 +30,47 @@ export async function GET(request: NextRequest) {
 
     const supabase = createAdminClient();
 
-    // Find the payment record
-    const { data: payment } = (await supabase
+    // Shape fidelity only: the old route 404'd on an unknown session, and the
+    // client treats 404 as "nothing to show". Read-only; settlement decisions
+    // all live in the operation below.
+    const { data: payment, error: lookupError } = (await supabase
       .from("payments")
-      .select("id, enrollment_id, status")
+      .select("id, enrollment_id")
       .eq("stripe_session_id", sessionId)
-      .single()) as { data: { id: string; enrollment_id: string; status: string } | null; error: unknown };
-
+      .maybeSingle()) as unknown as {
+      data: { id: string; enrollment_id: string } | null;
+      error: { message: string } | null;
+    };
+    if (lookupError) {
+      return NextResponse.json({ error: "Failed to verify payment" }, { status: 500 });
+    }
     if (!payment) {
       return NextResponse.json({ error: "Payment not found" }, { status: 404 });
     }
 
-    // Idempotent: if webhook already confirmed, just return current enrollment status
-    if (payment.status !== "verified") {
-      await supabase
-        .from("payments")
-        .update({
-          status: "verified",
-          stripe_payment_intent_id: session.payment_intent as string,
-          paid_at: new Date().toISOString(),
-        } as never)
-        .eq("id", payment.id);
+    const outcome = await settlePaidPayment({
+      sessionId,
+      observedAmountMinor: session.amount_total,
+      observedCurrency: session.currency,
+      source: { type: "creation_request", id: randomUUID() },
+      backfillPaymentIntentId:
+        typeof session.payment_intent === "string" ? session.payment_intent : null,
+    });
 
-      await supabase
-        .from("enrollments")
-        .update({ status: "confirmed" } as never)
-        .eq("id", payment.enrollment_id);
-    }
-
-    // Fulfil whenever Stripe reports the session paid, not only when this call
-    // settled: the webhook's replay guard means whoever settles second never
-    // issues. Idempotent; #187's guard declines anything not confirmed.
-    //
-    // Caught deliberately — this route returns the ENROLLMENT status and its
-    // consumer maps that to a label, so it must keep that exact shape rather
-    // than 500 after the customer has been charged. Retry is #186.
-    try {
-      await issueTicketsForEnrollment(payment.enrollment_id);
-    } catch (err) {
-      console.error("[tickets] stripe/verify fulfilment failed:", err);
+    switch (outcome.kind) {
+      case "settled":
+      case "already_settled":
+        break; // fall through to the enrollment-status read
+      case "conflict":
+        // Terminal — recorded before this response existed. The client stops
+        // treating this as a pending payment and surfaces support.
+        return NextResponse.json({ status: "settlement_conflict" });
+      case "retryable":
+        // The customer may already be charged; the webhook path retries
+        // independently and the client may call verify again. Never a false
+        // "confirmed".
+        console.error("[stripe-verify] settle retryable:", outcome.reason);
+        return NextResponse.json({ error: "Failed to verify payment" }, { status: 500 });
     }
 
     const { data: enrollment } = (await supabase
@@ -73,6 +81,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ status: enrollment?.status ?? "confirmed" });
   } catch (err) {
+    // Conflict-write failures land here too: recorded-or-500, never silent.
     console.error("[stripe-verify]", err);
     return NextResponse.json({ error: "Failed to verify payment" }, { status: 500 });
   }

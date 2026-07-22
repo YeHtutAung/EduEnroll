@@ -1030,6 +1030,14 @@ export default function PaymentInstructionsPage() {
       fetch(`/api/public/payments/stripe/verify?session_id=${encodeURIComponent(sessionId)}`)
         .then((res) => res.json())
         .then((data) => {
+          if (data.status === "settlement_conflict") {
+            // Terminal (Plan v18 §3c): recorded server-side; polling or
+            // re-verifying cannot resolve it. Surface support, stop treating
+            // it as a pending payment.
+            setStripeReturn(null);
+            setStripeError(`This payment needs attention. Contact support and quote reference ${params.ref}.`);
+            return;
+          }
           if (data.status && data.status !== "pending") {
             const STATUS_LABELS: Record<string, { en: string; mm: string }> = {
               confirmed:       { en: "Enrollment Confirmed",       mm: "စာရင်းသွင်းမှု အတည်ပြုပြီး" },

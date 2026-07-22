@@ -10,10 +10,12 @@ import { NextRequest } from "next/server";
 
 const mockConstructEvent = vi.fn();
 const mockPiRetrieve = vi.fn();
+const mockSessionRetrieve = vi.fn();
 vi.mock("@/lib/stripe", () => ({
   getStripe: () => ({
     webhooks: { constructEvent: (...a: unknown[]) => mockConstructEvent(...a) },
     paymentIntents: { retrieve: (...a: unknown[]) => mockPiRetrieve(...a) },
+    checkout: { sessions: { retrieve: (...a: unknown[]) => mockSessionRetrieve(...a) } },
   }),
 }));
 
@@ -388,5 +390,82 @@ describe("R9-R15: signature, failure path, response policy", () => {
     expect(second.first_source_id).toBe(first.first_source_id); // never rewritten
     expect(second.last_source_id).not.toBe(first.last_source_id); // moves
     expect(second.first_source_type).toBe("webhook_event");
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// V-suite: /api/public/payments/stripe/verify as a settlement ADAPTER.
+// The old route wrote verified/confirmed directly, ignored both errors,
+// validated nothing and recorded nothing — these pin the invariants it now
+// inherits from settlePaidPayment, against the real database.
+describe("V1-V6: verify route through the settlement contract", () => {
+  const verifyGet = async (sessionId: string) => {
+    const { GET } = await import("@/app/api/public/payments/stripe/verify/route");
+    return GET(new NextRequest(new Request(
+      `https://t.kuunyi.com/api/public/payments/stripe/verify?session_id=${sessionId}`)));
+  };
+  const paidSession = (cs: string, over?: Record<string, unknown>) => ({
+    id: cs, payment_status: "paid", amount_total: 10000, currency: "sgd",
+    payment_intent: `pi_v_${uniq()}`, ...over,
+  });
+
+  it("V1: amount mismatch → settlement_conflict, payment untouched, amount_mismatch recorded as creation_request", async () => {
+    const o = await eventOrder({ flow: "hosted_checkout" });
+    mockSessionRetrieve.mockResolvedValue(paidSession(o.cs, { amount_total: 9999 }));
+    const res = await verifyGet(o.cs);
+    expect(await res.json()).toEqual({ status: "settlement_conflict" });
+    expect((await paymentRow(o.paymentId)).status).toBe("awaiting_payment");
+    expect(await enrollmentStatus(o.enrollmentId)).toBe("pending_payment");
+    const [c] = await conflictRows(o.cs);
+    expect(c.conflict_type).toBe("amount_mismatch");
+    expect(c.first_source_type).toBe("creation_request");
+  });
+
+  it("V2: currency mismatch → settlement_conflict, currency_mismatch recorded", async () => {
+    const o = await eventOrder({ flow: "hosted_checkout" });
+    mockSessionRetrieve.mockResolvedValue(paidSession(o.cs, { currency: "usd" }));
+    const res = await verifyGet(o.cs);
+    expect(await res.json()).toEqual({ status: "settlement_conflict" });
+    expect((await paymentRow(o.paymentId)).status).toBe("awaiting_payment");
+    expect((await conflictRows(o.cs))[0].conflict_type).toBe("currency_mismatch");
+  });
+
+  it("V3: rejected enrollment → settlement_conflict, NO confirmation, NO tickets — never the old silent confirmed", async () => {
+    const o = await eventOrder({ flow: "hosted_checkout", enrollmentStatus: "rejected" });
+    mockSessionRetrieve.mockResolvedValue(paidSession(o.cs));
+    const res = await verifyGet(o.cs);
+    expect(await res.json()).toEqual({ status: "settlement_conflict" });
+    // The trigger's predicate refused the confirm; the enrollment stays rejected.
+    expect(await enrollmentStatus(o.enrollmentId)).toBe("rejected");
+    expect(await ticketCount(o.enrollmentId)).toBe(0);
+    expect((await conflictRows(o.cs))[0].conflict_type).toBe("rejected_enrollment");
+  });
+
+  it("V4: verified replay repairs missing tickets and returns the enrollment status", async () => {
+    const o = await eventOrder({ flow: "hosted_checkout", paymentStatus: "verified", enrollmentStatus: "confirmed" });
+    expect(await ticketCount(o.enrollmentId)).toBe(0); // the ticketless state
+    mockSessionRetrieve.mockResolvedValue(paidSession(o.cs));
+    const res = await verifyGet(o.cs);
+    expect(await res.json()).toEqual({ status: "confirmed" });
+    expect(await ticketCount(o.enrollmentId)).toBe(2); // repaired
+  });
+
+  it("V5: settles a fresh paid session — verified + confirmed + tickets, {status:'confirmed'}", async () => {
+    const o = await eventOrder({ flow: "hosted_checkout" });
+    mockSessionRetrieve.mockResolvedValue(paidSession(o.cs));
+    const res = await verifyGet(o.cs);
+    expect(await res.json()).toEqual({ status: "confirmed" });
+    const p = await paymentRow(o.paymentId);
+    expect(p.status).toBe("verified");
+    expect(p.stripe_payment_intent_id).toMatch(/^pi_v_/); // backfilled
+    expect(await ticketCount(o.enrollmentId)).toBe(2);
+  });
+
+  it("V6: unknown session → 404; unpaid session → pending — response shapes preserved", async () => {
+    mockSessionRetrieve.mockResolvedValue(paidSession(`cs_rs_v6_${uniq()}`));
+    expect((await verifyGet(`cs_rs_v6_${uniq()}`)).status).toBe(404);
+    const o = await eventOrder({ flow: "hosted_checkout" });
+    mockSessionRetrieve.mockResolvedValue({ id: o.cs, payment_status: "unpaid" });
+    expect(await (await verifyGet(o.cs)).json()).toEqual({ status: "pending" });
   });
 });
