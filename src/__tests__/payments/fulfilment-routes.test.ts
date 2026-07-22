@@ -338,6 +338,38 @@ describe("browser route fulfilment posture", () => {
   const verifyReq = (sid: string) =>
     new NextRequest(new Request(`https://t.kuunyi.com/api/public/payments/stripe/verify?session_id=${sid}`));
 
+  it("F5 verify: settlement database failure → 500, never a false confirmed", async () => {
+    // The old route ignored BOTH update errors and answered from the
+    // enrollment read — a db failure looked like success. Now the shared
+    // operation reports retryable and the adapter returns 500.
+    mockSessionRetrieve.mockResolvedValue({
+      id: "cs_1", payment_status: "paid", amount_total: 10000, currency: "sgd", payment_intent: "pi_1",
+    });
+    paymentRow!.status = "awaiting_payment";
+    // First payments query (adapter pre-check) succeeds; the settlement
+    // UPDATE chain fails at its resolving .select().
+    let call = 0;
+    mockAdminFrom.mockImplementation((table: string) => {
+      if (table === "payments") {
+        call += 1;
+        if (call <= 2) return stubFor(paymentRow, []); // pre-check + locate
+        const q = stubFor(paymentRow, []);
+        (q as { select: unknown }).select = vi.fn(() =>
+          Promise.resolve({ data: null, error: { message: "db down" } }));
+        return q;
+      }
+      if (table === "enrollments") return stubFor({ ...NOTIFIABLE_ENROLLMENT, status: "confirmed" });
+      return stubFor(null);
+    });
+
+    const { GET } = await import("@/app/api/public/payments/stripe/verify/route");
+    const res = await GET(new NextRequest(new Request(
+      "https://t.kuunyi.com/api/public/payments/stripe/verify?session_id=cs_1")));
+    expect(res.status).toBe(500);
+    const body = await res.json();
+    expect(body.status).toBeUndefined(); // no enrollment status leaks as success
+  });
+
   it("F3 intent/status settles via the shared op; fulfilment throw is now retryable (500)", async () => {
     // Pre-plan: inline settlement kept the Stripe-status shape when issuance
     // threw, because nothing else would retry. Plan v18: the webhook path and
@@ -362,21 +394,32 @@ describe("browser route fulfilment posture", () => {
     expect(await ok.json()).toEqual({ status: "succeeded" });
   });
 
-    it("F4 stripe/verify invokes the helper once and keeps its enrollment-status shape when it throws", async () => {
-    mockSessionRetrieve.mockResolvedValue({ payment_status: "paid", payment_intent: "pi_1" });
-    paymentRow = { id: "pay-1", enrollment_id: "enr-1", status: "verified" };
+    it("F4 stripe/verify repairs via the shared op; fulfilment throw is now retryable (500)", async () => {
+    // Pre-plan this route masked a fulfilment throw behind the enrollment
+    // status. Plan v18: the webhook and the client's re-verify both retry,
+    // so a failed repair is 500 — never a success shape over missing tickets.
+    mockSessionRetrieve.mockResolvedValue({
+      id: "cs_1", payment_status: "paid", payment_intent: "pi_1",
+      amount_total: 10000, currency: "sgd",
+    });
+    paymentRow!.status = "verified";
     mockIssue.mockRejectedValue(new Error("fulfilment boom"));
 
     const { GET } = await import("@/app/api/public/payments/stripe/verify/route");
     const res = await GET(verifyReq("cs_1"));
-    const body = await res.json();
 
     expect(mockIssue).toHaveBeenCalledTimes(1);
     expect(mockIssue).toHaveBeenCalledWith("enr-1");
-    expect(res.status).toBe(200);
-    // Enrollment status — its consumer maps this to a label, so the shape must
-    // not become a Stripe status.
-    expect(typeof body.status).toBe("string");
+    expect(res.status).toBe(500);
+
+    // Repair succeeds -> the enrollment-status shape is preserved (its
+    // consumer maps it to a label; it must never become a Stripe status).
+    mockIssue.mockResolvedValue(undefined);
+    paymentRow!.status = "verified";
+    const ok = await GET(verifyReq("cs_1"));
+    const body = await ok.json();
+    expect(ok.status).toBe(200);
+    expect(body.status).toBe("confirmed");
     expect(body.status).not.toBe("succeeded");
   });
 
