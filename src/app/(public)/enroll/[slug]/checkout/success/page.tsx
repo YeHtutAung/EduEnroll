@@ -490,8 +490,22 @@ function SuccessContent() {
           }
 
           pdf.setFont("helvetica", "bold");
-          const wordWidth = pdf.getTextWidth(sponsor.name);
           const gap = 1.2;
+
+          // Same bound as the canvas twin. `maxLogoWidth` constrains the logo
+          // branch only, so a text-only sponsor — or one whose logo failed to
+          // load and fell through to here — could still overrun its slot and
+          // collide with the next name in the "SUPPORTED BY" strip.
+          // "..." rather than "…", which is not in the standard PDF encoding.
+          const wordBudget = Math.max(maxLogoWidth - markSize - gap, 4);
+          let name = sponsor.name;
+          if (pdf.getTextWidth(name) > wordBudget) {
+            while (name.length > 1 && pdf.getTextWidth(`${name}...`) > wordBudget) {
+              name = name.slice(0, -1);
+            }
+            name = `${name}...`;
+          }
+          const wordWidth = pdf.getTextWidth(name);
           const groupWidth = markSize + gap + wordWidth;
           const startX =
             align === "right" ? x - groupWidth : align === "center" ? x - groupWidth / 2 : x;
@@ -520,7 +534,7 @@ function SuccessContent() {
             );
           } else pdf.roundedRect(startX, y - markSize / 2, markSize, markSize, 0.6, 0.6, "F");
           pdf.setTextColor(light ? 255 : 15, light ? 255 : 31, light ? 255 : 66);
-          pdf.text(sponsor.name, startX + markSize + gap, y + 0.8);
+          pdf.text(name, startX + markSize + gap, y + 0.8);
         };
 
         tickets.forEach((ticket, i) => {

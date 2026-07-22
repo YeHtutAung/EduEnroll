@@ -25,8 +25,9 @@ const EMPTY: SponsorPlacements = { presenting: null, partners: [], supported_by:
  * produced a null config, and that rendered as plausible-looking content
  * instead of as the fault it was.
  *
- * DEFAULT_SPONSOR_PLACEMENTS still exists for the admin preview, where sample
- * data is clearly being previewed rather than published.
+ * The sample constant it fell back to has been deleted outright rather than
+ * kept for previews: it had no runtime consumer, and a fallback that names
+ * invented sponsors has no safe caller.
  */
 export function resolveSponsorPlacements(
   config?: SponsorPlacements | null | unknown,
