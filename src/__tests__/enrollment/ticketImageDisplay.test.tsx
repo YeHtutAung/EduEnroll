@@ -102,6 +102,52 @@ describe("EvTrustedOfficial ticket artwork", () => {
     expect(img).not.toContain("object-cover");
   });
 
+  it("bounds the height so an extreme upload cannot run off the page", async () => {
+    // Uploads are validated on file size (5 MB) and MIME type only — never
+    // dimensions — so a portrait or panoramic image is accepted. Unbounded,
+    // a 1000x4000 upload renders a card several screens tall and pushes the
+    // quantity controls out of reach, once per ticket type.
+    const img = await imgTag();
+
+    expect(img).toMatch(/max-h-\[\d+px\]/);
+  });
+
+  it("keeps the artwork whole when the bound clamps it", async () => {
+    // A height bound alone would squash a tall image, and `cover` would crop it
+    // back. object-contain letterboxes instead, so nothing is lost.
+    const img = await imgTag();
+
+    expect(img).toContain("object-contain");
+  });
+
+  it("loads the first card's artwork eagerly and later ones lazily", async () => {
+    // The first poster is above the fold: lazy-loading it delays the main image
+    // and shifts the controls when it arrives.
+    const { default: Template } = await import(
+      "@/components/enrollment/templates/EvTrustedOfficialTemplate"
+    );
+    const { renderToStaticMarkup: render } = await import("react-dom/server");
+    const html = render(
+      <Template
+        appearance={{ brand_color: "#1e40af" } as never}
+        intake={intake}
+        classes={[
+          { ...cls, id: "c1", level: "Early bird", image_url: "https://example.test/a.jpeg" },
+          { ...cls, id: "c2", level: "Normal", image_url: "https://example.test/b.jpeg" },
+        ]}
+        labels={labels}
+        slug="august-2026"
+        currency="SGD"
+      />,
+    );
+
+    const first = html.match(/<img[^>]*a\.jpeg[^>]*>/)![0];
+    const second = html.match(/<img[^>]*b\.jpeg[^>]*>/)![0];
+
+    expect(first).toContain('loading="eager"');
+    expect(second).toContain('loading="lazy"');
+  });
+
   it("omits the image element entirely when a ticket has no artwork", async () => {
     const html = await markup({ image_url: null });
 
