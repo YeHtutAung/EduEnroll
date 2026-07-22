@@ -337,7 +337,10 @@ function SuccessContent() {
 
     ctx.fillStyle = "#8a90a5";
     ctx.font = font(TICKET_FONT.orderRefLabel);
-    // 38, not 40: the caption's box ended 6px BELOW the ref's top at 40.
+    // The caption sits close above the reference: its glyph box once ended
+    // BELOW the reference's top, so this row and TICKET_ROWS.orderRef are kept
+    // apart deliberately. See the geometry guard rather than trusting the gap
+    // by eye — the numbers live in TICKET_ROWS.
     ctx.fillText("ORDER REF", padX, m + TICKET_ROWS.orderRefLabel * S);
     ctx.fillStyle = "#ffffff";
     const refText = fitText(data.enrollment_ref, W - padX * 2, TICKET_FONT.orderRef, "bold");
