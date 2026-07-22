@@ -20,6 +20,21 @@ const CARD = {
 };
 
 const ID_LINE = "Ticket #b131e09c · 1 of 2";
+
+/**
+ * Rows drawn on the common card: no presenting sponsor.
+ *
+ * `presentedByCaption` is excluded deliberately — it is only drawn in the
+ * sponsor variant, where the header is a different layout, so asserting it
+ * here would test a card that is never rendered.
+ */
+const ROWS_UNDER_TEST = [
+  "eventName",
+  "tier",
+  "orderRefLabel",
+  "orderRef",
+  "ticketId",
+] as const satisfies readonly (keyof typeof TICKET_ROWS)[];
 const CAPTION = "Scan at entry";
 
 // ── Canvas metrics, measured in a real browser on Helvetica ────────────────
@@ -35,11 +50,11 @@ const CANVAS_METRICS: Record<string, { size: number; asc: number; desc: number; 
 
 function canvasBoxes(): Record<string, Box> {
   const out: Record<string, Box> = {};
-  for (const key of Object.keys(TICKET_ROWS) as (keyof typeof TICKET_ROWS)[]) {
+  for (const key of ROWS_UNDER_TEST) {
     const m = CANVAS_METRICS[key];
     out[key] = boxFor({
       x: CARD.left,
-      baseline: TICKET_ROWS[key],
+      baseline: TICKET_CARD.margin + TICKET_ROWS[key],
       width: m.width,
       fontSize: m.size,
       ascentRatio: m.asc,
@@ -86,7 +101,7 @@ function pdfBoxes(): Record<string, Box> {
     const dims = pdf.getTextDimensions(text); // real jsPDF metrics at current size
     return boxFor({
       x: CARD.left,
-      baseline: TICKET_ROWS[key],
+      baseline: TICKET_CARD.margin + TICKET_ROWS[key],
       width: dims.w,
       fontSize: size,
       // jsPDF reports total line height; split it the way Helvetica sits.
@@ -164,7 +179,7 @@ describe("card constants", () => {
   it("keeps the QR clear of the ticket-id line", () => {
     const top = qrTop();
     expect(top - TICKET_CARD.qrWhitePad).toBeGreaterThan(
-      TICKET_ROWS.ticketId + TICKET_CARD.idLineDescender,
+      TICKET_CARD.margin + TICKET_ROWS.ticketId + TICKET_CARD.idLineDescender,
     );
   });
 

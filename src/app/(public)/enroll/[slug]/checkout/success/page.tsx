@@ -208,11 +208,11 @@ function SuccessContent() {
     if (!data) return null;
     const sponsorConfig = resolveSponsorPlacements(data.sponsor_config);
     const S = 6;
-    const W = 100 * S;
-    const H = 150 * S;
-    const m = 8 * S;
+    const W = TICKET_CARD.pageWidth * S;
+    const H = TICKET_CARD.pageHeight * S;
+    const m = TICKET_CARD.margin * S;
     const cardW = W - 2 * m;
-    const cardH = 112 * S;
+    const cardH = TICKET_CARD.cardHeight * S;
     const canvas = document.createElement("canvas");
     canvas.width = W;
     canvas.height = H;
@@ -260,7 +260,7 @@ function SuccessContent() {
     roundRectPath(ctx, m, m, cardW, cardH, 4 * S);
     ctx.fill();
 
-    const padX = m + 8 * S;
+    const padX = TICKET_CARD.padX * S;
     ctx.textBaseline = "alphabetic";
     ctx.fillStyle = "#d4af5a";
     ctx.textAlign = "left";
@@ -298,7 +298,7 @@ function SuccessContent() {
       ctx.fillStyle = "#8a90a5";
       ctx.font = font(5.5, "bold");
       ctx.textAlign = "right";
-      ctx.fillText("PRESENTED BY", W - padX, m + 8 * S);
+      ctx.fillText("PRESENTED BY", W - padX, m + TICKET_ROWS.presentedByCaption * S);
       if (presentingHasLogo) {
         ctx.fillStyle = "#ffffff";
         roundRectPath(ctx, W - padX - 38 * S, m + 9 * S, 38 * S, 12 * S, 2 * S);
@@ -359,18 +359,25 @@ function SuccessContent() {
     // baseline and covered it. Push the code down if the panel would collide.
     const qy = qrTop(S);
     ctx.fillStyle = "#ffffff";
-    roundRectPath(ctx, qx - 3 * S, qy - 3 * S, qs + 6 * S, qs + 6 * S, 2 * S);
+    roundRectPath(
+      ctx,
+      qx - TICKET_CARD.qrWhitePad * S,
+      qy - TICKET_CARD.qrWhitePad * S,
+      qs + TICKET_CARD.qrWhitePad * 2 * S,
+      qs + TICKET_CARD.qrWhitePad * 2 * S,
+      2 * S,
+    );
     ctx.fill();
     const qrImg = await loadImage(qrUrl);
     ctx.drawImage(qrImg, qx, qy, qs, qs);
     ctx.fillStyle = "#8a90a5";
-    ctx.font = font(6.5);
+    ctx.font = font(TICKET_CARD.qrCaptionSize);
     ctx.textAlign = "center";
     ctx.fillText("Scan at entry", W / 2, qy + qs + TICKET_CARD.qrCaptionGap * S);
 
     if (sponsorConfig.supported_by.length > 0) {
-      const stripY = m + cardH + 4 * S;
-      const stripH = 18 * S;
+      const stripY = m + cardH + TICKET_CARD.sponsorStripTop * S;
+      const stripH = TICKET_CARD.sponsorStripHeight * S;
       ctx.fillStyle = "#ffffff";
       ctx.strokeStyle = "#e3e0d6";
       ctx.lineWidth = S;
@@ -477,11 +484,11 @@ function SuccessContent() {
           }),
         );
 
-        const W = 100;
-        const H = 150;
-        const m = 8;
+        const W = TICKET_CARD.pageWidth;
+        const H = TICKET_CARD.pageHeight;
+        const m = TICKET_CARD.margin;
         const cardW = W - 2 * m;
-        const cardH = 112;
+        const cardH = TICKET_CARD.cardHeight;
         const pdf = new jsPDF({ unit: "mm", format: [W, H] });
 
         const logoSponsors = [sponsorConfig.presenting, ...sponsorConfig.supported_by].filter(
@@ -574,7 +581,7 @@ function SuccessContent() {
           pdf.setFillColor(15, 31, 66);
           pdf.roundedRect(m, m, cardW, cardH, 4, 4, "F");
 
-          const padX = m + 8;
+          const padX = TICKET_CARD.padX;
 
           /**
            * jsPDF twin of the canvas `fitText`: shrink to the largest size that
@@ -628,7 +635,9 @@ function SuccessContent() {
             const presentingHasLogo = Boolean(sponsorConfig.presenting.logo_url);
             pdf.setTextColor(138, 144, 165);
             pdf.setFontSize(5.5);
-            pdf.text("PRESENTED BY", W - padX, m + 8, { align: "right" });
+            pdf.text("PRESENTED BY", W - padX, m + TICKET_ROWS.presentedByCaption, {
+              align: "right",
+            });
             if (presentingHasLogo) {
               pdf.setFillColor(255, 255, 255);
               pdf.roundedRect(W - padX - 38, m + 9, 38, 10, 2, 2, "F");
@@ -685,16 +694,24 @@ function SuccessContent() {
             // qy, which sat over the "Ticket #" line.
             const qy = qrTop();
             pdf.setFillColor(255, 255, 255);
-            pdf.roundedRect(qx - 3, qy - 3, qs + 6, qs + 6, 2, 2, "F");
+            pdf.roundedRect(
+              qx - TICKET_CARD.qrWhitePad,
+              qy - TICKET_CARD.qrWhitePad,
+              qs + TICKET_CARD.qrWhitePad * 2,
+              qs + TICKET_CARD.qrWhitePad * 2,
+              2,
+              2,
+              "F",
+            );
             pdf.addImage(qr, "PNG", qx, qy, qs, qs);
             pdf.setTextColor(138, 144, 165);
-            pdf.setFontSize(6.5);
+            pdf.setFontSize(TICKET_CARD.qrCaptionSize);
             pdf.text("Scan at entry", W / 2, qy + qs + TICKET_CARD.qrCaptionGap, { align: "center" });
           }
 
           if (sponsorConfig.supported_by.length > 0) {
-            const stripY = m + cardH + 4;
-            const stripH = 18;
+            const stripY = m + cardH + TICKET_CARD.sponsorStripTop;
+            const stripH = TICKET_CARD.sponsorStripHeight;
             pdf.setFillColor(255, 255, 255);
             pdf.setDrawColor(227, 224, 214);
             pdf.setLineWidth(0.25);

@@ -110,6 +110,8 @@ export function overlaps(a: Box, b: Box): boolean {
  * against the same layout.
  */
 export const TICKET_ROWS = {
+  /** "PRESENTED BY" caption, drawn only when a presenting sponsor exists. */
+  presentedByCaption: 8,
   eventName: 12,
   tier: 26,
   orderRefLabel: 38,
