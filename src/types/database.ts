@@ -315,8 +315,42 @@ export interface Payment {
   verified_by: string | null; // references users.id
   verified_by_agent: number | null; // telegram chat_id of agent verifier
   hitpay_payment_id: string | null; // HitPay payment request ID
+  // Stripe settlement contract (Plan v18): snapshot validated at settlement,
+  // never recomputed; attempt identity + flow travel together (CHECK-enforced).
+  provider_amount_minor: number | null;
+  provider_currency: string | null;
+  integration_flow: "direct_payment_intent" | "hosted_checkout" | null;
+  attempt_seq: number | null;
+  card_brand: string | null;
+  card_last4: string | null;
   verified_at: string | null;
   created_at: string;
+}
+
+// One row per (provider object, conflict type). Money-adjacent anomalies are
+// recorded here rather than silently logged; cleanup_status='pending' means a
+// payable object still exists — reopening sales requires zero such rows.
+export interface PaymentSettlementConflict {
+  id: string;
+  provider: "stripe";
+  provider_object_id: string;
+  first_source_type: "webhook_event" | "creation_request";
+  first_source_id: string;
+  last_source_type: "webhook_event" | "creation_request";
+  last_source_id: string;
+  payment_id: string | null;
+  enrollment_id: string | null;
+  conflict_type: string;
+  expected_amount_minor: number | null;
+  actual_amount_minor: number | null;
+  expected_currency: string | null;
+  actual_currency: string | null;
+  status: "open" | "resolved";
+  cleanup_status: "none" | "pending" | "done";
+  occurrence_count: number;
+  created_at: string;
+  resolved_at: string | null;
+  resolution_note: string | null;
 }
 
 export interface EnrollmentItem {

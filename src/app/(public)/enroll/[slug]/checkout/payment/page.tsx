@@ -93,18 +93,36 @@ function PayNowTab({
 
   const startPolling = useCallback(() => {
     if (pollRef.current) clearInterval(pollRef.current);
+    // Polling has a defined timeout (Plan v18 §3c): after it, surface support
+    // rather than spinning forever on a state that may never resolve.
+    let ticks = 0;
+    const MAX_TICKS = 200; // 200 × 3s = 10 minutes, matching the QR expiry
     pollRef.current = setInterval(async () => {
+      ticks += 1;
       try {
         const res = await fetch(`/api/public/payments/stripe/intent/status?pi=${piId}`);
         const { status } = await res.json();
         if (status === "succeeded") {
           clearInterval(pollRef.current!);
           router.push(`/enroll/${slug}/checkout/success/?ref=${enrollmentRef}`);
-        } else if (status === "cancelled") {
+          return;
+        }
+        if (status === "cancelled") {
           clearInterval(pollRef.current!);
           setError("Payment expired. Please return to the event page and try again.");
+          return;
         }
-      } catch { /* network error — keep polling */ }
+        if (status === "settlement_conflict") {
+          // Terminal — stop polling; this cannot resolve itself.
+          clearInterval(pollRef.current!);
+          setError(`This payment needs attention. Contact support and quote reference ${enrollmentRef}.`);
+          return;
+        }
+      } catch { /* network error — keep polling until the timeout */ }
+      if (ticks >= MAX_TICKS) {
+        clearInterval(pollRef.current!);
+        setError(`We could not confirm this payment in time. Contact support and quote reference ${enrollmentRef}.`);
+      }
     }, 3000);
   }, [piId, slug, enrollmentRef, router]);
 
