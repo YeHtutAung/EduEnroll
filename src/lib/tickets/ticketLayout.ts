@@ -113,11 +113,13 @@ export const TICKET_ROWS = {
   /** "PRESENTED BY" caption, drawn only when a presenting sponsor exists. */
   presentedByCaption: 8,
   eventName: 12,
-  tier: 26,
-  orderRefLabel: 38,
-  orderRef: 47,
+  /** 28, not 26: at a smaller tier size the old row left the title and the
+   *  tier almost touching. */
+  tier: 28,
+  orderRefLabel: 37,
+  orderRef: 46,
   /** Ticket id, and the "N of M" index when there is more than one ticket. */
-  ticketId: 54,
+  ticketId: 53,
 } as const;
 
 /**
@@ -145,7 +147,7 @@ export const TICKET_CARD = {
    *  8.5, not 7: at 7 the caption's ascender rose into the QR's white panel,
    *  which extends 3 units past the code itself. */
   qrCaptionGap: 8.5,
-  qrCaptionSize: 6.5,
+  qrCaptionSize: 6,
 
   /** Clearance the QR panel keeps below the ticket-id line. */
   idLineClearance: 5,
@@ -154,6 +156,26 @@ export const TICKET_CARD = {
   /** Sponsor strip, drawn below the card. */
   sponsorStripTop: 4,
   sponsorStripHeight: 18,
+} as const;
+
+/**
+ * Base font sizes, before the fit-to-width pass shrinks anything that is too
+ * wide for the card.
+ *
+ * These are BASE sizes, which is why they matter: a long tier like "Early bird"
+ * was already being shrunk to fit, but a short one like "Normal" rendered at
+ * the full base and dominated the card. Reducing the base is what fixes the
+ * short case.
+ *
+ * Intended hierarchy: tier largest but not dominant, then event name and order
+ * reference clearly readable, then metadata and caption as support.
+ */
+export const TICKET_FONT = {
+  eventName: 7.5,
+  tier: 16,
+  orderRefLabel: 6,
+  orderRef: 11,
+  ticketId: 6,
 } as const;
 
 /** Y of the QR's top edge: bottom-anchored, but never over the id line. */

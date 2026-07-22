@@ -1,6 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { jsPDF } from "jspdf";
-import { boxFor, overlaps, TICKET_ROWS, TICKET_CARD, qrTop, type Box } from "@/lib/tickets/ticketLayout";
+import {
+  boxFor,
+  overlaps,
+  TICKET_ROWS,
+  TICKET_CARD,
+  TICKET_FONT,
+  qrTop,
+  type Box,
+} from "@/lib/tickets/ticketLayout";
 
 // ─── Whole-card geometry, measured per renderer ─────────────────────────────
 //
@@ -22,6 +30,30 @@ const CARD = {
 const ID_LINE = "Ticket #b131e09c · 1 of 2";
 
 /**
+ * Both tier shapes, because they fail differently.
+ *
+ * "Early bird" is too wide for the card and gets shrunk to 14.5 whether the
+ * base is 16 or 20 — it can NEVER reveal an oversized base. "Normal" fits, so
+ * it renders at the full base: 16 -> 96px, but 20 -> 117px, which is the
+ * reported top-heavy ticket. Modelling only "Early bird" is why the first
+ * version of this guard passed with the bug present.
+ *
+ * `widthPerEm` is measured (rendered width in layout units ÷ font size), so the
+ * fitted size is DERIVED from TICKET_FONT here rather than hardcoded.
+ */
+const TIER_VARIANTS = [
+  { label: "Normal", widthPerEm: 3.4456, asc: 0.7188, desc: 0.0104 },
+  { label: "Early bird", widthPerEm: 4.6131, asc: 0.7241, desc: 0.2069 },
+] as const;
+
+/** The renderers' fit-to-width pass: step down in quarters until it fits. */
+function fittedSize(base: number, widthPerEm: number, avail: number): number {
+  let size = base;
+  while (size * widthPerEm > avail && size > base * 0.55) size -= 0.25;
+  return size;
+}
+
+/**
  * Rows drawn on the common card: no presenting sponsor.
  *
  * `presentedByCaption` is excluded deliberately — it is only drawn in the
@@ -40,18 +72,26 @@ const CAPTION = "Scan at entry";
 // ── Canvas metrics, measured in a real browser on Helvetica ────────────────
 // (actualBoundingBoxAscent / actualBoundingBoxDescent ÷ font size)
 const CANVAS_METRICS: Record<string, { size: number; asc: number; desc: number; width: number }> = {
-  eventName: { size: 6.5, asc: 0.7179, desc: 0, width: 67.2 },
-  tier: { size: 14.5, asc: 0.7241, desc: 0.2069, width: 66.9 },
-  orderRefLabel: { size: 7, asc: 0.7143, desc: 0, width: 32.1 },
-  orderRef: { size: 10.75, asc: 0.7442, desc: 0.0775, width: 66.9 },
-  ticketId: { size: 6, asc: 0.7222, desc: 0, width: 67.4 },
-  caption: { size: TICKET_CARD.qrCaptionSize, asc: 0.7179, desc: 0.2069, width: 22.4 },
+  eventName: { size: 6.5, asc: 0.7179, desc: 0, width: 67.19 },
+  tier: { size: 14.5, asc: 0.7241, desc: 0.2069, width: 66.89 },
+  orderRefLabel: { size: 6, asc: 0.7222, desc: 0, width: 35.33 },
+  orderRef: { size: 10.75, asc: 0.7442, desc: 0.0775, width: 66.91 },
+  ticketId: { size: 6, asc: 0.7222, desc: 0, width: 67.49 },
+  caption: { size: TICKET_CARD.qrCaptionSize, asc: 0.7222, desc: 0.1944, width: 35.35 },
 };
 
-function canvasBoxes(): Record<string, Box> {
+function canvasBoxes(tierIndex = 1): Record<string, Box> {
   const out: Record<string, Box> = {};
+  const variant = TIER_VARIANTS[tierIndex];
+  const avail = CARD.right - CARD.left;
   for (const key of ROWS_UNDER_TEST) {
-    const m = CANVAS_METRICS[key];
+    const m =
+      key === "tier"
+        ? (() => {
+            const size = fittedSize(TICKET_FONT.tier, variant.widthPerEm, avail);
+            return { size, asc: variant.asc, desc: variant.desc, width: size * variant.widthPerEm };
+          })()
+        : CANVAS_METRICS[key];
     out[key] = boxFor({
       x: CARD.left,
       baseline: TICKET_CARD.margin + TICKET_ROWS[key],
@@ -81,7 +121,7 @@ function canvasBoxes(): Record<string, Box> {
 }
 
 /** PDF boxes measured from a real jsPDF document. */
-function pdfBoxes(): Record<string, Box> {
+function pdfBoxes(tier: string = "Early bird"): Record<string, Box> {
   const pdf = new jsPDF({ unit: "mm", format: [TICKET_CARD.pageWidth, TICKET_CARD.pageHeight] });
   const avail = CARD.right - CARD.left;
 
@@ -111,11 +151,11 @@ function pdfBoxes(): Record<string, Box> {
   };
 
   const out: Record<string, Box> = {
-    eventName: row("eventName", "AUGUST 2026 EVENT", 8, "bold"),
-    tier: row("tier", "Early bird", 20, "bold"),
-    orderRefLabel: row("orderRefLabel", "ORDER REF", 7, "normal"),
-    orderRef: row("orderRef", "F-0722-CEQ7", 13, "bold"),
-    ticketId: row("ticketId", ID_LINE, 7, "normal"),
+    eventName: row("eventName", "AUGUST 2026 EVENT", TICKET_FONT.eventName, "bold"),
+    tier: row("tier", tier, TICKET_FONT.tier, "bold"),
+    orderRefLabel: row("orderRefLabel", "ORDER REF", TICKET_FONT.orderRefLabel, "normal"),
+    orderRef: row("orderRef", "F-0722-CEQ7", TICKET_FONT.orderRef, "bold"),
+    ticketId: row("ticketId", ID_LINE, TICKET_FONT.ticketId, "normal"),
   };
 
   const top = qrTop();
@@ -152,8 +192,10 @@ function collisions(boxes: Record<string, Box>): string[] {
 }
 
 describe.each([
-  ["canvas", canvasBoxes],
-  ["pdf (real jsPDF metrics)", pdfBoxes],
+  ["canvas — tier \"Normal\" (fits at base)", () => canvasBoxes(0)],
+  ["canvas — tier \"Early bird\" (shrunk to fit)", () => canvasBoxes(1)],
+  ["pdf — tier \"Normal\"", () => pdfBoxes("Normal")],
+  ["pdf — tier \"Early bird\"", () => pdfBoxes("Early bird")],
 ])("ticket card geometry — %s", (_name, build) => {
   it("has no overlapping elements", () => {
     expect(collisions(build())).toEqual([]);
@@ -172,6 +214,55 @@ describe.each([
     // (canvas) below the navy card in both renderers.
     const { caption } = build();
     expect(caption.bottom).toBeLessThan(CARD.bottom);
+  });
+});
+
+describe("measured metrics stay in step with the font constants", () => {
+  // The canvas pass reads a hardcoded table of MEASURED metrics, so it cannot
+  // notice a change to TICKET_FONT on its own — lower a base size and the table
+  // silently describes a card that is no longer rendered. A fitted size can
+  // never exceed its base, so this catches exactly that drift and forces a
+  // re-measure.
+  it.each(Object.keys(TICKET_FONT) as (keyof typeof TICKET_FONT)[])(
+    "%s: recorded size does not exceed its base",
+    (key) => {
+      expect(
+        CANVAS_METRICS[key].size,
+        `CANVAS_METRICS.${key} was measured at ${CANVAS_METRICS[key].size} but TICKET_FONT.${key} is now ${TICKET_FONT[key]} — re-measure the table`,
+      ).toBeLessThanOrEqual(TICKET_FONT[key]);
+    },
+  );
+
+  it("caption metrics match the configured caption size", () => {
+    expect(CANVAS_METRICS.caption.size).toBe(TICKET_CARD.qrCaptionSize);
+  });
+});
+
+describe("type hierarchy", () => {
+  // The drift guard below only catches a base LOWERED past the recorded size.
+  // Restoring the original tier: 20 passes it (14.5 <= 20) while "Normal" goes
+  // back to 117px — the reported bug. These pin the intent instead.
+  it("keeps the tier at or below its rebalanced size", () => {
+    expect(TICKET_FONT.tier).toBeLessThanOrEqual(16);
+  });
+
+  it("keeps the tier from dominating the order reference", () => {
+    expect(TICKET_FONT.tier / TICKET_FONT.orderRef).toBeLessThanOrEqual(1.5);
+  });
+
+  it("orders the hierarchy: tier > reference > event name > metadata", () => {
+    expect(TICKET_FONT.tier).toBeGreaterThan(TICKET_FONT.orderRef);
+    expect(TICKET_FONT.orderRef).toBeGreaterThan(TICKET_FONT.eventName);
+    expect(TICKET_FONT.eventName).toBeGreaterThan(TICKET_FONT.ticketId);
+    expect(TICKET_FONT.ticketId).toBeGreaterThanOrEqual(TICKET_CARD.qrCaptionSize);
+  });
+
+  it("caps the short-tier render, which is the case that regressed", () => {
+    // "Normal" fits, so it renders at the full base: 16 -> 96px, 20 -> 117px.
+    const avail = CARD.right - CARD.left;
+    const normal = TIER_VARIANTS[0];
+    const size = fittedSize(TICKET_FONT.tier, normal.widthPerEm, avail);
+    expect(size * 6).toBeLessThanOrEqual(96); // canvas px at S=6
   });
 });
 
