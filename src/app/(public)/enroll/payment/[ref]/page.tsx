@@ -1038,12 +1038,20 @@ export default function PaymentInstructionsPage() {
           setStripeError(`This payment needs attention. Contact support and quote reference ${params.ref}.`);
           return;
         }
-        if (outcome.kind === "pending_confirmation") {
-          // Retries exhausted (500s, network, or still-pending). The money
-          // decision is safe server-side — only the confirmation display is
-          // owed. Clear the spinner; the status page shows it once settled.
+        if (outcome.kind === "permanent_error") {
+          // 4xx: will not self-heal — a paid Session with no payment row is
+          // an anomaly, not a race. Straight to support.
           setStripeReturn(null);
-          setStripeError("Payment received — confirmation is still processing. Check this page again in a few minutes; no further payment is needed.");
+          setStripeError(`We could not verify this payment. Contact support and quote reference ${params.ref}.`);
+          return;
+        }
+        if (outcome.kind === "pending_confirmation") {
+          // Transient retries exhausted or still pending. Neither is PROOF
+          // the payment landed — a network failure proves nothing, and
+          // "pending" can still fail. Neutral copy: no false reassurance,
+          // and no invitation to pay again either.
+          setStripeReturn(null);
+          setStripeError("Payment confirmation is still processing. Do not submit another payment yet — check again shortly or contact support.");
           return;
         }
         const STATUS_LABELS: Record<string, { en: string; mm: string }> = {

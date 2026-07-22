@@ -10,6 +10,8 @@ const ok = (body: unknown) =>
   ({ ok: true, json: async () => body }) as unknown as Response;
 const http500 = () =>
   ({ ok: false, status: 500, json: async () => ({ error: "retry" }) }) as unknown as Response;
+const httpStatus = (status: number) =>
+  ({ ok: false, status, json: async () => ({ error: "e" }) }) as unknown as Response;
 
 const noSleep = () => Promise.resolve();
 
@@ -35,6 +37,29 @@ describe("verifyStripeReturn — no outcome leaves a spinner", () => {
     const out = await verifyStripeReturn({ sessionId: "cs_1", fetchImpl, sleep: noSleep });
     expect(out).toEqual({ kind: "conflict" });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("HTTP 404 (permanent) → ONE attempt, support outcome — retrying cannot self-heal an orphan", async () => {
+    // The creation contract finalizes the payment row BEFORE returning the
+    // Checkout URL, so a paid Session with no row is an anomaly, not a race.
+    const fetchImpl = seq(httpStatus(404));
+    const out = await verifyStripeReturn({ sessionId: "cs_1", fetchImpl, sleep: noSleep });
+    expect(out).toEqual({ kind: "permanent_error" });
+    expect(fetchImpl).toHaveBeenCalledTimes(1); // no wasted retries, no false reassurance
+  });
+
+  it("HTTP 400 (permanent) → same single-attempt support outcome", async () => {
+    const fetchImpl = seq(httpStatus(400));
+    const out = await verifyStripeReturn({ sessionId: "cs_1", fetchImpl, sleep: noSleep });
+    expect(out).toEqual({ kind: "permanent_error" });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("HTTP 502/503/504 (transient) → retried like 500", async () => {
+    const fetchImpl = seq(httpStatus(502), httpStatus(503), httpStatus(504), ok({ status: "confirmed" }));
+    const out = await verifyStripeReturn({ sessionId: "cs_1", fetchImpl, sleep: noSleep });
+    expect(out).toEqual({ kind: "status", status: "confirmed" });
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
   });
 
   it("HTTP 500 (retryable settlement) → bounded retries, then pending_confirmation", async () => {
