@@ -1,5 +1,4 @@
 import type { Sponsor, SponsorPlacements } from "@/types/database";
-import { DEFAULT_SPONSOR_PLACEMENTS } from "@/types/database";
 
 function isSponsor(value: unknown): value is Sponsor {
   return Boolean(
@@ -10,23 +9,35 @@ function isSponsor(value: unknown): value is Sponsor {
   );
 }
 
+const EMPTY: SponsorPlacements = { presenting: null, partners: [], supported_by: [] };
+
+/**
+ * Resolves a tenant's stored sponsor config into what should actually be shown.
+ *
+ * Absent, malformed or partial config resolves to NOTHING — never to sample
+ * sponsors. This used to fall back to DEFAULT_SPONSOR_PLACEMENTS, so a tenant
+ * with no sponsors configured, or whose config failed to load, got "Northwind",
+ * "Vertex", "Lumen" and "Nexa" printed on real customers' e-tickets. Inventing
+ * a sponsor is worse than showing none: it misrepresents a commercial
+ * relationship on a document the buyer keeps and may reproduce a real mark.
+ *
+ * It also made failures invisible. A wrong table name in the enrolment API
+ * produced a null config, and that rendered as plausible-looking content
+ * instead of as the fault it was.
+ *
+ * DEFAULT_SPONSOR_PLACEMENTS still exists for the admin preview, where sample
+ * data is clearly being previewed rather than published.
+ */
 export function resolveSponsorPlacements(
   config?: SponsorPlacements | null | unknown,
 ): SponsorPlacements {
-  if (!config || typeof config !== "object") return DEFAULT_SPONSOR_PLACEMENTS;
+  if (!config || typeof config !== "object") return EMPTY;
   const value = config as Partial<SponsorPlacements>;
   return {
-    presenting:
-      value.presenting === null
-        ? null
-        : isSponsor(value.presenting)
-          ? value.presenting
-          : DEFAULT_SPONSOR_PLACEMENTS.presenting,
-    partners: Array.isArray(value.partners)
-      ? value.partners.filter(isSponsor).slice(0, 12)
-      : DEFAULT_SPONSOR_PLACEMENTS.partners,
+    presenting: isSponsor(value.presenting) ? value.presenting : null,
+    partners: Array.isArray(value.partners) ? value.partners.filter(isSponsor).slice(0, 12) : [],
     supported_by: Array.isArray(value.supported_by)
       ? value.supported_by.filter(isSponsor).slice(0, 6)
-      : DEFAULT_SPONSOR_PLACEMENTS.supported_by,
+      : [],
   };
 }

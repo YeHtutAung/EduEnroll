@@ -134,8 +134,20 @@ function SuccessContent() {
     const size = markSize * scale;
     const shape = sponsor.mark ?? "square";
     const color = sponsor.mark_color || (shape === "circle" ? "#d4af5a" : "#0f1f42");
-    const wordWidth = ctx.measureText(sponsor.name).width;
     const gap = 4 * scale;
+
+    // Constrain the wordmark to its slot. `maxLogoWidth` bounded the logo path
+    // only, so text sponsors were measured but never fitted and adjacent names
+    // in the "SUPPORTED BY" strip ran into each other.
+    const wordBudget = Math.max(maxLogoWidth * scale - size - gap, 8 * scale);
+    let name = sponsor.name;
+    if (ctx.measureText(name).width > wordBudget) {
+      while (name.length > 1 && ctx.measureText(`${name}…`).width > wordBudget) {
+        name = name.slice(0, -1);
+      }
+      name = `${name}…`;
+    }
+    const wordWidth = ctx.measureText(name).width;
     const groupWidth = size + gap + wordWidth;
     const startX = align === "right" ? x - groupWidth : align === "center" ? x - groupWidth / 2 : x;
     const markX = startX;
@@ -177,7 +189,7 @@ function SuccessContent() {
     ctx.fillStyle = light ? "#ffffff" : "#0f1f42";
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
-    ctx.fillText(sponsor.name, startX + size + gap, y);
+    ctx.fillText(name, startX + size + gap, y);
   }
 
   // Render a single e-ticket to a PNG blob (canvas), mirroring the PDF layout.
@@ -203,6 +215,39 @@ function SuccessContent() {
     const font = (px: number, weight = "normal") =>
       `${weight} ${px * S}px Helvetica, Arial, sans-serif`;
 
+    /**
+     * Sets ctx.font to the largest size up to `px` at which `text` fits inside
+     * `maxWidth`, and returns the text — ellipsised if it will not fit even at
+     * the floor size.
+     *
+     * The layout was written with fixed sizes and no measurement, so anything
+     * longer than the samples it was designed against ran past the card: the
+     * ticket tier and order ref overflowed the right edge, and the event name
+     * collided with the "PRESENTED BY" block. Nothing is truncated for the
+     * common short values — they simply fit at full size.
+     */
+    const fitText = (
+      text: string,
+      maxWidth: number,
+      px: number,
+      weight = "normal",
+      minPx = px * 0.55,
+    ): string => {
+      let size = px;
+      ctx.font = font(size, weight);
+      while (ctx.measureText(text).width > maxWidth && size > minPx) {
+        size -= 0.25;
+        ctx.font = font(size, weight);
+      }
+      if (ctx.measureText(text).width <= maxWidth) return text;
+
+      let clipped = text;
+      while (clipped.length > 1 && ctx.measureText(`${clipped}…`).width > maxWidth) {
+        clipped = clipped.slice(0, -1);
+      }
+      return `${clipped}…`;
+    };
+
     ctx.fillStyle = "#f7f5ef";
     ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = "#0f1f42";
@@ -212,9 +257,17 @@ function SuccessContent() {
     const padX = m + 8 * S;
     ctx.textBaseline = "alphabetic";
     ctx.fillStyle = "#d4af5a";
-    ctx.font = font(8, "bold");
     ctx.textAlign = "left";
-    ctx.fillText((data.event_name || "").toUpperCase(), padX, m + 12 * S);
+    // Reserve the right-hand block (presenting sponsor, or "Ticket i/n") so the
+    // event name cannot run underneath it.
+    const headerRightReserve = sponsorConfig.presenting ? 42 * S : 22 * S;
+    const eventNameText = fitText(
+      (data.event_name || "").toUpperCase(),
+      W - padX * 2 - headerRightReserve,
+      8,
+      "bold",
+    );
+    ctx.fillText(eventNameText, padX, m + 12 * S);
     if (sponsorConfig.presenting) {
       const presentingHasLogo = Boolean(sponsorConfig.presenting.logo_url);
       ctx.fillStyle = "#8a90a5";
@@ -246,9 +299,9 @@ function SuccessContent() {
     }
 
     ctx.fillStyle = "#ffffff";
-    ctx.font = font(20, "bold");
     ctx.textAlign = "left";
-    ctx.fillText(ticket.tier, padX, m + 26 * S);
+    const tierText = fitText(ticket.tier, W - padX * 2, 20, "bold");
+    ctx.fillText(tierText, padX, m + 26 * S);
 
     ctx.strokeStyle = "rgba(255,255,255,0.5)";
     ctx.lineWidth = 0.5 * S;
@@ -263,15 +316,18 @@ function SuccessContent() {
     ctx.font = font(7);
     ctx.fillText("ORDER REF", padX, m + 40 * S);
     ctx.fillStyle = "#ffffff";
-    ctx.font = font(13, "bold");
-    ctx.fillText(data.enrollment_ref, padX, m + 47 * S);
+    const refText = fitText(data.enrollment_ref, W - padX * 2, 13, "bold");
+    ctx.fillText(refText, padX, m + 47 * S);
     ctx.fillStyle = "#8a90a5";
     ctx.font = font(7);
     ctx.fillText(`Ticket #${ticket.jti.slice(0, 8)}`, padX, m + 53 * S);
 
     const qs = 44 * S;
     const qx = (W - qs) / 2;
-    const qy = m + cardH - qs - 14 * S;
+    // The QR's white panel starts 3*S above qy, which sat above the "Ticket #"
+    // baseline and covered it. Push the code down if the panel would collide.
+    const ticketLineBottom = m + 53 * S + 2 * S; // baseline + descender
+    const qy = Math.max(m + cardH - qs - 14 * S, ticketLineBottom + 5 * S);
     ctx.fillStyle = "#ffffff";
     roundRectPath(ctx, qx - 3 * S, qy - 3 * S, qs + 6 * S, qs + 6 * S, 2 * S);
     ctx.fill();
@@ -475,11 +531,43 @@ function SuccessContent() {
           pdf.roundedRect(m, m, cardW, cardH, 4, 4, "F");
 
           const padX = m + 8;
+
+          /**
+           * jsPDF twin of the canvas `fitText`: shrink to the largest size that
+           * fits, then ellipsise only if it still will not. The PDF layout used
+           * the same fixed sizes and coordinates as the canvas, so it overflowed
+           * identically — long tiers and refs ran past the card edge.
+           * "..." rather than "…", which is not in the standard PDF encoding.
+           */
+          const fitPdf = (
+            text: string,
+            maxWidth: number,
+            size: number,
+            minSize = size * 0.55,
+          ): string => {
+            let s = size;
+            pdf.setFontSize(s);
+            while (pdf.getTextWidth(text) > maxWidth && s > minSize) {
+              s -= 0.25;
+              pdf.setFontSize(s);
+            }
+            if (pdf.getTextWidth(text) <= maxWidth) return text;
+            let clipped = text;
+            while (clipped.length > 1 && pdf.getTextWidth(`${clipped}...`) > maxWidth) {
+              clipped = clipped.slice(0, -1);
+            }
+            return `${clipped}...`;
+          };
+
           // Event name (gold) + ticket index (right)
           pdf.setFont("helvetica", "bold");
           pdf.setTextColor(212, 175, 90);
-          pdf.setFontSize(8);
-          pdf.text((data.event_name || "").toUpperCase(), padX, m + 12);
+          const headerReserve = sponsorConfig.presenting ? 42 : 22;
+          pdf.text(
+            fitPdf((data.event_name || "").toUpperCase(), W - padX * 2 - headerReserve, 8),
+            padX,
+            m + 12,
+          );
           if (sponsorConfig.presenting) {
             const presentingHasLogo = Boolean(sponsorConfig.presenting.logo_url);
             pdf.setTextColor(138, 144, 165);
@@ -507,8 +595,7 @@ function SuccessContent() {
 
           // Tier (white, large)
           pdf.setTextColor(255, 255, 255);
-          pdf.setFontSize(20);
-          pdf.text(ticket.tier, padX, m + 25);
+          pdf.text(fitPdf(ticket.tier, W - padX * 2, 20), padX, m + 25);
 
           // Dashed divider
           pdf.setDrawColor(255, 255, 255);
@@ -524,8 +611,7 @@ function SuccessContent() {
           pdf.text("ORDER REF", padX, m + 40);
           pdf.setFont("helvetica", "bold");
           pdf.setTextColor(255, 255, 255);
-          pdf.setFontSize(13);
-          pdf.text(data.enrollment_ref, padX, m + 47);
+          pdf.text(fitPdf(data.enrollment_ref, W - padX * 2, 13), padX, m + 47);
           pdf.setFont("helvetica", "normal");
           pdf.setTextColor(138, 144, 165);
           pdf.setFontSize(7);
@@ -536,7 +622,9 @@ function SuccessContent() {
           if (qr) {
             const qs = 44;
             const qx = (W - qs) / 2;
-            const qy = m + cardH - qs - 14;
+            // Same collision as the canvas: the QR's white chip starts 3 above
+            // qy, which sat over the "Ticket #" line.
+            const qy = Math.max(m + cardH - qs - 14, m + 53 + 2 + 5);
             pdf.setFillColor(255, 255, 255);
             pdf.roundedRect(qx - 3, qy - 3, qs + 6, qs + 6, 2, 2, "F");
             pdf.addImage(qr, "PNG", qx, qy, qs, qs);
