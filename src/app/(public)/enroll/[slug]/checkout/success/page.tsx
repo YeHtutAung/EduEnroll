@@ -12,6 +12,7 @@ import {
   TicketPresentingSponsor,
 } from "@/components/enrollment/SponsorPlacements";
 import { resolveSponsorPlacements } from "@/lib/sponsors";
+import { headerRightReserve } from "@/lib/tickets/ticketLayout";
 
 interface TicketData {
   jti: string;
@@ -258,12 +259,32 @@ function SuccessContent() {
     ctx.textBaseline = "alphabetic";
     ctx.fillStyle = "#d4af5a";
     ctx.textAlign = "left";
-    // Reserve the right-hand block (presenting sponsor, or "Ticket i/n") so the
-    // event name cannot run underneath it.
-    const headerRightReserve = sponsorConfig.presenting ? 42 * S : 22 * S;
+    // The reserve must be MEASURED, not guessed: a fixed 22*S kept 132px clear
+    // for a label that measures 190.7px ("Ticket 1/1"), and 237.4px at
+    // "Ticket 10/10", so the fitted name still ran into it.
+    //
+    // Measuring alone was not enough, though. Sharing one 408px line between a
+    // long event name and that label forced the name down to 13-18px to fit —
+    // unreadable — or ellipsised it to "AUGUST 202…". The name is the primary
+    // information, so it now gets the full width and the ticket index moves to
+    // its own line beneath. The index is also omitted for a single ticket,
+    // where "Ticket 1/1" says nothing.
+    const showIndex = n > 1;
+    ctx.font = font(6, "bold");
+    const reserve = headerRightReserve({
+      label: null,
+      measure: (t) => ctx.measureText(t).width,
+      gap: 4 * S,
+      // Only a presenting sponsor still shares the top line.
+      sponsorReserve: sponsorConfig.presenting ? 42 * S : 0,
+      sponsorName: sponsorConfig.presenting?.logo_url
+        ? null
+        : (sponsorConfig.presenting?.name ?? null),
+      sponsorMarkAllowance: 14 * S,
+    });
     const eventNameText = fitText(
       (data.event_name || "").toUpperCase(),
-      W - padX * 2 - headerRightReserve,
+      W - padX * 2 - reserve,
       8,
       "bold",
     );
@@ -291,11 +312,16 @@ function SuccessContent() {
         "right",
         !presentingHasLogo,
       );
-    } else {
+    }
+
+    // Own line, below the event name and above the tier — never sharing the
+    // header's width. Omitted entirely for a single ticket.
+    if (showIndex) {
       ctx.fillStyle = "#8a90a5";
-      ctx.font = font(7, "bold");
+      ctx.font = font(6, "bold");
       ctx.textAlign = "right";
-      ctx.fillText(`Ticket ${i + 1}/${n}`, W - padX, m + 12 * S);
+      ctx.fillText(`Ticket ${i + 1}/${n}`, W - padX, m + 18 * S);
+      ctx.textAlign = "left";
     }
 
     ctx.fillStyle = "#ffffff";
@@ -576,7 +602,20 @@ function SuccessContent() {
           // Event name (gold) + ticket index (right)
           pdf.setFont("helvetica", "bold");
           pdf.setTextColor(212, 175, 90);
-          const headerReserve = sponsorConfig.presenting ? 42 : 22;
+          // Mirrors the canvas: the name takes the full width and the ticket
+          // index moves to its own line, omitted when there is only one.
+          const pdfShowIndex = tickets.length > 1;
+          pdf.setFontSize(6);
+          const headerReserve = headerRightReserve({
+            label: null,
+            measure: (t) => pdf.getTextWidth(t),
+            gap: 2,
+            sponsorReserve: sponsorConfig.presenting ? 42 : 0,
+            sponsorName: sponsorConfig.presenting?.logo_url
+              ? null
+              : (sponsorConfig.presenting?.name ?? null),
+            sponsorMarkAllowance: 7,
+          });
           pdf.text(
             fitPdf((data.event_name || "").toUpperCase(), W - padX * 2 - headerReserve, 8),
             padX,
@@ -603,8 +642,13 @@ function SuccessContent() {
             );
           } else {
             pdf.setTextColor(138, 144, 165);
-            pdf.setFontSize(7);
-            pdf.text(`Ticket ${i + 1}/${tickets.length}`, W - padX, m + 12, { align: "right" });
+          }
+
+          if (pdfShowIndex) {
+            pdf.setFont("helvetica", "bold");
+            pdf.setTextColor(138, 144, 165);
+            pdf.setFontSize(6);
+            pdf.text(`Ticket ${i + 1}/${tickets.length}`, W - padX, m + 18, { align: "right" });
           }
 
           // Tier (white, large)
