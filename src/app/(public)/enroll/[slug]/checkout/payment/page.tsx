@@ -21,7 +21,17 @@ interface BankAccount {
 
 // ─── Card Payment Form ────────────────────────────────────────────────────────
 
-function CardForm({ slug, enrollmentRef, totalAmount }: { slug: string; enrollmentRef: string; totalAmount: number }) {
+function CardForm({
+  slug,
+  enrollmentRef,
+  paymentIntentId,
+  totalAmount,
+}: {
+  slug: string;
+  enrollmentRef: string;
+  paymentIntentId: string;
+  totalAmount: number;
+}) {
   const stripe = useStripe();
   const elements = useElements();
   const [paying, setPaying] = useState(false);
@@ -32,6 +42,27 @@ function CardForm({ slug, enrollmentRef, totalAmount }: { slug: string; enrollme
     if (!stripe || !elements) return;
     setPaying(true);
     setError(null);
+
+    // A client secret can outlive the enrollment that reserved the seat.
+    // Revalidate immediately before handing control to Stripe so an ordinary
+    // stale checkout cannot pay an order whose seat has already been released.
+    try {
+      const eligibility = await fetch("/api/public/payments/stripe/intent/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enrollmentRef, paymentIntentId }),
+      });
+      const body = await eligibility.json();
+      if (!eligibility.ok) {
+        setError(body.message ?? "This enrollment is no longer awaiting payment.");
+        setPaying(false);
+        return;
+      }
+    } catch {
+      setError("Could not verify payment eligibility. Please try again.");
+      setPaying(false);
+      return;
+    }
 
     const origin = window.location.origin;
     const { error: stripeError } = await stripe.confirmPayment({
@@ -727,7 +758,12 @@ function PaymentContent() {
 
           {tab === "card" ? (
             <Elements stripe={stripePromise} options={{ clientSecret }}>
-              <CardForm slug={params.slug} enrollmentRef={ref} totalAmount={totalAmount} />
+              <CardForm
+                slug={params.slug}
+                enrollmentRef={ref}
+                paymentIntentId={piId}
+                totalAmount={totalAmount}
+              />
             </Elements>
           ) : (
             <PayNowTab

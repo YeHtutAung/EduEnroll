@@ -15,6 +15,10 @@ const mockIssue = vi.fn();
 vi.mock("@/server/tickets/issueTickets", () => ({
   issueTicketsForEnrollment: (...a: unknown[]) => mockIssue(...a),
 }));
+const mockNotifyWinner = vi.fn();
+vi.mock("@/server/payments/notifyEnrollmentConfirmed", () => ({
+  notifyEnrollmentConfirmed: (...a: unknown[]) => mockNotifyWinner(...a),
+}));
 
 const { settlePaidPayment } = await import("@/server/payments/settlePaidPayment");
 const { handleStripePaymentFailure } = await import("@/server/payments/handleStripePaymentFailure");
@@ -81,6 +85,7 @@ beforeEach(() => {
   mockFrom.mockImplementation((table: string) => chainFor(table));
   mockRpc.mockResolvedValue({ data: null, error: null });
   mockIssue.mockResolvedValue(undefined);
+  mockNotifyWinner.mockResolvedValue(undefined);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -92,7 +97,27 @@ describe("settlePaidPayment — happy path and replay", () => {
     const out = await settlePaidPayment(paidInput());
     expect(out).toEqual({ kind: "settled", paymentId: "pay-1", enrollmentId: "enr-1" });
     expect(mockIssue).toHaveBeenCalledExactlyOnceWith("enr-1");
+    expect(mockNotifyWinner).toHaveBeenCalledExactlyOnceWith("enr-1");
     expect(mockRpc).not.toHaveBeenCalled(); // no conflict recorded
+  });
+
+  it("notification failure does not turn a paid settlement into a retryable error", async () => {
+    queue("payments", { data: PAYMENT, error: null });
+    queue("payments", { data: [{ id: "pay-1" }], error: null });
+    queue("enrollments", { data: { id: "enr-1", status: "confirmed" }, error: null });
+    mockNotifyWinner.mockRejectedValueOnce(new Error("mail unavailable"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const out = await settlePaidPayment(paidInput());
+
+    expect(out.kind).toBe("settled");
+    expect(mockIssue).toHaveBeenCalledExactlyOnceWith("enr-1");
+    expect(mockNotifyWinner).toHaveBeenCalledExactlyOnceWith("enr-1");
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[payment-settlement] notification failed:",
+      expect.any(Error),
+    );
+    errorSpy.mockRestore();
   });
 
   it("S3: already-verified replay goes straight to fulfilment repair (already_settled)", async () => {
@@ -101,6 +126,7 @@ describe("settlePaidPayment — happy path and replay", () => {
     const out = await settlePaidPayment(paidInput());
     expect(out.kind).toBe("already_settled");
     expect(mockIssue).toHaveBeenCalledExactlyOnceWith("enr-1"); // repair runs
+    expect(mockNotifyWinner).not.toHaveBeenCalled();
   });
 
   it("S3b: verified row with NULL snapshot still repairs — snapshot gates the transition, not the replay", async () => {

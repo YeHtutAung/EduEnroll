@@ -64,11 +64,13 @@ vi.mock("@/lib/origin", () => ({
 const mockConstructEvent = vi.fn();
 const mockPiRetrieve = vi.fn();
 const mockSessionRetrieve = vi.fn();
+const mockRefundCreate = vi.fn();
 vi.mock("@/lib/stripe", () => ({
   getStripe: () => ({
     webhooks: { constructEvent: (...a: unknown[]) => mockConstructEvent(...a) },
     paymentIntents: { retrieve: (...a: unknown[]) => mockPiRetrieve(...a) },
     checkout: { sessions: { retrieve: (...a: unknown[]) => mockSessionRetrieve(...a) } },
+    refunds: { create: (...a: unknown[]) => mockRefundCreate(...a) },
   }),
 }));
 
@@ -134,6 +136,12 @@ beforeEach(() => {
   mockSendSms.mockResolvedValue(undefined);
   mockTelegram.mockResolvedValue(undefined);
   mockChannelInvite.mockResolvedValue(undefined);
+  mockRefundCreate.mockResolvedValue({
+    id: "re_1",
+    status: "succeeded",
+    payment_intent: "pi_1",
+    metadata: { integration_namespace: "eduenroll", conflict_type: "rejected_enrollment" },
+  });
   mockVerifyWebhook.mockReturnValue(true);
   process.env.STRIPE_WEBHOOK_SECRET = "whsec_test_only";
   process.env.HITPAY_SALT = "test_salt_only";
@@ -276,6 +284,60 @@ describe("webhook fulfilment posture", () => {
     expect(mockSendSms).toHaveBeenCalledTimes(1);
     expect(mockTelegram).toHaveBeenCalledTimes(1);
     expect(mockChannelInvite).toHaveBeenCalledTimes(1);
+  });
+
+  it("late direct payment against a rejected enrollment is refunded idempotently", async () => {
+    paymentRow!.status = "awaiting_payment";
+    mockConstructEvent.mockReturnValue({
+      id: "evt_late",
+      type: "payment_intent.succeeded",
+      data: {
+        object: {
+          id: "pi_1",
+          amount_received: 10000,
+          currency: "sgd",
+          metadata: { integration_flow: "direct_payment_intent" },
+        },
+      },
+    });
+    mockAdminFrom.mockImplementation((table: string) => {
+      if (table === "payments") return stubFor(paymentRow, [{ id: paymentRow!.id }]);
+      if (table === "enrollments") return stubFor({ ...NOTIFIABLE_ENROLLMENT, status: "rejected" });
+      if (table === "payment_settlement_conflicts") return stubFor(null, [{ id: "conflict-1" }]);
+      return stubFor(null);
+    });
+
+    const { POST } = await import("@/app/api/webhooks/stripe/route");
+    const res = await POST(stripeReq());
+
+    expect(res.status).toBe(200);
+    expect(mockIssue).not.toHaveBeenCalled();
+    expect(mockRefundCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ payment_intent: "pi_1" }),
+      { idempotencyKey: "eduenroll:refund:rejected:pi_1" },
+    );
+  });
+
+  it("late hosted Checkout payment against a rejected enrollment is also refunded", async () => {
+    paymentRow!.status = "awaiting_payment";
+    stripeSessionEvent();
+    mockAdminFrom.mockImplementation((table: string) => {
+      if (table === "payments") return stubFor(paymentRow, [{ id: paymentRow!.id }]);
+      if (table === "enrollments")
+        return stubFor({ ...NOTIFIABLE_ENROLLMENT, status: "rejected" });
+      if (table === "payment_settlement_conflicts")
+        return stubFor(null, [{ id: "conflict-1" }]);
+      return stubFor(null);
+    });
+
+    const { POST } = await import("@/app/api/webhooks/stripe/route");
+    const res = await POST(stripeReq());
+
+    expect(res.status).toBe(200);
+    expect(mockRefundCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ payment_intent: "pi_1" }),
+      { idempotencyKey: "eduenroll:refund:rejected:pi_1" },
+    );
   });
 
   it("F2a HitPay verified replay fulfils once and notifies nobody", async () => {
