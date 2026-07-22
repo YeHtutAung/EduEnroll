@@ -313,12 +313,32 @@ function CheckoutForm() {
         const d = await intentRes.json();
         throw new Error(d.message ?? "Payment setup failed. Please try again.");
       }
-      const { clientSecret, paymentIntentId } = await intentRes.json();
+      const intentData = await intentRes.json();
+
+      // Discriminated result (Plan v18 §3c) — never mistake one shape for
+      // another, and never mount the payment UI without a client secret.
+      if (intentData.kind === "settlement_conflict") {
+        throw new Error(
+          `This payment needs attention. Contact support and quote reference ${intentData.reference ?? ref}.`,
+        );
+      }
+      if (intentData.kind === "succeeded") {
+        router.push(`/enroll/${params.slug}/checkout/success/?ref=${ref}`);
+        return;
+      }
+      if (intentData.kind === "processing") {
+        // A payment is already in flight — the payment screen polls status.
+        router.push(`/enroll/${params.slug}/checkout/payment/?ref=${ref}&pi=${intentData.paymentIntentId}&processing=1`);
+        return;
+      }
+      if (intentData.kind !== "requires_payment" || !intentData.clientSecret) {
+        throw new Error("Payment setup failed. Please try again.");
+      }
 
       // 3. Store clientSecret in sessionStorage for Screen 3
-      sessionStorage.setItem(`cs_${ref}`, clientSecret);
+      sessionStorage.setItem(`cs_${ref}`, intentData.clientSecret);
 
-      router.push(`/enroll/${params.slug}/checkout/payment/?ref=${ref}&pi=${paymentIntentId}`);
+      router.push(`/enroll/${params.slug}/checkout/payment/?ref=${ref}&pi=${intentData.paymentIntentId}`);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Something went wrong.");
       setSubmitting(false);

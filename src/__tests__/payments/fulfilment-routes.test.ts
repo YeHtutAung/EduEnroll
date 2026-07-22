@@ -338,23 +338,31 @@ describe("browser route fulfilment posture", () => {
   const verifyReq = (sid: string) =>
     new NextRequest(new Request(`https://t.kuunyi.com/api/public/payments/stripe/verify?session_id=${sid}`));
 
-  it("F3 intent/status invokes the helper once and keeps its Stripe-status shape when it throws", async () => {
-    mockPiRetrieve.mockResolvedValue({ status: "succeeded", payment_method: null });
-    paymentRow = { id: "pay-1", enrollment_id: "enr-1", status: "verified" };
+  it("F3 intent/status settles via the shared op; fulfilment throw is now retryable (500)", async () => {
+    // Pre-plan: inline settlement kept the Stripe-status shape when issuance
+    // threw, because nothing else would retry. Plan v18: the webhook path and
+    // the next poll tick both retry, so a failed settle/fulfil returns 500 —
+    // "not resolved yet", never a false "succeeded".
+    mockPiRetrieve.mockResolvedValue({ id: "pi_1", status: "succeeded", amount_received: 10000, currency: "sgd", payment_method: null });
+    paymentRow!.status = "awaiting_payment";
     mockIssue.mockRejectedValue(new Error("fulfilment boom"));
 
     const { GET } = await import("@/app/api/public/payments/stripe/intent/status/route");
-    const res = await GET(statusReq("pi_1"));
-    const body = await res.json();
+    const res = await GET(new NextRequest(new Request(
+      "https://t.kuunyi.com/api/public/payments/stripe/intent/status?pi=pi_1")));
 
     expect(mockIssue).toHaveBeenCalledTimes(1);
-    expect(mockIssue).toHaveBeenCalledWith("enr-1");
-    expect(res.status).toBe(200);
-    // Stripe payment status — NOT an enrollment status.
-    expect(body).toEqual({ status: "succeeded" });
+    expect(res.status).toBe(500);
+
+    // And when fulfilment succeeds, the poll shape is preserved:
+    mockIssue.mockResolvedValue(undefined);
+    paymentRow!.status = "awaiting_payment";
+    const ok = await GET(new NextRequest(new Request(
+      "https://t.kuunyi.com/api/public/payments/stripe/intent/status?pi=pi_1")));
+    expect(await ok.json()).toEqual({ status: "succeeded" });
   });
 
-  it("F4 stripe/verify invokes the helper once and keeps its enrollment-status shape when it throws", async () => {
+    it("F4 stripe/verify invokes the helper once and keeps its enrollment-status shape when it throws", async () => {
     mockSessionRetrieve.mockResolvedValue({ payment_status: "paid", payment_intent: "pi_1" });
     paymentRow = { id: "pay-1", enrollment_id: "enr-1", status: "verified" };
     mockIssue.mockRejectedValue(new Error("fulfilment boom"));

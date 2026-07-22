@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { randomUUID } from "node:crypto";
 import { getStripe } from "@/lib/stripe";
-import { issueTicketsForEnrollment } from "@/server/tickets/issueTickets";
+import { settlePaidPayment } from "@/server/payments/settlePaidPayment";
+import type Stripe from "stripe";
 
 // ─── GET /api/public/payments/stripe/intent/status?pi=pi_xxx ─────────────────
-// Polls Stripe for PaymentIntent status. Used by PayNow QR polling loop.
+// Polls Stripe for PaymentIntent status. Used by the PayNow QR polling loop.
 // No PII returned — PaymentIntent IDs are already client-side (in URL).
-// Idempotent — safe to call on every poll tick.
+//
+// Settlement goes through the SHARED operation (Plan v18 §5): the old inline
+// read-then-write here was the exact pattern the plan removes — no snapshot
+// validation, no conditional update, direct enrollment write racing the
+// trigger. The response keeps its poll shape: `{status}` where
+// `settlement_conflict` is terminal (client stops polling → support state).
 
 export async function GET(request: NextRequest) {
   const piId = request.nextUrl.searchParams.get("pi");
@@ -18,55 +24,33 @@ export async function GET(request: NextRequest) {
     const pi = await getStripe().paymentIntents.retrieve(piId, { expand: ["payment_method"] });
 
     if (pi.status === "succeeded") {
-      const supabase = createAdminClient();
+      const pm = pi.payment_method as Stripe.PaymentMethod | null;
+      const outcome = await settlePaidPayment({
+        paymentIntentId: piId,
+        observedAmountMinor: pi.amount_received,
+        observedCurrency: pi.currency,
+        source: { type: "creation_request", id: randomUUID() },
+        cardBrand: pm?.card?.brand ?? null,
+        cardLast4: pm?.card?.last4 ?? null,
+      });
 
-      const { data: payment } = (await supabase
-        .from("payments")
-        .select("id, enrollment_id, status")
-        .eq("stripe_payment_intent_id", piId)
-        .single()) as { data: { id: string; enrollment_id: string; status: string } | null; error: unknown };
-
-      if (payment && payment.status !== "verified") {
-        const pm = pi.payment_method as import("stripe").Stripe.PaymentMethod | null;
-        const cardBrand = pm?.card?.brand ?? null;
-        const cardLast4 = pm?.card?.last4 ?? null;
-
-        await supabase
-          .from("payments")
-          .update({
-            status: "verified",
-            paid_at: new Date().toISOString(),
-            ...(cardBrand ? { card_brand: cardBrand } : {}),
-            ...(cardLast4 ? { card_last4: cardLast4 } : {}),
-          } as never)
-          .eq("id", payment.id);
-
-        await supabase
-          .from("enrollments")
-          .update({ status: "confirmed" } as never)
-          .eq("id", payment.enrollment_id);
-
-        // Notifications intentionally omitted: Stripe checkout is browser-driven.
-        // The user is already on the success page. No push notification is needed.
+      switch (outcome.kind) {
+        case "settled":
+        case "already_settled":
+          // Tickets are issued INSIDE the operation (settle → fulfil order);
+          // "succeeded" here means the database confirms, not just Stripe.
+          return NextResponse.json({ status: "succeeded" });
+        case "conflict":
+          // Terminal — the client stops polling and shows support quoting
+          // the reference it already has.
+          return NextResponse.json({ status: "settlement_conflict" });
+        case "retryable":
+          // The customer may already be charged; the webhook path retries
+          // independently, and the next poll tick retries here. 500 tells
+          // the client "not resolved yet", never "failed".
+          console.error("[stripe/intent/status] settle retryable:", outcome.reason);
+          return NextResponse.json({ error: "Settlement pending. Keep polling." }, { status: 500 });
       }
-
-      // Fulfil on every succeeded poll, not only when this call settled: the
-      // webhook's replay guard means whoever settles second never issues, so
-      // this path was leaving orders ticketless. Idempotent, and #187's guard
-      // declines anything not confirmed.
-      //
-      // Caught deliberately: the helper now throws on query failure, and this
-      // route must keep returning its existing Stripe-status shape rather than
-      // 500 after the customer has been charged. Retry is #186.
-      if (payment) {
-        try {
-          await issueTicketsForEnrollment(payment.enrollment_id);
-        } catch (err) {
-          console.error("[tickets] intent/status fulfilment failed:", err);
-        }
-      }
-
-      return NextResponse.json({ status: "succeeded" });
     }
 
     if (pi.status === "canceled") {
