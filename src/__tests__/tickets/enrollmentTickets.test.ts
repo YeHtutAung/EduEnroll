@@ -95,7 +95,10 @@ function setupMocks(enrollmentStatus: string, opts: { withTickets?: boolean } = 
       };
     }
 
-    if (table === "tenant_appearances") {
+    // Singular — the real table. This mock previously answered to
+    // "tenant_appearances", matching a typo in the route, so the suite passed
+    // while production silently returned no branding at all.
+    if (table === "tenant_appearance") {
       return {
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockReturnThis(),

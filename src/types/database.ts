@@ -158,20 +158,16 @@ export interface SponsorPlacements {
   supported_by: Sponsor[];
 }
 
-export const DEFAULT_SPONSOR_PLACEMENTS: SponsorPlacements = {
-  presenting: { name: "Northwind", mark: "circle", mark_color: "#d4af5a" },
-  partners: [
-    { name: "Vertex", mark: "square", mark_color: "#0f1f42" },
-    { name: "Lumen", mark: "circle", mark_color: "#b7912b" },
-    { name: "Nexa", mark: "diamond", mark_color: "#0f1f42" },
-    { name: "Orbit", mark: "ring", mark_color: "#0f1f42" },
-  ],
-  supported_by: [
-    { name: "Vertex", mark: "square", mark_color: "#0f1f42" },
-    { name: "Lumen", mark: "circle", mark_color: "#b7912b" },
-    { name: "Nexa", mark: "diamond", mark_color: "#0f1f42" },
-  ],
-};
+// There was a DEFAULT_SPONSOR_PLACEMENTS constant here — sample wordmarks
+// (Northwind, Vertex, Lumen, Nexa, Orbit) that resolveSponsorPlacements()
+// returned whenever a tenant's config was absent or failed to load. They were
+// printed on real customers' e-tickets, and the admin editor seeded from the
+// same call, so opening Appearance and saving persisted them as if they were
+// genuine sponsors.
+//
+// Deliberately not kept "for previews": a fallback that names invented
+// sponsors has no safe caller, and leaving it exported invites exactly the
+// reuse that caused the incident. Absent config now resolves to nothing.
 
 export interface TenantAppearance {
   id: string;
