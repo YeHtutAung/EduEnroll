@@ -19,6 +19,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { issueTicketsForEnrollment } from "@/server/tickets/issueTickets";
+import { notifyEnrollmentConfirmed } from "@/server/payments/notifyEnrollmentConfirmed";
 import { recordConflict, type ConflictSource, type ConflictType } from "./settlementConflicts";
 
 export type SettleInput = {
@@ -208,6 +209,20 @@ export async function settlePaidPayment(input: SettleInput): Promise<SettleOutco
     // non-confirmed enrollments; it throws on query failure. A throw here is
     // a 500: the money is recorded, the retry repairs tickets.
     await issueTicketsForEnrollment(payment!.enrollment_id);
+
+    // The conditional payment transition elects exactly one winner across
+    // browser polling and webhook delivery. Keep notification behind that
+    // same winner boundary so whichever caller wins sends it once.
+    if (won) {
+      try {
+        await notifyEnrollmentConfirmed(payment!.enrollment_id);
+      } catch (error) {
+        // Notification transports are not part of the money/ticket commit.
+        // Durable notification retry remains tracked separately; never make a
+        // completed payment look failed because a best-effort channel threw.
+        console.error("[payment-settlement] notification failed:", error);
+      }
+    }
 
     return won
       ? { kind: "settled", paymentId: payment!.id, enrollmentId: payment!.enrollment_id }

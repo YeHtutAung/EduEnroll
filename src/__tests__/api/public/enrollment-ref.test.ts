@@ -8,6 +8,7 @@ vi.mock("@/lib/stripe", () => ({ getStripe: vi.fn() }));
 
 import { resolveTenantId } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getStripe } from "@/lib/stripe";
 import { GET, PATCH } from "@/app/api/public/enrollment/[ref]/route";
 
 // ─── Supabase query builder factory ──────────────────────────────────────────
@@ -164,6 +165,37 @@ describe("GET /api/public/enrollment/[ref]", () => {
 
     const res = await GET(makeRequest() as never, routeParams);
     expect(res.status).toBe(410);
+  });
+
+  it("does not return a reusable Stripe client secret after enrollment rejection", async () => {
+    const retrieve = vi.fn();
+    vi.mocked(getStripe).mockReturnValue({ paymentIntents: { retrieve } } as never);
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock({
+        data: {
+          enrollment_ref: "NM-2026-00001",
+          status: "rejected",
+          student_name_en: "Test User",
+          email: "test@example.com",
+          quantity: 1,
+          enrollment_items: [],
+          classes: { level: "N3", fee_amount: 4000, intakes: null },
+          payments: [{
+            payment_method: "stripe",
+            status: "awaiting_payment",
+            stripe_payment_intent_id: "pi_stale",
+          }],
+        },
+        error: null,
+      }) as never,
+    );
+
+    const res = await GET(makeRequest() as never, routeParams);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.stripe_client_secret).toBeUndefined();
+    expect(retrieve).not.toHaveBeenCalled();
   });
 
   it("returns 400 when tenant cannot be resolved", async () => {
