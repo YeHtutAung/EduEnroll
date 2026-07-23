@@ -19,6 +19,7 @@ export async function GET(request: NextRequest) {
     .from("enrollments")
     .select("telegram_chat_id")
     .eq("tenant_id", tenantId)
+    .is("internal_test_at", null)
     .eq("intake_id", intakeId)
     .not("telegram_chat_id", "is", null);
 

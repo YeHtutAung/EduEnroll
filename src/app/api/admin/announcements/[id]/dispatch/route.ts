@@ -71,6 +71,7 @@ export async function POST(
     .from("enrollments")
     .select("telegram_chat_id")
     .eq("tenant_id", tenantId)
+    .is("internal_test_at", null)
     .not("telegram_chat_id", "is", null);
 
   if (announcement.intake_id) {
