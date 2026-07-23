@@ -7,6 +7,7 @@ import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-
 import QRCode from "qrcode";
 import TrustedOfficialShell from "@/components/enrollment/TrustedOfficialShell";
 import QRPaymentModal from "@/components/payments/QRPaymentModal";
+import PayNowQrSaveButton from "@/components/payments/PayNowQrSaveButton";
 
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
 
@@ -197,8 +198,11 @@ function PayNowTab({
         return;
       }
 
-      if (data.qrImageUrl) {
-        setQrImageUrl(data.qrImageUrl);
+      if (data.qrData || data.qrImageUrl) {
+        const imageUrl = data.qrData
+          ? await QRCode.toDataURL(data.qrData, { width: 360, margin: 2 })
+          : data.qrImageUrl;
+        setQrImageUrl(imageUrl);
         startPolling();
       } else {
         setError("Could not generate PayNow QR. Please try card payment instead.");
@@ -220,6 +224,7 @@ function PayNowTab({
           <img src={qrImageUrl} alt="PayNow QR" className="w-[130px] h-[130px] mx-auto mb-2" />
           <p className="text-[10.5px]" style={{ color: "#8b8f9a" }}>Scan with your banking app</p>
           <p className="text-[9.5px]" style={{ color: "#aca795" }}>DBS · OCBC · UOB · and most PayNow banks</p>
+          <PayNowQrSaveButton imageUrl={qrImageUrl} enrollmentRef={enrollmentRef} />
         </div>
         <div className="flex items-center justify-between px-3 py-2 rounded-[8px]" style={{ background: "#fdf3e0", border: "1px solid #eed9a3" }}>
           <span className="text-[10.5px]" style={{ color: "#8a6a1f" }}>Waiting for payment</span>
@@ -471,7 +476,7 @@ function HitPaySection({
         setLoading(false);
         return;
       }
-      const dataUrl = await QRCode.toDataURL(data.qrCode, { width: 200, margin: 2 });
+      const dataUrl = await QRCode.toDataURL(data.qrCode, { width: 360, margin: 2 });
       setQrDataUrl(dataUrl);
       startPolling();
     } catch {
@@ -536,6 +541,7 @@ function HitPaySection({
               <img src={qrDataUrl} alt="PayNow QR" className="w-[130px] h-[130px] mx-auto mb-2" />
               <p className="text-[10.5px]" style={{ color: "#8b8f9a" }}>Scan with your banking app (PayNow)</p>
               <p className="text-[9.5px]" style={{ color: "#aca795" }}>DBS · OCBC · UOB · and most PayNow banks</p>
+              <PayNowQrSaveButton imageUrl={qrDataUrl} enrollmentRef={enrollmentRef} />
             </div>
             <div className="flex items-center justify-between px-3 py-2 rounded-[8px]" style={{ background: "#fdf3e0", border: "1px solid #eed9a3" }}>
               <span className="text-[10.5px]" style={{ color: "#8a6a1f" }}>Waiting for payment</span>

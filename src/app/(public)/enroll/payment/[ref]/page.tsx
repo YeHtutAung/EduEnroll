@@ -6,6 +6,7 @@ import QRCode from "qrcode";
 import { verifyStripeReturn } from "@/lib/payments/verifyStripeReturn";
 import { formatCurrencySimple, formatAmount } from "@/lib/utils";
 import QRPaymentModal from "@/components/payments/QRPaymentModal";
+import PayNowQrSaveButton from "@/components/payments/PayNowQrSaveButton";
 import BrandHeader from "@/components/enrollment/BrandHeader";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
@@ -1196,7 +1197,7 @@ export default function PaymentInstructionsPage() {
       if (!res.ok) throw new Error(data.message ?? "Failed to generate QR.");
 
 
-      const dataUrl = await QRCode.toDataURL(data.qrCode as string, { width: 280, margin: 2 });
+      const dataUrl = await QRCode.toDataURL(data.qrCode as string, { width: 360, margin: 2 });
       setHitpayQrImage(dataUrl);
       setHitpayPolling(true);
     } catch (err) {
@@ -1687,6 +1688,7 @@ export default function PaymentInstructionsPage() {
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={hitpayQrImage} alt="PayNow QR Code" className="mx-auto rounded-lg" width={280} height={280} />
                       <p className="mt-2 text-xs text-gray-500">Scan with your banking app (PayNow)</p>
+                      <PayNowQrSaveButton imageUrl={hitpayQrImage} enrollmentRef={params.ref as string} />
                       <button
                         onClick={() => { setHitpayQrImage(null); setHitpayPolling(false); }}
                         className="mt-3 text-xs text-gray-400 underline"

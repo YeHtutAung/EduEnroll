@@ -52,7 +52,13 @@ beforeEach(() => {
   stripe.retrieve.mockResolvedValue({ id: "pi_1", status: "requires_payment_method" });
   stripe.createMethod.mockResolvedValue({ id: "pm_1" });
   stripe.confirm.mockResolvedValue({
-    next_action: { paynow_display_qr_code: { image_url_svg: "https://stripe.test/qr.svg" } },
+    next_action: {
+      paynow_display_qr_code: {
+        data: "PAYNOW-QR-DATA",
+        image_url_png: "https://stripe.test/qr.png",
+        image_url_svg: "https://stripe.test/qr.svg",
+      },
+    },
   });
 });
 
@@ -90,7 +96,10 @@ describe("Stripe confirmation preflight", () => {
     const { POST } = await import("@/app/api/public/payments/stripe/paynow-confirm/route");
     const response = await POST(request());
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ qrImageUrl: "https://stripe.test/qr.svg" });
+    expect(await response.json()).toEqual({
+      qrData: "PAYNOW-QR-DATA",
+      qrImageUrl: "https://stripe.test/qr.png",
+    });
     expect(stripe.confirm).toHaveBeenCalledTimes(1);
   });
 
