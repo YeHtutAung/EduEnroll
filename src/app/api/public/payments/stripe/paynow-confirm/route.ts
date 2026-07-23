@@ -5,7 +5,7 @@ import { validateStripeAttempt } from "@/server/payments/validateStripeAttempt";
 
 // ─── POST /api/public/payments/stripe/paynow-confirm ─────────────────────────
 // Confirms a PaymentIntent with PayNow on the server side and returns
-// the QR code image URL for display. Server-side confirmation is required
+// the QR payload and PNG URL for display/save. Server-side confirmation is required
 // because Stripe.js confirmPayNowPayment does not reliably attach the
 // payment method on PaymentIntents with multiple payment_method_types.
 
@@ -68,17 +68,26 @@ export async function POST(request: NextRequest) {
     });
 
     const qrCode = (pi.next_action as unknown as {
-      paynow_display_qr_code?: { image_url_svg?: string };
+      paynow_display_qr_code?: {
+        data?: string;
+        image_url_png?: string;
+        image_url_svg?: string;
+      };
     } | null)?.paynow_display_qr_code;
 
-    if (!qrCode?.image_url_svg) {
+    if (!qrCode?.data || !qrCode.image_url_png) {
       return NextResponse.json(
         { error: "QR generation failed", message: "Could not generate PayNow QR code." },
         { status: 502 },
       );
     }
 
-    return NextResponse.json({ qrImageUrl: qrCode.image_url_svg });
+    // The client renders `data` into a local PNG, which mobile browsers can
+    // share/save reliably. The Stripe PNG remains a display fallback.
+    return NextResponse.json({
+      qrData: qrCode.data,
+      qrImageUrl: qrCode.image_url_png,
+    });
   } catch (err) {
     const code = (err as { code?: string }).code ?? "stripe_error";
     console.error("[paynow-confirm] Stripe request failed:", code);
