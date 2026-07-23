@@ -64,6 +64,7 @@ export async function GET(
     .select("id", { count: "exact", head: true })
     .eq("tenant_id", tenantId)
     .eq("class_id", channel.class_id)
+    .is("internal_test_at", null)
     .not("telegram_chat_id", "is", null);
 
   return NextResponse.json({
