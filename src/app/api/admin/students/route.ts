@@ -98,7 +98,8 @@ export async function GET(request: NextRequest) {
     `,
       { count: "exact" },
     )
-    .eq("tenant_id", tenantId);
+    .eq("tenant_id", tenantId)
+    .is("internal_test_at", null);
 
   // ── Filters ────────────────────────────────────────────────────────────────
   if (status) query = query.eq("status", status);

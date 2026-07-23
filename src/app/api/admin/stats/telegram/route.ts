@@ -31,11 +31,13 @@ export async function GET() {
       .from("enrollments")
       .select("id", { count: "exact", head: true })
       .eq("tenant_id", tenantId)
+      .is("internal_test_at", null)
       .not("telegram_chat_id", "is", null),
     supabase
       .from("enrollments")
       .select("id", { count: "exact", head: true })
       .eq("tenant_id", tenantId)
+      .is("internal_test_at", null)
       .not("telegram_link_pending_chat_id", "is", null),
     supabase
       .from("class_channels")

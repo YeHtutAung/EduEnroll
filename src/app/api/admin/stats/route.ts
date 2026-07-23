@@ -39,24 +39,28 @@ export async function GET() {
       supabase
         .from("enrollments")
         .select("*", { count: "exact", head: true })
-        .eq("tenant_id", tenantId),
+        .eq("tenant_id", tenantId)
+        .is("internal_test_at", null),
 
       supabase
         .from("enrollments")
         .select("*", { count: "exact", head: true })
         .eq("tenant_id", tenantId)
+        .is("internal_test_at", null)
         .eq("status", "confirmed"),
 
       supabase
         .from("enrollments")
         .select("*", { count: "exact", head: true })
         .eq("tenant_id", tenantId)
+        .is("internal_test_at", null)
         .eq("status", "pending_payment"),
 
       supabase
         .from("enrollments")
         .select("*", { count: "exact", head: true })
         .eq("tenant_id", tenantId)
+        .is("internal_test_at", null)
         .eq("status", "payment_submitted"),
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

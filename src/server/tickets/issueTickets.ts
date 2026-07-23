@@ -25,7 +25,7 @@ export async function issueTicketsForEnrollment(enrollmentId: string): Promise<v
   // failed".
   const { data: enrollment, error: enrollmentError } = (await supabase
     .from("enrollments")
-    .select("id, tenant_id, class_id, quantity, status")
+    .select("id, tenant_id, class_id, quantity, status, internal_test_at")
     .eq("id", enrollmentId)
     .maybeSingle()) as unknown as {
     data: {
@@ -34,6 +34,7 @@ export async function issueTicketsForEnrollment(enrollmentId: string): Promise<v
       class_id: string | null;
       quantity: number | null;
       status: string;
+      internal_test_at: string | null;
     } | null;
     error: unknown;
   };
@@ -42,6 +43,12 @@ export async function issueTicketsForEnrollment(enrollmentId: string): Promise<v
     throw new Error(`issueTickets: enrollment load failed: ${JSON.stringify(enrollmentError)}`);
   }
   if (!enrollment) return;
+
+  // Internal launch/smoke records retain their payment and provider ownership
+  // for audit and webhook replay, but are not admissions. Existing rows have
+  // been voided atomically by archive_internal_test_enrollment(); returning
+  // here also prevents a replay from filling any previously missing tickets.
+  if (enrollment.internal_test_at) return;
 
   // ── Admission guard ───────────────────────────────────────────────────────
   // A rejected enrollment has had its seat restored and possibly resold, so

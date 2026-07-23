@@ -52,6 +52,7 @@ export async function GET(request: NextRequest) {
       .from("enrollments")
       .select("id, status, enrolled_at, class_id")
       .eq("tenant_id", tenantId)
+      .is("internal_test_at", null)
       .order("enrolled_at", { ascending: true }) as unknown as Promise<{
       data: EnrollmentRow[] | null;
       error: unknown;
@@ -208,7 +209,9 @@ export async function GET(request: NextRequest) {
   }));
 
   // ─── 3. Revenue by level ──────────────────────────────────────────────
-  const enrollmentIds = new Set(enrollments.map((e) => e.id));
+  const enrollmentIds = new Set(
+    enrollments.filter((e) => e.status === "confirmed").map((e) => e.id),
+  );
   const filteredPayments = payments.filter(
     (p) => p.status === "verified" && enrollmentIds.has(p.enrollment_id)
   );
