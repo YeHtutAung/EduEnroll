@@ -44,6 +44,9 @@ function TicketCard({
   const { isDisabled, overlayState } = getCardState(cls);
   const max = cls.max_tickets_per_person ?? 10;
 
+  // Hides the "X seats remaining" line. Flip to true to show it again.
+  const SHOW_SEAT_COUNT = false;
+
   const overlayLabel =
     overlayState === "full"
       ? "Sold Out"
@@ -105,7 +108,7 @@ function TicketCard({
       {/* Card body */}
       <div className="p-[13px]" style={{ minWidth: 0 }}>
         {/* Header row */}
-        <div className="flex items-start justify-between mb-1">
+        <div className="flex items-start justify-between mb-3">
           <div className="flex items-center gap-2">
             <span className="font-bold text-[13px]" style={{ color: brand }}>
               {cls.level}
@@ -125,9 +128,11 @@ function TicketCard({
         </div>
 
         {/* Seats remaining */}
-        <p className="text-[10.5px] mb-3" style={{ color: "#8b8f9a" }}>
-          {cls.seat_remaining} seats remaining
-        </p>
+        {SHOW_SEAT_COUNT && (
+          <p className="text-[10.5px] mb-3" style={{ color: "#8b8f9a" }}>
+            {cls.seat_remaining} seats remaining
+          </p>
+        )}
 
         {/* Controls */}
         {overlayLabel ? (
