@@ -158,13 +158,34 @@ export async function POST(request: NextRequest) {
   }
 
   // ── 3a. Order window, from the tenant's auto-cancel setting ─
-  const { data: tenant } = (await supabase
+  const { data: tenant, error: tenantError } = (await supabase
     .from("tenants")
     .select("auto_cancel_hours")
     .eq("id", enrollment.tenant_id)
-    .maybeSingle()) as { data: { auto_cancel_hours: number | null } | null; error: unknown };
+    .maybeSingle()) as {
+    data: { auto_cancel_hours: number | null } | null;
+    error: { message: string } | null;
+  };
 
-  const windowMinutes = orderWindowMinutes(tenant?.auto_cancel_hours);
+  // Fail closed. Falling back to 120m on a failed lookup would silently
+  // recreate the exact window this derivation exists to close: a tenant with a
+  // 15-minute deadline would get a QR payable for two hours, and the failure
+  // would be invisible — a working QR, and money taken later against a rejected
+  // enrollment.
+  //
+  // This is deliberately NOT the same as `auto_cancel_hours: null`. That means
+  // the row was read and auto-cancel is disabled, which is a valid state where
+  // KBZPay's 120-minute maximum is correct. An absent row or a read error means
+  // we do not KNOW the deadline, and guessing it is what causes the harm.
+  if (tenantError || !tenant) {
+    console.error(
+      `[kbzpay] tenant ${enrollment.tenant_id} lookup failed ` +
+        `(${tenantError?.message ?? "no row"}); refusing to guess the order window`,
+    );
+    return gatewayError();
+  }
+
+  const windowMinutes = orderWindowMinutes(tenant.auto_cancel_hours);
   const windowMs = windowMinutes * 60_000;
 
   // ── 4. Total fee ───────────────────────────────────────────
