@@ -244,6 +244,56 @@ describe("KBZPAY_NOTIFY_ORIGIN", () => {
       expect.objectContaining({ notifyUrl: "https://www.kuunyi.com/api/webhooks/kbzmmqr" }),
     );
   });
+
+  // new URL() accepts http:, ftp: and file: perfectly happily, and .origin
+  // returns them unchanged — so without an explicit scheme check the callback
+  // could be delivered over plaintext, or worse.
+  it.each([
+    ["http", "http://brave.kuunyi.com"],
+    ["ftp", "ftp://brave.kuunyi.com"],
+    ["javascript", "javascript:alert(1)"],
+  ])("refuses a %s scheme and falls back to platformOrigin", async (_label, value) => {
+    process.env.KBZPAY_NOTIFY_ORIGIN = value;
+
+    await POST(req());
+
+    expect(mockPrecreate).toHaveBeenCalledWith(
+      expect.objectContaining({ notifyUrl: "https://www.kuunyi.com/api/webhooks/kbzmmqr" }),
+    );
+  });
+
+  // file: is the nastiest case: its .origin is the literal string "null", so
+  // the pre-fix code would have sent KBZPay "null/api/webhooks/kbzmmqr".
+  it("refuses a file: URL, whose origin is the literal string 'null'", async () => {
+    expect(new URL("file:///tmp/x").origin).toBe("null");
+
+    process.env.KBZPAY_NOTIFY_ORIGIN = "file:///tmp/x";
+    await POST(req());
+
+    const sent = mockPrecreate.mock.calls[0][0].notifyUrl as string;
+    expect(sent).toBe("https://www.kuunyi.com/api/webhooks/kbzmmqr");
+    expect(sent).not.toContain("null");
+  });
+
+  it("never emits a non-https notify_url for any accepted value", async () => {
+    for (const value of [
+      "https://brave.kuunyi.com",
+      "http://brave.kuunyi.com",
+      "ftp://brave.kuunyi.com",
+      "file:///tmp/x",
+      "brave.kuunyi.com",
+      "",
+    ]) {
+      mockPrecreate.mockClear();
+      if (value) process.env.KBZPAY_NOTIFY_ORIGIN = value;
+      else delete process.env.KBZPAY_NOTIFY_ORIGIN;
+
+      await POST(req());
+
+      const sent = mockPrecreate.mock.calls[0][0].notifyUrl as string;
+      expect(sent.startsWith("https://")).toBe(true);
+    }
+  });
 });
 
 describe("claim outcomes", () => {

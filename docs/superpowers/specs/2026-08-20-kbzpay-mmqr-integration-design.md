@@ -631,9 +631,23 @@ KBZPAY_NOTIFY_ORIGIN=  # e.g. https://brave.kuunyi.com — origin KBZPay calls b
 `KBZPAY_NOTIFY_ORIGIN` exists because the callback host must be **registered with
 KBZPay per environment**, and the host they register has to match what we send with each
 order. It is operator-set and fixed per deployment — never derived from the request or from
-whichever tenant is checking out, which is the §7 rule it must not break. Unset falls back
-to `platformOrigin()`; a malformed value logs and falls back too, so a typo cannot turn into
-a relative or empty callback URL.
+whichever tenant is checking out, which is the §7 rule it must not break.
+
+It is validated before use, and every rejection falls back to `platformOrigin()` with a log
+rather than being sent to KBZPay:
+
+- **Unset** → fallback, so a missing variable is safe rather than broken.
+- **Malformed** → fallback, so a typo cannot become a relative or empty callback URL.
+- **Not `https:`** → fallback. `new URL()` accepts `http:`, `ftp:` and `file:` without
+  complaint and `.origin` returns them unchanged, so without an explicit scheme check the
+  callback could be delivered over plaintext. `file:` is the worst case: its `.origin` is the
+  literal string `"null"`, which would have produced a `notify_url` of
+  `null/api/webhooks/kbzmmqr`.
+- **Path or query present** → normalised to the origin, since KBZPay rejects a `notify_url`
+  carrying query parameters.
+
+`platformOrigin()` itself is deliberately not scheme-checked: it is the app's own configured
+origin, is `http://localhost` in local development, and no provider can reach that host.
 
 DEV values in `.env.local`; production values as Vercel Production env vars set with
 `printf` (never `echo`, which appends a newline and breaks signatures).
