@@ -5,6 +5,8 @@
 // Pure module: no Supabase, no Next.js imports. Everything here is unit-testable
 // against the vectors the provider publishes.
 
+import { createHash, timingSafeEqual } from "crypto";
+
 export type KbzField = string | number | null | undefined | unknown;
 
 // ── Signature: stringA construction ────────────────────────────────────────
@@ -51,4 +53,35 @@ export function buildStringA(input: Record<string, KbzField>): string {
     .sort() // ASCII / UTF-16 code unit order — NEVER localeCompare
     .map((k) => `${k}=${flat[k]}`)
     .join("&");
+}
+
+// ── Signature: sign and verify ─────────────────────────────────────────────
+
+/**
+ * SHA256 — NOT HMAC — of stringA + "&key=" + appKey, as uppercase hex.
+ *
+ * The signing input ends with the app key, so it must never be logged.
+ */
+export function sign(input: Record<string, KbzField>, appKey: string): string {
+  const stringToSign = `${buildStringA(input)}&key=${appKey}`;
+  return createHash("sha256").update(stringToSign, "utf8").digest("hex").toUpperCase();
+}
+
+/**
+ * Verifies a signature over WHATEVER keys arrived — never a fixed field list.
+ *
+ * The docs warn that the API may add fields and that extension fields must be
+ * supported when verifying, so a hardcoded list would break every callback the
+ * day KBZPay adds one. Spec §3.3.
+ */
+export function verifySign(payload: Record<string, KbzField>, appKey: string): boolean {
+  const received = payload.sign;
+  if (typeof received !== "string" || received.length !== 64) return false;
+
+  const expected = sign(payload, appKey);
+  const a = Buffer.from(expected, "utf8");
+  const b = Buffer.from(received.toUpperCase(), "utf8");
+  if (a.length !== b.length) return false;
+
+  return timingSafeEqual(a, b);
 }
