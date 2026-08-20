@@ -43,6 +43,7 @@ describe("precreate", () => {
       amount: 40000,
       title: "Payment for ENR-1",
       notifyUrl: "https://www.kuunyi.com/api/webhooks/kbzmmqr",
+      timeoutMinutes: 120,
     });
 
     expect(res).toEqual({ ok: true, qrCode: "0002010102...", prepayId: "KBZ00abc" });
@@ -70,7 +71,7 @@ describe("precreate", () => {
     const { precreate } = await import("@/lib/kbzpay");
     fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0", qrCode: "q", prepay_id: "p" }));
 
-    await precreate({ merchOrderId: "KBZ_x_y", amount: 1, title: "t", notifyUrl: "https://x/y" });
+    await precreate({ merchOrderId: "KBZ_x_y", amount: 1, title: "t", notifyUrl: "https://x/y", timeoutMinutes: 120 });
 
     expect(fetchMock.mock.calls[0][0]).toBe("https://api.kbzpay.com/payment/gateway/precreate");
   });
@@ -216,8 +217,61 @@ describe("credential hygiene", () => {
     const { precreate } = await import("@/lib/kbzpay");
     fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0", qrCode: "q", prepay_id: "p" }));
 
-    await precreate({ merchOrderId: "KBZ_x_y", amount: 1, title: "t", notifyUrl: "https://x/y" });
+    await precreate({ merchOrderId: "KBZ_x_y", amount: 1, title: "t", notifyUrl: "https://x/y", timeoutMinutes: 120 });
 
     expect(fetchMock.mock.calls[0][1].body).not.toContain(ENV.KBZPAY_APP_KEY);
+  });
+});
+
+// The POLICY (match the tenant's auto-cancel window) lives in the creation
+// route. This guard only ensures a missing or nonsensical value cannot reach
+// KBZPay as a malformed string — `${undefined}m` is "undefinedm".
+describe("timeout_express guard", () => {
+  const sentTimeout = () => JSON.parse(fetchMock.mock.calls[0][1].body).Request.biz_content.timeout_express;
+
+  const call = async (timeoutMinutes: unknown) => {
+    const { precreate } = await import("@/lib/kbzpay");
+    fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0", qrCode: "q", prepay_id: "p" }));
+    await precreate({
+      merchOrderId: "KBZ_x_y",
+      amount: 1,
+      title: "t",
+      notifyUrl: "https://x/y",
+      timeoutMinutes: timeoutMinutes as number,
+    });
+  };
+
+  it("passes a valid window through unchanged", async () => {
+    await call(15);
+    expect(sentTimeout()).toBe("15m");
+  });
+
+  it.each([undefined, NaN, null])("never emits 'undefinedm' for %s", async (bad) => {
+    await call(bad);
+    expect(sentTimeout()).toBe("120m");
+    expect(sentTimeout()).not.toContain("undefined");
+    expect(sentTimeout()).not.toContain("NaN");
+  });
+
+  it.each([
+    [0, "1m"],
+    [-5, "1m"],
+    [121, "120m"],
+    [4320, "120m"],
+    [15.9, "15m"],
+  ])("clamps %s to %s", async (input, expected) => {
+    await call(input);
+    expect(sentTimeout()).toBe(expected);
+  });
+
+  it("always emits an integer minute value within KBZPay's range", async () => {
+    for (const value of [undefined, NaN, -1, 0, 1, 15, 119, 120, 121, 9999, 15.9]) {
+      fetchMock.mockClear();
+      await call(value);
+      const m = Number(String(sentTimeout()).replace("m", ""));
+      expect(Number.isInteger(m)).toBe(true);
+      expect(m).toBeGreaterThanOrEqual(1);
+      expect(m).toBeLessThanOrEqual(120);
+    }
   });
 });

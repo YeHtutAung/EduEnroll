@@ -19,6 +19,7 @@ let paymentUpdates: Row[];
 let enrollmentUpdates: Row[];
 let rpcCalls: { name: string; args: Row }[];
 let updateError: { message: string } | null;
+let autoCancelMinutes: number | null;
 
 const mockResolveTenantId = vi.fn();
 vi.mock("@/lib/api", () => ({
@@ -77,6 +78,7 @@ beforeEach(() => {
   enrollmentUpdates = [];
   rpcCalls = [];
   updateError = null;
+  autoCancelMinutes = 15; // tenant setting: 15 MINUTES (column is misnamed _hours)
 
   mockResolveTenantId.mockResolvedValue("ten-1");
   mockPrecreate.mockResolvedValue({ ok: true, qrCode: "0002010102QR", prepayId: "KBZ00abc" });
@@ -93,6 +95,18 @@ beforeEach(() => {
           enrollmentUpdates.push(payload);
           return { eq: async () => ({ data: null, error: null }) };
         },
+      };
+    }
+    if (table === "tenants") {
+      return {
+        select: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({
+              data: { auto_cancel_hours: autoCancelMinutes },
+              error: null,
+            }),
+          }),
+        }),
       };
     }
     if (table === "payments") {
@@ -463,5 +477,74 @@ describe("browser contract (§5.1a)", () => {
 
   it("always carries a status discriminant on success", async () => {
     expect((await json(await POST(req()))).status).toBe("created");
+  });
+});
+
+// ─── Order window vs the tenant's auto-cancel timer ─────────────────────────
+//
+// The QR must not outlive the enrollment. check_expired_enrollments() rejects
+// an unpaid enrollment after the tenant's window and does NOT touch the payment
+// row, so a QR still payable afterwards lets a student pay for an enrollment
+// that no longer exists: the money settles, but fn_block_reconfirm_rejected and
+// the sync trigger both refuse to re-confirm a rejected enrollment, so no
+// ticket is issued and the seat is gone.
+//
+// NOTE: tenants.auto_cancel_hours holds MINUTES, not hours (migration 058).
+describe("order window", () => {
+  const timeoutOf = () => mockPrecreate.mock.calls[0][0].timeoutMinutes as number;
+  const expiresAt = () =>
+    new Date(rpcCalls.find((c) => c.name === "claim_kbzpay_order_slot")!.args
+      .p_expires_at as string).getTime();
+
+  it("matches the tenant's auto-cancel window", async () => {
+    autoCancelMinutes = 15;
+    await POST(req());
+    expect(timeoutOf()).toBe(15);
+  });
+
+  it("uses the same window for provider_order_expires_at", async () => {
+    autoCancelMinutes = 15;
+    const before = Date.now();
+    await POST(req());
+
+    const minutes = (expiresAt() - before) / 60_000;
+    expect(minutes).toBeGreaterThan(14);
+    expect(minutes).toBeLessThanOrEqual(15.1);
+  });
+
+  // 0 disables auto-cancel, so there is no enrollment deadline to outlive and
+  // KBZPay's maximum is the right choice.
+  it.each([0, null])("falls back to KBZPay's 120m maximum when auto-cancel is %s", async (value) => {
+    autoCancelMinutes = value as number | null;
+    await POST(req());
+    expect(timeoutOf()).toBe(120);
+  });
+
+  it("clamps to KBZPay's 120-minute maximum", async () => {
+    autoCancelMinutes = 4320; // the 72-hour default, in minutes
+    await POST(req());
+    expect(timeoutOf()).toBe(120);
+  });
+
+  it("never emits a window outside KBZPay's accepted 1-120 range", async () => {
+    for (const value of [-5, 0, 1, 15, 119, 120, 121, 4320, null]) {
+      mockPrecreate.mockClear();
+      autoCancelMinutes = value as number | null;
+      await POST(req());
+
+      const t = timeoutOf();
+      expect(Number.isInteger(t)).toBe(true);
+      expect(t).toBeGreaterThanOrEqual(1);
+      expect(t).toBeLessThanOrEqual(120);
+    }
+  });
+
+  it("never lets the QR outlive a configured auto-cancel window", async () => {
+    for (const value of [1, 15, 60, 119, 120]) {
+      mockPrecreate.mockClear();
+      autoCancelMinutes = value;
+      await POST(req());
+      expect(timeoutOf()).toBeLessThanOrEqual(value);
+    }
   });
 });
