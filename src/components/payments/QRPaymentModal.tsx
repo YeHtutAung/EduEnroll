@@ -219,7 +219,11 @@ export default function QRPaymentModal({
     }
 
     createPayment();
-  }, [enrollmentRef, startPolling, apiBase]);
+    // onSuccess is listed because the already_paid branch calls it directly.
+    // This does not change when the effect re-runs: startPolling is already a
+    // dependency and is itself a useCallback over [onSuccess, apiBase], so an
+    // unstable onSuccess already re-triggered this effect through it.
+  }, [enrollmentRef, startPolling, apiBase, onSuccess]);
 
   function handleRetry() {
     if (pollRef.current) clearInterval(pollRef.current);
