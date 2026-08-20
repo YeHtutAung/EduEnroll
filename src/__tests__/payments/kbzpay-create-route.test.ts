@@ -20,6 +20,8 @@ let enrollmentUpdates: Row[];
 let rpcCalls: { name: string; args: Row }[];
 let updateError: { message: string } | null;
 let autoCancelMinutes: number | null;
+let tenantError: { message: string } | null;
+let tenantMissing: boolean;
 
 const mockResolveTenantId = vi.fn();
 vi.mock("@/lib/api", () => ({
@@ -79,6 +81,8 @@ beforeEach(() => {
   rpcCalls = [];
   updateError = null;
   autoCancelMinutes = 15; // tenant setting: 15 MINUTES (column is misnamed _hours)
+  tenantError = null;
+  tenantMissing = false;
 
   mockResolveTenantId.mockResolvedValue("ten-1");
   mockPrecreate.mockResolvedValue({ ok: true, qrCode: "0002010102QR", prepayId: "KBZ00abc" });
@@ -102,8 +106,8 @@ beforeEach(() => {
         select: () => ({
           eq: () => ({
             maybeSingle: async () => ({
-              data: { auto_cancel_hours: autoCancelMinutes },
-              error: null,
+              data: tenantMissing ? null : { auto_cancel_hours: autoCancelMinutes },
+              error: tenantError,
             }),
           }),
         }),
@@ -546,5 +550,64 @@ describe("order window", () => {
       await POST(req());
       expect(timeoutOf()).toBeLessThanOrEqual(value);
     }
+  });
+});
+
+// Falling back to 120m on a failed tenant lookup would silently recreate the
+// window this whole derivation exists to close — and invisibly, since the
+// student still receives a working QR. Fail closed instead.
+describe("tenant lookup failure", () => {
+  it("returns 502 when the tenant lookup errors, and never calls KBZPay", async () => {
+    tenantError = { message: "connection reset" };
+
+    const res = await POST(req());
+
+    expect(res.status).toBe(502);
+    expect(mockPrecreate).not.toHaveBeenCalled();
+  });
+
+  it("returns 502 when no tenant row is found", async () => {
+    tenantMissing = true;
+
+    const res = await POST(req());
+
+    expect(res.status).toBe(502);
+    expect(mockPrecreate).not.toHaveBeenCalled();
+  });
+
+  it("claims no order slot when the tenant lookup fails", async () => {
+    tenantError = { message: "connection reset" };
+
+    await POST(req());
+
+    // No payment row, so nothing to reconcile and no slot held.
+    expect(rpcCalls).toHaveLength(0);
+  });
+
+  it("never falls back to 120m when the deadline is unknown", async () => {
+    for (const setup of [
+      () => { tenantError = { message: "boom" }; },
+      () => { tenantMissing = true; },
+    ]) {
+      mockPrecreate.mockClear();
+      tenantError = null;
+      tenantMissing = false;
+      autoCancelMinutes = 15;
+      setup();
+
+      await POST(req());
+      expect(mockPrecreate).not.toHaveBeenCalled();
+    }
+  });
+
+  // Distinct from the above: the row WAS read, and auto-cancel is disabled.
+  // There is no deadline to outlive, so KBZPay's maximum is correct.
+  it("still accepts auto_cancel_hours: null as a valid 'use 120m' case", async () => {
+    autoCancelMinutes = null;
+
+    const res = await POST(req());
+
+    expect(res.status).toBe(200);
+    expect(mockPrecreate.mock.calls[0][0].timeoutMinutes).toBe(120);
   });
 });
