@@ -104,3 +104,198 @@ export function buildMerchOrderId(enrollmentId: string): string {
   const short = enrollmentId.replace(/-/g, "").slice(0, 8);
   return `KBZ_${short}_${randomBytes(8).toString("hex")}`;
 }
+
+// ── Transport ──────────────────────────────────────────────────────────────
+
+const APPID = () => process.env.KBZPAY_APPID!;
+const MERCH_CODE = () => process.env.KBZPAY_MERCH_CODE!;
+const APP_KEY = () => process.env.KBZPAY_APP_KEY!;
+
+// Always HTTPS. The UAT docs print http:// for precreate and queryorder, but
+// merchant credentials and signatures must not cross the wire in the clear.
+// Spec §3.1, gate G2.
+const BASE = () =>
+  process.env.KBZPAY_MODE === "production"
+    ? "https://api.kbzpay.com/payment/gateway"
+    : "https://api-uat.kbzpay.com/payment/gateway/uat";
+
+function nonce(): string {
+  return randomBytes(16).toString("hex").toUpperCase();
+}
+
+type CallResult = {
+  ok: boolean;
+  body?: Record<string, KbzField>;
+  code?: string;
+  msg?: string;
+};
+
+async function call(
+  path: string,
+  method: string,
+  version: string,
+  bizContent: Record<string, KbzField>,
+  extraCommon: Record<string, KbzField> = {},
+): Promise<CallResult> {
+  const request: Record<string, KbzField> = {
+    timestamp: Math.floor(Date.now() / 1000).toString(),
+    method,
+    nonce_str: nonce(),
+    sign_type: "SHA256",
+    version,
+    biz_content: bizContent,
+    ...extraCommon,
+  };
+  request.sign = sign(request, APP_KEY());
+
+  let res: Response;
+  try {
+    res = await fetch(`${BASE()}/${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ Request: request }),
+    });
+  } catch (err) {
+    // Never log the signing input — it ends with the app key.
+    console.error(`[kbzpay] ${method} transport error:`, err instanceof Error ? err.message : err);
+    return { ok: false };
+  }
+
+  if (!res.ok) {
+    console.error(`[kbzpay] ${method} HTTP ${res.status}`);
+    return { ok: false };
+  }
+
+  const json = (await res.json()) as { Response?: Record<string, KbzField> };
+  const body = json?.Response;
+  if (!body) return { ok: false };
+
+  // Spec §3.5: check `result` first, then `code`, then the business fields.
+  const code = typeof body.code === "string" ? body.code : undefined;
+  const msg = typeof body.msg === "string" ? body.msg : undefined;
+
+  if (body.result !== "SUCCESS" || code !== "0") {
+    console.error(`[kbzpay] ${method} failed: code=${code} msg=${msg}`);
+    return { ok: false, body, code, msg };
+  }
+
+  return { ok: true, body, code, msg };
+}
+
+// ── 1. Create order ────────────────────────────────────────────────────────
+
+export type PrecreateParams = {
+  merchOrderId: string;
+  amount: number;
+  title: string;
+  notifyUrl: string;
+};
+
+export type PrecreateResult = { ok: false } | { ok: true; qrCode: string; prepayId: string };
+
+export async function precreate(p: PrecreateParams): Promise<PrecreateResult> {
+  const r = await call(
+    "precreate",
+    "kbz.payment.precreate",
+    "1.0",
+    {
+      appid: APPID(),
+      merch_code: MERCH_CODE(),
+      merch_order_id: p.merchOrderId,
+      trade_type: "PAY_BY_QRCODE",
+      title: p.title,
+      total_amount: String(p.amount),
+      trans_currency: "MMK",
+      timeout_express: "120m",
+    },
+    { notify_url: p.notifyUrl },
+  );
+
+  if (!r.ok || typeof r.body?.qrCode !== "string") return { ok: false };
+
+  return {
+    ok: true,
+    qrCode: r.body.qrCode,
+    prepayId: typeof r.body.prepay_id === "string" ? r.body.prepay_id : "",
+  };
+}
+
+// ── 2. Query order ─────────────────────────────────────────────────────────
+
+export type TradeStatus =
+  | "PAY_SUCCESS"
+  | "PAY_FAILED"
+  | "WAIT_PAY"
+  | "PAYING"
+  | "ORDER_EXPIRED"
+  | "ORDER_CLOSED"
+  | "ORDER_NOT_FOUND";
+
+export type QueryResult =
+  | { ok: false }
+  | {
+      ok: true;
+      tradeStatus: TradeStatus;
+      totalAmount?: string;
+      transCurrency?: string;
+      mmOrderId?: string;
+      walletIdentifier?: string;
+    };
+
+/**
+ * The single source of truth for whether an order is payable. Spec §7 —
+ * no terminal mmqr_status transition and no order-slot release may be decided
+ * from local state; only from this call's answer.
+ */
+export async function queryOrder(merchOrderId: string): Promise<QueryResult> {
+  const r = await call("queryorder", "kbz.payment.queryorder", "3.0", {
+    appid: APPID(),
+    merch_code: MERCH_CODE(),
+    merch_order_id: merchOrderId,
+  });
+
+  // "The order does not exist" is an ANSWER, not a failure: it is the only
+  // thing that proves KBZPay holds no order under this reference, which is
+  // what lets a row become FAILED. Spec R13.
+  if (!r.ok && r.code === "QUERYORDER_FAIL") {
+    return { ok: true, tradeStatus: "ORDER_NOT_FOUND" };
+  }
+
+  if (!r.ok || typeof r.body?.trade_status !== "string") return { ok: false };
+
+  return {
+    ok: true,
+    // The docs' own success example prints " PAY_SUCCESS" with a leading space.
+    tradeStatus: r.body.trade_status.trim() as TradeStatus,
+    totalAmount: typeof r.body.total_amount === "string" ? r.body.total_amount : undefined,
+    transCurrency: typeof r.body.trans_currency === "string" ? r.body.trans_currency : undefined,
+    mmOrderId: typeof r.body.mm_order_id === "string" ? r.body.mm_order_id : undefined,
+    walletIdentifier:
+      typeof r.body.Wallet_identifier === "string" ? r.body.Wallet_identifier : undefined,
+  };
+}
+
+// ── 3. Close order ─────────────────────────────────────────────────────────
+
+/**
+ * `ok: true` means ONLY "the close call did not error". It is NOT proof the
+ * order went unpaid: ORDER_ALREADY_CLOSED and QUERYORDER_FAIL say the order is
+ * not payable *now*, without saying whether it was cancelled or completed.
+ * The caller MUST re-query afterwards. Spec §5.1 step 7b, R12.
+ */
+export async function closeOrder(merchOrderId: string): Promise<{ ok: boolean }> {
+  const r = await call("closeorder", "kbz.payment.closeorder", "3.0", {
+    appid: APPID(),
+    merch_code: MERCH_CODE(),
+    merch_order_id: merchOrderId,
+  });
+
+  if (r.ok) return { ok: true };
+  if (r.code === "ORDER_ALREADY_CLOSED" || r.code === "QUERYORDER_FAIL") return { ok: true };
+  return { ok: false };
+}
+
+// ── Export ─────────────────────────────────────────────────────────────────
+
+const kbzpay = { precreate, queryOrder, closeOrder, sign, verifySign, buildMerchOrderId };
+export default kbzpay;
