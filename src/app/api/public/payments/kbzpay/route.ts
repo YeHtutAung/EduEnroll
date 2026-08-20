@@ -21,6 +21,55 @@ import { resolveKbzpayOrder } from "@/server/payments/resolveKbzpayOrder";
 /** KBZPay's maximum timeout_express, and the window we mirror locally. */
 const ORDER_WINDOW_MS = 120 * 60_000;
 
+/**
+ * Origin KBZPay will POST its payment notification to.
+ *
+ * `KBZPAY_NOTIFY_ORIGIN` exists because the callback host has to be registered
+ * with KBZPay per environment, and the host they register must match what we
+ * send with each order. It is an operator-set, fixed value per deployment —
+ * NOT derived from the request or from whichever tenant is checking out.
+ *
+ * That distinction is the point (spec §7). A tenant-derived host could be a
+ * custom domain the tenant controls and might remove, which would strand
+ * in-flight payments and would mean registering every new tenant domain with
+ * KBZPay. `platformOrigin()` remains the fallback, so an unset variable is
+ * safe rather than broken.
+ */
+function notifyOrigin(): string {
+  const configured = process.env.KBZPAY_NOTIFY_ORIGIN;
+  if (!configured) return platformOrigin();
+
+  let parsed: URL;
+  try {
+    parsed = new URL(configured);
+  } catch {
+    // A malformed value must not silently become a relative or empty URL —
+    // fall back to the known-good platform origin and say so.
+    console.error("[kbzpay] KBZPAY_NOTIFY_ORIGIN is not a valid URL; using platformOrigin()");
+    return platformOrigin();
+  }
+
+  // HTTPS only. `new URL()` happily accepts http:, ftp: and file:, and .origin
+  // would return them unchanged — or the literal string "null" for opaque
+  // schemes like file:, producing a notify_url of "null/api/webhooks/kbzmmqr".
+  // The callback carries payment notifications and must not be delivered over
+  // plaintext, so anything other than https falls back rather than being sent
+  // to KBZPay.
+  //
+  // The platformOrigin() fallback is deliberately NOT scheme-checked: it is the
+  // app's own configured origin, is http://localhost in local development, and
+  // no provider can reach that host anyway.
+  if (parsed.protocol !== "https:") {
+    console.error(
+      `[kbzpay] KBZPAY_NOTIFY_ORIGIN must use https (got ${parsed.protocol}); ` +
+        `using platformOrigin()`,
+    );
+    return platformOrigin();
+  }
+
+  return parsed.origin;
+}
+
 type EnrollmentRow = {
   id: string;
   enrollment_ref: string;
@@ -198,7 +247,7 @@ export async function POST(request: NextRequest) {
     return gatewayError();
   }
 
-  const notifyUrl = `${platformOrigin()}/api/webhooks/kbzpay`;
+  const notifyUrl = `${notifyOrigin()}/api/webhooks/kbzmmqr`;
 
   const created = await precreate({
     merchOrderId,

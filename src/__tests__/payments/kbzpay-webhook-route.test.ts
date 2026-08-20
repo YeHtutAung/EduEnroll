@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-// ─── POST /api/webhooks/kbzpay ──────────────────────────────────────────────
+// ─── POST /api/webhooks/kbzmmqr ─────────────────────────────────────────────
 // Spec §5.2 and the §8 callback table.
 //
 // verifySign is deliberately NOT mocked — these prove the handler actually
@@ -35,7 +35,7 @@ vi.mock("@/server/payments/settleMmqrPayment", () => ({
   settleMmqrPayment: (...a: unknown[]) => mockSettle(...a),
 }));
 
-const { POST } = await import("@/app/api/webhooks/kbzpay/route");
+const { POST } = await import("@/app/api/webhooks/kbzmmqr/route");
 const { sign } = await import("@/lib/kbzpay");
 
 const REF = "KBZ_1a2b3c4d_9f3c7b21d0e4a856";
@@ -59,7 +59,7 @@ const callbackFields = {
 function signedRequest(over: Record<string, unknown> = {}, key = APP_KEY) {
   const fields = { ...callbackFields, ...over };
   const payload = { Request: { ...fields, sign: sign(fields, key) } };
-  return new NextRequest("https://www.kuunyi.com/api/webhooks/kbzpay", {
+  return new NextRequest("https://www.kuunyi.com/api/webhooks/kbzmmqr", {
     method: "POST",
     body: JSON.stringify(payload),
     headers: { "Content-Type": "application/json" },
@@ -98,7 +98,7 @@ describe("signature verification", () => {
   });
 
   it("returns 403 when the signature is absent", async () => {
-    const req = new NextRequest("https://www.kuunyi.com/api/webhooks/kbzpay", {
+    const req = new NextRequest("https://www.kuunyi.com/api/webhooks/kbzmmqr", {
       method: "POST",
       body: JSON.stringify({ Request: callbackFields }),
       headers: { "Content-Type": "application/json" },
@@ -110,7 +110,7 @@ describe("signature verification", () => {
 
   it("returns 403 when the amount was tampered with after signing", async () => {
     const signed = { ...callbackFields, sign: sign(callbackFields, APP_KEY) };
-    const req = new NextRequest("https://www.kuunyi.com/api/webhooks/kbzpay", {
+    const req = new NextRequest("https://www.kuunyi.com/api/webhooks/kbzmmqr", {
       method: "POST",
       body: JSON.stringify({ Request: { ...signed, total_amount: "1" } }),
       headers: { "Content-Type": "application/json" },
@@ -128,7 +128,7 @@ describe("signature verification", () => {
   });
 
   it("returns 400 for a malformed body", async () => {
-    const req = new NextRequest("https://www.kuunyi.com/api/webhooks/kbzpay", {
+    const req = new NextRequest("https://www.kuunyi.com/api/webhooks/kbzmmqr", {
       method: "POST",
       body: "not json",
       headers: { "Content-Type": "application/json" },

@@ -3,7 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { verifySign, queryOrder, type KbzField } from "@/lib/kbzpay";
 import { settleMmqrPayment } from "@/server/payments/settleMmqrPayment";
 
-// ─── POST /api/webhooks/kbzpay ──────────────────────────────────────────────
+// ─── POST /api/webhooks/kbzmmqr ─────────────────────────────────────────────
 // KBZPay asynchronous payment notification.
 // Design: docs/superpowers/specs/2026-08-20-kbzpay-mmqr-integration-design.md §5.2
 //
