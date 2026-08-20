@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildStringA } from "@/lib/kbzpay";
+import { buildStringA, sign, verifySign } from "@/lib/kbzpay";
 
 // ─── KBZPay signature: stringA construction ─────────────────────────────────
 // The KBZPay PGW docs publish two worked examples that print the expected
@@ -76,5 +76,68 @@ describe("buildStringA", () => {
     expect(buildStringA({ appid: "x", Wallet_identifier: "MCB", merch_code: "1" })).toBe(
       "Wallet_identifier=MCB&appid=x&merch_code=1",
     );
+  });
+});
+
+// ─── sign() and verifySign() ────────────────────────────────────────────────
+
+const KEY = "testkey0123456789abcdef";
+
+// Fixed vector. The docs mask the real app key, so their published `sign`
+// values cannot be reproduced; this pins the hash step against a value computed
+// once out-of-band rather than by re-running the implementation's own logic.
+const EXPECTED_SIGN = "BB6E194654BF884102D53336C0586BA01F05A0BF774CB3266010756C54BDAD24";
+
+describe("sign", () => {
+  it("appends &key= and returns uppercase hex SHA256", () => {
+    expect(sign({ a: "1", b: "2" }, KEY)).toBe(EXPECTED_SIGN);
+  });
+
+  it("always returns 64 uppercase hex characters", () => {
+    expect(sign({ z: "9" }, KEY)).toMatch(/^[0-9A-F]{64}$/);
+  });
+});
+
+describe("verifySign", () => {
+  const payload = {
+    merch_order_id: "KBZ_1a2b3c4d_9f3c7b21d0e4a856",
+    total_amount: "40000",
+    trans_currency: "MMK",
+    trade_status: "PAY_SUCCESS",
+    Wallet_identifier: "MCB",
+    sign_type: "SHA256",
+  };
+
+  it("accepts a correctly signed payload", () => {
+    expect(verifySign({ ...payload, sign: sign(payload, KEY) }, KEY)).toBe(true);
+  });
+
+  // The docs state KBZPay may add fields and that extension fields must be
+  // supported when verifying. A hardcoded field list would break every callback
+  // the day they add one. Spec §3.3.
+  it("accepts a payload carrying an unknown extension field", () => {
+    const extended = { ...payload, some_future_field: "whatever" };
+    expect(verifySign({ ...extended, sign: sign(extended, KEY) }, KEY)).toBe(true);
+  });
+
+  it("rejects a payload whose amount was tampered with", () => {
+    const signed = { ...payload, sign: sign(payload, KEY) };
+    expect(verifySign({ ...signed, total_amount: "1" }, KEY)).toBe(false);
+  });
+
+  it("rejects a wrong key", () => {
+    const signed = { ...payload, sign: sign(payload, KEY) };
+    expect(verifySign(signed, "someotherkey")).toBe(false);
+  });
+
+  it("rejects a missing or malformed signature without throwing", () => {
+    expect(verifySign({ ...payload }, KEY)).toBe(false);
+    expect(verifySign({ ...payload, sign: "short" }, KEY)).toBe(false);
+    expect(verifySign({ ...payload, sign: 12345 }, KEY)).toBe(false);
+  });
+
+  it("accepts a lowercase signature, since only the hex casing differs", () => {
+    const signed = { ...payload, sign: sign(payload, KEY).toLowerCase() };
+    expect(verifySign(signed, KEY)).toBe(true);
   });
 });
