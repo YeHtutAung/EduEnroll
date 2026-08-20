@@ -69,7 +69,7 @@ fresh `queryorder` afterwards (§5.1 step 7b).
 {
   "Request": {
     "timestamp": "1535166225",
-    "notify_url": "https://…/api/webhooks/kbzpay",
+    "notify_url": "https://…/api/webhooks/kbzmmqr",
     "method": "kbz.payment.precreate",
     "nonce_str": "5K8264ILTKCH16CQ2502SI8ZNMTM67VS",
     "sign_type": "SHA256",
@@ -151,7 +151,7 @@ Response-level result handling: check `result` (`SUCCESS`/`FAIL`) first, then `c
 | `src/server/payments/settleMmqrPayment.ts` | The settlement operation. Locates a payment by `payment_ref`, performs the conditional status transition, then fulfilment. |
 | `src/app/api/public/payments/kbzpay/route.ts` | `POST` — creates the KBZPay order, inserts the payment row, returns the QR string. |
 | `src/app/api/public/payments/kbzpay/status/route.ts` | `GET` — browser poller; also self-heals a missed callback. |
-| `src/app/api/webhooks/kbzpay/route.ts` | `POST` — callback receiver. |
+| `src/app/api/webhooks/kbzmmqr/route.ts` | `POST` — callback receiver. |
 
 Splitting the client from the settlement operation from the routes means the signature
 algorithm can be tested against the published vectors without any HTTP or database
@@ -400,7 +400,7 @@ is retained purely so a reference is recognisable during support and log triage.
    `trg_payments_sync_enrollment` fires on `pending` and would advance the enrollment to
    `payment_submitted` before any QR exists — the exact hazard migration 054 was added to
    avoid. If the claim fails, return 502 and never call KBZPay.
-9. Build `notify_url` as `platformOrigin() + "/api/webhooks/kbzpay"`.
+9. Build `notify_url` as `notifyOrigin() + "/api/webhooks/kbzmmqr"`.
    **Never** derived from the inbound `Host` header — see §7.
 10. Call `precreate` with `trade_type: "PAY_BY_QRCODE"`, `trans_currency: "MMK"`,
     `timeout_express: "120m"`.
@@ -493,7 +493,7 @@ starting a poller. The existing `success` state already renders correctly, so no
 state is needed. The `qr`/`url` handling below it is unchanged, which keeps ABank, MMPay and
 PayPay on exactly their current path — none of them ever sends `status`.
 
-### 5.2 Callback settlement — `POST /api/webhooks/kbzpay`
+### 5.2 Callback settlement — `POST /api/webhooks/kbzmmqr`
 
 1. Read the raw body; parse the `Request` envelope.
 2. **Verify the signature.** Invalid → log and return `403`. (Not `success`, but a forged
@@ -625,7 +625,15 @@ KBZPAY_APPID=          # 32-char application id
 KBZPAY_MERCH_CODE=     # merchant short code
 KBZPAY_APP_KEY=        # signing key — secret
 KBZPAY_MODE=           # 'production' | anything else → UAT
+KBZPAY_NOTIFY_ORIGIN=  # e.g. https://brave.kuunyi.com — origin KBZPay calls back
 ```
+
+`KBZPAY_NOTIFY_ORIGIN` exists because the callback host must be **registered with
+KBZPay per environment**, and the host they register has to match what we send with each
+order. It is operator-set and fixed per deployment — never derived from the request or from
+whichever tenant is checking out, which is the §7 rule it must not break. Unset falls back
+to `platformOrigin()`; a malformed value logs and falls back too, so a typo cannot turn into
+a relative or empty callback URL.
 
 DEV values in `.env.local`; production values as Vercel Production env vars set with
 `printf` (never `echo`, which appends a newline and breaks signatures).
@@ -753,7 +761,7 @@ mocks cannot prove.
 | G1 | KBZPay UAT credentials (`appid`, `merch_code`, app key) issued. Blocks live verification, not implementation. | KBZPay onboarding |
 | G2 | **Confirm HTTPS on `api-uat.kbzpay.com`.** The docs print `http://` for `precreate` and `queryorder`. Merchant credentials must not cross plaintext HTTP; if UAT genuinely offers HTTP only, that is a finding to raise with KBZPay before any real key is used. | Us → KBZPay |
 | G3 | Register the production `notify_url` with KBZPay and confirm whether they require IP allowlisting. | KBZPay onboarding |
-| G4 | Production `notify_url` must use `https://www.kuunyi.com/...` — the apex domain 307-redirects, and redirects break POST callbacks. | Us |
+| G4 | `KBZPAY_NOTIFY_ORIGIN` must be set per environment — `https://brave.kuunyi.com` in production, `https://brave.staging.kuunyi.com` on staging — and **must match the URL registered with KBZPay**. The apex 307-redirects and a redirected POST is not followed, so an apex value fails silently. Confirm both hosts resolve; staging subdomains are not wildcard. | Us |
 | G5 | Confirm the `total_amount` decimal convention for MMK (docs allow up to 2 decimals; MMK is normally whole-kyat). Affects the amount comparison. | Us → KBZPay |
 | G6 | **Before the unique-index migration**, confirm zero existing duplicate `payment_ref` values on dev *and* production: `select payment_ref, count(*) from payments where payment_ref is not null group by 1 having count(*) > 1;`. Read-only, and the production run is a query only — no schema change is applied there outside the normal dev → staging → main pipeline. If duplicates exist, they must be reconciled before the index can be created. | Us |
 
