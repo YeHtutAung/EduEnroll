@@ -38,16 +38,36 @@ const ORDER_WINDOW_MS = 120 * 60_000;
 function notifyOrigin(): string {
   const configured = process.env.KBZPAY_NOTIFY_ORIGIN;
   if (!configured) return platformOrigin();
+
+  let parsed: URL;
   try {
-    return new URL(configured).origin;
+    parsed = new URL(configured);
   } catch {
     // A malformed value must not silently become a relative or empty URL —
     // fall back to the known-good platform origin and say so.
+    console.error("[kbzpay] KBZPAY_NOTIFY_ORIGIN is not a valid URL; using platformOrigin()");
+    return platformOrigin();
+  }
+
+  // HTTPS only. `new URL()` happily accepts http:, ftp: and file:, and .origin
+  // would return them unchanged — or the literal string "null" for opaque
+  // schemes like file:, producing a notify_url of "null/api/webhooks/kbzmmqr".
+  // The callback carries payment notifications and must not be delivered over
+  // plaintext, so anything other than https falls back rather than being sent
+  // to KBZPay.
+  //
+  // The platformOrigin() fallback is deliberately NOT scheme-checked: it is the
+  // app's own configured origin, is http://localhost in local development, and
+  // no provider can reach that host anyway.
+  if (parsed.protocol !== "https:") {
     console.error(
-      `[kbzpay] KBZPAY_NOTIFY_ORIGIN is not a valid URL; falling back to platformOrigin()`,
+      `[kbzpay] KBZPAY_NOTIFY_ORIGIN must use https (got ${parsed.protocol}); ` +
+        `using platformOrigin()`,
     );
     return platformOrigin();
   }
+
+  return parsed.origin;
 }
 
 type EnrollmentRow = {
