@@ -243,6 +243,73 @@ test.describe("Checkout — payment page", () => {
     ).toBeVisible();
   });
 
+  test("kbzpay: clicking Pay via MMQR opens the QR modal", async ({ page }) => {
+    await page.route("**/api/public/enrollment/E2E-KBZ-001", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ...BASE_ENROLLMENT, enrollment_ref: "E2E-KBZ-001", payment_mode: "mmqr", mmqr_provider: "kbzpay" }),
+      }),
+    );
+    await page.route("**/api/public/payments/kbzpay", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          status: "created",
+          qr: "00020101021202021110500346KBZ0075303MMK5802MM6304F50D",
+          orderId: "KBZ_e2e0001_9f3c7b21d0e4a856",
+          amount: 40000,
+        }),
+      }),
+    );
+
+    await page.goto(paymentUrl("E2E-KBZ-001"));
+    await expect(page.getByRole("button", { name: /Pay via MMQR/i })).toBeVisible({ timeout: 15_000 });
+
+    await page.getByRole("button", { name: /Pay via MMQR/i }).click();
+    await expect(page.getByRole("dialog")).toBeVisible({ timeout: 5_000 });
+    await expect(
+      page.getByText(/Generating QR code/i).or(page.getByText(/Pay with MMQR/i)),
+    ).toBeVisible();
+  });
+
+  // Spec R10 at the integration level. Before the fix, an already_paid response
+  // rendered an EMPTY QR panel and then polled /status?ref=undefined every 5s
+  // for 10 minutes before declaring the code expired — to a student who had
+  // already paid. Asserting on the ABSENCE of that request is what makes this
+  // test meaningful.
+  test("kbzpay: already_paid shows success and starts no poller", async ({ page }) => {
+    await page.route("**/api/public/enrollment/E2E-KBZ-PAID-001", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ...BASE_ENROLLMENT, enrollment_ref: "E2E-KBZ-PAID-001", payment_mode: "mmqr", mmqr_provider: "kbzpay" }),
+      }),
+    );
+    await page.route("**/api/public/payments/kbzpay", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "already_paid" }),
+      }),
+    );
+
+    const statusRequests: string[] = [];
+    page.on("request", (req) => {
+      if (req.url().includes("/api/public/payments/kbzpay/status")) statusRequests.push(req.url());
+    });
+
+    await page.goto(paymentUrl("E2E-KBZ-PAID-001"));
+    await page.getByRole("button", { name: /Pay via MMQR/i }).click({ timeout: 15_000 });
+
+    await expect(page.getByRole("dialog")).toBeVisible({ timeout: 5_000 });
+
+    // Give the old polling interval (5s) more than enough time to fire.
+    await page.waitForTimeout(7_000);
+    expect(statusRequests).toEqual([]);
+  });
+
   test("paypay: shows Pay via PayPay button", async ({ page }) => {
     await page.route("**/api/public/enrollment/E2E-PAYPAY-001", (route) =>
       route.fulfill({
