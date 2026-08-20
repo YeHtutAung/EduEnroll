@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildStringA, sign, verifySign } from "@/lib/kbzpay";
+import { buildStringA, buildMerchOrderId, sign, verifySign } from "@/lib/kbzpay";
 
 // ─── KBZPay signature: stringA construction ─────────────────────────────────
 // The KBZPay PGW docs publish two worked examples that print the expected
@@ -139,5 +139,28 @@ describe("verifySign", () => {
   it("accepts a lowercase signature, since only the hex casing differs", () => {
     const signed = { ...payload, sign: sign(payload, KEY).toLowerCase() };
     expect(verifySign(signed, KEY)).toBe(true);
+  });
+});
+
+// ─── buildMerchOrderId() ────────────────────────────────────────────────────
+// KBZPay allows only letters, digits and underscores, max 40. A timestamp
+// suffix is not collision-safe, and a duplicate payment_ref breaks settlement
+// for BOTH payments because the webhooks resolve it with .single(). Spec R1.
+
+describe("buildMerchOrderId", () => {
+  const ENROLLMENT = "1a2b3c4d-5e6f-7788-99aa-bbccddeeff00";
+
+  it("matches KBZPay's charset and length limit", () => {
+    expect(buildMerchOrderId(ENROLLMENT)).toMatch(/^[A-Za-z0-9_]{1,40}$/);
+  });
+
+  it("keeps a recognisable enrollment prefix for support triage", () => {
+    expect(buildMerchOrderId(ENROLLMENT)).toMatch(/^KBZ_1a2b3c4d_/);
+  });
+
+  it("never collides across repeated calls for the SAME enrollment", () => {
+    const seen = new Set<string>();
+    for (let i = 0; i < 10_000; i++) seen.add(buildMerchOrderId(ENROLLMENT));
+    expect(seen.size).toBe(10_000);
   });
 });

@@ -5,7 +5,7 @@
 // Pure module: no Supabase, no Next.js imports. Everything here is unit-testable
 // against the vectors the provider publishes.
 
-import { createHash, timingSafeEqual } from "crypto";
+import { createHash, randomBytes, timingSafeEqual } from "crypto";
 
 export type KbzField = string | number | null | undefined | unknown;
 
@@ -84,4 +84,23 @@ export function verifySign(payload: Record<string, KbzField>, appKey: string): b
   if (a.length !== b.length) return false;
 
   return timingSafeEqual(a, b);
+}
+
+// ── Merchant order reference ───────────────────────────────────────────────
+
+/**
+ * KBZ_{8 hex of enrollment id}_{16 hex random} — 29 chars, 64 bits of entropy.
+ *
+ * Randomness rather than a timestamp: two concurrent requests for the same
+ * enrollment in the same millisecond would otherwise produce the same
+ * reference, and because the webhooks and status routes resolve payment_ref
+ * with .single(), a duplicate breaks settlement for BOTH payments rather than
+ * merely creating a stray row. Spec R1.
+ *
+ * The enrollment prefix is kept purely so a reference is recognisable during
+ * support and log triage.
+ */
+export function buildMerchOrderId(enrollmentId: string): string {
+  const short = enrollmentId.replace(/-/g, "").slice(0, 8);
+  return `KBZ_${short}_${randomBytes(8).toString("hex")}`;
 }
