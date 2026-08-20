@@ -4,6 +4,7 @@ import { resolveTenantId } from "@/lib/api";
 import { platformOrigin } from "@/lib/origin";
 import { precreate, buildMerchOrderId } from "@/lib/kbzpay";
 import { resolveKbzpayOrder } from "@/server/payments/resolveKbzpayOrder";
+import { orderWindow } from "@/server/payments/kbzpayOrderWindow";
 
 // ─── POST /api/public/payments/kbzpay ───────────────────────────────────────
 // Creates a KBZPay MMQR order and returns a QR string for the user to scan.
@@ -17,9 +18,6 @@ import { resolveKbzpayOrder } from "@/server/payments/resolveKbzpayOrder";
 //
 // No settleMmqrPayment result object ever reaches the browser — the route
 // translates, always.
-
-/** KBZPay's maximum timeout_express, and the window we mirror locally. */
-const ORDER_WINDOW_MS = 120 * 60_000;
 
 /**
  * Origin KBZPay will POST its payment notification to.
@@ -77,6 +75,7 @@ type EnrollmentRow = {
   class_id: string | null;
   quantity: number | null;
   status: string;
+  enrolled_at: string | null;
   student_name_en: string;
   classes: { id: string; fee_amount: number; level: string } | null;
   enrollment_items: { class_id: string; quantity: number; fee_amount: number }[] | null;
@@ -128,6 +127,57 @@ export async function POST(request: NextRequest) {
   if (enrollment.status !== "pending_payment" && enrollment.status !== "partial_payment") {
     return fail(409, "This enrollment is not awaiting payment.", "Conflict");
   }
+
+  // ── 3a. Order window, from the tenant's auto-cancel setting ─
+  const { data: tenant, error: tenantError } = (await supabase
+    .from("tenants")
+    .select("auto_cancel_hours")
+    .eq("id", enrollment.tenant_id)
+    .maybeSingle()) as {
+    data: { auto_cancel_hours: number | null } | null;
+    error: { message: string } | null;
+  };
+
+  // Fail closed. Falling back to 120m on a failed lookup would silently
+  // recreate the exact window this derivation exists to close: a tenant with a
+  // 15-minute deadline would get a QR payable for two hours, and the failure
+  // would be invisible — a working QR, and money taken later against a rejected
+  // enrollment.
+  //
+  // This is deliberately NOT the same as `auto_cancel_hours: null`. That means
+  // the row was read and auto-cancel is disabled, which is a valid state where
+  // KBZPay's 120-minute maximum is correct. An absent row or a read error means
+  // we do not KNOW the deadline, and guessing it is what causes the harm.
+  if (tenantError || !tenant) {
+    console.error(
+      `[kbzpay] tenant ${enrollment.tenant_id} lookup failed ` +
+        `(${tenantError?.message ?? "no row"}); refusing to guess the order window`,
+    );
+    return gatewayError();
+  }
+
+  const win = orderWindow(tenant.auto_cancel_hours, enrollment.enrolled_at, Date.now());
+
+  if (win.kind === "unknown") {
+    console.error(
+      `[kbzpay] cannot derive the order window for ${enrollment.enrollment_ref} ` +
+        `(enrolled_at=${enrollment.enrolled_at ?? "null"}); refusing to guess`,
+    );
+    return gatewayError();
+  }
+
+  // Under a minute left before auto-cancel. Issuing anything here guarantees a
+  // QR that outlives its enrollment, so let the expiry process win.
+  if (win.kind === "expired") {
+    return fail(
+      409,
+      "This enrollment has expired or is about to. Please start a new one.",
+      "Conflict",
+    );
+  }
+
+  const windowMinutes = win.timeoutMinutes;
+  const expiresAtIso = win.expiresAt.toISOString();
 
   // ── 4. Total fee ───────────────────────────────────────────
   const isCart =
@@ -205,7 +255,7 @@ export async function POST(request: NextRequest) {
       p_reason: resolution.reason,
       p_new_ref: newRef,
       p_amount: totalFee,
-      p_expires_at: new Date(Date.now() + ORDER_WINDOW_MS).toISOString(),
+      p_expires_at: expiresAtIso,
       // `as never` matches the convention for RPCs absent from the generated
       // Database types — see settlementConflicts.ts.
     } as never)) as { data: SupersedeRow[] | null; error: { message: string } | null };
@@ -254,6 +304,7 @@ export async function POST(request: NextRequest) {
     amount: totalFee,
     title: `Payment for ${enrollment.enrollment_ref}`,
     notifyUrl,
+    timeoutMinutes: windowMinutes,
   });
 
   if (!created.ok) {
@@ -273,7 +324,7 @@ export async function POST(request: NextRequest) {
     .from("payments")
     .update({
       provider_qr: created.qrCode,
-      provider_order_expires_at: new Date(Date.now() + ORDER_WINDOW_MS).toISOString(),
+      provider_order_expires_at: expiresAtIso,
     } as never)
     .eq("payment_ref", merchOrderId)) as { error: { message: string } | null };
 
@@ -299,7 +350,7 @@ export async function POST(request: NextRequest) {
         p_tenant_id: enrollment!.tenant_id,
         p_payment_ref: buildMerchOrderId(enrollment!.id),
         p_amount: totalFee,
-        p_expires_at: new Date(Date.now() + ORDER_WINDOW_MS).toISOString(),
+        p_expires_at: expiresAtIso,
       } as never)) as { data: ClaimRow[] | null; error: { message: string } | null };
 
       if (error) {

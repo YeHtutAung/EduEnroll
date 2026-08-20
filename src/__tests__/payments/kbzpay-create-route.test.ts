@@ -19,6 +19,9 @@ let paymentUpdates: Row[];
 let enrollmentUpdates: Row[];
 let rpcCalls: { name: string; args: Row }[];
 let updateError: { message: string } | null;
+let autoCancelMinutes: number | null;
+let tenantError: { message: string } | null;
+let tenantMissing: boolean;
 
 const mockResolveTenantId = vi.fn();
 vi.mock("@/lib/api", () => ({
@@ -47,6 +50,7 @@ vi.mock("@/lib/origin", () => ({
 }));
 
 const { POST } = await import("@/app/api/public/payments/kbzpay/route");
+const { orderWindow } = await import("@/server/payments/kbzpayOrderWindow");
 
 const ENROLLMENT = {
   id: "1a2b3c4d-5e6f-7788-99aa-bbccddeeff00",
@@ -55,6 +59,7 @@ const ENROLLMENT = {
   class_id: "cls-1",
   quantity: 2,
   status: "pending_payment",
+  enrolled_at: new Date().toISOString(), // fresh by default
   student_name_en: "Test Student",
   classes: { id: "cls-1", fee_amount: 20000, level: "N5" },
   enrollment_items: null,
@@ -77,6 +82,9 @@ beforeEach(() => {
   enrollmentUpdates = [];
   rpcCalls = [];
   updateError = null;
+  autoCancelMinutes = 15; // tenant setting: 15 MINUTES (column is misnamed _hours)
+  tenantError = null;
+  tenantMissing = false;
 
   mockResolveTenantId.mockResolvedValue("ten-1");
   mockPrecreate.mockResolvedValue({ ok: true, qrCode: "0002010102QR", prepayId: "KBZ00abc" });
@@ -93,6 +101,18 @@ beforeEach(() => {
           enrollmentUpdates.push(payload);
           return { eq: async () => ({ data: null, error: null }) };
         },
+      };
+    }
+    if (table === "tenants") {
+      return {
+        select: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({
+              data: tenantMissing ? null : { auto_cancel_hours: autoCancelMinutes },
+              error: tenantError,
+            }),
+          }),
+        }),
       };
     }
     if (table === "payments") {
@@ -463,5 +483,277 @@ describe("browser contract (§5.1a)", () => {
 
   it("always carries a status discriminant on success", async () => {
     expect((await json(await POST(req()))).status).toBe("created");
+  });
+});
+
+// ─── Order window vs the tenant's auto-cancel timer ─────────────────────────
+//
+// The QR must not outlive the enrollment. check_expired_enrollments() rejects
+// an unpaid enrollment after the tenant's window and does NOT touch the payment
+// row, so a QR still payable afterwards lets a student pay for an enrollment
+// that no longer exists: the money settles, but fn_block_reconfirm_rejected and
+// the sync trigger both refuse to re-confirm a rejected enrollment, so no
+// ticket is issued and the seat is gone.
+//
+// NOTE: tenants.auto_cancel_hours holds MINUTES, not hours (migration 058).
+describe("order window (route level)", () => {
+  const fresh = () => { enrollment = { ...ENROLLMENT, enrolled_at: new Date().toISOString() }; };
+  const timeoutOf = () => mockPrecreate.mock.calls[0][0].timeoutMinutes as number;
+  const claimExpiry = () =>
+    Date.parse(rpcCalls.find((c) => c.name === "claim_kbzpay_order_slot")!.args
+      .p_expires_at as string);
+
+  // Bounded, not exact: enrolled_at is a real timestamp and the window is
+  // floored, so a "fresh" enrollment yields configured-1 once any time has
+  // passed. Exact-value behaviour is pinned in the orderWindow tests below,
+  // which control the clock.
+  it("derives the window from the tenant setting", async () => {
+    autoCancelMinutes = 15;
+    fresh();
+    await POST(req());
+
+    expect(timeoutOf()).toBeGreaterThanOrEqual(14);
+    expect(timeoutOf()).toBeLessThanOrEqual(15);
+  });
+
+  it("uses the same window for provider_order_expires_at", async () => {
+    autoCancelMinutes = 15;
+    fresh();
+    const before = Date.now();
+    await POST(req());
+
+    const minutes = (claimExpiry() - before) / 60_000;
+    expect(minutes).toBeGreaterThan(14);
+    expect(minutes).toBeLessThanOrEqual(15.1);
+  });
+
+  // 0 disables auto-cancel, so there is no enrollment deadline to outlive and
+  // KBZPay's maximum is the right choice.
+  it.each([0, null])("falls back to KBZPay's 120m maximum when auto-cancel is %s", async (value) => {
+    autoCancelMinutes = value as number | null;
+    fresh();
+    await POST(req());
+    expect(timeoutOf()).toBe(120);
+  });
+
+  it("clamps to KBZPay's 120-minute maximum", async () => {
+    autoCancelMinutes = 4320; // the 72-hour default, in minutes
+    fresh();
+    await POST(req());
+    expect(timeoutOf()).toBe(120);
+  });
+
+  it("never emits a window outside KBZPay's accepted 1-120 range", async () => {
+    for (const value of [2, 15, 119, 120, 121, 4320, 0, null]) {
+      mockPrecreate.mockClear();
+      autoCancelMinutes = value as number | null;
+      fresh();
+      await POST(req());
+
+      // A window too short to issue returns 409 and calls nothing — also valid.
+      if (mockPrecreate.mock.calls.length === 0) continue;
+
+      const t = timeoutOf();
+      expect(Number.isInteger(t)).toBe(true);
+      expect(t).toBeGreaterThanOrEqual(1);
+      expect(t).toBeLessThanOrEqual(120);
+    }
+  });
+
+  it("never lets the QR outlive a configured auto-cancel window", async () => {
+    for (const value of [2, 15, 60, 119, 120]) {
+      mockPrecreate.mockClear();
+      autoCancelMinutes = value;
+      fresh();
+      await POST(req());
+
+      if (mockPrecreate.mock.calls.length === 0) continue;
+      expect(timeoutOf()).toBeLessThanOrEqual(value);
+    }
+  });
+});
+
+describe("tenant lookup failure", () => {
+  it("returns 502 when the tenant lookup errors, and never calls KBZPay", async () => {
+    tenantError = { message: "connection reset" };
+
+    const res = await POST(req());
+
+    expect(res.status).toBe(502);
+    expect(mockPrecreate).not.toHaveBeenCalled();
+  });
+
+  it("returns 502 when no tenant row is found", async () => {
+    tenantMissing = true;
+
+    const res = await POST(req());
+
+    expect(res.status).toBe(502);
+    expect(mockPrecreate).not.toHaveBeenCalled();
+  });
+
+  it("claims no order slot when the tenant lookup fails", async () => {
+    tenantError = { message: "connection reset" };
+
+    await POST(req());
+
+    // No payment row, so nothing to reconcile and no slot held.
+    expect(rpcCalls).toHaveLength(0);
+  });
+
+  it("never falls back to 120m when the deadline is unknown", async () => {
+    for (const setup of [
+      () => { tenantError = { message: "boom" }; },
+      () => { tenantMissing = true; },
+    ]) {
+      mockPrecreate.mockClear();
+      tenantError = null;
+      tenantMissing = false;
+      autoCancelMinutes = 15;
+      setup();
+
+      await POST(req());
+      expect(mockPrecreate).not.toHaveBeenCalled();
+    }
+  });
+
+  // Distinct from the above: the row WAS read, and auto-cancel is disabled.
+  // There is no deadline to outlive, so KBZPay's maximum is correct.
+  it("still accepts auto_cancel_hours: null as a valid 'use 120m' case", async () => {
+    autoCancelMinutes = null;
+
+    const res = await POST(req());
+
+    expect(res.status).toBe(200);
+    expect(mockPrecreate.mock.calls[0][0].timeoutMinutes).toBe(120);
+  });
+});
+
+// ─── Remaining time, not configured duration ────────────────────────────────
+//
+// The deadline is enrolled_at + auto_cancel minutes, matching
+// check_expired_enrollments(). Sending the full configured duration for an
+// enrollment created 14 minutes into a 15-minute window would leave the QR
+// payable ~14 minutes AFTER the enrollment is rejected.
+describe("orderWindow (remaining time)", () => {
+  const NOW = Date.parse("2026-08-20T12:00:00.000Z");
+  const minutesAgo = (m: number) => new Date(NOW - m * 60_000).toISOString();
+
+  it("uses the REMAINING time, not the configured duration", () => {
+    // 14 minutes into a 15-minute window: 1 minute left, not 15.
+    const w = orderWindow(15, minutesAgo(14), NOW);
+    expect(w).toMatchObject({ kind: "ok", timeoutMinutes: 1 });
+  });
+
+  it("gives the full window to a brand-new enrollment", () => {
+    expect(orderWindow(15, minutesAgo(0), NOW)).toMatchObject({ timeoutMinutes: 15 });
+  });
+
+  it.each([
+    [1, 14],
+    [7, 8],
+    [14, 1],
+  ])("leaves %s minutes elapsed → %s minutes remaining", (elapsed, expected) => {
+    expect(orderWindow(15, minutesAgo(elapsed), NOW)).toMatchObject({ timeoutMinutes: expected });
+  });
+
+  it("reports expired when under a minute remains", () => {
+    // 14.5 minutes elapsed → 30 seconds left, below KBZPay's 1-minute minimum.
+    expect(orderWindow(15, new Date(NOW - 14.5 * 60_000).toISOString(), NOW)).toEqual({
+      kind: "expired",
+    });
+  });
+
+  it("reports expired once the deadline has passed", () => {
+    expect(orderWindow(15, minutesAgo(20), NOW)).toEqual({ kind: "expired" });
+  });
+
+  it("clamps to KBZPay's 120-minute maximum for a long window", () => {
+    expect(orderWindow(4320, minutesAgo(0), NOW)).toMatchObject({ timeoutMinutes: 120 });
+  });
+
+  it.each([0, null, undefined])("uses 120m when auto-cancel is %s", (value) => {
+    expect(orderWindow(value as number | null, minutesAgo(999), NOW)).toMatchObject({
+      kind: "ok",
+      timeoutMinutes: 120,
+    });
+  });
+
+  it.each([null, undefined, "not-a-date"])(
+    "reports unknown for enrolled_at %s rather than guessing",
+    (value) => {
+      expect(orderWindow(15, value as string | null, NOW)).toEqual({ kind: "unknown" });
+    },
+  );
+
+  it("expires at the enrollment deadline, not now + timeout", () => {
+    const w = orderWindow(15, minutesAgo(10), NOW);
+    if (w.kind !== "ok") throw new Error("expected ok");
+    // Deadline is enrolled_at + 15m = NOW + 5m.
+    expect(w.expiresAt.getTime()).toBe(NOW + 5 * 60_000);
+  });
+
+  it("caps expiresAt at KBZPay's 120 minutes when the deadline is further out", () => {
+    const w = orderWindow(4320, minutesAgo(0), NOW);
+    if (w.kind !== "ok") throw new Error("expected ok");
+    expect(w.expiresAt.getTime()).toBe(NOW + 120 * 60_000);
+  });
+
+  // The invariant this whole PR exists for.
+  it("never lets the QR outlive the enrollment deadline", () => {
+    for (const autoCancel of [1, 5, 15, 60, 119, 120, 240, 4320]) {
+      for (const elapsed of [0, 1, 5, 14, 30, 119, 240]) {
+        const w = orderWindow(autoCancel, minutesAgo(elapsed), NOW);
+        if (w.kind !== "ok") continue;
+
+        const deadline = NOW - elapsed * 60_000 + autoCancel * 60_000;
+        expect(NOW + w.timeoutMinutes * 60_000).toBeLessThanOrEqual(deadline);
+        expect(w.expiresAt.getTime()).toBeLessThanOrEqual(deadline);
+      }
+    }
+  });
+});
+
+describe("route honours the remaining window", () => {
+  const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+
+  // The clock is frozen deliberately. With a real Date.now() this assertion
+  // holds only if the route observes the SAME millisecond used to build
+  // enrolled_at — any crossing floors 5 to 4. It passed by luck, not by design.
+  it("sends the remaining minutes, not the configured duration", async () => {
+    const NOW = Date.parse("2026-08-21T12:00:00.000Z");
+    const clock = vi.spyOn(Date, "now").mockReturnValue(NOW);
+
+    try {
+      autoCancelMinutes = 15;
+      enrollment = { ...ENROLLMENT, enrolled_at: new Date(NOW - 10 * 60_000).toISOString() };
+
+      await POST(req());
+
+      expect(mockPrecreate.mock.calls[0][0].timeoutMinutes).toBe(5);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it("returns 409 and creates nothing when under a minute remains", async () => {
+    autoCancelMinutes = 15;
+    enrollment = { ...ENROLLMENT, enrolled_at: minutesAgo(14.6) };
+
+    const res = await POST(req());
+
+    expect(res.status).toBe(409);
+    expect(mockPrecreate).not.toHaveBeenCalled();
+    expect(rpcCalls).toHaveLength(0);
+  });
+
+  it("returns 502 when enrolled_at cannot be parsed", async () => {
+    autoCancelMinutes = 15;
+    enrollment = { ...ENROLLMENT, enrolled_at: null };
+
+    const res = await POST(req());
+
+    expect(res.status).toBe(502);
+    expect(mockPrecreate).not.toHaveBeenCalled();
   });
 });
