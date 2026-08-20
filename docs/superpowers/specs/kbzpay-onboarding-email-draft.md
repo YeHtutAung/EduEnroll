@@ -1,10 +1,15 @@
 # KBZPay onboarding — email draft
 
-Draft only. Review before sending; fill the bracketed placeholders.
+FINAL. Fill the four bracketed placeholders and send.
+
+Section 5 (trade_status whitespace, order expiry) was removed: the expiry question
+quoted a hardcoded 120m timeout_express that is being changed to derive from the
+tenant's auto-cancel window, and the whitespace question is cosmetic — the client
+already trims defensively.
 
 **To:** KBZPay PGW integration / IT team
 **Cc:** [your ops contact]
-**Subject:** MMQR (PAY_BY_QRCODE) integration — UAT credentials and four technical questions
+**Subject:** KBZPay MMQR integration — UAT credentials request and technical questions
 
 ---
 
@@ -25,7 +30,7 @@ and covered by automated tests. We are using the MMQR product with
 We are not using the refund interface at this stage.
 
 Before we can begin UAT testing we need credentials, and we would be grateful
-for clarification on four technical points.
+for clarification on three technical points.
 
 ## 1. UAT credentials
 
@@ -115,17 +120,6 @@ If fractional MMK amounts are possible we will need to adjust how we store order
 amounts. If MMK is always whole kyat in practice, no change is needed and we
 would simply like that confirmed.
 
-## 5. Two smaller confirmations
-
-- **`trade_status` whitespace.** The success example in your `queryorder`
-  documentation shows `"trade_status": " PAY_SUCCESS"` with a leading space. We
-  trim the value defensively, but could you confirm whether that space is
-  present in real responses or is a typographical error in the documentation?
-- **Order expiry.** We set `timeout_express` to `120m`. Does the `queryorder`
-  response expose the order's expiry time in any field? It is not listed in the
-  specification, and having it would let us align our own expiry handling with
-  yours precisely.
-
 ## Timeline
 
 We are ready to begin UAT as soon as credentials are available. Please let us
@@ -150,7 +144,6 @@ Each section maps to a gate in the design spec:
 | 2 — HTTPS | G2 | Using a real app key anywhere |
 | 3 — callback URL / IP | G3, G4 | Production go-live |
 | 4 — MMK decimals | G5 | The settlement amount comparison |
-| 5 — whitespace, expiry | — | Not blocking; both already handled defensively |
 
 **Correction to an earlier version of this note.** It claimed that a
 `"40000.00"` response would fail the amount guard and stall every settlement.
