@@ -199,30 +199,26 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_old    public.payments%ROWTYPE;
-  v_tenant uuid;
-  v_new_id uuid;
+  v_old               public.payments%ROWTYPE;
+  v_tenant            uuid;
+  v_enrollment_status public.enrollments.status%TYPE;
+  v_new_id            uuid;
 BEGIN
   IF p_reason NOT IN ('FAILED', 'EXPIRED', 'SUPERSEDED') THEN
     RAISE EXCEPTION 'invalid reason: %', p_reason;
   END IF;
 
-  -- Same guard as claim_kbzpay_order_slot, and for the same reason: this
-  -- function also inserts an awaiting-payment row, and the route's guard is a
-  -- TOCTOU check. The window here is WIDER than the claim's — between the two
-  -- calls the route makes one or two round trips to KBZPay (queryorder, then
-  -- possibly closeorder and a re-query), which is ample time for an admin
-  -- rejection or an auto-cancellation to land.
+  -- Lock the enrollment and prove TENANT OWNERSHIP on every path. Ownership is
+  -- unconditional: no outcome of this function may be reported to a caller that
+  -- does not own the enrollment.
   --
-  -- Failing closed here leaves the old row untouched and PENDING. That is the
-  -- correct outcome: the caller has already proven the provider-side order is
-  -- dead, but a dead provider order plus an ineligible enrollment means there
-  -- is nothing to replace it with.
-  SELECT e.tenant_id INTO v_tenant
+  -- The enrollment STATUS is deliberately NOT tested here — see the guard
+  -- further down, immediately before the write.
+  SELECT e.tenant_id, e.status
+    INTO v_tenant, v_enrollment_status
     FROM public.enrollments e
    WHERE e.id        = p_enrollment_id
      AND e.tenant_id = p_tenant_id
-     AND e.status IN ('pending_payment', 'partial_payment')
    FOR UPDATE;
 
   IF NOT FOUND THEN
@@ -254,6 +250,26 @@ BEGIN
   -- anything about why.
   IF v_old.mmqr_status IS DISTINCT FROM 'PENDING' THEN
     RETURN QUERY SELECT 'not_live'::text, v_old.id;
+    RETURN;
+  END IF;
+
+  -- Enrollment status is validated HERE, and only here: this guard protects the
+  -- write below, and nothing above it writes anything.
+  --
+  -- Position is load-bearing. Placed with the ownership check, it shadowed the
+  -- 'already_settled' branch: settling the old payment fires
+  -- trg_payments_sync_enrollment, which sets the enrollment to 'confirmed', so
+  -- the status test rejected the very case R11 requires be reported as paid.
+  -- The route would then return 409 to a student who had just paid successfully.
+  -- A confirmed enrollment is not an invalid state here — it is the expected
+  -- consequence of settlement, and it must be reported, not refused.
+  --
+  -- Reaching this point means the old order is genuinely live and unpaid, so an
+  -- ineligible enrollment (rejected or auto-cancelled while the route was
+  -- talking to KBZPay) really does mean there is nothing to replace it with.
+  -- Failing closed leaves the old row untouched and PENDING.
+  IF v_enrollment_status NOT IN ('pending_payment', 'partial_payment') THEN
+    RETURN QUERY SELECT 'invalid_enrollment'::text, NULL::uuid;
     RETURN;
   END IF;
 
