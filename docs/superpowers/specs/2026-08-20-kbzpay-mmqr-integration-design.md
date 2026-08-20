@@ -449,10 +449,20 @@ their next request resolves the old reference — one extra `queryorder` round t
 That is the deliberate trade: an extra API call on a rare path, versus the possibility of two
 simultaneously payable orders on the same enrollment.
 
-`timeout_express` is set to KBZPay's maximum of 120 minutes so the QR outlives the browser
-modal and the student can still pay from their banking app after closing the tab. The
-tenant's `auto_cancel_hours` remains the real enrollment deadline; if the KBZPay order
-expires first the student simply regenerates a QR, which is existing behaviour for ABank.
+`timeout_express` is derived from the tenant's own auto-cancel window, clamped to KBZPay's
+accepted 1-120 minutes. **The QR must not outlive the enrollment.**
+`check_expired_enrollments()` rejects an unpaid enrollment after that window and does NOT
+touch the payment row, so a QR still payable afterwards lets a student pay for an enrollment
+that no longer exists: the money settles, but `fn_block_reconfirm_rejected` and the sync
+trigger's status predicate both refuse to re-confirm a rejected enrollment, so no ticket is
+issued and the seat is already gone — a manual refund or reinstatement every time.
+
+A 15-minute tenant setting against the previously hardcoded `120m` left a 105-minute window
+in which this was reachable in normal use.
+
+NOTE `tenants.auto_cancel_hours` holds **minutes**, not hours, since migration 058. A value
+of 0 disables auto-cancel, in which case KBZPay's 120-minute maximum is correct: there is no
+enrollment deadline to outlive.
 
 ### 5.1a Creation-route response contract (R10)
 

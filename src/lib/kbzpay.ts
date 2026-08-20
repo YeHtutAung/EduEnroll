@@ -189,9 +189,32 @@ export type PrecreateParams = {
   amount: number;
   title: string;
   notifyUrl: string;
+  /**
+   * How long the QR stays payable, in minutes. KBZPay accepts 1-120.
+   *
+   * Must not outlive the enrollment: the tenant's auto-cancel timer rejects an
+   * unpaid enrollment independently, and a QR that is still payable after that
+   * lets a student pay for an enrollment that no longer exists. The caller
+   * derives this from the tenant's own window.
+   */
+  timeoutMinutes: number;
 };
 
 export type PrecreateResult = { ok: false } | { ok: true; qrCode: string; prepayId: string };
+
+/**
+ * Last-resort sanity clamp on timeout_express.
+ *
+ * The POLICY — matching the QR window to the tenant's auto-cancel timer — lives
+ * in the creation route, which is the only thing that knows the tenant. This
+ * guard exists purely so a missing or nonsensical value cannot reach KBZPay as
+ * a malformed string: `${undefined}m` is "undefinedm", which they would reject
+ * or, worse, interpret.
+ */
+function safeTimeoutMinutes(value: number): number {
+  if (!Number.isFinite(value)) return 120;
+  return Math.min(Math.max(Math.floor(value), 1), 120);
+}
 
 export async function precreate(p: PrecreateParams): Promise<PrecreateResult> {
   const r = await call(
@@ -206,7 +229,7 @@ export async function precreate(p: PrecreateParams): Promise<PrecreateResult> {
       title: p.title,
       total_amount: String(p.amount),
       trans_currency: "MMK",
-      timeout_express: "120m",
+      timeout_express: `${safeTimeoutMinutes(p.timeoutMinutes)}m`,
     },
     { notify_url: p.notifyUrl },
   );
