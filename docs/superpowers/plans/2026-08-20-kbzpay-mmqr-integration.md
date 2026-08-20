@@ -49,7 +49,13 @@ KBZPAY_MODE=uat
 | A single DB file | `npx vitest run --config vitest.db.config.ts src/__tests__/db/<file>.db.test.ts` |
 | Lint | `npm run lint` |
 | Build (judge by **exit code**, not output text) | `npm run build` |
-| Apply migrations to dev | `npm run db:migrate` |
+| Apply migrations **locally** | `npx supabase migration up --local` |
+
+> **Never run `npm run db:migrate` from this workspace.** It is `npx supabase db push`, which
+> targets whichever project the CLI is *linked* to — and `supabase/.temp/project-ref` currently
+> reads `nhxmumcvgnxlczjsgctz`, the **production** project. There is no `--dev` in that script;
+> the word "dev" appears nowhere in it. Use the explicit `--local` form above, or have an
+> operator apply the migration to dev through the normal pipeline.
 
 **Git.** Work on the current branch `feat/kbzpay-mmqr-design`, which is branched from
 `origin/dev` and already carries the spec commit. Never push to `main` or `staging`; the
@@ -949,11 +955,30 @@ GRANT EXECUTE ON FUNCTION public.complete_kbzpay_supersede(uuid, uuid, text, tex
 COMMIT;
 ```
 
-- [ ] **Step 3: Show the diff before applying (project rule)**
+- [ ] **Step 3: Validate the migration against a local database**
 
-Run: `npm run db:diff`
-Review the output, then apply to **dev only**: `npm run db:migrate`
-Expected: migration applies cleanly. Never link or push to the production project ref.
+`supabase db diff` is the wrong instrument here: it detects *drift* between a database and the
+migration files, which is how you capture manual DB edits into a migration. It does not preview
+a hand-written migration. The SQL file is the diff; validation means executing it.
+
+```bash
+npx supabase start
+npx supabase migration up --local
+```
+
+Expected: applies cleanly. **Do not use `npm run db:migrate`** — see the warning in the command
+table above; it pushes to the linked project, which is production.
+
+If `migration up --local` fails on an *earlier* migration because the local database has
+drifted (objects present but absent from `supabase_migrations.schema_migrations`), apply this
+migration directly instead — it is idempotent throughout:
+
+```bash
+docker exec -i supabase_db_EduEnroll psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+  -f - < supabase/migrations/20260820120000_kbzpay_mmqr.sql
+```
+
+Then verify the objects, and confirm EXECUTE is granted to `service_role` **only**.
 
 - [ ] **Step 4: Commit**
 
@@ -1011,6 +1036,27 @@ describe("claim_kbzpay_order_slot", () => {
     // Exactly one 'created'; the other must not create a second live row.
     // Assert count of live kbzpay rows for the enrollment === 1.
   });
+
+  // P1 review: the route's guard is a TOCTOU check. These prove the function
+  // defends itself, since it is SECURITY DEFINER and inserts payments rows.
+  it("returns invalid_enrollment for a mismatched tenant and inserts nothing", async () => {});
+
+  it("returns invalid_enrollment for a rejected/confirmed/cancelled enrollment", async () => {
+    // Parameterise over every enrollment_status except pending_payment and
+    // partial_payment. Assert no payments row is created for any of them.
+  });
+
+  it("fails closed when the enrollment is rejected concurrently", async () => {
+    // Begin a transaction that sets the enrollment to 'rejected' but does not
+    // commit; call the claim; commit the rejection. Under READ COMMITTED,
+    // FOR UPDATE re-evaluates the predicate after the lock, so the claim must
+    // return invalid_enrollment rather than inserting.
+  });
+
+  it("attributes the payment to the enrollment's own tenant_id", async () => {
+    // The INSERT uses the tenant read from the locked enrollment row, not the
+    // p_tenant_id argument.
+  });
 });
 
 describe("complete_kbzpay_supersede", () => {
@@ -1026,6 +1072,12 @@ describe("complete_kbzpay_supersede", () => {
 
   it("rejects an invalid reason", async () => {
     // expect the call to reject
+  });
+
+  it("returns invalid_enrollment and leaves the old row PENDING (P1 review)", async () => {
+    // Enrollment rejected between the claim and this call — the window here is
+    // wider, since the route makes one or two KBZPay round trips in between.
+    // Assert: no new row, and the OLD row is still PENDING (not retired).
   });
 
   it("frees the slot for every terminal reason", async () => {
@@ -1310,13 +1362,17 @@ the cart/class fee calculation and the partial-payment adjustment. Then §5.1 st
 2. Compute the fee exactly as the ABank route does.
 3. `buildMerchOrderId(enrollment.id)`; `expiresAt = now + 120 min`.
 4. Call `claim_kbzpay_order_slot` via `supabase.rpc(...)`.
+   - `invalid_enrollment` → **409**. The enrollment stopped being a legal payment target
+     between the route's guard and the function's lock — a rejection, an auto-cancellation,
+     or a tenant mismatch. Never retry and never call KBZPay (P1 review).
    - `reuse` → `{ status: 'created', qr, orderId, amount }` from the stored row, no KBZPay call.
    - `unresolved` → `resolveKbzpayOrder()`, then:
      - `already_paid` → `{ status: 'already_paid' }` (200)
      - `settlement_conflict` → 409
      - `blocked` → 502
      - `retire` → `complete_kbzpay_supersede(...)`; `already_settled` →
-       `{ status: 'already_paid' }` (R11); `not_live` → re-claim once; `replaced` → continue.
+       `{ status: 'already_paid' }` (R11); `not_live` → re-claim once; `invalid_enrollment` →
+       **409**, leaving the old row PENDING (P1 review); `replaced` → continue.
    - `created` → continue.
 5. `notifyUrl = platformOrigin() + "/api/webhooks/kbzpay"`. **Never** from the inbound `Host`.
 6. `precreate(...)`. On failure → 502, **leave the row `PENDING`** (R13).
