@@ -717,13 +717,23 @@ describe("orderWindow (remaining time)", () => {
 describe("route honours the remaining window", () => {
   const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
 
+  // The clock is frozen deliberately. With a real Date.now() this assertion
+  // holds only if the route observes the SAME millisecond used to build
+  // enrolled_at — any crossing floors 5 to 4. It passed by luck, not by design.
   it("sends the remaining minutes, not the configured duration", async () => {
-    autoCancelMinutes = 15;
-    enrollment = { ...ENROLLMENT, enrolled_at: minutesAgo(10) };
+    const NOW = Date.parse("2026-08-21T12:00:00.000Z");
+    const clock = vi.spyOn(Date, "now").mockReturnValue(NOW);
 
-    await POST(req());
+    try {
+      autoCancelMinutes = 15;
+      enrollment = { ...ENROLLMENT, enrolled_at: new Date(NOW - 10 * 60_000).toISOString() };
 
-    expect(mockPrecreate.mock.calls[0][0].timeoutMinutes).toBe(5);
+      await POST(req());
+
+      expect(mockPrecreate.mock.calls[0][0].timeoutMinutes).toBe(5);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it("returns 409 and creates nothing when under a minute remains", async () => {
