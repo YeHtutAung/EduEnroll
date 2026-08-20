@@ -6,7 +6,39 @@ import { formatCurrencySimple } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type QRProvider = "mmpay" | "abank" | "paypay";
+type QRProvider = "mmpay" | "abank" | "paypay" | "kbzpay";
+
+// ─── Creation-response interpretation ───────────────────────────────────────
+// Exported and pure so the decision can be tested without a DOM (this project
+// has no jsdom; component tests use renderToStaticMarkup and cannot run
+// effects).
+//
+// KBZPay's creation route has TWO success shapes, discriminated by `status`
+// (spec §5.1a). The already_paid one carries no qr and no orderId, and it MUST
+// be recognised before anything reads data.qr: treating it as a QR response
+// sets qrData/orderId to undefined, renders an empty QR panel, and then polls
+// /status?ref=undefined every 5s for 10 minutes before declaring the code
+// expired — showing a blank code, then an expiry error, to a student who has
+// already paid.
+//
+// ABank, MMPay and PayPay never send `status`, so they fall through unchanged.
+export type CreateResponse =
+  | { kind: "already_paid" }
+  | { kind: "qr"; qrSource: string; orderId: string };
+
+export function interpretCreateResponse(data: {
+  status?: string;
+  qr?: string;
+  url?: string;
+  orderId?: string;
+}): CreateResponse | null {
+  if (data?.status === "already_paid") return { kind: "already_paid" };
+
+  const qrSource = data?.qr ?? data?.url;
+  if (!qrSource || !data?.orderId) return null;
+
+  return { kind: "qr", qrSource, orderId: data.orderId };
+}
 
 interface QRPaymentModalProps {
   enrollmentRef: string;
@@ -34,6 +66,7 @@ export default function QRPaymentModal({
   const apiBase =
     provider === "abank" ? "/api/public/payments/abank"
     : provider === "paypay" ? "/api/public/payments/paypay"
+    : provider === "kbzpay" ? "/api/public/payments/kbzpay"
     : "/api/public/payments/mmpay";
   const [state, setState] = useState<ModalState>("loading");
   const [qrData, setQrData] = useState<string | null>(null);
@@ -142,10 +175,26 @@ export default function QRPaymentModal({
         const data = await res.json();
         console.log("[QRPaymentModal] API response:", data);
 
+        const interpreted = interpretCreateResponse(data);
+
+        // The previous order turned out to be paid (spec §5.1a). Show success
+        // and start NO poller — there is no order to poll for.
+        if (interpreted?.kind === "already_paid") {
+          setState("success");
+          onSuccess();
+          return;
+        }
+
+        if (!interpreted) {
+          setErrorMsg("Failed to generate QR code.");
+          setState("error");
+          return;
+        }
+
         // PayPay returns a URL, MMQR returns a QR string
-        const qrSource = data.qr ?? data.url;
+        const qrSource = interpreted.qrSource;
         setQrData(qrSource);
-        setOrderId(data.orderId);
+        setOrderId(interpreted.orderId);
 
         // Generate QR image from either EMVCo string or PayPay URL
         if (qrSource) {
@@ -162,7 +211,7 @@ export default function QRPaymentModal({
         if (data.deeplink) setPaypayDeeplink(data.deeplink);
 
         setState("qr");
-        startPolling(data.orderId);
+        startPolling(interpreted.orderId);
       } catch {
         setErrorMsg("Network error. Please check your connection.");
         setState("error");
@@ -197,9 +246,27 @@ export default function QRPaymentModal({
         }
 
         const data = await res.json();
-        const qrSource = data.qr ?? data.url;
+        const interpreted = interpretCreateResponse(data);
+
+        // Same already-paid branch as the mount effect. Retry is a second
+        // entry point into the identical decision, and omitting it here would
+        // leave the blank-QR-then-expiry path alive for anyone who pressed
+        // "Try again" (spec §5.1a).
+        if (interpreted?.kind === "already_paid") {
+          setState("success");
+          onSuccess();
+          return;
+        }
+
+        if (!interpreted) {
+          setErrorMsg("Failed to generate QR code.");
+          setState("error");
+          return;
+        }
+
+        const qrSource = interpreted.qrSource;
         setQrData(qrSource);
-        setOrderId(data.orderId);
+        setOrderId(interpreted.orderId);
         if (qrSource) {
           try {
             const dataUrl = await QRCode.toDataURL(qrSource, { width: 280, margin: 2 });
@@ -211,7 +278,7 @@ export default function QRPaymentModal({
         if (data.url) setPaypayUrl(data.url);
         if (data.deeplink) setPaypayDeeplink(data.deeplink);
         setState("qr");
-        startPolling(data.orderId);
+        startPolling(interpreted.orderId);
       } catch {
         setErrorMsg("Network error. Please check your connection.");
         setState("error");

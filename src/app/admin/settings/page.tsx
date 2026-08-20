@@ -526,7 +526,7 @@ function SettingsContent() {
   // ── Currency & Payment mode ──────────────────────────────────────────────
   const [currency, setCurrency] = useState("MMK");
   const [paymentMode, setPaymentMode] = useState<"bank_transfer" | "mmqr" | "stripe" | "paypay" | "hitpay">("bank_transfer");
-  const [mmqrProvider, setMmqrProvider] = useState<"abank" | "mmpay">("abank");
+  const [mmqrProvider, setMmqrProvider] = useState<"abank" | "mmpay" | "kbzpay">("abank");
   const [savingPaymentMode, setSavingPaymentMode] = useState(false);
 
   const fetchProfile = useCallback(async () => {
@@ -588,7 +588,7 @@ function SettingsContent() {
         setSmsOnPayment(tenant.sms_on_payment ?? true);
         setCurrency(tenant.currency || "MMK");
         setPaymentMode((tenant.payment_mode as "bank_transfer" | "mmqr" | "stripe" | "paypay" | "hitpay") ?? "bank_transfer");
-        setMmqrProvider((tenant.mmqr_provider as "abank" | "mmpay") ?? "abank");
+        setMmqrProvider((tenant.mmqr_provider as "abank" | "mmpay" | "kbzpay") ?? "abank");
       }
     } catch {
       // non-critical; keep defaults
@@ -1365,11 +1365,12 @@ function SettingsContent() {
               <label className="block text-sm font-medium text-gray-700 mb-1.5">MMQR Provider</label>
               <select
                 value={mmqrProvider}
-                onChange={(e) => setMmqrProvider(e.target.value as "abank" | "mmpay")}
+                onChange={(e) => setMmqrProvider(e.target.value as "abank" | "mmpay" | "kbzpay")}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
               >
                 <option value="abank">ABank (A+ Wallet)</option>
                 <option value="mmpay">MyanMyanPay</option>
+                <option value="kbzpay">KBZPay (MMQR &mdash; any Myanmar bank app)</option>
               </select>
             </div>
           )}
