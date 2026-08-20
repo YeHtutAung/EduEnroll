@@ -42,7 +42,7 @@ describe("precreate", () => {
       merchOrderId: "KBZ_1a2b3c4d_9f3c7b21d0e4a856",
       amount: 40000,
       title: "Payment for ENR-1",
-      notifyUrl: "https://www.kuunyi.com/api/webhooks/kbzpay",
+      notifyUrl: "https://www.kuunyi.com/api/webhooks/kbzmmqr",
     });
 
     expect(res).toEqual({ ok: true, qrCode: "0002010102...", prepayId: "KBZ00abc" });
@@ -56,7 +56,7 @@ describe("precreate", () => {
     const body = requestBody();
     expect(body.method).toBe("kbz.payment.precreate");
     expect(body.version).toBe("1.0");
-    expect(body.notify_url).toBe("https://www.kuunyi.com/api/webhooks/kbzpay");
+    expect(body.notify_url).toBe("https://www.kuunyi.com/api/webhooks/kbzmmqr");
     expect(body.biz_content.trade_type).toBe("PAY_BY_QRCODE");
     expect(body.biz_content.trans_currency).toBe("MMK");
     expect(body.biz_content.timeout_express).toBe("120m");

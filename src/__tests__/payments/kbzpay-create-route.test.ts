@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
 // ─── POST /api/public/payments/kbzpay ───────────────────────────────────────
@@ -189,8 +189,110 @@ describe("ordering — row before provider call (R2)", () => {
     await POST(req());
 
     expect(mockPrecreate).toHaveBeenCalledWith(
-      expect.objectContaining({ notifyUrl: "https://www.kuunyi.com/api/webhooks/kbzpay" }),
+      expect.objectContaining({ notifyUrl: "https://www.kuunyi.com/api/webhooks/kbzmmqr" }),
     );
+  });
+});
+
+// KBZPay registers a callback host per environment, and the host they register
+// must match what we send per order. KBZPAY_NOTIFY_ORIGIN is the operator-set,
+// per-deployment value for that — never derived from the request or from
+// whichever tenant is checking out (spec §7).
+describe("KBZPAY_NOTIFY_ORIGIN", () => {
+  afterEach(() => {
+    delete process.env.KBZPAY_NOTIFY_ORIGIN;
+  });
+
+  it("overrides the notify_url origin when set", async () => {
+    process.env.KBZPAY_NOTIFY_ORIGIN = "https://brave.kuunyi.com";
+
+    await POST(req());
+
+    expect(mockPrecreate).toHaveBeenCalledWith(
+      expect.objectContaining({ notifyUrl: "https://brave.kuunyi.com/api/webhooks/kbzmmqr" }),
+    );
+  });
+
+  it("uses only the origin, discarding any path or query in the value", async () => {
+    // KBZPay rejects a notify_url carrying query parameters, so the value is
+    // normalised to an origin rather than concatenated blindly.
+    process.env.KBZPAY_NOTIFY_ORIGIN = "https://brave.kuunyi.com/some/path?x=1";
+
+    await POST(req());
+
+    expect(mockPrecreate).toHaveBeenCalledWith(
+      expect.objectContaining({ notifyUrl: "https://brave.kuunyi.com/api/webhooks/kbzmmqr" }),
+    );
+  });
+
+  it("falls back to platformOrigin when unset", async () => {
+    await POST(req());
+
+    expect(mockPrecreate).toHaveBeenCalledWith(
+      expect.objectContaining({ notifyUrl: "https://www.kuunyi.com/api/webhooks/kbzmmqr" }),
+    );
+  });
+
+  // A malformed value must not become a relative or empty URL — that would
+  // hand KBZPay an unreachable callback and strand every payment silently.
+  it("falls back to platformOrigin when the value is not a valid URL", async () => {
+    process.env.KBZPAY_NOTIFY_ORIGIN = "brave.kuunyi.com";
+
+    await POST(req());
+
+    expect(mockPrecreate).toHaveBeenCalledWith(
+      expect.objectContaining({ notifyUrl: "https://www.kuunyi.com/api/webhooks/kbzmmqr" }),
+    );
+  });
+
+  // new URL() accepts http:, ftp: and file: perfectly happily, and .origin
+  // returns them unchanged — so without an explicit scheme check the callback
+  // could be delivered over plaintext, or worse.
+  it.each([
+    ["http", "http://brave.kuunyi.com"],
+    ["ftp", "ftp://brave.kuunyi.com"],
+    ["javascript", "javascript:alert(1)"],
+  ])("refuses a %s scheme and falls back to platformOrigin", async (_label, value) => {
+    process.env.KBZPAY_NOTIFY_ORIGIN = value;
+
+    await POST(req());
+
+    expect(mockPrecreate).toHaveBeenCalledWith(
+      expect.objectContaining({ notifyUrl: "https://www.kuunyi.com/api/webhooks/kbzmmqr" }),
+    );
+  });
+
+  // file: is the nastiest case: its .origin is the literal string "null", so
+  // the pre-fix code would have sent KBZPay "null/api/webhooks/kbzmmqr".
+  it("refuses a file: URL, whose origin is the literal string 'null'", async () => {
+    expect(new URL("file:///tmp/x").origin).toBe("null");
+
+    process.env.KBZPAY_NOTIFY_ORIGIN = "file:///tmp/x";
+    await POST(req());
+
+    const sent = mockPrecreate.mock.calls[0][0].notifyUrl as string;
+    expect(sent).toBe("https://www.kuunyi.com/api/webhooks/kbzmmqr");
+    expect(sent).not.toContain("null");
+  });
+
+  it("never emits a non-https notify_url for any accepted value", async () => {
+    for (const value of [
+      "https://brave.kuunyi.com",
+      "http://brave.kuunyi.com",
+      "ftp://brave.kuunyi.com",
+      "file:///tmp/x",
+      "brave.kuunyi.com",
+      "",
+    ]) {
+      mockPrecreate.mockClear();
+      if (value) process.env.KBZPAY_NOTIFY_ORIGIN = value;
+      else delete process.env.KBZPAY_NOTIFY_ORIGIN;
+
+      await POST(req());
+
+      const sent = mockPrecreate.mock.calls[0][0].notifyUrl as string;
+      expect(sent.startsWith("https://")).toBe(true);
+    }
   });
 });
 
