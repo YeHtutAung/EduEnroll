@@ -73,7 +73,7 @@ branch reaches `dev` through a PR that a human reviews.
 | `src/server/payments/resolveKbzpayOrder.ts` | **Create.** The §5.1 step 7 resolve procedure, extracted so the create route stays readable and the procedure is testable on its own. |
 | `src/app/api/public/payments/kbzpay/route.ts` | **Create.** `POST` — claim, resolve, precreate, return QR. |
 | `src/app/api/public/payments/kbzpay/status/route.ts` | **Create.** `GET` — poller, self-heals a missed callback. |
-| `src/app/api/webhooks/kbzpay/route.ts` | **Create.** `POST` — signed callback receiver. |
+| `src/app/api/webhooks/kbzmmqr/route.ts` | **Create.** `POST` — signed callback receiver. |
 | `src/components/payments/QRPaymentModal.tsx` | **Modify.** Provider union, endpoint map, `already_paid` branch. |
 | `src/app/admin/settings/page.tsx` | **Modify.** Third `mmqr_provider` option. |
 | `src/app/(public)/enroll/[slug]/checkout/payment/page.tsx` | **Modify.** Pass the provider through. |
@@ -478,7 +478,7 @@ describe("precreate", () => {
       merchOrderId: "KBZ_1a2b3c4d_9f3c7b21d0e4a856",
       amount: 40000,
       title: "Payment for ENR-1",
-      notifyUrl: "https://www.kuunyi.com/api/webhooks/kbzpay",
+      notifyUrl: "https://www.kuunyi.com/api/webhooks/kbzmmqr",
     });
 
     expect(res).toEqual({ ok: true, qrCode: "0002010102...", prepayId: "KBZ00abc" });
@@ -1374,7 +1374,7 @@ the cart/class fee calculation and the partial-payment adjustment. Then §5.1 st
        `{ status: 'already_paid' }` (R11); `not_live` → re-claim once; `invalid_enrollment` →
        **409**, leaving the old row PENDING (P1 review); `replaced` → continue.
    - `created` → continue.
-5. `notifyUrl = platformOrigin() + "/api/webhooks/kbzpay"`. **Never** from the inbound `Host`.
+5. `notifyUrl = notifyOrigin() + "/api/webhooks/kbzmmqr"`. **Never** from the inbound `Host`.
 6. `precreate(...)`. On failure → 502, **leave the row `PENDING`** (R13).
 7. Update `provider_qr` and re-anchor `provider_order_expires_at` to the response time + 120
    min. On failure → 502, row stays `PENDING`.
@@ -1397,13 +1397,13 @@ git commit -m "feat(kbzpay): QR creation route with slot claim and ambiguous-sta
 ## Task 10: Webhook route
 
 **Files:**
-- Create: `src/app/api/webhooks/kbzpay/route.ts`
+- Create: `src/app/api/webhooks/kbzmmqr/route.ts`
 - Test: `src/__tests__/payments/kbzpay-webhook-route.test.ts`
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-describe("POST /api/webhooks/kbzpay", () => {
+describe("POST /api/webhooks/kbzmmqr", () => {
   it("returns 403 and does not settle when the signature is invalid", async () => {});
 
   it("returns 404 when the payment_ref is unknown, so KBZPay retries", async () => {});
@@ -1448,7 +1448,7 @@ Expected: PASS.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/app/api/webhooks/kbzpay/route.ts src/__tests__/payments/kbzpay-webhook-route.test.ts
+git add src/app/api/webhooks/kbzmmqr/route.ts src/__tests__/payments/kbzpay-webhook-route.test.ts
 git commit -m "feat(kbzpay): signed callback receiver with server-side confirmation"
 ```
 
@@ -1632,7 +1632,7 @@ not go live until each is closed. Record the outcome of each in the PR descripti
       with them before a real app key is used anywhere.
 - [ ] **G3** — Register the production `notify_url` with KBZPay; confirm whether they require
       IP allowlisting.
-- [ ] **G4** — Production `notify_url` must be `https://www.kuunyi.com/api/webhooks/kbzpay`.
+- [ ] **G4** — Production `notify_url` must be `https://www.kuunyi.com/api/webhooks/kbzmmqr`.
       The apex domain 307-redirects and redirects break POST callbacks.
 - [ ] **G5** — Confirm the MMK decimal convention for `total_amount`. Adjust the amount
       comparison in `settleMmqrPayment` if KBZPay sends decimals.

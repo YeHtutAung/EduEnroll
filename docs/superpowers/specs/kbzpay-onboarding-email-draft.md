@@ -64,17 +64,20 @@ know, as we would need to discuss that before using a live app key there.
 
 ## 3. Callback URL registration and IP allowlisting
 
-Our production callback URL will be:
+Our callback URLs are:
 
 ```
-https://www.kuunyi.com/api/webhooks/kbzpay
+UAT / staging:  https://brave.staging.kuunyi.com/api/webhooks/kbzmmqr
+Production:     https://brave.kuunyi.com/api/webhooks/kbzmmqr
 ```
 
-Please note the `www` prefix is required — our apex domain issues a 307
-redirect, and redirects are not followed for POST callbacks.
+Both accept `POST` and carry no query parameters.
 
-Please register this URL for our merchant account. We will provide a separate
-UAT callback URL once credentials are issued.
+Please note the exact hostnames matter. Our apex domain issues a 307 redirect,
+and a redirected POST is generally not followed — so a callback sent to the
+apex would never reach us.
+
+Please register both URLs for our merchant account.
 
 We have two separate questions about IP addresses.
 
