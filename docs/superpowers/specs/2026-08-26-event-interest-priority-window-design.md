@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-26
 **Status:** Approved (design), pending implementation plan
-**Revision:** v3 — incorporates two rounds of external review (Codex, 2026-08-26)
+**Revision:** v4 (2026-08-27) — incorporates three rounds of external review (Codex)
 
 ## Problem
 
@@ -33,7 +33,7 @@ Redemption.
 | Token reuse | Multi-use for the whole window, first use recorded |
 | Lost link recovery | Rotate on resend, with a grace period on the old token |
 | Signup cutoff | Closes when the priority window opens |
-| Spam control | Honeypot + unique `(intake_id, email)` index + resend cooldown + input bounds |
+| Spam control | IP+intake creation limit, honeypot, unique `(intake_id, email)` index, resend cooldown, input bounds |
 | Tenant scope | Admin UI hidden for `language_school`, no database restriction |
 
 ## Current state
@@ -218,6 +218,52 @@ drift apart.
 The composite FK closes the denormalisation gap that `tickets` leaves open:
 `tenant_id` cannot drift from the intake's owner.
 
+### Signup rate limiting
+
+Signup emails a link, so the public endpoint can send branded mail from the
+tenant's Resend domain to any address a caller supplies. The cost of abuse is
+not junk rows — it is Resend spend and sender-reputation damage on the same
+domain that delivers payment email. That warrants a real counter, which this
+codebase does not yet have.
+
+```sql
+CREATE TABLE public.interest_signup_attempts (
+  id         bigserial PRIMARY KEY,
+  intake_id  uuid NOT NULL REFERENCES public.intakes(id) ON DELETE CASCADE,
+  ip_hash    text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+
+  CONSTRAINT interest_signup_attempts_ip_format CHECK (ip_hash ~ '^[0-9a-f]{64}$')
+);
+
+CREATE INDEX interest_signup_attempts_lookup
+  ON public.interest_signup_attempts (intake_id, ip_hash, created_at DESC);
+CREATE INDEX interest_signup_attempts_prune
+  ON public.interest_signup_attempts (created_at);
+
+ALTER TABLE public.interest_signup_attempts ENABLE ROW LEVEL SECURITY;
+-- No policies: service-role only.
+```
+
+`ip_hash` is `sha256(ip + server-side salt)`, never the raw address: the table
+exists to count, not to build a log of who visited. The salt lives in an
+environment variable alongside the other secrets.
+
+Two limits, both checked before any insert or send:
+
+- per `(ip_hash, intake_id)` — the narrow case, someone hammering one event;
+- per `ip_hash` across all intakes — the broad case, a script walking events.
+
+Rows older than the longest window are pruned opportunistically on write, so
+the table stays small without a scheduled job.
+
+**This is a cost and reputation control, not a security boundary.** The client
+address comes from `NextRequest.ip`, falling back to the first `x-forwarded-for`
+entry, and forwarded headers are attacker-influenced in the general case.
+Treating it as an authorisation mechanism would repeat the tenant-header
+mistake this codebase has already paid for; it raises the cost of abuse and
+nothing more.
+
 ## The gate
 
 The gate lives in one place — inside the two RPCs, in the same transaction as
@@ -269,9 +315,17 @@ policies on `event_interest` — a direct call by `anon` is both unprivileged an
 fruitless. The owner retains `EXECUTE` implicitly, so no grant is needed.
 
 **Access is evaluated per class but the window is per intake**, so a cart
-carrying several tiers of the token's own event passes as a unit, while a class
-belonging to a different intake is judged on its own merits and correctly
-denied. A single token parameter therefore suffices.
+carrying several tiers of the token's own event passes as a unit. A single
+token parameter therefore suffices.
+
+Cart validation is all-or-nothing: `submit_cart_enrollment` checks every item
+in Phase 1 and returns on the first failure, before Phase 2 creates anything.
+A cart mixing the token's own tiers with a class from a different intake
+therefore fails **entirely** — not partially. The RPC enforces same-tenant but
+not same-intake, so such a cart is constructible even though the UI, which
+builds carts per `/enroll/[slug]`, never produces one. That is left as it is:
+the case already fails safely, and adding a restriction to an RPC on the live
+payment path is scope this change set does not need.
 
 ### Why the token is hashed in Node
 
@@ -329,6 +383,10 @@ reusing the honeypot convention from `src/app/api/public/enroll/route.ts`.
 - The intake must not be closed or cancelled.
 - `email` is trimmed and lowercased, `name` and `phone` trimmed, before both
   lookup and insert.
+- The signup rate limits above are checked before any row is written or any
+  mail is sent. A caller over the limit receives the same generic success as
+  everyone else — telling a script when it has been throttled only helps it
+  calibrate.
 
 Because only a hash is stored, a lost link cannot be re-sent verbatim.
 Recovery is **rotation with a grace period**:
@@ -342,6 +400,13 @@ Recovery is **rotation with a grace period**:
   email the new link to the address on file. The response says "we have
   emailed your link" and contains **no token**. Echoing it would let anyone
   harvest another person's link by typing their address into the public form.
+
+The first-signup response carries a live credential in its body, so it is
+returned with `Cache-Control: no-store` and must never be recorded by
+application, CDN, or diagnostic logging. Request/response body logging on this
+route is prohibited, and the raw token must not appear in any log line. This
+complements moving the token out of the query string; neither substitutes for
+the other.
 
 The grace period is what makes rotation safe across a failed send. Rotating and
 emailing cannot be one atomic operation — the mail server is not in the
@@ -458,7 +523,8 @@ Priority users take seats through the ordinary path, so `seat_remaining`,
 | No, invalid, or revoked token during the window | `ENROLLMENT_NOT_OPEN` — identical to today, and no leak of whether a token exists |
 | Valid token, `priority_open_at` still in the future | Denied |
 | Token for event A presented on a class of event B | Denied — the class's intake is part of the lookup |
-| Cart mixing the token's own tiers with another event's | The own-event tiers pass; the foreign class is denied on its own merits |
+| Cart mixing the token's own tiers with another event's | **The whole cart fails.** `submit_cart_enrollment` validates every item in Phase 1 and returns on the first failure, before Phase 2 creates anything — there is no partial success |
+| Signup over the IP rate limit | Generic success, nothing written, no mail sent |
 | Superseded token inside its grace period | Accepted |
 | Superseded token after the grace expires | Denied |
 | Rotation succeeded but the email failed | Old link works until grace expiry; cooldown not stamped, so retry is immediate |
@@ -495,8 +561,15 @@ Required coverage:
   editing a class.
 - Repeat signup returns no token.
 
+- A cart mixing intakes fails wholesale, with no enrollment row and no seat
+  decremented for the token's own tiers.
+- The signup rate limits: both the per-intake and the cross-intake counter
+  throttle, a throttled caller gets the same generic success as a permitted
+  one, and no mail is sent.
+
 Route-level tests follow the existing patterns in `src/__tests__/api/public/`,
-including that the token never appears in a query string or a `Referer`.
+including that the token never appears in a query string or a `Referer`, and
+that the first-signup response carries `Cache-Control: no-store`.
 
 ## Deployment
 
@@ -511,6 +584,9 @@ judged by exit code.
   `token_prefix` holding the first 8 characters for admin display).
 - Grace period duration for a superseded token (proposal: 24 hours).
 - Final cooldown duration (proposal: 15 minutes per email per intake).
+- Signup rate-limit thresholds and windows (proposal: 5 per hour per
+  `(ip_hash, intake_id)`, 20 per hour per `ip_hash` across intakes), and the
+  prune horizon.
 - Chunk size for the invite endpoint, based on Resend throughput and the Vercel
   function timeout.
 - Whether the interest CTA also appears on the intake-level listing page or
@@ -541,6 +617,22 @@ being softened), the exclusivity promise conflicting with forwardable links
 eligibility validation (P1 — tenant ownership and intake state now checked
 before any write), and email canonicalisation (P2 — normalised at the boundary
 and enforced by CHECK).
+
+**v4 (2026-08-27)** — third review round, conducted against a stale copy of v2
+rather than the committed v3, so its claim that the round-two findings were
+unincorporated does not hold against this document. Its three new findings were
+assessed on their own merits. Accepted and fixed: the mixed-cart failure
+description, which wrongly implied partial success when
+`submit_cart_enrollment` validates every item before creating anything — the
+error was live in v3; and `Cache-Control: no-store` plus a logging prohibition
+on the response that carries a raw token. Reversed from two earlier rounds:
+signup rate limiting, previously declined twice, is now in — not because it was
+raised a third time, but because v3 made signup send email, turning the
+endpoint into an unauthenticated trigger for branded mail from the domain that
+also delivers payment email. The premise the earlier decision rested on had
+changed. Declined: enforcing same-intake carts in the RPC, which is tidiness
+rather than a fix — the case already fails safely, and it would mean a
+behavioural change to the live payment path.
 
 Raised by neither review, found while applying them: **interest signup had to
 close at `priority_open_at`.** Left open, anyone could have registered during
