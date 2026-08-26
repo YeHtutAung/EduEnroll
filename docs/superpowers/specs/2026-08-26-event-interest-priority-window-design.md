@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-26
 **Status:** Approved (design), pending implementation plan
-**Revision:** v4 (2026-08-27) — incorporates three rounds of external review (Codex)
+**Revision:** v5 (2026-08-27) — incorporates four rounds of external review (Codex)
 
 ## Problem
 
@@ -31,6 +31,7 @@ Redemption.
 | Delivery | Email at signup, plus the link shown on screen |
 | Window control | Scheduled, via `priority_open_at` on the **intake** |
 | Token reuse | Multi-use for the whole window, first use recorded |
+| Link minting | A link is created only at the moment it is emailed or displayed — mint, send, then persist |
 | Lost link recovery | Rotate on resend, with a grace period on the old token |
 | Signup cutoff | Closes when the priority window opens |
 | Spam control | IP+intake creation limit, honeypot, unique `(intake_id, email)` index, resend cooldown, input bounds |
@@ -254,8 +255,58 @@ Two limits, both checked before any insert or send:
 - per `(ip_hash, intake_id)` — the narrow case, someone hammering one event;
 - per `ip_hash` across all intakes — the broad case, a script walking events.
 
-Rows older than the longest window are pruned opportunistically on write, so
-the table stays small without a scheduled job.
+**Checking and consuming a slot must be one serialized operation.** A
+count-then-insert from the application races: concurrent requests from one
+address each observe capacity, then all insert and all send. That is precisely
+the flood the limiter exists to stop, so the check and the insert live in a
+single database function under a transaction-scoped advisory lock keyed on the
+address hash:
+
+```sql
+CREATE FUNCTION public.consume_interest_signup_slot(
+  p_intake_id uuid,
+  p_ip_hash   text,
+  p_per_intake_limit integer,
+  p_global_limit     integer,
+  p_window           interval
+) RETURNS boolean
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+DECLARE v_intake_count integer; v_global_count integer;
+BEGIN
+  -- Serializes every concurrent request from this address for the rest of
+  -- the transaction; released automatically on commit or rollback.
+  PERFORM pg_advisory_xact_lock(hashtextextended(p_ip_hash, 0));
+
+  DELETE FROM public.interest_signup_attempts
+   WHERE created_at < now() - p_window;
+
+  SELECT count(*) INTO v_intake_count
+    FROM public.interest_signup_attempts
+   WHERE ip_hash = p_ip_hash AND intake_id = p_intake_id
+     AND created_at >= now() - p_window;
+
+  SELECT count(*) INTO v_global_count
+    FROM public.interest_signup_attempts
+   WHERE ip_hash = p_ip_hash
+     AND created_at >= now() - p_window;
+
+  IF v_intake_count >= p_per_intake_limit OR v_global_count >= p_global_limit THEN
+    RETURN false;
+  END IF;
+
+  INSERT INTO public.interest_signup_attempts (intake_id, ip_hash)
+  VALUES (p_intake_id, p_ip_hash);
+
+  RETURN true;
+END $$;
+```
+
+The `DELETE` prunes expired rows on the same pass, so the table stays small
+without a scheduled job. Like every other function this migration creates, it
+is revoked from `PUBLIC`, `anon`, and `authenticated` and granted only to
+`service_role`.
 
 **This is a cost and reputation control, not a security boundary.** The client
 address comes from `NextRequest.ip`, falling back to the first `x-forwarded-for`
@@ -391,15 +442,16 @@ reusing the honeypot convention from `src/app/api/public/enroll/route.ts`.
 Because only a hash is stored, a lost link cannot be re-sent verbatim.
 Recovery is **rotation with a grace period**:
 
-- **First signup for this email on this event** — mint a token, store its
-  hash, email the link, and return the raw token so the page can display it
-  with a "save this link" prompt. The submitter has just demonstrated they are
-  the person enrolling.
-- **Repeat signup** — mint a new token, move the current hash into
-  `superseded_token_hash` with `superseded_expires_at = now() + grace`, and
-  email the new link to the address on file. The response says "we have
-  emailed your link" and contains **no token**. Echoing it would let anyone
-  harvest another person's link by typing their address into the public form.
+- **First signup for this email on this event** — mint a token, email the link,
+  then write the row, and return the raw token so the page can display it with
+  a "save this link" prompt. The submitter has just demonstrated they are the
+  person enrolling.
+- **Repeat signup** — mint a new token, email the link to the address on file,
+  then under a row lock move the current hash into `superseded_token_hash` with
+  `superseded_expires_at = now() + grace` and store the new one. The response
+  says "we have emailed your link" and contains **no token**. Echoing it would
+  let anyone harvest another person's link by typing their address into the
+  public form.
 
 The first-signup response carries a live credential in its body, so it is
 returned with `Cache-Control: no-store` and must never be recorded by
@@ -408,15 +460,45 @@ route is prohibited, and the raw token must not appear in any log line. This
 complements moving the token out of the query string; neither substitutes for
 the other.
 
-The grace period is what makes rotation safe across a failed send. Rotating and
-emailing cannot be one atomic operation — the mail server is not in the
-transaction — so if delivery fails after the row is updated, the person's
-existing link keeps working until the grace expires. `last_link_sent_at` is
-stamped **only on a successful send**, so a failure does not start the cooldown
-and the request can be retried immediately.
+#### Ordering: mint, send, then persist
+
+Rotating and emailing cannot be one atomic operation — the mail server is not
+in the transaction — so the order determines which failure mode you get:
+
+- *Persist then send* fails as "the old link is dead and the new one was never
+  delivered." The person is worse off than before they asked.
+- *Mint, send, then persist* fails as "nothing changed" — the row is untouched,
+  so the existing link keeps working and the request can simply be retried.
+
+The second is strictly better, so the token is generated in memory, emailed,
+and only written to the row **after** the send succeeds. A token that was
+emailed but never persisted grants nothing: its hash was never stored, so the
+gate denies it like any unknown value. The residual failure — a successful send
+followed by a failed write — leaves a dead link in an inbox while the recipient's
+existing link still works, and a retry re-mints and re-sends.
+
+The grace period then covers what ordering cannot: users who are mid-flow when
+a rotation lands, and the send-succeeded-write-failed case above.
+`last_link_sent_at` is stamped in the same write, so a failure never starts the
+cooldown and the request can be retried immediately.
 
 The superseded hash is cleared the first time the new token is used, so a
 successful rotation narrows to one live credential as soon as it is confirmed.
+
+#### Rotation is serialized per record
+
+The two-slot model holds exactly one superseded credential, so concurrent
+rotations would overwrite it and silently cut short a grace period someone was
+promised. Every rotation therefore takes `SELECT ... FOR UPDATE` on the
+`event_interest` row and completes its read-modify-write under that lock.
+
+The guarantee this design offers is deliberately narrow and should be stated in
+those terms: **the token immediately prior to the most recent rotation stays
+valid for the grace period.** It is not "every token ever issued." A second
+rotation while a grace token is still live replaces it — the older credential
+dies early by design. The public cooldown makes this rare from the public
+endpoint; admin resend bypasses the cooldown, so the admin UI warns before
+rotating a record whose previous token is still inside its grace window.
 
 **Accepted consequence:** rotation sits on a public endpoint, so a third party
 who knows someone's email can force a rotation. They gain no access — the new
@@ -428,9 +510,23 @@ generic success without sending or rotating.
 ### Discovery
 
 `GET /api/public/enroll/[slug]` returns the intake's `priority_open_at`
-alongside the `opens_at` it already provides. The event page shows an interest
-CTA when `priority_open_at` is set and still in the future, and stops showing
-it once the window opens.
+alongside the `opens_at` it already provides, plus which tiers the window
+actually covers.
+
+The interest CTA appears only when **both** hold: `priority_open_at` is set and
+still in the future, *and* at least one tier still has a future
+`enrollment_open_at`. It disappears once the window opens.
+
+**Partially-public events need explicit copy.** A tier with a null
+`enrollment_open_at` is already on sale and is exempt from the window trigger,
+so an intake can legitimately have VIP selling now while General Admission
+opens later behind a priority window. The gate handles this correctly on its
+own — a token is simply irrelevant to a tier that is already public, and the
+buyer needs no head start for it. What must not be left implicit is the
+promise: the CTA and the confirmation email name the tiers the head start
+covers, rather than saying "early access to this event" while part of the event
+is already on sale. If every tier is already public, there is nothing to be
+early for: the CTA is hidden and signup is rejected.
 
 ### Redemption
 
@@ -483,8 +579,19 @@ the gate — an additive change to `priority_access_granted`.
 ### Invitations
 
 `POST /api/admin/interest/[intakeId]/invite` sends a reminder to rows not yet
-invited. It does **not** rotate tokens — the link each person already holds
-stays valid.
+invited.
+
+**It rotates.** Only hashes are stored, so the raw token a recipient already
+holds cannot be reconstructed and cannot be put in an email — the same
+hash-is-not-reversible constraint that governs resend. Rather than send a
+linkless reminder, the invitation mints a fresh token per row through the
+ordinary grace mechanism, so one click from the reminder gets the recipient in.
+This is what makes the invariant hold everywhere: **a link is only ever created
+at the moment it is emailed or displayed.**
+
+Each row follows the same mint-send-persist order and row lock as a public
+resend, so a failed send leaves that row untouched and retryable, and the
+recipient's existing link keeps working.
 
 - Stamps `invited_at` **per row as each send succeeds**, so a partial failure
   re-runs only the remainder instead of double-mailing the whole list.
@@ -498,11 +605,13 @@ stays valid.
 Two new templates beside the existing four in `src/lib/email.ts`, built on
 `baseLayout` so they inherit tenant name and logo:
 
-1. **Interest confirmation** (signup and resend) — carries the `#pa=` link and
-   states when it becomes usable. On a resend, states that the previous link
-   stops working shortly.
-2. **Priority window reminder** (admin invitation) — same link, sent when the
-   window is about to open or has opened.
+1. **Interest confirmation** (signup and resend) — carries the `#pa=` link,
+   states when it becomes usable, and names the tiers the head start covers.
+   On a resend, states that the previous link stops working shortly.
+2. **Priority window reminder** (admin invitation) — carries a **freshly minted
+   link**, not the recipient's previous one, which cannot be reconstructed from
+   a hash. Says plainly that this link supersedes any earlier one, and is sent
+   when the window is about to open or has opened.
 
 Resend and `FROM_EMAIL` are already wired.
 
@@ -527,7 +636,11 @@ Priority users take seats through the ordinary path, so `seat_remaining`,
 | Signup over the IP rate limit | Generic success, nothing written, no mail sent |
 | Superseded token inside its grace period | Accepted |
 | Superseded token after the grace expires | Denied |
-| Rotation succeeded but the email failed | Old link works until grace expiry; cooldown not stamped, so retry is immediate |
+| Email send fails during a rotation | Nothing was written — the existing link is untouched, no cooldown stamped, retry immediately |
+| Send succeeds but the write then fails | The emailed link grants nothing (its hash was never stored); the existing link still works; retry re-mints |
+| Two rotations inside one grace window | The older superseded token dies early — the guarantee covers only the token immediately prior to the most recent rotation |
+| Concurrent signups from one address at the limit | Serialized by the advisory lock; exactly the permitted number proceed |
+| Intake where every tier is already public | CTA hidden, signup rejected — nothing to be early for |
 | Resend requested inside the cooldown | Generic success, nothing sent, no rotation |
 | Signup attempted after the window opens | Rejected — no self-minted head start |
 | Signup with another tenant's `intake_id` | Rejected before any write |
@@ -566,6 +679,16 @@ Required coverage:
 - The signup rate limits: both the per-intake and the cross-intake counter
   throttle, a throttled caller gets the same generic success as a permitted
   one, and no mail is sent.
+- **Rate-limit atomicity** — N concurrent requests from one address against a
+  limit of M admit exactly M. A count-then-insert implementation passes a
+  sequential test and fails this one, which is the whole reason it exists.
+- **Rotation serialization** — two concurrent rotations on one record leave a
+  coherent row, and the surviving superseded token is the one immediately prior
+  to the later rotation.
+- Mint-send-persist ordering: a simulated send failure leaves the row entirely
+  unchanged and the original token still valid.
+- An invitation run rotates each row, and a mid-run failure leaves already-sent
+  rows stamped and the remainder retryable without double-mailing.
 
 Route-level tests follow the existing patterns in `src/__tests__/api/public/`,
 including that the token never appears in a query string or a `Referer`, and
@@ -634,7 +757,27 @@ changed. Declined: enforcing same-intake carts in the RPC, which is tidiness
 rather than a fix — the case already fails safely, and it would mean a
 behavioural change to the live payment path.
 
-Raised by neither review, found while applying them: **interest signup had to
-close at `priority_open_at`.** Left open, anyone could have registered during
+**v5 (2026-08-27)** — fourth review round, the first conducted against the
+current document rather than a stale copy. Accepted and fixed: the invitation
+email promised "the same link" while the store holds only hashes, making the
+template unimplementable (the identical hash-is-not-reversible error corrected
+for resend in v2 and never carried across to invitations — invitations now
+rotate, which also makes the mint-only-on-send invariant hold everywhere);
+rate-limit consumption was a count-then-insert race that concurrent requests
+defeat, now one serialized function under an advisory lock; token rotation was
+unserialized, so concurrent rotations could overwrite the single superseded
+slot and silently shorten a promised grace period, now row-locked with the
+guarantee stated narrowly; and partially-public intakes, where one tier is
+already on sale while the list forms for others — correct at the gate, but the
+user-facing promise now names which tiers the head start covers.
+
+Found while applying that round: **v4 had the rotation ordering backwards.**
+It persisted the new hash and then sent, whose failure mode is "old link dead,
+new link never delivered." Minting, sending, and only then persisting fails as
+"nothing changed," and a token emailed but never stored grants nothing. The
+grace period now covers only what ordering cannot.
+
+Raised by no review, found earlier while applying round two: **interest signup
+had to close at `priority_open_at`.** Left open, anyone could have registered during
 the window and minted themselves a token on the spot, which would have made the
 head start available to the general public and defeated the feature.
