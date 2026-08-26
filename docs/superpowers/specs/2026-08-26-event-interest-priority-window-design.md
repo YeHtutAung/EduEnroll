@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-26
 **Status:** Approved (design), pending implementation plan
-**Revision:** v5 (2026-08-27) — incorporates four rounds of external review (Codex)
+**Revision:** v6 (2026-08-27) — incorporates five rounds of external review (Codex)
 
 ## Problem
 
@@ -31,7 +31,7 @@ Redemption.
 | Delivery | Email at signup, plus the link shown on screen |
 | Window control | Scheduled, via `priority_open_at` on the **intake** |
 | Token reuse | Multi-use for the whole window, first use recorded |
-| Link minting | A link is created only at the moment it is emailed or displayed — mint, send, then persist |
+| Link minting | A link is created only at the moment it is emailed or displayed, and always persisted before it is sent |
 | Lost link recovery | Rotate on resend, with a grace period on the old token |
 | Signup cutoff | Closes when the priority window opens |
 | Spam control | IP+intake creation limit, honeypot, unique `(intake_id, email)` index, resend cooldown, input bounds |
@@ -174,6 +174,7 @@ CREATE TABLE public.event_interest (
   superseded_token_hash         text,
   superseded_expires_at         timestamptz,
   created_at                    timestamptz NOT NULL DEFAULT now(),
+  last_link_attempt_at          timestamptz,
   last_link_sent_at             timestamptz,
   invited_at                    timestamptz,
   first_used_at                 timestamptz,
@@ -246,9 +247,14 @@ ALTER TABLE public.interest_signup_attempts ENABLE ROW LEVEL SECURITY;
 -- No policies: service-role only.
 ```
 
-`ip_hash` is `sha256(ip + server-side salt)`, never the raw address: the table
-exists to count, not to build a log of who visited. The salt lives in an
-environment variable alongside the other secrets.
+`ip_hash` is `HMAC-SHA-256(secret, canonical_ip)`, never the raw address: the
+table exists to count, not to build a log of who visited. A keyed MAC rather
+than `sha256(ip + salt)` — concatenating a salt leaves the delimiter and
+ordering as unstated conventions that a later edit can silently change, while
+HMAC states the construction. `canonical_ip` is normalised first (IPv6
+lowercased and compressed, IPv4-mapped forms reduced) so one client cannot
+occupy several buckets. The secret lives in an environment variable alongside
+the others.
 
 Two limits, both checked before any insert or send:
 
@@ -442,16 +448,16 @@ reusing the honeypot convention from `src/app/api/public/enroll/route.ts`.
 Because only a hash is stored, a lost link cannot be re-sent verbatim.
 Recovery is **rotation with a grace period**:
 
-- **First signup for this email on this event** — mint a token, email the link,
-  then write the row, and return the raw token so the page can display it with
-  a "save this link" prompt. The submitter has just demonstrated they are the
-  person enrolling.
-- **Repeat signup** — mint a new token, email the link to the address on file,
-  then under a row lock move the current hash into `superseded_token_hash` with
-  `superseded_expires_at = now() + grace` and store the new one. The response
-  says "we have emailed your link" and contains **no token**. Echoing it would
-  let anyone harvest another person's link by typing their address into the
-  public form.
+- **First signup for this email on this event** — write the row and its token
+  hash, then email the link, and return the raw token so the page can display
+  it with a "save this link" prompt. The submitter has just demonstrated they
+  are the person enrolling.
+- **Repeat signup** — under a row lock, check the cooldown, mint a new token,
+  move the current hash into `superseded_token_hash` with
+  `superseded_expires_at = now() + grace`, store the new one and commit; then
+  email the link to the address on file. The response says "we have emailed
+  your link" and contains **no token**. Echoing it would let anyone harvest
+  another person's link by typing their address into the public form.
 
 The first-signup response carries a live credential in its body, so it is
 returned with `Cache-Control: no-store` and must never be recorded by
@@ -460,45 +466,65 @@ route is prohibited, and the raw token must not appear in any log line. This
 complements moving the token out of the query string; neither substitutes for
 the other.
 
-#### Ordering: mint, send, then persist
+#### Ordering: persist, then send
 
-Rotating and emailing cannot be one atomic operation — the mail server is not
-in the transaction — so the order determines which failure mode you get:
+Minting and emailing cannot be one atomic operation — the mail server is not in
+the transaction — so the order decides which failure the user gets. **The token
+is persisted first, and only then emailed.**
 
-- *Persist then send* fails as "the old link is dead and the new one was never
-  delivered." The person is worse off than before they asked.
-- *Mint, send, then persist* fails as "nothing changed" — the row is untouched,
-  so the existing link keeps working and the request can simply be retried.
+A token is never emailed before its hash is stored, so a link that reaches an
+inbox always works. What a failed send costs is a *notification*, never a
+credential:
 
-The second is strictly better, so the token is generated in memory, emailed,
-and only written to the row **after** the send succeeds. A token that was
-emailed but never persisted grants nothing: its hash was never stored, so the
-gate denies it like any unknown value. The residual failure — a successful send
-followed by a failed write — leaves a dead link in an inbox while the recipient's
-existing link still works, and a retry re-mints and re-sends.
+- **First signup** — the row and its hash are written, then the link is
+  emailed and shown on screen. If the send fails, the token is still valid and
+  the on-screen link still works; the page says the email did not go out and
+  offers a resend. If the *write* fails, nothing was created, nothing was
+  emailed, and the endpoint returns an error rather than a false success.
+- **Rotation** (resend and invitation) — the new hash is stored and the current
+  one moves into `superseded_token_hash` with `superseded_expires_at`, then the
+  new link is emailed. If the send fails, the recipient's existing link keeps
+  working for the whole grace period.
 
-The grace period then covers what ordering cannot: users who are mid-flow when
-a rotation lands, and the send-succeeded-write-failed case above.
-`last_link_sent_at` is stamped in the same write, so a failure never starts the
-cooldown and the request can be retried immediately.
+This is the point of the grace slot: it makes a failed send survivable on the
+rotation path, exactly as a persisted-and-displayed token does on the signup
+path. The endpoint never reports success before persistence succeeds, so no
+outbox or durable delivery state is required to keep the promise that an
+accepted link works.
 
 The superseded hash is cleared the first time the new token is used, so a
 successful rotation narrows to one live credential as soon as it is confirmed.
 
-#### Rotation is serialized per record
+#### Rotation is serialized before the send, not after
 
 The two-slot model holds exactly one superseded credential, so concurrent
 rotations would overwrite it and silently cut short a grace period someone was
-promised. Every rotation therefore takes `SELECT ... FOR UPDATE` on the
-`event_interest` row and completes its read-modify-write under that lock.
+promised. Serializing only the write is not enough: two requests could both
+read the old row, both decide to rotate, and both send, producing duplicate
+mail, bypassing the cooldown, and leaving the first freshly-emailed link as
+nothing but the superseded token of the second.
+
+**The entire rotation decision therefore happens under the row lock, before any
+mail is sent.** In one transaction: `SELECT ... FOR UPDATE` the
+`event_interest` row, evaluate the cooldown against `last_link_attempt_at`,
+mint, write the new hash and the superseded slot, stamp `last_link_attempt_at`,
+commit. Only then is the email sent, and `last_link_sent_at` is stamped
+afterwards on success.
+
+The cooldown is evaluated against the *attempt*, not the successful send, which
+is what makes a concurrent second request back off instead of sending a
+duplicate. On a send failure the route clears `last_link_attempt_at` so a retry
+is immediate. If the process dies between commit and that cleanup, the record
+is simply in cooldown until it expires — a bounded, self-healing degradation
+rather than a stuck state.
 
 The guarantee this design offers is deliberately narrow and should be stated in
 those terms: **the token immediately prior to the most recent rotation stays
 valid for the grace period.** It is not "every token ever issued." A second
 rotation while a grace token is still live replaces it — the older credential
-dies early by design. The public cooldown makes this rare from the public
-endpoint; admin resend bypasses the cooldown, so the admin UI warns before
-rotating a record whose previous token is still inside its grace window.
+dies early by design. The cooldown makes this rare from the public endpoint;
+admin resend bypasses the cooldown, so the admin UI warns before rotating a
+record whose previous token is still inside its grace window.
 
 **Accepted consequence:** rotation sits on a public endpoint, so a third party
 who knows someone's email can force a rotation. They gain no access — the new
@@ -589,9 +615,10 @@ ordinary grace mechanism, so one click from the reminder gets the recipient in.
 This is what makes the invariant hold everywhere: **a link is only ever created
 at the moment it is emailed or displayed.**
 
-Each row follows the same mint-send-persist order and row lock as a public
-resend, so a failed send leaves that row untouched and retryable, and the
-recipient's existing link keeps working.
+Each row follows the same persist-then-send order and pre-send row lock as a
+public resend, so a failed send costs that row a notification rather than a
+credential: the new token is already live and the recipient's previous link
+keeps working through its grace period.
 
 - Stamps `invited_at` **per row as each send succeeds**, so a partial failure
   re-runs only the remainder instead of double-mailing the whole list.
@@ -636,8 +663,11 @@ Priority users take seats through the ordinary path, so `seat_remaining`,
 | Signup over the IP rate limit | Generic success, nothing written, no mail sent |
 | Superseded token inside its grace period | Accepted |
 | Superseded token after the grace expires | Denied |
-| Email send fails during a rotation | Nothing was written — the existing link is untouched, no cooldown stamped, retry immediately |
-| Send succeeds but the write then fails | The emailed link grants nothing (its hash was never stored); the existing link still works; retry re-mints |
+| Email send fails on a first signup | Token is already persisted, so the on-screen link works; page reports the email failure and offers a resend |
+| Email send fails during a rotation | New token is live and the previous one still works through its grace; attempt stamp cleared, so retry is immediate |
+| Write fails on a first signup | Nothing created, nothing emailed, endpoint returns an error rather than a false success |
+| Process dies between rotation commit and the send | Record sits in cooldown until it expires, then retryable — bounded and self-healing |
+| Two concurrent resends on one record | Serialized by the row lock before sending; the second sees the attempt stamp and backs off, so one email goes out |
 | Two rotations inside one grace window | The older superseded token dies early — the guarantee covers only the token immediately prior to the most recent rotation |
 | Concurrent signups from one address at the limit | Serialized by the advisory lock; exactly the permitted number proceed |
 | Intake where every tier is already public | CTA hidden, signup rejected — nothing to be early for |
@@ -685,8 +715,13 @@ Required coverage:
 - **Rotation serialization** — two concurrent rotations on one record leave a
   coherent row, and the surviving superseded token is the one immediately prior
   to the later rotation.
-- Mint-send-persist ordering: a simulated send failure leaves the row entirely
-  unchanged and the original token still valid.
+- Persist-then-send ordering: a simulated send failure on a first signup leaves
+  a working token and a truthful "email failed" response; on a rotation it
+  leaves the previous token valid through its grace.
+- No token is ever emailed whose hash is not already stored — asserted by
+  injecting a failure between the write and the send and confirming the gate
+  accepts the token that was written.
+- Two concurrent resends on one record produce exactly one email.
 - An invitation run rotates each row, and a mid-run failure leaves already-sent
   rows stamped and the remainder retryable without double-mailing.
 
@@ -771,11 +806,26 @@ guarantee stated narrowly; and partially-public intakes, where one tier is
 already on sale while the list forms for others — correct at the gate, but the
 user-facing promise now names which tiers the head start covers.
 
-Found while applying that round: **v4 had the rotation ordering backwards.**
-It persisted the new hash and then sent, whose failure mode is "old link dead,
-new link never delivered." Minting, sending, and only then persisting fails as
-"nothing changed," and a token emailed but never stored grants nothing. The
-grace period now covers only what ordering cannot.
+**v6 (2026-08-27)** — fifth substantive round. Accepted and fixed: v5's
+send-before-persist ordering, which is unsafe for a *first* signup where there
+is no prior token to fall back on — a failed write after a successful send
+would have left a dead link both in the inbox and on screen; the rotation lock,
+which v5 acquired only after the email had gone out, so two concurrent resends
+could each read the old row, each mint, and each send before their writes
+serialized — the whole rotation decision and the cooldown check now happen
+under the row lock before any mail is sent, keyed on a new
+`last_link_attempt_at`; and the IP pseudonym, now `HMAC-SHA-256` over a
+canonicalised address rather than a salt concatenation.
+
+**Correcting v5's own reasoning.** v5 justified send-before-persist by claiming
+that persisting first fails as "the old link is dead and the new one was never
+delivered." That was false: the grace slot added in v3 keeps the previous token
+valid precisely so a failed send is survivable. The design had already solved
+the problem v5 reorganised itself to solve, and in doing so introduced a real
+one on the signup path. v6 restores persist-then-send and states the invariant
+it protects — no token is ever emailed whose hash is not already stored, so a
+link that reaches an inbox always works, and a failed send costs a notification
+rather than a credential.
 
 Raised by no review, found earlier while applying round two: **interest signup
 had to close at `priority_open_at`.** Left open, anyone could have registered during
