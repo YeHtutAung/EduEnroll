@@ -572,8 +572,14 @@ export function interestConfirmationEmail(params: {
       <div style="text-align: center; margin: 24px 0 16px;">
         <a href="${link}" style="display: inline-block; padding: 12px 28px; background: #1a6b3c; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px;">Open My Priority Access Link</a>
       </div>
-      <p style="font-size: 12px; color: #9ca3af; text-align: center; word-break: break-all;">
-        If the button does not work, use this link: <a href="${link}" style="color: #1a6b3c;">${link}</a>
+      <p style="font-size: 13px; color: #374151; text-align: center;">
+        If the button does not work, use the link below:
+      </p>
+      <p style="font-size: 13px; color: #374151; text-align: center; font-family: 'Noto Sans Myanmar', sans-serif;">
+        ခလုတ်အလုပ်မလုပ်ပါက အောက်ပါလင့်ခ်ကို အသုံးပြုပါ။
+      </p>
+      <p style="font-size: 13px; color: #1a6b3c; text-align: center; word-break: break-all;">
+        <a href="${link}" style="color: #1a6b3c;">${link}</a>
       </p>
 
       <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin: 20px 0;">
@@ -629,8 +635,14 @@ export function priorityWindowReminderEmail(params: {
       <div style="text-align: center; margin: 24px 0 16px;">
         <a href="${link}" style="display: inline-block; padding: 12px 28px; background: #1a6b3c; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px;">Open My Priority Access Link</a>
       </div>
-      <p style="font-size: 12px; color: #9ca3af; text-align: center; word-break: break-all;">
-        If the button does not work, use this link: <a href="${link}" style="color: #1a6b3c;">${link}</a>
+      <p style="font-size: 13px; color: #374151; text-align: center;">
+        If the button does not work, use the link below:
+      </p>
+      <p style="font-size: 13px; color: #374151; text-align: center; font-family: 'Noto Sans Myanmar', sans-serif;">
+        ခလုတ်အလုပ်မလုပ်ပါက အောက်ပါလင့်ခ်ကို အသုံးပြုပါ။
+      </p>
+      <p style="font-size: 13px; color: #1a6b3c; text-align: center; word-break: break-all;">
+        <a href="${link}" style="color: #1a6b3c;">${link}</a>
       </p>
 
       <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin: 20px 0;">
