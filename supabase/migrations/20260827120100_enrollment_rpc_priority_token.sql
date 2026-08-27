@@ -34,12 +34,22 @@
 -- event_interest_superseded_paired CHECK requires them to move as a pair).
 -- The row lock is held to commit, so no revocation can interleave.
 --
--- revoked_at is deliberately NOT part of the locking WHERE clause. Under READ
--- COMMITTED, FOR UPDATE blocks on a concurrently-updated row and then
--- re-evaluates the predicate against the new version; filtering on revoked_at
--- there would make a just-revoked row silently vanish as NOT FOUND instead of
--- being returned for an explicit check. The predicate matches on the token
--- alone so the row always comes back, and revocation is judged afterwards.
+-- What closes the race is the FOR UPDATE, not the shape of the predicate.
+--
+-- revoked_at is nonetheless deliberately NOT part of the locking WHERE clause.
+-- The plan is Limit -> LockRows -> Sort -> scan, so LockRows sits BELOW Limit:
+-- when READ COMMITTED re-evaluates a locked row against its new version and
+-- rejects it, the node does not yield empty, it pulls the next row from the
+-- sort. With revoked_at in the predicate a just-revoked row is rejected and the
+-- scan falls through to any other row matching the same hash, which is then
+-- returned unrevoked and granted. Matching on the token alone always returns
+-- the row itself, and revocation is judged afterwards.
+--
+-- With one matching row the two predicates are equivalent — both deny, both
+-- fail closed, no seat moves — and one matching row is all that token_hash's
+-- UNIQUE constraint permits without a SHA-256 collision. So this is a
+-- robustness choice for a case that should not be reachable, not the thing
+-- that makes the reachable case correct.
 --
 -- A row that is gone entirely (NOT FOUND) is treated as denied, and the denial
 -- reuses the payload an unauthorised caller gets, so nothing leaks about
@@ -117,7 +127,7 @@ DECLARE
   v_qty              integer;
   v_gate_used        boolean := false;
   v_interest_id      uuid;
-  v_interest_revoked timestamptz;
+  v_revoked_at       timestamptz;
 BEGIN
   v_qty := GREATEST(COALESCE(p_quantity, 1), 1);
 
@@ -192,7 +202,7 @@ BEGIN
   -- revocation under that lock, before anything is created or decremented.
   IF v_gate_used THEN
     SELECT ei.id, ei.revoked_at
-    INTO   v_interest_id, v_interest_revoked
+    INTO   v_interest_id, v_revoked_at
     FROM   public.event_interest ei
     WHERE  ei.intake_id = v_class.intake_id
       AND (
@@ -208,7 +218,7 @@ BEGIN
     LIMIT 1
     FOR UPDATE;
 
-    IF NOT FOUND OR v_interest_revoked IS NOT NULL THEN
+    IF NOT FOUND OR v_revoked_at IS NOT NULL THEN
       RETURN jsonb_build_object('success', false, 'error', 'ENROLLMENT_NOT_OPEN');
     END IF;
   END IF;
@@ -284,8 +294,8 @@ DECLARE
   v_new_remaining  integer;
   v_gate_intake_id uuid;
   v_gate_class     public.classes%ROWTYPE;
-  v_interest_id      uuid;
-  v_interest_revoked timestamptz;
+  v_interest_id    uuid;
+  v_revoked_at     timestamptz;
 BEGIN
   IF p_items IS NULL OR jsonb_array_length(p_items) = 0 THEN
     RETURN jsonb_build_object('success', false, 'error', 'EMPTY_CART');
@@ -335,6 +345,14 @@ BEGIN
       -- but always to the same intake: the gate matches the token against the
       -- class's own intake, so a second intake needing the gate would have
       -- returned above.
+      --
+      -- v_gate_class therefore ends up naming whichever gated tier Phase 1 saw
+      -- last, which need not be the tier a later revocation has anything to do
+      -- with. That is intended: the denial below must be indistinguishable from
+      -- this branch's, or the payload itself would reveal that the token
+      -- existed and was revoked mid-flight. Worth knowing when reading logs —
+      -- on a revoked-under-lock denial the tier named is arbitrary, and the
+      -- interest row, not that tier, is where the cause lives.
       v_gate_intake_id := v_class.intake_id;
       v_gate_class     := v_class;
     END IF;
@@ -363,7 +381,7 @@ BEGIN
   -- and still before Phase 2 creates anything or Phase 3 decrements a seat.
   IF v_gate_intake_id IS NOT NULL THEN
     SELECT ei.id, ei.revoked_at
-    INTO   v_interest_id, v_interest_revoked
+    INTO   v_interest_id, v_revoked_at
     FROM   public.event_interest ei
     WHERE  ei.intake_id = v_gate_intake_id
       AND (
@@ -371,11 +389,12 @@ BEGIN
         OR (ei.superseded_token_hash = p_priority_token_hash
             AND now() < ei.superseded_expires_at)
       )
+    -- Ordering rationale: see submit_enrollment above.
     ORDER BY (ei.token_hash = p_priority_token_hash) DESC, ei.id
     LIMIT 1
     FOR UPDATE;
 
-    IF NOT FOUND OR v_interest_revoked IS NOT NULL THEN
+    IF NOT FOUND OR v_revoked_at IS NOT NULL THEN
       RETURN jsonb_build_object('success', false, 'error', 'ENROLLMENT_NOT_OPEN',
         'class_id', v_gate_class.id, 'class_level', v_gate_class.level,
         'opens_at', v_gate_class.enrollment_open_at);
