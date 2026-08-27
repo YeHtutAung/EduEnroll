@@ -519,10 +519,10 @@ export function interestConfirmationEmail(params: {
   const resendNoticeHtml = isResend
     ? `<div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 16px; margin: 20px 0;">
         <p style="margin: 0; font-size: 13px; color: #92400e;">
-          <strong>Your previous link has stopped working.</strong> A link is only valid until it is replaced — use the one below from now on.
+          <strong>Your previous link will stop working shortly.</strong> Please switch to the one below now so you're not caught out later.
         </p>
         <p style="margin: 6px 0 0; font-size: 12px; color: #a16207; font-family: 'Noto Sans Myanmar', sans-serif;">
-          သင့်ရှေးလင့်ခ်ကို အသုံးပြု၍ မရတော့ပါ။ ယခုအခါ အောက်ပါလင့်ခ်ကိုသာ အသုံးပြုပါ။
+          သင့်ရှေးလင့်ခ်ကို မကြာမီ အသုံးပြု၍ မရတော့ပါ။ ယခုမှစ၍ အောက်ပါလင့်ခ်ကိုသာ အသုံးပြုပါ။
         </p>
       </div>`
     : "";
@@ -608,10 +608,10 @@ export function priorityWindowReminderEmail(params: {
 
       <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 16px; margin: 20px 0;">
         <p style="margin: 0; font-size: 13px; color: #991b1b;">
-          <strong>This is a new link and replaces any link from your earlier confirmation email.</strong> That old link no longer works — use only the link below.
+          <strong>This is a new link and supersedes any link from your earlier confirmation email.</strong> That old link will stop working shortly — switch to the one below now.
         </p>
         <p style="margin: 6px 0 0; font-size: 12px; color: #b91c1c; font-family: 'Noto Sans Myanmar', sans-serif;">
-          ဤလင့်ခ်သည် အသစ်ဖြစ်ပြီး သင့်ရှေးအတည်ပြုအီးမေးလ်ထဲက လင့်ခ်ကို အစားထိုးပါသည်။ ရှေးလင့်ခ်ကို အသုံးပြု၍ မရတော့ပါ။
+          ဤလင့်ခ်သည် အသစ်ဖြစ်ပြီး သင့်ရှေးအတည်ပြုအီးမေးလ်ထဲက လင့်ခ်ကို အစားထိုးပါသည်။ ရှေးလင့်ခ်ကို မကြာမီ အသုံးပြု၍ မရတော့ပါ။ ယခုမှစ၍ အောက်ပါလင့်ခ်ကိုသာ အသုံးပြုပါ။
         </p>
       </div>
 
