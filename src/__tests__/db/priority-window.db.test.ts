@@ -42,12 +42,11 @@ type Tracked = {
   intakes: string[];
   classes: string[];
   interests: string[];
-  enrollments: string[];
 };
 let made: Tracked;
 
 const fresh = (): Tracked => ({
-  tenants: [], intakes: [], classes: [], interests: [], enrollments: [],
+  tenants: [], intakes: [], classes: [], interests: [],
 });
 
 let seq = 0;
@@ -164,7 +163,6 @@ async function submitEnrollment(
     [classId, idempotencyKey, quantity, tokenHash],
   );
   if (row.result.success && row.result.enrollment_id) {
-    made.enrollments.push(String(row.result.enrollment_id));
   }
   return row.result;
 }
@@ -180,7 +178,6 @@ async function submitCartEnrollment(
     [JSON.stringify(items), tenantId, tokenHash],
   );
   if (row.result.success && row.result.enrollment_id) {
-    made.enrollments.push(String(row.result.enrollment_id));
   }
   return row.result;
 }
@@ -200,12 +197,12 @@ afterEach(async () => {
   // file's check_expired_enrollments() call and fail it for an unrelated
   // reason (check_expired_enrollments() is global).
   //
-  // Enrollments are swept BY TENANT, not by the made.enrollments id list.
-  // made.enrollments is only ever pushed to on a SUCCESSFUL RPC result, so an
-  // enrollment created by a call that returned failure — exactly the
-  // partial-cart regression C6 guards against, or E1's path if the block
-  // assertion throws before the id is pushed — would never be tracked and
-  // would survive this cleanup. enrollments_class_id_fkey is NO ACTION, so a
+  // Enrollments are swept BY TENANT, deliberately not by a tracked id list.
+  // A list can only record ids the test actually saw, so an enrollment created
+  // by a call that returned failure — exactly the partial-cart regression C6
+  // guards against, or E1's path if the block assertion throws early — would
+  // never be tracked and would survive this cleanup.
+  // enrollments_class_id_fkey is NO ACTION, so a
   // stray row would then make the classes delete below throw, abort the rest
   // of this afterEach, and strand a pending_payment enrollment for a later
   // file's global check_expired_enrollments() to trip over — loud here,
@@ -607,7 +604,6 @@ describe("C. gate through the enrollment RPCs", () => {
           );
           const result = rows[0].result as RpcResult;
           if (result.success && result.enrollment_id) {
-            made.enrollments.push(String(result.enrollment_id));
           }
           return result;
         } finally {
@@ -908,7 +904,6 @@ describe("E. the revoke race, two connections", () => {
       await c1.query("COMMIT"); // A's revoke commits first
       const b = await bPromise; // now released, re-evaluates under the lock
       if (b.result.success && b.result.enrollment_id) {
-        made.enrollments.push(String(b.result.enrollment_id));
       }
 
       expect(b.result).toMatchObject({ success: false, error: "ENROLLMENT_NOT_OPEN" });
