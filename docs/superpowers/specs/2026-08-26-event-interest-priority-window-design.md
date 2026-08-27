@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-26
 **Status:** Approved (design), pending implementation plan
-**Revision:** v8 (2026-08-27) — incorporates five rounds of external review (Codex)
+**Revision:** v9 (2026-08-27) — incorporates five rounds of external review (Codex)
 
 ## Problem
 
@@ -631,6 +631,40 @@ On a successful enrollment during the window the RPC stamps `first_used_at` and
 token. The token stays valid for the rest of the window: a mid-checkout browser
 failure must not strand someone with a dead link.
 
+#### The redemption transition, and why it is locked
+
+`priority_access_granted` is a `STABLE` read. It takes no lock, so on its own it
+leaves a window: an admin can revoke a token *after* the gate has read it and
+*before* the enrollment is inserted, and both transactions commit. The revoked
+token gets one enrollment through.
+
+The stamping and that race have the same fix, so the RPC does them together.
+Once the gate has admitted a class on the strength of a token, and **before any
+enrollment row is inserted or any seat decremented**:
+
+1. `SELECT ... FOR UPDATE` the matching `event_interest` row — the one whose
+   `token_hash` or live `superseded_token_hash` equals the presented hash, for
+   the enrolled class's intake.
+2. Re-check `revoked_at IS NULL` under that lock. If it is now set, return
+   `ENROLLMENT_NOT_OPEN` exactly as an unauthorised caller would. A revocation
+   that commits first wins; one that commits second is too late.
+3. Proceed with the insert and the seat decrement.
+4. Stamp `first_used_at` and `first_converted_enrollment_id` where they are
+   null, and clear `superseded_token_hash` / `superseded_expires_at`.
+
+The lock is held from step 1 to commit, so no revocation can interleave. Step 4
+is what makes the rotation guarantee true in practice: without it a superseded
+token stays valid for its entire grace period even after the current token has
+been used, which contradicts *the superseded hash is cleared the first time the
+new token is used*.
+
+For a cart the token is intake-level, so exactly one interest row is locked and
+stamped once, against the cart's enrollment id — not once per tier.
+
+Locking a row the caller does not otherwise touch is deliberate. The alternative
+is to check revocation twice and hope, which is the shape of the bug rather than
+a fix for it.
+
 **Accepted risk — links are forwardable.** A priority link is a bearer
 credential tied to an event, not to a person; nothing binds it to the name or
 email used at checkout. Someone may pass their head start to a friend or post
@@ -917,6 +951,25 @@ clean, and passed a 181-test suite — because no caller exists yet. It would
 have failed on the first live signup, in the one function granted to
 `service_role`. A migration applying successfully is not evidence that its
 functions run.
+
+**v9 (2026-08-27)** — external review of the enrollment-RPC migration found the
+redemption transition missing entirely. The RPC authorised access, inserted the
+enrollment and decremented seats, but never touched `event_interest`: no
+`first_used_at`, no `first_converted_enrollment_id`, and no clearing of the
+superseded token. The audit fields would have stayed null forever, and — the
+part that matters — a rotated-away token would have remained valid for its whole
+grace period even after the current token was successfully used, contradicting
+this document's own rotation guarantee.
+
+The same review found that `priority_access_granted` is a `STABLE` read holding
+no lock, so a revocation committing between the gate check and the insert lets a
+revoked token through once. Both have one fix, now specified above: lock the
+matching interest row before the insert, re-check revocation under the lock, and
+stamp the transition after. The lock is held to commit.
+
+This was an omission in the implementation brief, not in the implementation. The
+requirement was already stated in this document; the task that built the gate
+never mentioned it.
 
 Also recorded here: the `FOR UPDATE` added in v7 introduces a lock-ordering
 surface between `intakes` and `classes` that did not exist before. Two
