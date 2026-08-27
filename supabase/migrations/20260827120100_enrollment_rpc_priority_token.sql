@@ -12,6 +12,52 @@
 -- failure, before Phase 2 creates anything: the cart is all-or-nothing by
 -- design, and that is deliberate, not an oversight to be "fixed" here.
 --
+-- ── The redemption transition, and why it is locked ─────────────────────────
+--
+-- priority_access_granted is STABLE and takes no lock, so on its own it leaves
+-- a window: an admin can revoke a token AFTER the gate reads it and BEFORE the
+-- enrollment is inserted, and both transactions commit. The revoked token gets
+-- one enrollment through. Separately, the gate alone never records that a token
+-- was redeemed, so first_used_at / first_converted_enrollment_id would stay
+-- null forever and — the consequential half — a superseded token would stay
+-- valid for its whole grace period even after the current token had been used,
+-- contradicting the rotation guarantee that the superseded hash is cleared on
+-- first use of the new token.
+--
+-- Both have one fix. Where the gate admitted a class on the strength of a
+-- token, and before any enrollment row is inserted or any seat decremented,
+-- the RPC locks the matching event_interest row FOR UPDATE, re-checks
+-- revoked_at under that lock, and after the insert stamps the transition:
+-- first_used_at and first_converted_enrollment_id via COALESCE so an earlier
+-- redemption is never overwritten, and superseded_token_hash /
+-- superseded_expires_at cleared to NULL together (the
+-- event_interest_superseded_paired CHECK requires them to move as a pair).
+-- The row lock is held to commit, so no revocation can interleave.
+--
+-- revoked_at is deliberately NOT part of the locking WHERE clause. Under READ
+-- COMMITTED, FOR UPDATE blocks on a concurrently-updated row and then
+-- re-evaluates the predicate against the new version; filtering on revoked_at
+-- there would make a just-revoked row silently vanish as NOT FOUND instead of
+-- being returned for an explicit check. The predicate matches on the token
+-- alone so the row always comes back, and revocation is judged afterwards.
+--
+-- A row that is gone entirely (NOT FOUND) is treated as denied, and the denial
+-- reuses the payload an unauthorised caller gets, so nothing leaks about
+-- whether the token existed.
+--
+-- Lock order is classes then event_interest, in both functions. The admin
+-- revoke path touches event_interest alone, so it cannot invert this.
+--
+-- The cart's token is intake-level: exactly one interest row is locked and
+-- stamped once, against the cart's enrollment id, not once per tier. Only one
+-- intake can ever be admitted through a single token — priority_access_granted
+-- joins event_interest on the class's own intake_id, so a cart spanning two
+-- intakes that both need the gate fails on the second, and Phase 1 is
+-- all-or-nothing. The admitted intake is tracked rather than assumed.
+--
+-- Nothing above happens when the gate was not exercised. A tier already on
+-- public sale involves no token, and no interest row is touched.
+--
 -- ── Why DROP, and why the grants are repaired by hand ───────────────────────
 --
 -- Adding a parameter — even a defaulted one — makes a NEW overload. It does
@@ -69,6 +115,9 @@ DECLARE
   v_enrollment_ref   text;
   v_new_remaining    integer;
   v_qty              integer;
+  v_gate_used        boolean := false;
+  v_interest_id      uuid;
+  v_interest_revoked timestamptz;
 BEGIN
   v_qty := GREATEST(COALESCE(p_quantity, 1), 1);
 
@@ -116,6 +165,8 @@ BEGIN
     IF NOT public.priority_access_granted(v_class.id, p_priority_token_hash) THEN
       RETURN jsonb_build_object('success', false, 'error', 'ENROLLMENT_NOT_OPEN');
     END IF;
+    -- Admitted on a token: the redemption transition below is owed.
+    v_gate_used := true;
   END IF;
   IF v_class.enrollment_close_at IS NOT NULL AND now() > v_class.enrollment_close_at THEN
     RETURN jsonb_build_object('success', false, 'error', 'ENROLLMENT_CLOSED');
@@ -137,6 +188,31 @@ BEGIN
     );
   END IF;
 
+  -- Redemption transition, step 1-2: lock the interest row and re-check
+  -- revocation under that lock, before anything is created or decremented.
+  IF v_gate_used THEN
+    SELECT ei.id, ei.revoked_at
+    INTO   v_interest_id, v_interest_revoked
+    FROM   public.event_interest ei
+    WHERE  ei.intake_id = v_class.intake_id
+      AND (
+            ei.token_hash = p_priority_token_hash
+        OR (ei.superseded_token_hash = p_priority_token_hash
+            AND now() < ei.superseded_expires_at)
+      )
+    -- token_hash is UNIQUE table-wide, so the live-token branch matches at most
+    -- one row; superseded_token_hash carries no such constraint. Ordering the
+    -- live match first and taking one row makes the choice deterministic
+    -- instead of leaving SELECT INTO to pick a row arbitrarily and silently.
+    ORDER BY (ei.token_hash = p_priority_token_hash) DESC, ei.id
+    LIMIT 1
+    FOR UPDATE;
+
+    IF NOT FOUND OR v_interest_revoked IS NOT NULL THEN
+      RETURN jsonb_build_object('success', false, 'error', 'ENROLLMENT_NOT_OPEN');
+    END IF;
+  END IF;
+
   INSERT INTO public.enrollments (
     class_id, tenant_id, student_name_en, phone, status, enrollment_ref, idempotency_key, quantity
   ) VALUES (
@@ -153,6 +229,18 @@ BEGIN
   SET seat_remaining = v_new_remaining,
       status = CASE WHEN v_new_remaining <= 0 THEN 'full'::class_status ELSE status END
   WHERE id = p_class_id;
+
+  -- Redemption transition, step 4. COALESCE: a later redemption must not
+  -- overwrite the first one. Clearing the superseded pair is what actually
+  -- retires a rotated-away token at first use of the new one.
+  IF v_interest_id IS NOT NULL THEN
+    UPDATE public.event_interest
+    SET first_used_at                 = COALESCE(first_used_at, now()),
+        first_converted_enrollment_id = COALESCE(first_converted_enrollment_id, v_enrollment_id),
+        superseded_token_hash         = NULL,
+        superseded_expires_at         = NULL
+    WHERE id = v_interest_id;
+  END IF;
 
   RETURN jsonb_build_object(
     'success',         true,
@@ -194,6 +282,10 @@ DECLARE
   v_resolved_tenant uuid;
   v_qty            integer;
   v_new_remaining  integer;
+  v_gate_intake_id uuid;
+  v_gate_class     public.classes%ROWTYPE;
+  v_interest_id      uuid;
+  v_interest_revoked timestamptz;
 BEGIN
   IF p_items IS NULL OR jsonb_array_length(p_items) = 0 THEN
     RETURN jsonb_build_object('success', false, 'error', 'EMPTY_CART');
@@ -237,6 +329,14 @@ BEGIN
           'class_id', v_class.id, 'class_level', v_class.level,
           'opens_at', v_class.enrollment_open_at);
       END IF;
+      -- Record which intake the gate admitted, and on which tier, so the
+      -- transition below locks the right row and can deny with the same
+      -- payload shape this branch produces. Re-assigned on every gated tier,
+      -- but always to the same intake: the gate matches the token against the
+      -- class's own intake, so a second intake needing the gate would have
+      -- returned above.
+      v_gate_intake_id := v_class.intake_id;
+      v_gate_class     := v_class;
     END IF;
 
     IF v_class.enrollment_close_at IS NOT NULL AND now() > v_class.enrollment_close_at THEN
@@ -258,6 +358,29 @@ BEGIN
         'seat_remaining', v_class.seat_remaining);
     END IF;
   END LOOP;
+
+  -- Redemption transition, step 1-2. Once for the cart, not once per tier,
+  -- and still before Phase 2 creates anything or Phase 3 decrements a seat.
+  IF v_gate_intake_id IS NOT NULL THEN
+    SELECT ei.id, ei.revoked_at
+    INTO   v_interest_id, v_interest_revoked
+    FROM   public.event_interest ei
+    WHERE  ei.intake_id = v_gate_intake_id
+      AND (
+            ei.token_hash = p_priority_token_hash
+        OR (ei.superseded_token_hash = p_priority_token_hash
+            AND now() < ei.superseded_expires_at)
+      )
+    ORDER BY (ei.token_hash = p_priority_token_hash) DESC, ei.id
+    LIMIT 1
+    FOR UPDATE;
+
+    IF NOT FOUND OR v_interest_revoked IS NOT NULL THEN
+      RETURN jsonb_build_object('success', false, 'error', 'ENROLLMENT_NOT_OPEN',
+        'class_id', v_gate_class.id, 'class_level', v_gate_class.level,
+        'opens_at', v_gate_class.enrollment_open_at);
+    END IF;
+  END IF;
 
   -- Phase 2: Create enrollment (class_id = NULL for cart)
   INSERT INTO public.enrollments (
@@ -300,6 +423,16 @@ BEGIN
   UPDATE public.enrollments
   SET quantity = v_total_qty
   WHERE id = v_enrollment_id;
+
+  -- Redemption transition, step 4. Stamped against the cart's enrollment id.
+  IF v_interest_id IS NOT NULL THEN
+    UPDATE public.event_interest
+    SET first_used_at                 = COALESCE(first_used_at, now()),
+        first_converted_enrollment_id = COALESCE(first_converted_enrollment_id, v_enrollment_id),
+        superseded_token_hash         = NULL,
+        superseded_expires_at         = NULL
+    WHERE id = v_interest_id;
+  END IF;
 
   RETURN jsonb_build_object(
     'success',      true,
