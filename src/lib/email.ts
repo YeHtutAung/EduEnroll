@@ -497,3 +497,145 @@ export function enrollmentRejectedEmail(params: {
     `, tenantName, logoUrl),
   };
 }
+
+// ── Interest confirmation email (sent at signup, and again on resend) ───────
+
+export function interestConfirmationEmail(params: {
+  name: string;
+  eventName: string;
+  link: string;
+  windowOpensAt: string; // already formatted for display; do not format it here
+  coveredTiers: string[]; // the tiers the head start actually applies to
+  isResend: boolean;
+  tenantName?: string;
+  logoUrl?: string;
+}): { subject: string; html: string } {
+  const { name, eventName, link, windowOpensAt, coveredTiers, isResend, tenantName, logoUrl } = params;
+
+  const tierListHtml = coveredTiers.length
+    ? `<ol style="margin: 8px 0 0; padding-left: 20px; font-size: 14px; color: #1f2937;">${coveredTiers.map((t) => `<li style="margin: 2px 0;">${t}</li>`).join("")}</ol>`
+    : "";
+
+  const resendNoticeHtml = isResend
+    ? `<div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 16px; margin: 20px 0;">
+        <p style="margin: 0; font-size: 13px; color: #92400e;">
+          <strong>Your previous link has stopped working.</strong> A link is only valid until it is replaced — use the one below from now on.
+        </p>
+        <p style="margin: 6px 0 0; font-size: 12px; color: #a16207; font-family: 'Noto Sans Myanmar', sans-serif;">
+          သင့်ရှေးလင့်ခ်ကို အသုံးပြု၍ မရတော့ပါ။ ယခုအခါ အောက်ပါလင့်ခ်ကိုသာ အသုံးပြုပါ။
+        </p>
+      </div>`
+    : "";
+
+  return {
+    subject: isResend
+      ? `Your Priority Access Link (Resent) — ${eventName}`
+      : `You're on the Priority List — ${eventName}`,
+    html: baseLayout(`
+      <div style="text-align: center; margin-bottom: 24px;">
+        <div style="width: 56px; height: 56px; border-radius: 50%; background: #dbeafe; margin: 0 auto 12px; display: flex; align-items: center; justify-content: center;">
+          <span style="font-size: 28px;">🎟️</span>
+        </div>
+        <h1 style="margin: 0; font-size: 22px; color: #1a1a1a;">${isResend ? "Your Priority Link Has Been Resent" : "You're on the Priority List!"}</h1>
+        <p style="margin: 4px 0 0; color: #6b7280; font-family: 'Noto Sans Myanmar', sans-serif;">${isResend ? "သင့်ဦးစားပေးလင့်ခ်ကို ပြန်လည်ပေးပို့ထားပါသည်" : "သင့်ကို ဦးစားပေးစာရင်းတွင် ထည့်သွင်းထားပါပြီ"}</p>
+      </div>
+
+      <p style="font-size: 14px; color: #374151;">
+        Hi <strong>${name}</strong>, thanks for registering your interest in <strong>${eventName}</strong>. The link below is your personal priority access — keep this email.
+      </p>
+
+      ${resendNoticeHtml}
+
+      <div style="text-align: center; margin: 24px 0 16px;">
+        <a href="${link}" style="display: inline-block; padding: 12px 28px; background: #1a6b3c; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px;">Open My Priority Access Link</a>
+      </div>
+
+      <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin: 20px 0;">
+        <p style="margin: 0; font-size: 13px; color: #1e3a8a;">
+          <strong>This link does not work yet.</strong> It activates on <strong>${windowOpensAt}</strong>. If you open it before then, you'll see a page saying the window hasn't opened — that is expected, not an error. Come back after that time.
+        </p>
+        <p style="margin: 6px 0 0; font-size: 12px; color: #1e40af; font-family: 'Noto Sans Myanmar', sans-serif;">
+          ဤလင့်ခ်သည် ${windowOpensAt} မှစတင်၍ အလုပ်လုပ်ပါမည်။ ယခုနှိပ်ပါက မဖွင့်သေးကြောင်း စာမျက်နှာကိုသာ တွေ့ရပါလိမ့်မည်၊ ချို့ယွင်းချက် မဟုတ်ပါ။
+        </p>
+      </div>
+
+      <div style="margin: 20px 0;">
+        <p style="margin: 0 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #6b7280;">Your head start covers</p>
+        ${tierListHtml}
+      </div>
+
+      <p style="font-size: 13px; color: #6b7280;">
+        This head start applies only to the ticket type${coveredTiers.length === 1 ? "" : "s"} listed above. Other ticket types for this event may already be on sale to the general public.
+      </p>
+      <p style="font-size: 12px; color: #9ca3af; font-family: 'Noto Sans Myanmar', sans-serif;">
+        ဤဦးစားပေးအချိန်သည် အထက်ဖော်ပြပါ လက်မှတ်အမျိုးအစားများအတွက်သာ သက်ရောက်ပါသည်။ အခြားလက်မှတ်အမျိုးအစားများကို အများပြည်သူထံ ရောင်းချပြီးဖြစ်နိုင်ပါသည်။
+      </p>
+    `, tenantName, logoUrl),
+  };
+}
+
+// ── Priority window reminder email (sent by an admin before the window opens) ─
+
+export function priorityWindowReminderEmail(params: {
+  name: string;
+  eventName: string;
+  link: string;
+  windowOpensAt: string;
+  coveredTiers: string[];
+  tenantName?: string;
+  logoUrl?: string;
+}): { subject: string; html: string } {
+  const { name, eventName, link, windowOpensAt, coveredTiers, tenantName, logoUrl } = params;
+
+  const tierListHtml = coveredTiers.length
+    ? `<ol style="margin: 8px 0 0; padding-left: 20px; font-size: 14px; color: #1f2937;">${coveredTiers.map((t) => `<li style="margin: 2px 0;">${t}</li>`).join("")}</ol>`
+    : "";
+
+  return {
+    subject: `Your Priority Window Opens Soon — ${eventName}`,
+    html: baseLayout(`
+      <div style="text-align: center; margin-bottom: 24px;">
+        <div style="width: 56px; height: 56px; border-radius: 50%; background: #fef3c7; margin: 0 auto 12px; display: flex; align-items: center; justify-content: center;">
+          <span style="font-size: 28px;">⏰</span>
+        </div>
+        <h1 style="margin: 0; font-size: 22px; color: #1a1a1a;">Your Priority Window Opens Soon</h1>
+        <p style="margin: 4px 0 0; color: #6b7280; font-family: 'Noto Sans Myanmar', sans-serif;">သင့်ဦးစားပေးအချိန် မကြာမီ ဖွင့်လှစ်တော့မည်</p>
+      </div>
+
+      <p style="font-size: 14px; color: #374151;">
+        Hi <strong>${name}</strong>, your priority window for <strong>${eventName}</strong> opens on <strong>${windowOpensAt}</strong>.
+      </p>
+
+      <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 16px; margin: 20px 0;">
+        <p style="margin: 0; font-size: 13px; color: #991b1b;">
+          <strong>This is a new link and replaces any link from your earlier confirmation email.</strong> That old link no longer works — use only the link below.
+        </p>
+        <p style="margin: 6px 0 0; font-size: 12px; color: #b91c1c; font-family: 'Noto Sans Myanmar', sans-serif;">
+          ဤလင့်ခ်သည် အသစ်ဖြစ်ပြီး သင့်ရှေးအတည်ပြုအီးမေးလ်ထဲက လင့်ခ်ကို အစားထိုးပါသည်။ ရှေးလင့်ခ်ကို အသုံးပြု၍ မရတော့ပါ။
+        </p>
+      </div>
+
+      <div style="text-align: center; margin: 24px 0 16px;">
+        <a href="${link}" style="display: inline-block; padding: 12px 28px; background: #1a6b3c; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px;">Open My Priority Access Link</a>
+      </div>
+
+      <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin: 20px 0;">
+        <p style="margin: 0; font-size: 13px; color: #1e3a8a;">
+          <strong>This link will not work until ${windowOpensAt}.</strong> If you open it before then, you'll see a page saying the window hasn't opened yet — that is expected, not an error.
+        </p>
+      </div>
+
+      <div style="margin: 20px 0;">
+        <p style="margin: 0 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #6b7280;">Your head start covers</p>
+        ${tierListHtml}
+      </div>
+
+      <p style="font-size: 13px; color: #6b7280;">
+        This head start applies only to the ticket type${coveredTiers.length === 1 ? "" : "s"} listed above. Other ticket types for this event may already be on sale to the general public.
+      </p>
+      <p style="font-size: 12px; color: #9ca3af; font-family: 'Noto Sans Myanmar', sans-serif;">
+        ဤဦးစားပေးအချိန်သည် အထက်ဖော်ပြပါ လက်မှတ်အမျိုးအစားများအတွက်သာ သက်ရောက်ပါသည်။ အခြားလက်မှတ်အမျိုးအစားများကို အများပြည်သူထံ ရောင်းချပြီးဖြစ်နိုင်ပါသည်။
+      </p>
+    `, tenantName, logoUrl),
+  };
+}
