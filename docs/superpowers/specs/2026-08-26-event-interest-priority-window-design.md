@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-26
 **Status:** Approved (design), pending implementation plan
-**Revision:** v7 (2026-08-27) — incorporates five rounds of external review (Codex)
+**Revision:** v8 (2026-08-27) — incorporates five rounds of external review (Codex)
 
 ## Problem
 
@@ -301,9 +301,20 @@ BEGIN
   -- Two-argument form: the first key is a constant reserved for this feature,
   -- so this cannot collide with an advisory lock taken by unrelated code. The
   -- keyspace is global to the database, not scoped to a function or table.
+  --
+  -- hashtext(), NOT hashtextextended(). Postgres offers only two overloads,
+  -- pg_advisory_xact_lock(bigint) and (int, int) — there is no (bigint,
+  -- bigint). hashtextextended returns bigint, so the two-key call fails to
+  -- resolve, and narrowing casts are never implicit. Casting explicitly does
+  -- not rescue it either: the bigint overflows int4 and raises at runtime.
+  -- hashtext returns int4 natively and is the idiom for this form.
+  --
+  -- This fails at CALL time, not at CREATE time: PL/pgSQL prepares embedded
+  -- statements on first execution, so a wrong overload here compiles clean,
+  -- applies clean, and throws on the first real signup.
   PERFORM pg_advisory_xact_lock(
-    hashtextextended('event_interest_signup', 0),
-    hashtextextended(p_ip_hash, 0)
+    hashtext('event_interest_signup'),
+    hashtext(p_ip_hash)
   );
 
   -- Scoped to this address, NOT global. The lock is per-IP, so an unqualified
@@ -882,6 +893,30 @@ constraint can enforce it.
 
 The prune defect originated in this document, not in the implementation. The
 migration reproduced what v6 specified.
+
+**v8 (2026-08-27)** — the v7 lock-namespacing fix was itself broken, and was
+caught by re-review before any caller existed. `pg_advisory_xact_lock` has only
+two overloads, `(bigint)` and `(int, int)`; `hashtextextended` returns `bigint`,
+so the two-key call could not resolve, and narrowing casts are never implicit.
+Verified by execution: `consume_interest_signup_slot` raised `function
+pg_advisory_xact_lock(bigint, bigint) does not exist` on **every** call. The
+explicit-cast workaround was also tested and also fails — `integer out of
+range`, because the bigint overflows int4. `hashtext` returns int4 natively and
+is the correct idiom.
+
+The important part is why nothing caught it earlier. PL/pgSQL prepares embedded
+statements on first execution, so the wrong overload compiled clean, applied
+clean, and passed a 181-test suite — because no caller exists yet. It would
+have failed on the first live signup, in the one function granted to
+`service_role`. A migration applying successfully is not evidence that its
+functions run.
+
+Also recorded here: the `FOR UPDATE` added in v7 introduces a lock-ordering
+surface between `intakes` and `classes` that did not exist before. Two
+transactions touching the same two intakes in opposite order can deadlock. This
+is accepted — a loud, retryable `40P01` is strictly better than the silent
+invariant violation it replaces — but any future bulk writer over `classes`
+must iterate in a stable `intake_id` order and be prepared to retry.
 
 Raised by no review, found earlier while applying round two: **interest signup
 had to close at `priority_open_at`.** Left open, anyone could have registered during
