@@ -32,4 +32,10 @@ describe("hashIp", () => {
   it("changes with the secret", () => {
     expect(hashIp("1.2.3.4", "a")).not.toBe(hashIp("1.2.3.4", "b"));
   });
+
+  it("throws when secret is empty", () => {
+    expect(() => hashIp("1.2.3.4", "")).toThrow(
+      "hashIp: secret must be a non-empty string"
+    );
+  });
 });

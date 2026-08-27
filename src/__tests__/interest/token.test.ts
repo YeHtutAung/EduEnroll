@@ -23,6 +23,11 @@ describe("mintPriorityToken", () => {
     expect(seen.size).toBe(50);
   });
 
+  it("draws 32 bytes of entropy", () => {
+    const { token } = mintPriorityToken();
+    expect(Buffer.from(token, "base64url").length).toBe(32);
+  });
+
   it("returns a hash and prefix consistent with the token", () => {
     const { token, tokenHash, tokenPrefix } = mintPriorityToken();
     expect(tokenHash).toBe(hashPriorityToken(token));
