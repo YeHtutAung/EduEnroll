@@ -564,6 +564,20 @@ Task 3 tested the gate function. This tests it where it actually runs — inside
 6. **Cart mixing the token's intake with a foreign one** → the whole call fails and **no** seat is decremented for the token's own tiers. Assert `seat_remaining` is unchanged on every class in the cart, not just that the call returned an error.
 7. **Concurrent priority enrollments against the last seat** — two simultaneous calls, one succeeds, one gets `NOT_ENOUGH_SEATS`, and `seat_remaining` lands at 0, never negative.
 
+**The redemption transition — added after spec v9, and currently untested.**
+
+These seven cases predate the redemption transition. The migration that implements it (`20260827120100`) has **zero committed test coverage**: the existing suite passes unchanged precisely because nothing in it calls either RPC with a token argument at all. The behaviour is silent — a regression that drops the stamp `UPDATE`, or moves it above the `INSERT`, leaves every current test green. The superseded-clearing half has no visible symptom until a retired token is redeemed weeks later.
+
+8. A successful priority redemption stamps `first_used_at` and `first_converted_enrollment_id`, and clears `superseded_token_hash` / `superseded_expires_at`.
+9. After 8, the superseded token is **refused** by a subsequent `submit_enrollment`. This is the rotation guarantee, and it is the case with real teeth.
+10. A second redemption on the same token leaves both stamps at their original values. Backdate `first_used_at` before the second call — `now()` is transaction-constant, so re-stamping would write an identical value and the naive version of this test cannot fail.
+11. A tier already on public sale leaves every `event_interest` row for that intake untouched. Assert on the row, not on the return payload.
+12. A cart over three tiers of one intake stamps **exactly one** row, once, with `first_converted_enrollment_id` set to the cart's parent enrollment (`class_id IS NULL`), not a tier's.
+13. A cart mixing a gated tier with an already-open tier of the same intake still stamps exactly once.
+14. **The revoke race, two connections.** Session A: `BEGIN; UPDATE event_interest SET revoked_at = now()`, uncommitted. Session B calls the RPC and blocks. A commits. B returns `ENROLLMENT_NOT_OPEN` **and `seat_remaining` is unchanged**.
+
+Case 14 must be sanity-checked the way Task 4's concurrency tests were: remove the `FOR UPDATE` from the live function, confirm the test goes red, restore byte-exact. A concurrency test that passes both ways is testing nothing.
+
 - [ ] **Step 2: Run**
 
 Run: `npm run test:db -- src/__tests__/db/priority-window.db.test.ts`
@@ -869,6 +883,14 @@ Same ISO-string-or-null validation `enrollment_open_at` already gets in `src/app
 - [ ] **Step 4: Invitations**
 
 `POST /api/admin/interest/[intakeId]/invite`. It **rotates** — only hashes are stored, so the recipient's existing link cannot be reconstructed. Per row: same persist-then-send order and pre-send lock as a public resend. Stamp `invited_at` **per row as each send succeeds**, so a partial failure re-runs only the remainder. `await` the sends — fire-and-forget is killed on Vercel serverless. Process a bounded chunk and return `{ sent, remaining }`.
+
+**Commit per row, or in small chunks. Never one transaction over the intake.**
+
+This is a hard constraint, not a preference, and it comes from what the enrollment RPCs now do. Since `20260827120100`, redeeming a priority token takes a `FOR UPDATE` row lock on that person's `event_interest` row and holds it until commit. A bulk rotation that updates every interest row for an intake in a single transaction therefore sits directly in front of **every checkout for that event**.
+
+Buyers do not deadlock — they queue. And if the admin transaction outlives the authenticator's `statement_timeout`, those queued buyers get `INTERNAL_ERROR` at checkout. The traffic burst when a priority window opens is exactly when an organiser is most likely to hit "send invitations", so the failure lands at the worst possible moment and looks like the sale is broken.
+
+Per-row commits also fit the resumability requirement above: a row whose send succeeded is durably stamped and never re-sent, whatever happens to the rest of the run.
 
 - [ ] **Step 5: Admin UI**
 
