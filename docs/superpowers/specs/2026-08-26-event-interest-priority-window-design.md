@@ -253,10 +253,17 @@ CREATE TABLE public.interest_signup_attempts (
   CONSTRAINT interest_signup_attempts_ip_format CHECK (ip_hash ~ '^[0-9a-f]{64}$')
 );
 
+-- Serves v_intake_count: (ip_hash, intake_id, created_at) equality on the
+-- first two, range on the third.
 CREATE INDEX interest_signup_attempts_lookup
   ON public.interest_signup_attempts (intake_id, ip_hash, created_at DESC);
-CREATE INDEX interest_signup_attempts_prune
-  ON public.interest_signup_attempts (created_at);
+
+-- Serves both the scoped prune and v_global_count, which lead with ip_hash and
+-- range on created_at. Deliberately NOT an index on created_at alone: once the
+-- prune became per-address, no query filters on created_at without also
+-- filtering on ip_hash, so a created_at-only index would serve nothing.
+CREATE INDEX interest_signup_attempts_ip_window
+  ON public.interest_signup_attempts (ip_hash, created_at);
 
 ALTER TABLE public.interest_signup_attempts ENABLE ROW LEVEL SECURITY;
 -- No policies: service-role only.
