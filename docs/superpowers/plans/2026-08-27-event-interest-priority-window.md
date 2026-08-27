@@ -236,7 +236,7 @@ export function hashIp(raw: string | null | undefined, secret: string): string {
 - [ ] **Step 4: Run to verify they pass**
 
 Run: `npm test -- src/__tests__/interest/token.test.ts src/__tests__/interest/ipHash.test.ts`
-Expected: PASS, 11 tests.
+Expected: PASS, 12 tests.
 
 - [ ] **Step 5: Commit**
 
@@ -292,8 +292,12 @@ Expected: the objects above and nothing else. **If it shows changes you did not 
 - [ ] **Step 3: Apply locally and verify the privilege posture**
 
 ```bash
-npm run db:reset
+npx supabase migration up
 ```
+
+Do **not** run `npm run db:reset`. Project rules forbid `supabase db reset` without
+explicit confirmation from the user, and `migration up` applies pending migrations
+without wiping local data. If you believe a reset is genuinely required, STOP and ask.
 
 Then confirm the revokes actually took, rather than assuming:
 
@@ -360,7 +364,7 @@ Expected: FAIL. If instead it errors on missing env vars, you need `.env.test.lo
 
 - [ ] **Step 3: Make them pass**
 
-Task 2's migration should already satisfy every case. If one fails, fix the **migration** and `npm run db:reset` — do not weaken the test.
+Task 2's migration should already satisfy every case. If one fails, fix the **migration** and re-apply with `npx supabase migration up` — do not weaken the test, and do not reset the database.
 
 - [ ] **Step 4: Commit**
 
@@ -490,8 +494,12 @@ NOTIFY pgrst, 'reload schema';
 - [ ] **Step 2: Apply and verify the privilege posture**
 
 ```bash
-npm run db:reset
+npx supabase migration up
 ```
+
+Do **not** run `npm run db:reset`. Project rules forbid `supabase db reset` without
+explicit confirmation from the user, and `migration up` applies pending migrations
+without wiping local data. If you believe a reset is genuinely required, STOP and ask.
 
 ```sql
 SELECT p.oid::regprocedure AS sig,
@@ -564,6 +572,8 @@ export function interestConfirmationEmail(params: {
   windowOpensAt: string;   // already formatted for display
   coveredTiers: string[];  // names the head start actually applies to
   isResend: boolean;
+  tenantName?: string;     // baseLayout needs these for tenant branding
+  logoUrl?: string;
 }): { subject: string; html: string }
 ```
 
@@ -576,6 +586,8 @@ export function priorityWindowReminderEmail(params: {
   link: string;
   windowOpensAt: string;
   coveredTiers: string[];
+  tenantName?: string;
+  logoUrl?: string;
 }): { subject: string; html: string }
 ```
 
@@ -674,7 +686,7 @@ export async function registerInterest(input: {
 }
 ```
 
-**Add `rotate_interest_token` to the Task 2 migration** (amend it and re-run `npm run db:reset`) — the cooldown check, mint-slot write, superseded move and `last_link_attempt_at` stamp must be one transaction under `SELECT ... FOR UPDATE`. Doing this from the application cannot hold the lock across the decision.
+**Add `rotate_interest_token` to the Task 2 migration** (amend it, then re-apply — ask the user first if that requires a reset) — the cooldown check, mint-slot write, superseded move and `last_link_attempt_at` stamp must be one transaction under `SELECT ... FOR UPDATE`. Doing this from the application cannot hold the lock across the decision.
 
 - [ ] **Step 4: Run to verify they pass**
 
