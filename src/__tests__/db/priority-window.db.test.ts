@@ -199,10 +199,22 @@ afterEach(async () => {
   // a leaked pending_payment enrollment would otherwise be swept up by a later
   // file's check_expired_enrollments() call and fail it for an unrelated
   // reason (check_expired_enrollments() is global).
-  const { tenants, intakes, classes, interests, enrollments } = made;
-  if (enrollments.length) {
-    await sql(`DELETE FROM enrollment_items WHERE enrollment_id = ANY($1::uuid[])`, [enrollments]);
-    await sql(`DELETE FROM enrollments WHERE id = ANY($1::uuid[])`, [enrollments]);
+  //
+  // Enrollments are swept BY TENANT, not by the made.enrollments id list.
+  // made.enrollments is only ever pushed to on a SUCCESSFUL RPC result, so an
+  // enrollment created by a call that returned failure — exactly the
+  // partial-cart regression C6 guards against, or E1's path if the block
+  // assertion throws before the id is pushed — would never be tracked and
+  // would survive this cleanup. enrollments_class_id_fkey is NO ACTION, so a
+  // stray row would then make the classes delete below throw, abort the rest
+  // of this afterEach, and strand a pending_payment enrollment for a later
+  // file's global check_expired_enrollments() to trip over — loud here,
+  // silent damage downstream. The tenant sweep is unconditionally safe: every
+  // test in this file mints its own fresh tenant.
+  const { tenants, intakes, classes, interests } = made;
+  if (tenants.length) {
+    await sql(`DELETE FROM enrollment_items WHERE tenant_id = ANY($1::uuid[])`, [tenants]);
+    await sql(`DELETE FROM enrollments WHERE tenant_id = ANY($1::uuid[])`, [tenants]);
   }
   if (interests.length) await sql(`DELETE FROM event_interest WHERE id = ANY($1::uuid[])`, [interests]);
   if (classes.length) await sql(`DELETE FROM classes WHERE id = ANY($1::uuid[])`, [classes]);
@@ -461,11 +473,30 @@ describe("C. gate through the enrollment RPCs", () => {
     made.classes.push(row.id);
     const classId = row.id;
     const token = await createInterest(intakeId, tenantId, `${uniq()}@example.test`);
+    // Populated so its clearing (or non-clearing) is observable — same
+    // technique as D1. The gate admits this token (v_gate_used = true)
+    // BEFORE the close-time check fails the call; only statement ordering
+    // inside the function keeps the stamp from running on this path, so it
+    // is worth asserting directly rather than assuming.
+    const oldToken = mintPriorityToken();
+    await sql(
+      `UPDATE event_interest SET superseded_token_hash = $2, superseded_expires_at = $3
+       WHERE intake_id = $1`,
+      [intakeId, oldToken.tokenHash, hoursFromNow(1)],
+    );
 
     const result = await submitEnrollment(classId, hashPriorityToken(token));
 
     expect(result).toMatchObject({ success: false, error: "ENROLLMENT_CLOSED" });
     expect(await seatRemaining(classId)).toBe(5);
+
+    // A refused enrollment must not spend the token: nothing about this
+    // event_interest row moves, even though the gate admitted it.
+    const [row2] = await interestRowsForIntake(intakeId);
+    expect(row2.first_used_at).toBeNull();
+    expect(row2.first_converted_enrollment_id).toBeNull();
+    expect(row2.superseded_token_hash).toBe(oldToken.tokenHash);
+    expect(row2.superseded_expires_at).not.toBeNull();
   });
 
   it("C4 a valid token is not a seat guarantee — a full class still refuses", async () => {
@@ -475,12 +506,28 @@ describe("C. gate through the enrollment RPCs", () => {
       enrollmentOpenAt: hoursFromNow(1), seatTotal: 5, seatRemaining: 0, status: "open",
     });
     const token = await createInterest(intakeId, tenantId, `${uniq()}@example.test`);
+    // Same rationale as C3: the gate admits this token before the seat check
+    // fails the call, so the token must come out of this unspent.
+    const oldToken = mintPriorityToken();
+    await sql(
+      `UPDATE event_interest SET superseded_token_hash = $2, superseded_expires_at = $3
+       WHERE intake_id = $1`,
+      [intakeId, oldToken.tokenHash, hoursFromNow(1)],
+    );
 
     const result = await submitEnrollment(classId, hashPriorityToken(token));
 
     expect(result.success).toBe(false);
-    expect(["CLASS_FULL", "NOT_ENOUGH_SEATS"]).toContain(result.error);
+    // seat_remaining = 0 and quantity 1 make line 196's CASE deterministic —
+    // not a nondeterministic choice between two acceptable codes.
+    expect(result.error).toBe("CLASS_FULL");
     expect(await seatRemaining(classId)).toBe(0);
+
+    const [row2] = await interestRowsForIntake(intakeId);
+    expect(row2.first_used_at).toBeNull();
+    expect(row2.first_converted_enrollment_id).toBeNull();
+    expect(row2.superseded_token_hash).toBe(oldToken.tokenHash);
+    expect(row2.superseded_expires_at).not.toBeNull();
   });
 
   it("C5 a multi-tier cart enrolls every tier off one intake-level token", async () => {
@@ -585,7 +632,9 @@ describe("C. gate through the enrollment RPCs", () => {
 
     const finalSeats = await seatRemaining(classId);
     expect(finalSeats).toBe(0);
-    expect(finalSeats).toBeGreaterThanOrEqual(0); // never negative
+    // Never negative is implied by the toBe(0) above, not a separate live
+    // assertion — a `>= 0` check here could never fail once toBe(0) passed,
+    // so it would read as protection it is not providing.
   });
 });
 
@@ -685,16 +734,22 @@ describe("D. redemption transition", () => {
 
   it("D4 (case 11) a tier already on public sale leaves every event_interest row for that intake untouched", async () => {
     const tenantId = await createTenant();
-    // priority_open_at unset — this intake's own signups are irrelevant; the
-    // tier below is already publicly open (enrollment_open_at in the past),
-    // so the gate is never consulted at all.
-    const intakeId = await createIntake(tenantId, null);
+    // priority_open_at IS set (in the past) and a real, valid token is
+    // presented — the token is live and would be granted on a gated tier.
+    // The tier below is already publicly open (enrollment_open_at in the
+    // past) regardless, so the gate must never be consulted for THIS call,
+    // even though the caller holds a token and passes it: a real client
+    // forwards whatever priority token it has regardless of whether the
+    // tier being purchased still needs one. Passing null here would leave
+    // this blind to a regression that stamps on p_priority_token_hash IS NOT
+    // NULL instead of on whether the gate actually ran (v_gate_used).
+    const intakeId = await createIntake(tenantId, hoursFromNow(-1));
     const classId = await createClass(intakeId, tenantId, {
       enrollmentOpenAt: hoursFromNow(-1), seatTotal: 5, seatRemaining: 5, status: "open",
     });
-    await createInterest(intakeId, tenantId, `${uniq()}@example.test`);
+    const token = await createInterest(intakeId, tenantId, `${uniq()}@example.test`);
 
-    const result = await submitEnrollment(classId, null);
+    const result = await submitEnrollment(classId, hashPriorityToken(token));
     expect(result.success).toBe(true);
 
     const [row] = await interestRowsForIntake(intakeId);
@@ -703,7 +758,15 @@ describe("D. redemption transition", () => {
     expect(row.superseded_token_hash).toBeNull();
   });
 
-  it("D5 (case 12) a cart over three tiers of one intake stamps exactly one row once, against the cart's own enrollment", async () => {
+  it("D5 (case 12) a cart over three tiers of one intake ends with exactly one stamped row, pointing at the cart's own enrollment", async () => {
+    // Named for the observable end state, not the number of UPDATEs that ran:
+    // COALESCE plus a transaction-constant now() plus an identical
+    // v_enrollment_id across every loop iteration means a duplicate stamp
+    // injected into Phase 3 is unobservable from outside — this cannot tell
+    // "stamped once" from "stamped three times identically". What it does
+    // pin, and what has teeth: the final row count, its first_used_at/
+    // first_converted_enrollment_id, and that the id is the cart's parent
+    // enrollment, never a tier's.
     const tenantId = await createTenant();
     const intakeId = await createIntake(tenantId, hoursFromNow(-1));
     const classA = await createClass(intakeId, tenantId, {
@@ -742,7 +805,8 @@ describe("D. redemption transition", () => {
     expect(rows[0].first_converted_enrollment_id).toBe(result.enrollment_id);
   });
 
-  it("D6 (case 13) a cart mixing a gated tier with an already-open tier of the same intake still stamps exactly once", async () => {
+  it("D6 (case 13) a cart mixing a gated tier with an already-open tier ends with exactly one stamped row for the intake", async () => {
+    // Same naming rationale as D5 — this pins final state, not UPDATE count.
     const tenantId = await createTenant();
     const intakeId = await createIntake(tenantId, hoursFromNow(-1));
     const gatedClass = await createClass(intakeId, tenantId, {
@@ -807,9 +871,22 @@ describe("E. the revoke race, two connections", () => {
       await c1.query(`UPDATE event_interest SET revoked_at = now() WHERE id = $1`, [interestId]);
 
       // Session B: the enrollment call, issued strictly inside A's open
-      // transaction. Whether it BLOCKS is the mechanism under test, not
-      // something assumed — raced against a timeout so the assertion below
-      // fails (not hangs) if the FOR UPDATE is missing.
+      // transaction. The race against a timeout is a SYNCHRONISATION DEVICE,
+      // not proof of which lock is doing the blocking: it only guarantees B
+      // is still queued — not yet resolved — at the moment we choose to
+      // commit A, which is what makes this a genuine race instead of two
+      // calls that merely happen to run in program order.
+      //
+      // It is deliberately not read as evidence for the FOR UPDATE on the
+      // interest row specifically. Measured directly: with that lock
+      // stripped, B still blocks here (see the mutation-test report) — on
+      // the unrelated final stamp UPDATE colliding with A's still-open
+      // transaction on the same row, a plain MVCC UPDATE-UPDATE wait that has
+      // nothing to do with the redemption-transition lock. By the time that
+      // collision happens the wrong admission has already been decided. The
+      // assertion actually carrying this test is the outcome below: b.result
+      // must be ENROLLMENT_NOT_OPEN with the seat unchanged, which the
+      // stripped-lock mutant fails (it returns success: true).
       const bPromise = c2
         .query(`SELECT public.submit_enrollment($1, $2, $3, $4) AS result`, [
           classId, null, 1, hashPriorityToken(token),
@@ -825,7 +902,7 @@ describe("E. the revoke race, two connections", () => {
 
       expect(
         raced.outcome,
-        "B must block on A's uncommitted revoke, held by the FOR UPDATE row lock",
+        "B must still be queued when A commits — otherwise this is not a race",
       ).toBe("blocked");
 
       await c1.query("COMMIT"); // A's revoke commits first
