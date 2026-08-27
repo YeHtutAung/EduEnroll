@@ -180,6 +180,44 @@ describe("A. atomicity under concurrency", () => {
 
     expect(results.filter(Boolean)).toHaveLength(LIMIT);
   });
+
+  it("A3 the global limit still serializes when the same address hits two different intakes at once", async () => {
+    // A1 and A2 give every concurrent call the same single intake AND the
+    // same single address, so a lock keyed on EITHER value serializes them
+    // identically — neither case can tell "locked by address" apart from
+    // "locked by intake". This one pins the difference: one address racing
+    // across TWO intakes, checked against the GLOBAL count (which is meant
+    // to span intakes). A lock mistakenly keyed on intake_id would let calls
+    // against different intakes run unserialized against each other, so this
+    // must go red under that mutant while A1/A2 stay green.
+    const tenantId = await createTenant();
+    const intakeA = await createIntake(tenantId);
+    const intakeB = await createIntake(tenantId);
+    const ip = ipHash();
+    const LIMIT = 3;
+    const ATTEMPTS = 12;
+    // High enough that the per-intake count (max 6 calls per intake here)
+    // can never bind — only the global count can be why this refuses.
+    const PER_INTAKE_LIMIT = 1000;
+
+    const results = await Promise.all(
+      Array.from({ length: ATTEMPTS }, async (_, i) => {
+        const intakeId = i % 2 === 0 ? intakeA : intakeB;
+        const client = await pool.connect(); // a SEPARATE connection each
+        try {
+          const { rows } = await client.query(
+            `SELECT public.consume_interest_signup_slot($1, $2, $3, $4, $5) AS ok`,
+            [intakeId, ip, PER_INTAKE_LIMIT, LIMIT, "1 hour"],
+          );
+          return rows[0].ok as boolean;
+        } finally {
+          client.release();
+        }
+      }),
+    );
+
+    expect(results.filter(Boolean)).toHaveLength(LIMIT);
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════════════
