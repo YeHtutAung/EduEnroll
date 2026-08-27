@@ -16,6 +16,15 @@ import { mintPriorityToken, hashPriorityToken } from "@/lib/interest/token";
 //      pg_advisory_xact_lock in this same migration.
 //
 // Requires the isolated local stack. See setup.ts for the local-only guards.
+//
+// TIME-MARGIN RULE: every fixture timestamp uses hoursFromNow(±1) / (±2) —
+// roughly an hour of margin either side of "now", never a near-instant
+// boundary. This is deliberate, not laziness: with a continuously advancing
+// clock, a `>` vs `>=` slip on a timestamp predicate is unobservable in
+// practice, because by the time the gate evaluates, now() has already moved
+// past the boundary either way. A sub-second-margin fixture would not
+// discriminate that bug — it would only add flake risk to a suite whose
+// value depends on people trusting a red result. Do not tighten these.
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
@@ -160,6 +169,22 @@ describe("A. window trigger", () => {
       createClass(intakeId, tenantId, { enrollmentOpenAt: null }),
     ).resolves.toEqual(expect.any(String));
   });
+
+  it("A4 raises when a class is reparented onto an intake it would violate", async () => {
+    // trg_assert_priority_window_from_class explicitly re-validates when
+    // NEW.intake_id differs from OLD.intake_id — a separate branch from the
+    // enrollment_open_at-only edits A1-A3 exercise, so it needs its own case.
+    const tenantId = await createTenant();
+    // Origin intake is exempt (priority_open_at unset), so the class can be
+    // created there with a time that will only become a problem once moved.
+    const origin = await createIntake(tenantId, null);
+    const target = await createIntake(tenantId, hoursFromNow(2));
+    const classId = await createClass(origin, tenantId, { enrollmentOpenAt: hoursFromNow(1) });
+
+    await expect(
+      sql(`UPDATE classes SET intake_id = $2 WHERE id = $1`, [classId, target]),
+    ).rejects.toThrow(/priority_open_at must not be later/);
+  });
 });
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -189,6 +214,12 @@ describe("B. gate", () => {
     const tenantId = await createTenant();
     const intakeId = await createIntake(tenantId, hoursFromNow(-1));
     const classId = await createClass(intakeId, tenantId, { enrollmentOpenAt: hoursFromNow(1) });
+    // A real, unrelated signup on this intake. Without it, the gate's
+    // `JOIN event_interest ei ON ei.intake_id = c.intake_id` matches no rows
+    // at all, and EXISTS(...) is false regardless of whether the token
+    // comparison is even evaluated — the test would then prove "an intake
+    // with no signups grants nothing", not "an unknown token is refused".
+    await createInterest(intakeId, tenantId, `${uniq()}@example.test`);
 
     const unknownHash = hashPriorityToken(`never-issued-${uniq()}`);
     expect(await granted(classId, unknownHash)).toBe(false);
@@ -249,5 +280,39 @@ describe("B. gate", () => {
     );
 
     expect(await granted(classId, oldToken.tokenHash)).toBe(false);
+  });
+
+  it("B8 refuses a valid token when priority_open_at is unset", async () => {
+    // The default state for any intake collecting signups — its window has
+    // never been scheduled. The gate's `i.priority_open_at IS NOT NULL`
+    // guard has no other coverage among the cases above, which all set it.
+    const tenantId = await createTenant();
+    const intakeId = await createIntake(tenantId, null);
+    const classId = await createClass(intakeId, tenantId, { enrollmentOpenAt: null });
+    const token = await createInterest(intakeId, tenantId, `${uniq()}@example.test`);
+
+    expect(await granted(classId, hashPriorityToken(token))).toBe(false);
+  });
+
+  it("B9 still grants the current token after rotation, with superseded columns populated", async () => {
+    // B1 grants a current token on a row whose superseded columns are both
+    // NULL. B6/B7 exercise the superseded branch in isolation. Neither
+    // covers the shape the schema actually holds after a real rotation:
+    // current token live AND superseded token live at the same time — the
+    // state a malformed OR in the gate would get wrong.
+    const tenantId = await createTenant();
+    const intakeId = await createIntake(tenantId, hoursFromNow(-1));
+    const classId = await createClass(intakeId, tenantId, { enrollmentOpenAt: hoursFromNow(1) });
+    const currentToken = await createInterest(intakeId, tenantId, `${uniq()}@example.test`);
+
+    const oldToken = mintPriorityToken();
+    await sql(
+      `UPDATE event_interest
+         SET superseded_token_hash = $2, superseded_expires_at = $3
+       WHERE intake_id = $1`,
+      [intakeId, oldToken.tokenHash, hoursFromNow(1)],
+    );
+
+    expect(await granted(classId, hashPriorityToken(currentToken))).toBe(true);
   });
 });
