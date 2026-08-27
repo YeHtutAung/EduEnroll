@@ -190,6 +190,16 @@ describe("A. atomicity under concurrency", () => {
     // to span intakes). A lock mistakenly keyed on intake_id would let calls
     // against different intakes run unserialized against each other, so this
     // must go red under that mutant while A1/A2 stay green.
+    //
+    // MARGIN NOTE: under that mutant this admits 4 against a limit of 3 — a
+    // margin of one, verified deterministic across 13 runs. The reason it is
+    // structural rather than lucky: a wrongly-keyed lock produces exactly one
+    // chain per intake, so only TWO transactions can overlap at any instant,
+    // and +1 is near the ceiling that 2-way concurrency can produce. If this
+    // ever needs more headroom, rotate across MORE INTAKES — not more
+    // attempts. The overshoot ceiling is set by how many independently
+    // lockable chains exist, so raising ATTEMPTS only adds more rounds
+    // through the same 2-way race and does not widen the margin at all.
     const tenantId = await createTenant();
     const intakeA = await createIntake(tenantId);
     const intakeB = await createIntake(tenantId);
