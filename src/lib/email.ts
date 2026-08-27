@@ -498,6 +498,33 @@ export function enrollmentRejectedEmail(params: {
   };
 }
 
+// ── Shared tier-coverage block for the two priority-window emails below ─────
+// Extracted per the file's existing convention for small reused builders
+// (see cleanClassLevel, toMmFee). Guards the empty-tiers case itself so both
+// templates get the guard for free: with no covered tiers there is nothing
+// true to say about what the head start includes, so the whole section
+// (header, list, and footnote) is omitted rather than left pointing at an
+// empty list.
+function tierCoverageSection(coveredTiers: string[]): string {
+  if (!coveredTiers.length) return "";
+
+  const tierListHtml = `<ol style="margin: 8px 0 0; padding-left: 20px; font-size: 14px; color: #1f2937;">${coveredTiers.map((t) => `<li style="margin: 2px 0;">${t}</li>`).join("")}</ol>`;
+  const plural = coveredTiers.length === 1 ? "" : "s";
+
+  return `
+      <div style="margin: 20px 0;">
+        <p style="margin: 0 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #6b7280;">Your head start covers</p>
+        ${tierListHtml}
+      </div>
+
+      <p style="font-size: 13px; color: #6b7280;">
+        This head start applies only to the ticket type${plural} listed above. Other ticket types for this event may already be on sale to the general public.
+      </p>
+      <p style="font-size: 12px; color: #9ca3af; font-family: 'Noto Sans Myanmar', sans-serif;">
+        ဤဦးစားပေးအချိန်သည် အထက်ဖော်ပြပါ လက်မှတ်အမျိုးအစားများအတွက်သာ သက်ရောက်ပါသည်။ အခြားလက်မှတ်အမျိုးအစားများကို အများပြည်သူထံ ရောင်းချပြီးဖြစ်နိုင်ပါသည်။
+      </p>`;
+}
+
 // ── Interest confirmation email (sent at signup, and again on resend) ───────
 
 export function interestConfirmationEmail(params: {
@@ -511,10 +538,6 @@ export function interestConfirmationEmail(params: {
   logoUrl?: string;
 }): { subject: string; html: string } {
   const { name, eventName, link, windowOpensAt, coveredTiers, isResend, tenantName, logoUrl } = params;
-
-  const tierListHtml = coveredTiers.length
-    ? `<ol style="margin: 8px 0 0; padding-left: 20px; font-size: 14px; color: #1f2937;">${coveredTiers.map((t) => `<li style="margin: 2px 0;">${t}</li>`).join("")}</ol>`
-    : "";
 
   const resendNoticeHtml = isResend
     ? `<div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 16px; margin: 20px 0;">
@@ -549,6 +572,9 @@ export function interestConfirmationEmail(params: {
       <div style="text-align: center; margin: 24px 0 16px;">
         <a href="${link}" style="display: inline-block; padding: 12px 28px; background: #1a6b3c; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px;">Open My Priority Access Link</a>
       </div>
+      <p style="font-size: 12px; color: #9ca3af; text-align: center; word-break: break-all;">
+        If the button does not work, use this link: <a href="${link}" style="color: #1a6b3c;">${link}</a>
+      </p>
 
       <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin: 20px 0;">
         <p style="margin: 0; font-size: 13px; color: #1e3a8a;">
@@ -558,18 +584,7 @@ export function interestConfirmationEmail(params: {
           ဤလင့်ခ်သည် ${windowOpensAt} မှစတင်၍ အလုပ်လုပ်ပါမည်။ ယခုနှိပ်ပါက မဖွင့်သေးကြောင်း စာမျက်နှာကိုသာ တွေ့ရပါလိမ့်မည်၊ ချို့ယွင်းချက် မဟုတ်ပါ။
         </p>
       </div>
-
-      <div style="margin: 20px 0;">
-        <p style="margin: 0 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #6b7280;">Your head start covers</p>
-        ${tierListHtml}
-      </div>
-
-      <p style="font-size: 13px; color: #6b7280;">
-        This head start applies only to the ticket type${coveredTiers.length === 1 ? "" : "s"} listed above. Other ticket types for this event may already be on sale to the general public.
-      </p>
-      <p style="font-size: 12px; color: #9ca3af; font-family: 'Noto Sans Myanmar', sans-serif;">
-        ဤဦးစားပေးအချိန်သည် အထက်ဖော်ပြပါ လက်မှတ်အမျိုးအစားများအတွက်သာ သက်ရောက်ပါသည်။ အခြားလက်မှတ်အမျိုးအစားများကို အများပြည်သူထံ ရောင်းချပြီးဖြစ်နိုင်ပါသည်။
-      </p>
+      ${tierCoverageSection(coveredTiers)}
     `, tenantName, logoUrl),
   };
 }
@@ -586,10 +601,6 @@ export function priorityWindowReminderEmail(params: {
   logoUrl?: string;
 }): { subject: string; html: string } {
   const { name, eventName, link, windowOpensAt, coveredTiers, tenantName, logoUrl } = params;
-
-  const tierListHtml = coveredTiers.length
-    ? `<ol style="margin: 8px 0 0; padding-left: 20px; font-size: 14px; color: #1f2937;">${coveredTiers.map((t) => `<li style="margin: 2px 0;">${t}</li>`).join("")}</ol>`
-    : "";
 
   return {
     subject: `Your Priority Window Opens Soon — ${eventName}`,
@@ -618,24 +629,19 @@ export function priorityWindowReminderEmail(params: {
       <div style="text-align: center; margin: 24px 0 16px;">
         <a href="${link}" style="display: inline-block; padding: 12px 28px; background: #1a6b3c; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px;">Open My Priority Access Link</a>
       </div>
+      <p style="font-size: 12px; color: #9ca3af; text-align: center; word-break: break-all;">
+        If the button does not work, use this link: <a href="${link}" style="color: #1a6b3c;">${link}</a>
+      </p>
 
       <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin: 20px 0;">
         <p style="margin: 0; font-size: 13px; color: #1e3a8a;">
           <strong>This link will not work until ${windowOpensAt}.</strong> If you open it before then, you'll see a page saying the window hasn't opened yet — that is expected, not an error.
         </p>
+        <p style="margin: 6px 0 0; font-size: 12px; color: #1e40af; font-family: 'Noto Sans Myanmar', sans-serif;">
+          ဤလင့်ခ်သည် ${windowOpensAt} မှစတင်၍ အလုပ်လုပ်ပါမည်။ ယခုနှိပ်ပါက မဖွင့်သေးကြောင်း စာမျက်နှာကိုသာ တွေ့ရပါလိမ့်မည်၊ ချို့ယွင်းချက် မဟုတ်ပါ။
+        </p>
       </div>
-
-      <div style="margin: 20px 0;">
-        <p style="margin: 0 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #6b7280;">Your head start covers</p>
-        ${tierListHtml}
-      </div>
-
-      <p style="font-size: 13px; color: #6b7280;">
-        This head start applies only to the ticket type${coveredTiers.length === 1 ? "" : "s"} listed above. Other ticket types for this event may already be on sale to the general public.
-      </p>
-      <p style="font-size: 12px; color: #9ca3af; font-family: 'Noto Sans Myanmar', sans-serif;">
-        ဤဦးစားပေးအချိန်သည် အထက်ဖော်ပြပါ လက်မှတ်အမျိုးအစားများအတွက်သာ သက်ရောက်ပါသည်။ အခြားလက်မှတ်အမျိုးအစားများကို အများပြည်သူထံ ရောင်းချပြီးဖြစ်နိုင်ပါသည်။
-      </p>
+      ${tierCoverageSection(coveredTiers)}
     `, tenantName, logoUrl),
   };
 }
