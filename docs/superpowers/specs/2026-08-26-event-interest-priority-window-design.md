@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-26
 **Status:** Approved (design), pending implementation plan
-**Revision:** v6 (2026-08-27) — incorporates five rounds of external review (Codex)
+**Revision:** v7 (2026-08-27) — incorporates five rounds of external review (Codex)
 
 ## Problem
 
@@ -139,8 +139,15 @@ CREATE FUNCTION public.assert_priority_window_valid(p_intake_id uuid)
 RETURNS void LANGUAGE plpgsql AS $$
 DECLARE v_priority timestamptz;
 BEGIN
+  -- FOR UPDATE, not a plain read. The two triggers fire on different tables,
+  -- so under READ COMMITTED a transaction moving the intake's priority_open_at
+  -- later and a concurrent transaction moving a tier's enrollment_open_at
+  -- earlier would each validate against the other's pre-commit state, both
+  -- pass, and leave the invariant violated once both commit. Locking the
+  -- intake row serialises every validation for that event.
   SELECT priority_open_at INTO v_priority
-  FROM public.intakes WHERE id = p_intake_id;
+  FROM public.intakes WHERE id = p_intake_id
+  FOR UPDATE;
 
   IF v_priority IS NULL THEN RETURN; END IF;
 
@@ -220,6 +227,14 @@ drift apart.
 The composite FK closes the denormalisation gap that `tickets` leaves open:
 `tenant_id` cannot drift from the intake's owner.
 
+**`first_converted_enrollment_id` gets no such guarantee.** It is a bare FK to
+`enrollments(id)`, and the same composite trick is unavailable because
+`enrollments` has no `UNIQUE (id, tenant_id)` to reference. The schema
+therefore cannot stop an interest row from pointing at an enrollment belonging
+to another tenant or another event. Whatever writes that column must verify the
+match itself — this is a requirement on the enrollment RPC, not something the
+constraints will catch.
+
 ### Signup rate limiting
 
 Signup emails a link, so the public endpoint can send branded mail from the
@@ -283,10 +298,27 @@ DECLARE v_intake_count integer; v_global_count integer;
 BEGIN
   -- Serializes every concurrent request from this address for the rest of
   -- the transaction; released automatically on commit or rollback.
-  PERFORM pg_advisory_xact_lock(hashtextextended(p_ip_hash, 0));
+  -- Two-argument form: the first key is a constant reserved for this feature,
+  -- so this cannot collide with an advisory lock taken by unrelated code. The
+  -- keyspace is global to the database, not scoped to a function or table.
+  PERFORM pg_advisory_xact_lock(
+    hashtextextended('event_interest_signup', 0),
+    hashtextextended(p_ip_hash, 0)
+  );
 
+  -- Scoped to this address, NOT global. The lock is per-IP, so an unqualified
+  -- delete would let two callers holding different locks contend over the same
+  -- rows — serialising unrelated addresses behind each other, or deadlocking
+  -- outright and surfacing a hard error to a legitimate signup. That happens
+  -- under burst traffic, which is when a rate limiter is load-bearing.
+  --
+  -- This is complete for correctness: both counts below filter on ip_hash, so
+  -- another address's stale rows can never affect this address's decision.
+  -- Pruning globally is housekeeping, not correctness, and does not belong on
+  -- the hot path.
   DELETE FROM public.interest_signup_attempts
-   WHERE created_at < now() - p_window;
+   WHERE ip_hash = p_ip_hash
+     AND created_at < now() - p_window;
 
   SELECT count(*) INTO v_intake_count
     FROM public.interest_signup_attempts
@@ -309,10 +341,14 @@ BEGIN
 END $$;
 ```
 
-The `DELETE` prunes expired rows on the same pass, so the table stays small
-without a scheduled job. Like every other function this migration creates, it
-is revoked from `PUBLIC`, `anon`, and `authenticated` and granted only to
-`service_role`.
+The `DELETE` prunes only the calling address's expired rows. Rows belonging to
+addresses that never return are left behind; the table therefore grows slowly
+with the number of distinct addresses that ever signed up, which is bounded by
+real traffic and is not a correctness problem. If it ever needs trimming, that
+belongs in an out-of-band sweep, never on the hot path of a rate limiter.
+
+Like every other function this migration creates, it is revoked from `PUBLIC`,
+`anon`, and `authenticated`, and granted only to `service_role`.
 
 **This is a cost and reputation control, not a security boundary.** The client
 address comes from `NextRequest.ip`, falling back to the first `x-forwarded-for`
@@ -826,6 +862,26 @@ one on the signup path. v6 restores persist-then-send and states the invariant
 it protects — no token is ever emailed whose hash is not already stored, so a
 link that reaches an inbox always works, and a failed send costs a notification
 rather than a credential.
+
+**v7 (2026-08-27)** — found during implementation, by code review of the
+migration rather than of the prose. The rate limiter's prune was unqualified:
+the function takes a per-address advisory lock, then deleted every expired row
+in the table for every address. Two callers holding different locks could
+contend over the same rows, serialising unrelated addresses behind each other's
+whole transaction or deadlocking and surfacing a hard error to a legitimate
+signup — under burst traffic, which is exactly when a rate limiter matters. The
+prune is now scoped to the calling address, which is complete for correctness
+because both counts already filter on `ip_hash`. Also: the advisory lock is now
+namespaced with a reserved constant, since its keyspace is global to the
+database and a second future user of advisory locks would otherwise collide;
+`assert_priority_window_valid` locks the intake row, closing a TOCTOU where two
+concurrent edits from opposite sides could each validate against the other's
+pre-commit state; and `first_converted_enrollment_id`'s missing tenant scoping
+is now recorded as a requirement on the code that writes it, since no
+constraint can enforce it.
+
+The prune defect originated in this document, not in the implementation. The
+migration reproduced what v6 specified.
 
 Raised by no review, found earlier while applying round two: **interest signup
 had to close at `priority_open_at`.** Left open, anyone could have registered during
