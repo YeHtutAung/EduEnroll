@@ -311,7 +311,30 @@ WHERE proname IN ('priority_access_granted','consume_interest_signup_slot','asse
 
 Expected: `anon` and `auth` both `false` on all three rows.
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 4: Smoke-call every new function**
+
+**Applying a migration proves only that it parses.** PL/pgSQL prepares embedded
+statements on *first execution*, not at `CREATE FUNCTION` — so a wrong function
+overload compiles clean, applies clean, passes the entire test suite, and then
+throws on the first real call.
+
+That is not hypothetical. It happened on this exact migration: the rate limiter
+used `pg_advisory_xact_lock(bigint, bigint)`, which does not exist. Every check
+above reported green while the function raised on every invocation, because
+nothing called it yet.
+
+Invoke each new function with realistic arguments inside a transaction you roll
+back, and paste the real output:
+
+- `consume_interest_signup_slot(...)` with a real intake id and a 64-char hex
+  string — must return a boolean. Call it past the limit and confirm it returns
+  `false` rather than erroring.
+- `priority_access_granted(...)` with a real class id and an arbitrary 64-char
+  hex hash — must return `false`, not raise.
+- The window trigger — one `UPDATE` that should violate the constraint (confirm
+  it raises) and one that should not (confirm it does not).
+
+- [ ] **Step 5: Commit**
 
 ```bash
 git add supabase/migrations/20260827120000_event_interest_priority_window.sql
