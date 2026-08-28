@@ -723,7 +723,29 @@ export async function registerInterest(input: {
 }
 ```
 
-**Add `rotate_interest_token` to the Task 2 migration** (amend it, then re-apply — ask the user first if that requires a reset) — the cooldown check, mint-slot write, superseded move and `last_link_attempt_at` stamp must be one transaction under `SELECT ... FOR UPDATE`. Doing this from the application cannot hold the lock across the decision.
+**`rotate_interest_token` goes in a new migration: `supabase/migrations/20260828120000_rotate_interest_token.sql`.**
+
+Do **not** amend `20260827120000`. That migration is applied and verified, and amending it would mean dropping and re-applying the whole schema — a destructive operation needing the user's explicit confirmation, for no benefit. Neither migration has reached dev or production, so they will be applied in sequence there either way.
+
+The cooldown check, the mint-slot write, the superseded move and the `last_link_attempt_at` stamp must all be **one transaction under `SELECT ... FOR UPDATE`**. This cannot be done from the application: the lock has to be held across the decision, and a Supabase client cannot hold a transaction open across statements.
+
+Signature and contract:
+
+```sql
+CREATE FUNCTION public.rotate_interest_token(
+  p_interest_id uuid,
+  p_new_hash    text,
+  p_new_prefix  text,
+  p_grace       interval,
+  p_cooldown    interval
+) RETURNS text          -- 'ROTATED' | 'COOLDOWN' | 'NOT_FOUND'
+```
+
+Under the row lock, in order: lock the row; if `last_link_attempt_at` is within `p_cooldown` of now, return `'COOLDOWN'` having changed nothing; otherwise move the current `token_hash` into `superseded_token_hash` with `superseded_expires_at = now() + p_grace`, write the new hash and prefix, stamp `last_link_attempt_at = now()`, and return `'ROTATED'`.
+
+It carries the same privilege block as every other function in this feature — revoked from `PUBLIC`, `anon`, `authenticated`, granted to `service_role` only — and the same fail-closed assertion style.
+
+**Smoke-call it before considering the migration done.** A migration applying proves it parses; PL/pgSQL prepares embedded statements on first execution, and this project has already shipped a function that applied cleanly and threw on its first real call.
 
 - [ ] **Step 4: Run to verify they pass**
 
