@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-26
 **Status:** Approved (design), pending implementation plan
-**Revision:** v10 (2026-08-28) — incorporates five rounds of external review (Codex)
+**Revision:** v11 (2026-08-28) — incorporates five rounds of external review (Codex)
 
 ## Problem
 
@@ -576,10 +576,30 @@ afterwards on success.
 
 The cooldown is evaluated against the *attempt*, not the successful send, which
 is what makes a concurrent second request back off instead of sending a
-duplicate. On a send failure the route clears `last_link_attempt_at` so a retry
-is immediate. If the process dies between commit and that cleanup, the record
-is simply in cooldown until it expires — a bounded, self-healing degradation
-rather than a stuck state.
+duplicate.
+
+**On a send failure the rotation is rolled back, not merely un-cooled.** This
+is the same principle as persist-then-send: an operation that did not complete
+must leave no durable effect. Under the same row lock, restore `token_hash`
+from `superseded_token_hash`, null the superseded pair, and null
+`last_link_attempt_at` — but **only if `token_hash` still equals the value this
+attempt wrote**, so a concurrent rotation that has already superseded this one
+is never clobbered.
+
+Simply clearing the attempt is not sufficient, and the reason is worth stating
+because it is not obvious. Clearing lets the caller retry at once — which is
+the point — but it also disables the cooldown that is the stated mitigation for
+a second rotation inside a grace window. Two failed sends then walk the token
+forward twice: the original ends up in neither slot, so the link already in the
+recipient's inbox dies while neither replacement was ever delivered. Because
+`sendEmail` returns false rather than throwing whenever the mail provider is
+unreachable or unconfigured, an outage makes this the *normal* path, not a rare
+one. Dropping the clear instead would only make the loss less frequent — the
+original still dies at the next rotation.
+
+If the process dies between commit and the rollback, the record is in cooldown
+until it expires and the previous token remains live for its grace — a bounded,
+self-healing degradation rather than a stuck state.
 
 The guarantee this design offers is deliberately narrow and should be stated in
 those terms: **the token immediately prior to the most recent rotation stays
@@ -678,6 +698,21 @@ stamped once, against the cart's enrollment id — not once per tier.
 Locking a row the caller does not otherwise touch is deliberate. The alternative
 is to check revocation twice and hope, which is the shape of the bug rather than
 a fix for it.
+
+**Accepted consequence — a signup is distinguishable from a resend.** A first
+signup returns a visible token; a repeat does not. A throttled call also
+returns after one round trip where a resend takes three, so the two are
+separable by timing. Address enumeration on this endpoint is therefore possible
+and is accepted: it follows directly from showing the link on screen, which is
+the fallback that makes a failed send survivable. Making the paths
+indistinguishable would mean either withholding the on-screen link or reporting
+`emailed: true` when nothing was sent — telling the user something false. The
+enumeration is not worth either price.
+
+**Revoked records do not rotate.** A repeat signup against a revoked row
+returns the same generic success and sends nothing. Rotating one would spend an
+email on a link the gate refuses, and the recipient would get something that
+silently does not work.
 
 **Accepted risk — links are forwardable.** A priority link is a bearer
 credential tied to an event, not to a person; nothing binds it to the name or
@@ -958,6 +993,24 @@ clean, and passed a 181-test suite — because no caller exists yet. It would
 have failed on the first live signup, in the one function granted to
 `service_role`. A migration applying successfully is not evidence that its
 functions run.
+
+**v11 (2026-08-28)** — review of `registerInterest` found that this document
+asked for two properties that cannot both hold. The failure table promises the
+previous token keeps working through its grace; the rotation section relies on
+the cooldown to make a second rotation inside that grace rare. But clearing
+`last_link_attempt_at` on a send failure — which the same section required —
+disables that cooldown precisely when it is needed, so two failed sends walk
+the token forward twice and the link already in the recipient's inbox dies with
+neither replacement delivered. Since `sendEmail` returns false rather than
+throwing when the provider is unreachable, a mail outage makes that the normal
+path. Rotation is now rolled back on a send failure, guarded on the hash this
+attempt wrote so a concurrent rotation is never clobbered.
+
+Also recorded here as accepted rather than fixed: signup and resend are
+distinguishable by response and by timing, which follows from showing the link
+on screen and is not worth withholding that fallback to close. And revoked
+records now return generic success without rotating, rather than spending an
+email on a link the gate will refuse.
 
 **v10 (2026-08-28)** — the implementer of `registerInterest` flagged that the
 first signup did not stamp `last_link_attempt_at`, so the cooldown read null on
