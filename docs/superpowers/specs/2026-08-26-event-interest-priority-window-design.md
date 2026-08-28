@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-26
 **Status:** Approved (design), pending implementation plan
-**Revision:** v9 (2026-08-27) — incorporates five rounds of external review (Codex)
+**Revision:** v10 (2026-08-28) — incorporates five rounds of external review (Codex)
 
 ## Problem
 
@@ -506,6 +506,15 @@ Recovery is **rotation with a grace period**:
   hash, then email the link, and return the raw token so the page can display
   it with a "save this link" prompt. The submitter has just demonstrated they
   are the person enrolling.
+
+  **The insert stamps `last_link_attempt_at`.** The first send is an attempt
+  like any other, so the cooldown applies from the moment the row exists.
+  Without this the cooldown reads null on a brand-new row and an immediate
+  resend rotates and sends a second email straight away — one free rotation per
+  address per event, and the griefing case lands at its most effective on the
+  record that has just been created. The legitimate reason to resend
+  immediately, an email that did not arrive, is already covered: the link is on
+  screen.
 - **Repeat signup** — under a row lock, check the cooldown, mint a new token,
   move the current hash into `superseded_token_hash` with
   `superseded_expires_at = now() + grace`, store the new one and commit; then
@@ -828,11 +837,6 @@ judged by exit code.
 
 - Exact token entropy and encoding (proposal: 32 random bytes, base64url, with
   `token_prefix` holding the first 8 characters for admin display).
-- Grace period duration for a superseded token (proposal: 24 hours).
-- Final cooldown duration (proposal: 15 minutes per email per intake).
-- Signup rate-limit thresholds and windows (proposal: 5 per hour per
-  `(ip_hash, intake_id)`, 20 per hour per `ip_hash` across intakes), and the
-  prune horizon.
 - Chunk size for the invite endpoint, based on Resend throughput and the Vercel
   function timeout.
 - Whether the interest CTA also appears on the intake-level listing page or
@@ -951,6 +955,20 @@ clean, and passed a 181-test suite — because no caller exists yet. It would
 have failed on the first live signup, in the one function granted to
 `service_role`. A migration applying successfully is not evidence that its
 functions run.
+
+**v10 (2026-08-28)** — the implementer of `registerInterest` flagged that the
+first signup did not stamp `last_link_attempt_at`, so the cooldown read null on
+a brand-new row and an immediate resend rotated and sent again for free. It
+declined to change the behaviour on its own authority because this document did
+not say which was intended, which was the right call. The insert now stamps the
+attempt: the first send is an attempt like any other, the cooldown applies from
+the moment the row exists, and the only legitimate reason to resend immediately
+is already covered by the on-screen link.
+
+Also settled here, having been left open: the grace period is **24 hours**, and
+the signup limiter is **3 per address per intake** and **10 per address across
+intakes**, both over a **1 hour** window. These were chosen, not derived; they
+are cheap to change and should be revisited against real traffic.
 
 **v9 (2026-08-27)** — external review of the enrollment-RPC migration found the
 redemption transition missing entirely. The RPC authorised access, inserted the
