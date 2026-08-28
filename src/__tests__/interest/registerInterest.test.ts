@@ -149,6 +149,17 @@ describe("registerInterest — first signup", () => {
     expect(mockSendEmail).not.toHaveBeenCalled();
   });
 
+  it("stamps last_link_attempt_at on the insert", async () => {
+    await registerInterest(input());
+
+    // The first send is an attempt like any other. Left null, the cooldown
+    // would read null on a brand-new row and the very next resend would rotate
+    // and send again for free.
+    const stamped = insertPayloads[0].last_link_attempt_at;
+    expect(typeof stamped).toBe("string");
+    expect(Date.parse(stamped as string)).toBeGreaterThan(Date.now() - 60_000);
+  });
+
   it("normalises the email for both the lookup and the stored row", async () => {
     await registerInterest(input({ email: "  Foo@Example.COM " }));
 
@@ -197,6 +208,43 @@ describe("registerInterest — repeat signup", () => {
     expect(result).toEqual({ ok: true, emailed: false });
     expect(updatePayloads).toContainEqual({ last_link_attempt_at: null });
     expect(at("clearAttempt")).toBeGreaterThan(at("sendEmail"));
+  });
+});
+
+describe("registerInterest — the cooldown covers the first send", () => {
+  /**
+   * Mirrors rotate_interest_token's own predicate,
+   * `last_link_attempt_at > now() - p_cooldown`
+   * (supabase/migrations/20260828120000_rotate_interest_token.sql), against
+   * whatever registerInterest actually wrote. The predicate itself is the
+   * migration's and was smoke-called there; what this stands in for is the
+   * database reading back the row this module just inserted.
+   */
+  const COOLDOWN_MS = 15 * 60 * 1000;
+  const rotationVerdict = (storedAttempt: unknown) =>
+    typeof storedAttempt === "string" && Date.now() - Date.parse(storedAttempt) < COOLDOWN_MS
+      ? "COOLDOWN"
+      : "ROTATED";
+
+  it("throttles a resend that immediately follows a first signup", async () => {
+    // ── First signup: no row yet, the insert creates one. ──
+    const first = await registerInterest(input());
+    expect(first).toMatchObject({ ok: true, emailed: true });
+
+    // ── The same address signs up again, immediately. ──
+    // The row now exists, and the rotation RPC decides on the attempt this
+    // module stored a moment ago.
+    lookupResult = { data: { id: ROW_ID }, error: null };
+    rpcResults.rotate_interest_token = {
+      data: rotationVerdict(insertPayloads[0].last_link_attempt_at),
+      error: null,
+    };
+
+    const second = await registerInterest(input());
+
+    expect(second).toEqual({ ok: true, emailed: false });
+    // One email in total — the first signup's. The resend sent nothing.
+    expect(mockSendEmail).toHaveBeenCalledTimes(1);
   });
 });
 

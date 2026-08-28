@@ -32,9 +32,9 @@ import { interestConfirmationEmail, sendEmail } from "@/lib/email";
 /**
  * How long the token displaced by a rotation stays usable.
  *
- * The design fixes the *shape* of the grace period, not its length; this value
- * is chosen here. It has to outlast a slow mail delivery, since the whole point
- * is that a recipient reading yesterday's mail is not stranded.
+ * Chosen, not derived — the design (v10) records it as such. It has to outlast
+ * a slow mail delivery, since the whole point is that a recipient reading
+ * yesterday's mail is not stranded. Cheap to revisit against real traffic.
  */
 const GRACE_INTERVAL = "24 hours";
 
@@ -47,10 +47,11 @@ const GRACE_INTERVAL = "24 hours";
 const COOLDOWN_INTERVAL = "15 minutes";
 
 // Signup rate limits, per pseudonymised client address. The design fixes the
-// two-limit structure (narrow: one event; broad: a script walking events) but
-// not the numbers, which are chosen here and are meant to be tuned against
-// real traffic. This is a cost and reputation control on Resend spend, not an
-// authorization boundary — the address is attacker-influenced.
+// two-limit structure (narrow: one event; broad: a script walking events); the
+// numbers are chosen, not derived, and the design (v10) records them as such —
+// meant to be tuned against real traffic. This is a cost and reputation control
+// on Resend spend, not an authorization boundary: the address is
+// attacker-influenced.
 const RATE_LIMIT_WINDOW = "1 hour";
 const RATE_LIMIT_PER_INTAKE = 3;
 const RATE_LIMIT_GLOBAL = 10;
@@ -180,6 +181,14 @@ export async function registerInterest(
         phone,
         token_hash: minted.tokenHash,
         token_prefix: minted.tokenPrefix,
+        // The first send is an attempt like any other, so the cooldown applies
+        // from the moment the row exists. Left null, it would read null on a
+        // brand-new row and an immediate resend would rotate and send again for
+        // free — one free rotation per address per event, with the griefing
+        // case landing at its most effective on the record just created. The
+        // one legitimate reason to resend immediately, mail that did not
+        // arrive, is already covered: the link is on screen and already valid.
+        last_link_attempt_at: new Date().toISOString(),
       } as never)
       .select("id")
       .single();
