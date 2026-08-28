@@ -592,9 +592,14 @@ record whose previous token is still inside its grace window.
 **Accepted consequence:** rotation sits on a public endpoint, so a third party
 who knows someone's email can force a rotation. They gain no access — the new
 link goes only to the address on file — and the grace period means the victim's
-current link keeps working meanwhile. `last_link_sent_at` enforces a cooldown
-(proposal: 15 minutes per email per intake); requests inside it return the same
-generic success without sending or rotating.
+current link keeps working meanwhile. `last_link_attempt_at` enforces a **15 minute**
+cooldown per address per intake; requests inside it return the same generic
+success without sending or rotating.
+
+The cooldown reads the *attempt*, not the successful send — see *Rotation is
+serialized before the send*. That is what makes a concurrent second request
+back off instead of sending a duplicate, and it is why the insert stamps the
+attempt too: a brand-new row must not start life exempt.
 
 ### Discovery
 
@@ -835,8 +840,6 @@ judged by exit code.
 
 ## Open items for the implementation plan
 
-- Exact token entropy and encoding (proposal: 32 random bytes, base64url, with
-  `token_prefix` holding the first 8 characters for admin display).
 - Chunk size for the invite endpoint, based on Resend throughput and the Vercel
   function timeout.
 - Whether the interest CTA also appears on the intake-level listing page or
