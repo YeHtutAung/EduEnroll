@@ -10,6 +10,7 @@ import { formatCurrencySimple } from "@/lib/utils";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
 import { useRole } from "@/components/admin/RoleContext";
 import { createClient } from "@/lib/supabase/client";
+import { mm } from "@/lib/mm-labels";
 import type { Class, ClassChannel, ClassMode, ClassStatus, Intake, IntakeStatus } from "@/types/database";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -63,6 +64,17 @@ function toDatetimeLocal(isoStr: string | null | undefined): string {
 function fromDatetimeLocal(val: string): string | null {
   if (!val) return null;
   return new Date(val).toISOString();
+}
+
+function fmtDateTime(isoStr: string | null | undefined): string {
+  if (!isoStr) return "—";
+  return new Date(isoStr).toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function seatColor(remaining: number, total: number): string {
@@ -809,6 +821,56 @@ function AddCustomClassModal({
   );
 }
 
+// ── Interest list (priority window signups) ──────────────────────────────────
+//
+// Mirrors the SAFE_COLUMNS allowlist in src/app/api/admin/interest/[intakeId]/
+// route.ts — never token_hash, never superseded_token_hash. superseded_expires_at
+// is what the "previous link is still live" warning below is built from.
+
+interface InterestEntry {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  token_prefix: string;
+  created_at: string;
+  last_link_attempt_at: string | null;
+  last_link_sent_at: string | null;
+  invited_at: string | null;
+  first_used_at: string | null;
+  first_converted_enrollment_id: string | null;
+  revoked_at: string | null;
+  superseded_expires_at: string | null;
+}
+
+interface InviteRunResult {
+  sent: number;
+  failed: number;
+  skipped: number;
+  remaining: number;
+  stopped_early: boolean;
+}
+
+/** Grace window on the previous token is still live — a rotation now would cut it short. */
+function hasLiveGrace(entry: InterestEntry): boolean {
+  return !!entry.superseded_expires_at && Date.parse(entry.superseded_expires_at) > Date.now();
+}
+
+function InterestRowSkeleton() {
+  return (
+    <tr>
+      <td className="px-5 py-4"><Pulse className="h-4 w-28" /></td>
+      <td className="px-5 py-4"><Pulse className="h-4 w-36" /></td>
+      <td className="px-5 py-4"><Pulse className="h-4 w-20" /></td>
+      <td className="px-5 py-4"><Pulse className="h-4 w-20" /></td>
+      <td className="px-5 py-4"><Pulse className="h-4 w-16" /></td>
+      <td className="px-5 py-4"><Pulse className="h-4 w-16" /></td>
+      <td className="px-5 py-4"><Pulse className="h-4 w-12" /></td>
+      <td className="px-5 py-4"><Pulse className="h-8 w-24 rounded-lg" /></td>
+    </tr>
+  );
+}
+
 // ── Intake Detail Page ────────────────────────────────────────────────────────
 
 export default function IntakeDetailPage({
@@ -836,6 +898,7 @@ export default function IntakeDetailPage({
   const [editingIntake, setEditingIntake] = useState(false);
   const [editName, setEditName] = useState("");
   const [editYear, setEditYear] = useState(new Date().getFullYear());
+  const [editPriorityOpenAt, setEditPriorityOpenAt] = useState("");
   const [savingIntake, setSavingIntake] = useState(false);
 
   // ── Channel management (language_school only) ─────────────────────────────
@@ -845,6 +908,21 @@ export default function IntakeDetailPage({
   const [linkingChannel, setLinkingChannel] = useState<Class | null>(null);
   const [channelIdInput, setChannelIdInput] = useState("");
   const [channelSaving, setChannelSaving] = useState(false);
+
+  // ── Interest list / priority window (hidden for language_school) ──────────
+  //
+  // The API routes under /api/admin/interest are deliberately NOT gated by
+  // org_type — every route scopes to the caller's own tenant, so a school
+  // owner would just see their own empty list. This is a UI-only gate, so
+  // that offering the feature to schools later is a UI change, not an API one.
+  const showInterest = tl.orgType !== "language_school";
+  const [interest, setInterest] = useState<InterestEntry[]>([]);
+  const [interestLoading, setInterestLoading] = useState(true);
+  const [interestError, setInterestError] = useState<string | null>(null);
+  const [sendingInvites, setSendingInvites] = useState(false);
+  const [inviteSummary, setInviteSummary] = useState<InviteRunResult | null>(null);
+  const [actingEntryId, setActingEntryId] = useState<string | null>(null);
+  const [confirmResendEntry, setConfirmResendEntry] = useState<InterestEntry | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -893,6 +971,124 @@ export default function IntakeDetailPage({
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // ── Interest list ────────────────────────────────────────────────────────────
+
+  const fetchInterest = useCallback(async () => {
+    if (!showInterest) { setInterestLoading(false); return; }
+    setInterestLoading(true);
+    setInterestError(null);
+    try {
+      const res = await fetch(`/api/admin/interest/${params.id}`);
+      if (!res.ok) throw new Error(`Failed to fetch interest list (${res.status})`);
+      const data = await res.json();
+      setInterest((data.entries ?? []) as InterestEntry[]);
+    } catch (err) {
+      setInterestError(err instanceof Error ? err.message : "Failed to load interest list.");
+    } finally {
+      setInterestLoading(false);
+    }
+  }, [params.id, showInterest]);
+
+  useEffect(() => {
+    fetchInterest();
+  }, [fetchInterest]);
+
+  async function handleRevoke(entry: InterestEntry) {
+    setActingEntryId(entry.id);
+    try {
+      const res = await fetch(`/api/admin/interest/entry/${entry.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "revoke" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message ?? data.error ?? "Failed to revoke access.");
+      const updated = data.entry as InterestEntry | null;
+      if (updated) {
+        setInterest((prev) => prev.map((e) => (e.id === entry.id ? updated : e)));
+      }
+      toast.success(`Access revoked for ${entry.name}.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to revoke access.");
+    } finally {
+      setActingEntryId(null);
+    }
+  }
+
+  // Rotating while the previous token's grace window is still live shortens a
+  // grace period someone was promised — warn before doing it. See
+  // hasLiveGrace() and superseded_expires_at on the entry.
+  function requestResend(entry: InterestEntry) {
+    if (hasLiveGrace(entry)) {
+      setConfirmResendEntry(entry);
+    } else {
+      handleResend(entry);
+    }
+  }
+
+  async function handleResend(entry: InterestEntry) {
+    setConfirmResendEntry(null);
+    setActingEntryId(entry.id);
+    try {
+      const res = await fetch(`/api/admin/interest/entry/${entry.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "resend" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message ?? data.error ?? "Failed to resend the link.");
+      const updated = data.entry as InterestEntry | null;
+      if (updated) {
+        setInterest((prev) => prev.map((e) => (e.id === entry.id ? updated : e)));
+      }
+      toast.success(`Link resent to ${entry.name}.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to resend the link.");
+    } finally {
+      setActingEntryId(null);
+    }
+  }
+
+  // Drains the invite queue by repeatedly calling the invite endpoint (each
+  // call handles one 25-row chunk). MUST loop on `sent > 0`, never on
+  // `remaining > 0` — remaining counts rows that just failed too, so during a
+  // mail-provider outage it never decreases and a loop on it would never end.
+  async function handleSendInvites() {
+    if (!intake?.priority_open_at) {
+      toast.error("Schedule the priority window before sending invitations.");
+      return;
+    }
+    setSendingInvites(true);
+    const totals: InviteRunResult = { sent: 0, failed: 0, skipped: 0, remaining: 0, stopped_early: false };
+    try {
+      let keepGoing = true;
+      while (keepGoing) {
+        const res = await fetch(`/api/admin/interest/${params.id}/invite`, { method: "POST" });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message ?? data.error ?? "Failed to send invitations.");
+        const chunk = data as InviteRunResult;
+        totals.sent += chunk.sent;
+        totals.failed += chunk.failed;
+        totals.skipped += chunk.skipped;
+        totals.remaining = chunk.remaining;
+        totals.stopped_early = chunk.stopped_early;
+        setInviteSummary({ ...totals });
+        keepGoing = chunk.sent > 0 && chunk.remaining > 0;
+      }
+      if (totals.sent > 0) toast.success(`${totals.sent} invitation(s) sent.`);
+      if (totals.stopped_early) {
+        toast.error("Stopped after repeated send failures — the mail provider may be down.");
+      } else if (totals.sent === 0 && totals.remaining === 0 && totals.failed === 0) {
+        toast.info("Everyone on the list has already been invited.");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to send invitations.");
+    } finally {
+      setSendingInvites(false);
+      fetchInterest();
+    }
+  }
 
   // ── Channel link/unlink ─────────────────────────────────────────────────────
 
@@ -1052,6 +1248,7 @@ export default function IntakeDetailPage({
     if (!intake) return;
     setEditName(intake.name);
     setEditYear(intake.year);
+    setEditPriorityOpenAt(toDatetimeLocal(intake.priority_open_at));
     setEditingIntake(true);
   }
 
@@ -1061,13 +1258,22 @@ export default function IntakeDetailPage({
     if (!editYear || editYear < 2020 || editYear > 2100) { toast.error("Year must be between 2020 and 2100."); return; }
     setSavingIntake(true);
     try {
+      const payload: Record<string, unknown> = { name: editName.trim(), year: editYear };
+      // Only sent when the interest surface is shown — a language-school
+      // tenant never renders this field, so it must never send a value
+      // (including a clearing null) for one.
+      if (showInterest) {
+        payload.priority_open_at = fromDatetimeLocal(editPriorityOpenAt);
+      }
       const res = await fetch(`/api/intakes/${params.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: editName.trim(), year: editYear }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const err = await res.json();
+        // Surfaces the trigger's readable message (e.g. the priority window
+        // opening later than a tier's sale time) rather than a generic failure.
         throw new Error(err.message ?? err.error ?? "Failed to update.");
       }
       const updated = (await res.json()) as Intake;
@@ -1463,6 +1669,167 @@ export default function IntakeDetailPage({
         </div>
       </div>
 
+      {/* Priority interest list — hidden for language_school. The API routes
+          are NOT gated by org_type (every route scopes to the caller's own
+          tenant), so this is purely a UI decision. */}
+      {showInterest && (
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden mt-6">
+          <div className="px-6 py-4 border-b border-gray-100 flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-bold text-gray-700 uppercase tracking-wider">
+                Priority Interest List
+              </h2>
+              <p className="text-xs text-gray-400 font-myanmar mt-0.5">
+                {mm(tl.orgType, "interestListSubtitle")}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs text-gray-500">
+                {interestLoading ? "…" : `${interest.length} signed up`}
+              </span>
+              {isOwner && (
+                <>
+                  <a
+                    href={`/api/admin/interest/${params.id}?format=csv`}
+                    className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-300 text-gray-600 text-xs font-medium rounded-lg hover:border-[#1a3f8a] hover:text-[#1a3f8a] transition-colors"
+                  >
+                    Export CSV
+                  </a>
+                  <button
+                    onClick={handleSendInvites}
+                    disabled={sendingInvites || !intake?.priority_open_at}
+                    title={!intake?.priority_open_at ? "Schedule the priority window first." : undefined}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-[#1a3f8a] text-white text-xs font-medium rounded-lg hover:bg-blue-900 disabled:opacity-50 transition-colors"
+                  >
+                    {sendingInvites ? "Sending…" : "Send Invitations"}
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* priority window not scheduled */}
+          {!interestLoading && intake && !intake.priority_open_at && (
+            <div className="px-6 py-3 border-b border-gray-100 bg-amber-50 text-xs text-amber-700">
+              The priority window has not been scheduled yet — edit the {tl.intake} above and set
+              &ldquo;Priority Window Opens&rdquo; before sending invitations.
+            </div>
+          )}
+
+          {/* Invite run summary — sent, failed, skipped, remaining, stopped_early, all surfaced. */}
+          {inviteSummary && (
+            <div className="px-6 py-3 border-b border-gray-100 bg-blue-50/60 text-xs text-gray-700 space-y-1">
+              <p>
+                <span className="font-semibold text-[#1a6b3c]">{inviteSummary.sent}</span> sent
+                <span className="text-gray-300"> · </span>
+                <span className={inviteSummary.failed > 0 ? "font-semibold text-[#c0392b]" : ""}>
+                  {inviteSummary.failed}
+                </span>{" "}
+                failed
+                <span className="text-gray-300"> · </span>
+                {inviteSummary.skipped} skipped
+                <span className="text-gray-300"> · </span>
+                {inviteSummary.remaining} remaining
+              </p>
+              {inviteSummary.stopped_early && (
+                <p className="text-amber-700">
+                  Stopped after three consecutive send failures — this almost always means the
+                  mail provider is down, not that these particular addresses are bad. Wait and
+                  try again rather than resending immediately.
+                </p>
+              )}
+            </div>
+          )}
+
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] text-sm">
+              <thead>
+                <tr className="bg-gray-50 border-b border-gray-100 text-left">
+                  <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Name</th>
+                  <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Email</th>
+                  <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Signed Up</th>
+                  <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Last Link Sent</th>
+                  <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Invited</th>
+                  <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">First Used</th>
+                  <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Converted</th>
+                  <th className="px-5 py-3.5 text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {interestLoading ? (
+                  Array.from({ length: 3 }).map((_, i) => <InterestRowSkeleton key={i} />)
+                ) : interestError ? (
+                  <tr>
+                    <td colSpan={8} className="px-5 py-12 text-center text-sm text-gray-400">
+                      {interestError}
+                    </td>
+                  </tr>
+                ) : interest.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="px-5 py-12 text-center text-sm text-gray-400">
+                      No signups yet.
+                    </td>
+                  </tr>
+                ) : (
+                  interest.map((entry) => {
+                    const revoked = !!entry.revoked_at;
+                    const liveGrace = hasLiveGrace(entry);
+                    const busy = actingEntryId === entry.id;
+                    return (
+                      <tr key={entry.id} className="hover:bg-[#f0f4ff]/40 transition-colors">
+                        <td className="px-5 py-4 text-gray-700 font-medium">{entry.name}</td>
+                        <td className="px-5 py-4 text-gray-500">{entry.email}</td>
+                        <td className="px-5 py-4 text-gray-500 text-xs">{fmtDateTime(entry.created_at)}</td>
+                        <td className="px-5 py-4 text-gray-500 text-xs">{fmtDateTime(entry.last_link_sent_at)}</td>
+                        <td className="px-5 py-4 text-gray-500 text-xs">{fmtDateTime(entry.invited_at)}</td>
+                        <td className="px-5 py-4 text-gray-500 text-xs">{fmtDateTime(entry.first_used_at)}</td>
+                        <td className="px-5 py-4">
+                          {entry.first_converted_enrollment_id ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
+                              Converted
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-300">—</span>
+                          )}
+                        </td>
+                        <td className="px-5 py-4">
+                          {revoked ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-500">
+                              Revoked
+                            </span>
+                          ) : isOwner ? (
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => requestResend(entry)}
+                                disabled={busy}
+                                title={liveGrace ? "Previous link is still inside its grace window" : "Resend the link"}
+                                className="flex items-center gap-1 px-2.5 py-1 border border-gray-300 text-gray-600 text-xs font-medium rounded-lg hover:border-[#0891b2] hover:text-[#0891b2] disabled:opacity-50 transition-colors"
+                              >
+                                {busy ? "…" : "Resend"}
+                                {liveGrace && !busy && <span className="text-amber-500">⚠</span>}
+                              </button>
+                              <button
+                                onClick={() => handleRevoke(entry)}
+                                disabled={busy}
+                                className="flex items-center gap-1 px-2.5 py-1 border border-gray-300 text-gray-600 text-xs font-medium rounded-lg hover:border-[#c0392b] hover:text-[#c0392b] disabled:opacity-50 transition-colors"
+                              >
+                                {busy ? "…" : "Revoke"}
+                              </button>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-gray-300">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       {/* Edit class modal */}
       {editingClass && (
         <EditClassModal
@@ -1639,6 +2006,30 @@ export default function IntakeDetailPage({
                   className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
                 />
               </div>
+
+              {/* Priority window — hidden for language_school, same gate as the interest list below */}
+              {showInterest && (
+                <div className="border-t border-gray-100 pt-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    Priority Window Opens
+                  </label>
+                  <input
+                    type="datetime-local"
+                    value={editPriorityOpenAt}
+                    onChange={(e) => setEditPriorityOpenAt(e.target.value)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
+                  />
+                  <p className="mt-1.5 text-xs text-gray-400">
+                    People on the interest list get access from this moment. The general
+                    public still gets access only at each {tl.class.toLowerCase()}&rsquo;s own
+                    sale time. Leave blank to disable the priority window.
+                  </p>
+                  <p className="mt-0.5 text-xs text-gray-400 font-myanmar">
+                    {mm(tl.orgType, "priorityWindowHelp")}
+                  </p>
+                </div>
+              )}
+
               <div className="flex gap-3 pt-2">
                 <button
                   type="button"
@@ -1671,6 +2062,20 @@ export default function IntakeDetailPage({
           confirmLabel={tl.orgType === "event" ? "Open Sales" : "Open Enrollment"}
           onConfirm={() => handleStatusChange("open")}
           onCancel={() => setConfirmOpen(false)}
+        />
+      )}
+
+      {/* Confirm resend into a still-live grace window — a resend always
+          rotates, and rotating again while the prior token is still valid
+          shortens a grace period someone was promised. */}
+      {confirmResendEntry && (
+        <ConfirmModal
+          variant="danger"
+          title={`Resend to ${confirmResendEntry.name}?`}
+          message={`Their previous link is still active until ${fmtDateTime(confirmResendEntry.superseded_expires_at)}. Resending rotates the link again, which cuts that grace period short — anyone still relying on the old link will lose access sooner than promised.`}
+          confirmLabel="Resend Anyway"
+          onConfirm={() => handleResend(confirmResendEntry)}
+          onCancel={() => setConfirmResendEntry(null)}
         />
       )}
     </div>
