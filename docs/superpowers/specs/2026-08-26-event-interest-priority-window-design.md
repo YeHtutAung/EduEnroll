@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-26
 **Status:** Approved (design), pending implementation plan
-**Revision:** v11 (2026-08-28) — incorporates five rounds of external review (Codex)
+**Revision:** v12 (2026-08-29) — incorporates five rounds of external review (Codex)
 
 ## Problem
 
@@ -752,8 +752,18 @@ the gate — an additive change to `priority_access_granted`.
 - A per-intake interest view: count, table (name, email, signed up, last link
   sent, invited, first used, converted), CSV export, per-row revoke, per-row
   resend. Admin-initiated resend rotates and bypasses the public cooldown.
-- Hidden when `org_type = 'language_school'`, following the pattern in
-  `src/app/api/admin/channels/route.ts`. No database-level restriction, so a
+- Hidden **in the UI** when `org_type = 'language_school'`. The API routes are
+  deliberately **not** gated on `org_type`, which is what makes the next
+  sentence true: gating them would mean enabling this for schools required an
+  API change as well as a UI one. This is safe because every route already
+  requires an owner session and scopes every query to that owner's tenant — a
+  school owner calling them sees their own empty interest list and nothing
+  else. Note `channels/route.ts` is itself split this way: its POST gates on
+  `org_type`, its GET does not.
+
+  Earlier revisions said only "hidden when `org_type = 'language_school'`",
+  which read as an instruction to gate the API and contradicted the sentence
+  after it. No database-level restriction either, so a
   later decision to offer this to schools is a UI change rather than a
   migration.
 
@@ -781,6 +791,17 @@ keeps working through its grace period.
 - Processes a bounded chunk per invocation and returns `{ sent, remaining }` so
   a large list can be drained across calls without hitting the function
   timeout.
+
+**`remaining` counts rows still owed an invitation, including ones that just
+failed.** A caller draining the list must therefore loop on `sent > 0`, not on
+`remaining > 0` — during a mail outage every row fails, `remaining` never
+decreases, and looping on it never terminates.
+
+**The run aborts after three consecutive send failures.** Without it, a mail
+outage rotates and rolls back every row in the chunk just to discover the
+provider is down, and any rollback that loses its compare-and-swap leaves that
+row rotated with nothing delivered. The counter resets on any success, so one
+undeliverable address does not stop a run.
 
 ## Email
 
