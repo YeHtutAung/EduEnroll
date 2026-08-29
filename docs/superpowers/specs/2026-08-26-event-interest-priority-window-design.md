@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-26
 **Status:** Approved (design), pending implementation plan
-**Revision:** v12 (2026-08-29) — incorporates five rounds of external review (Codex)
+**Revision:** v13 (2026-08-29) — incorporates five rounds of external review (Codex)
 
 ## Problem
 
@@ -577,9 +577,15 @@ nothing but the superseded token of the second.
 
 **The entire rotation decision therefore happens under the row lock, before any
 mail is sent.** In one transaction: `SELECT ... FOR UPDATE` the
-`event_interest` row, evaluate the cooldown against `last_link_attempt_at`,
-mint, write the new hash and the superseded slot, stamp `last_link_attempt_at`,
-commit. Only then is the email sent, and `last_link_sent_at` is stamped
+`event_interest` row, **re-check `revoked_at` and return `NOT_FOUND` if it is
+set**, evaluate the cooldown against `last_link_attempt_at`, mint, write the
+new hash and the superseded slot, stamp `last_link_attempt_at`, commit.
+
+The revocation re-check belongs here, not in the caller. Checking it before
+rotating is a stale read: an admin can revoke between the caller's read and the
+rotation, and the row would still be rotated and a fresh credential emailed
+that the gate then refuses. The check has to sit under the same lock that does
+the writing. Only then is the email sent, and `last_link_sent_at` is stamped
 afterwards on success.
 
 The cooldown is evaluated against the *attempt*, not the successful send, which
@@ -815,6 +821,13 @@ Two new templates beside the existing four in `src/lib/email.ts`, built on
    link**, not the recipient's previous one, which cannot be reconstructed from
    a hash. Says plainly that this link supersedes any earlier one, and is sent
    when the window is about to open or has opened.
+
+   **Its copy must branch on which of those two it is.** The invitation is
+   explicitly permitted after the window has opened, so a template that
+   unconditionally says "Opens Soon" and "this link will not work until
+   `windowOpensAt`" tells a recipient their working link is dead, at the one
+   moment they are being urged to use it. When the window is already open the
+   email says so and tells them to go now.
 
 Resend and `FROM_EMAIL` are already wired.
 
