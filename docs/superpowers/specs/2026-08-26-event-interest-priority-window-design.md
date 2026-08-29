@@ -586,6 +586,16 @@ from `superseded_token_hash`, null the superseded pair, and null
 attempt wrote**, so a concurrent rotation that has already superseded this one
 is never clobbered.
 
+**The caller must supply the prefix to restore.** `token_prefix` holds the
+first eight characters of the *raw* token, which is unrecoverable from a hash —
+there is no `superseded_token_prefix` column, and deriving something from the
+stored hash would write a plausible-looking string matching nothing the
+recipient holds, which is worse than leaving it stale. So the rollback takes
+the prefix the caller read from the row before rotating, and the
+compare-and-swap on `token_hash` is what guarantees that read is still valid: if
+the row moved on, the swap fails and nothing is written. A null prefix raises
+rather than being written.
+
 Simply clearing the attempt is not sufficient, and the reason is worth stating
 because it is not obvious. Clearing lets the caller retry at once — which is
 the point — but it also disables the cooldown that is the stated mitigation for
