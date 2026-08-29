@@ -64,6 +64,14 @@ export interface InterestEmailContext {
   linkBase: string;
   /** Already formatted for display. */
   windowOpensAt: string;
+  /**
+   * Whether the window has already opened. Decided here, from the real
+   * timestamp, because the reminder's copy branches on it — an invitation sent
+   * after the window opens must not tell the recipient their working link is
+   * dead. The email template takes the boolean rather than re-deriving it from
+   * `windowOpensAt`, which is a localised display string by then.
+   */
+  windowIsOpen: boolean;
   coveredTiers: string[];
   tenantName?: string;
   logoUrl?: string;
@@ -142,6 +150,13 @@ export async function loadInterestEmailContext(
     windowOpensAt: intake.priority_open_at
       ? formatWindowOpensAt(intake.priority_open_at)
       : "a date that has not been scheduled yet",
+    // An unscheduled window is not an open one. Date.parse of a malformed
+    // value is NaN, and every comparison against NaN is false, so a junk
+    // timestamp lands on "not open yet" — the copy that is merely early rather
+    // than the copy that is wrong.
+    windowIsOpen: intake.priority_open_at
+      ? Date.parse(intake.priority_open_at) <= now
+      : false,
     coveredTiers,
     tenantName: tenant?.name ?? undefined,
     logoUrl: tenant?.logo_url ?? undefined,
@@ -227,6 +242,7 @@ export async function rotateAndSend(
           eventName: ctx.intake.name,
           link,
           windowOpensAt: ctx.windowOpensAt,
+          windowIsOpen: ctx.windowIsOpen,
           coveredTiers: ctx.coveredTiers,
           tenantName: ctx.tenantName,
           logoUrl: ctx.logoUrl,

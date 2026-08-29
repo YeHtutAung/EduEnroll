@@ -99,6 +99,24 @@ describe("PATCH /api/intakes/[id] — priority_open_at", () => {
     expect(capture.payload).toBeNull();
   });
 
+  it("rejects an unparseable date with 400 naming the field, not 404", async () => {
+    // Without the parse, the string reaches Postgres, fails the timestamptz
+    // cast, and the write-error handler reports "Intake not found" — sending an
+    // organiser to look for a missing event when the date is the problem.
+    const capture: UpdateCapture = { payload: null, eqs: {} };
+    authWith(makeSupabase({ data: { id: "intake-1" } }, capture));
+
+    const res = await PATCH(request({ priority_open_at: "next Tuesday-ish" }) as never, {
+      params: { id: "intake-1" },
+    });
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.message).toContain("priority_open_at");
+    // Rejected before the write, not after it.
+    expect(capture.payload).toBeNull();
+  });
+
   it("turns the trigger's exception into a readable validation message, not a raw database error", async () => {
     const capture: UpdateCapture = { payload: null, eqs: {} };
     authWith(

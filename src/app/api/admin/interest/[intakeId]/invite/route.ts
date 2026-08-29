@@ -40,6 +40,16 @@ import { loadInterestEmailContext, rotateAndSend } from "@/lib/interest/adminInt
 // The per-row ordering — rotate under the row lock, commit, then send, and roll
 // the rotation back if the send fails — lives in rotateAndSend().
 //
+// ── The drain contract ──────────────────────────────────────────────────────
+//
+// A caller drains a large list by calling again. It must stop when `sent` is 0,
+// and it must stop when `stop_reason` is non-null — NOT merely when `remaining`
+// reaches 0. Both conditions exist because a row can be delivered to and still
+// remain eligible: if the invited_at stamp fails, the mail went out but nothing
+// records it, so `sent > 0 && remaining > 0` would both hold for ever and an
+// auto-draining UI would re-rotate and re-mail that person on every request.
+// The run therefore ends on the spot and says why.
+//
 // See docs/superpowers/specs/2026-08-26-event-interest-priority-window-design.md
 // (v11), section "Invitations", and Task 12 of the implementation plan.
 
@@ -64,6 +74,16 @@ const CHUNK_SIZE = 25;
  * confirm it. Reset by any success, so one bad address does not stop the run.
  */
 const MAX_CONSECUTIVE_FAILURES = 3;
+
+/** Why a run stopped before it reached the end of its chunk. */
+type StopReason = "SEND_FAILURES" | "STAMP_FAILED";
+
+/** One row the run could not deliver to, reported so the operator can act. */
+interface FailedRow {
+  id: string;
+  email: string;
+  reason: string;
+}
 
 interface CandidateRow {
   id: string;
@@ -128,10 +148,17 @@ export async function POST(
   const candidates = data ?? [];
 
   let sent = 0;
-  let failed = 0;
   let skipped = 0;
   let consecutiveFailures = 0;
-  let stoppedEarly = false;
+  let stopReason: StopReason | null = null;
+
+  // Reported per row, not just counted. The run stops after three consecutive
+  // failures and re-selects oldest-eligible first, so three permanently
+  // undeliverable addresses would otherwise sit at the head of the queue for
+  // ever, blocking everyone behind them with nothing on screen to explain it.
+  // Naming them gives the organiser something to do — correct the address, or
+  // revoke the row to get it out of the way.
+  const failures: FailedRow[] = [];
 
   for (const row of candidates) {
     // Belt and braces. The query already excludes revoked rows; this repeats
@@ -153,11 +180,11 @@ export async function POST(
       // Nothing durable was left behind: a failed send has already been rolled
       // back inside rotateAndSend, and every other outcome wrote nothing. The
       // row keeps invited_at NULL and is picked up by the next call.
-      failed += 1;
+      failures.push({ id: row.id, email: row.email, reason: result.outcome });
       consecutiveFailures += 1;
       if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
         console.error("[admin/interest] invite aborted: consecutive send failures");
-        stoppedEarly = true;
+        stopReason = "SEND_FAILURES";
         break;
       }
       continue;
@@ -178,24 +205,34 @@ export async function POST(
       .eq("id", row.id)
       .eq("tenant_id", tenantId);
 
-    if (stampError) {
-      // The mail is already delivered and the new link already works, so this
-      // is not a failed send — but the row will be picked up again on the next
-      // call and mailed a second time. Loud, because a duplicate reminder is
-      // the visible symptom and this line is the explanation.
-      console.error("[admin/interest] stamping invited_at failed:", stampError.message);
-    }
-
+    // The send counts either way — the mail is delivered and the new link
+    // already works, so this is not a failed send.
     sent += 1;
+
+    if (stampError) {
+      // But the run STOPS. The row still has invited_at NULL, so it stays
+      // eligible and the fresh `remaining` count below still includes it. A UI
+      // draining the list while sent > 0 and remaining > 0 would see both hold,
+      // call again, select this same row, and rotate and email this person
+      // again — every request, without bound. Continuing here is what turns one
+      // duplicate into a loop, so the loop ends and the reason is reported
+      // rather than left for the operator to infer from a rising send count.
+      console.error("[admin/interest] stamping invited_at failed:", stampError.message);
+      failures.push({ id: row.id, email: row.email, reason: "STAMP_FAILED" });
+      stopReason = "STAMP_FAILED";
+      break;
+    }
   }
 
   return NextResponse.json(
     {
       ok: true,
       sent,
-      failed,
+      failed: failures.length,
+      failures,
       skipped,
-      stopped_early: stoppedEarly,
+      stopped_early: stopReason !== null,
+      stop_reason: stopReason,
       remaining: await countRemaining(supabase, tenantId, params.intakeId, candidates.length - sent),
     },
     { headers: { "Cache-Control": "no-store" } },
@@ -207,7 +244,9 @@ export async function POST(
  *
  * Rows whose send failed are still counted — they genuinely do still need one.
  * A caller draining the list must therefore loop on `sent > 0`, not on
- * `remaining > 0`, or a mail outage becomes an infinite loop.
+ * `remaining > 0`, or a mail outage becomes an infinite loop. It must also stop
+ * when `stop_reason` is set: after a STAMP_FAILED the run delivered mail AND
+ * left the row eligible, so `sent > 0` alone would keep it going.
  */
 async function countRemaining(
   supabase: ReturnType<typeof createAdminClient>,

@@ -98,6 +98,13 @@ export async function PATCH(
     if (priority_open_at !== null && typeof priority_open_at !== "string") {
       return badRequest("priority_open_at must be an ISO 8601 string or null.");
     }
+    // Parsed, not merely type-checked. An unparseable string reaches Postgres,
+    // fails the timestamptz cast, and comes back as a write error — which the
+    // handler below reports as "Intake not found", sending an organiser to look
+    // for a missing event when the actual problem is the date they typed.
+    if (typeof priority_open_at === "string" && Number.isNaN(Date.parse(priority_open_at))) {
+      return badRequest("priority_open_at must be a valid ISO 8601 date and time.");
+    }
     update.priority_open_at = (priority_open_at as string | null) ?? null;
   }
 

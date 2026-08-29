@@ -135,8 +135,43 @@ describe("POST /api/admin/interest/[intakeId]/invite", () => {
 
     expect(body.sent).toBe(2);
     expect(body.failed).toBe(1);
+    // Named, not just counted, so the organiser can correct or revoke the
+    // address instead of watching the run stall on it for ever.
+    expect(body.failures).toEqual([
+      { id: "entry-b", email: "b@example.com", reason: "SEND_FAILED" },
+    ]);
     // Still owed an invitation — the run is resumable, not silently complete.
     expect(body.remaining).toBe(1);
+  });
+
+  it("stops the run when the invited_at stamp fails, rather than looping on that row", async () => {
+    // The mail went out but nothing recorded it, so the row stays eligible and
+    // `remaining` still counts it. A UI draining while sent > 0 && remaining > 0
+    // would see both hold, call again, select the same row, and rotate and mail
+    // that person again on every request — unbounded. The run must end here.
+    const mock = makeInterestMock({
+      intake: { data: scheduledIntake() },
+      entries: { data: [candidate("a"), candidate("b"), candidate("c")] },
+      remainingCount: 3,
+    });
+    // Row a's stamp fails; b and c must never be attempted.
+    mock.stampErrorForIds.add("entry-a");
+    vi.mocked(createAdminClient).mockReturnValue(mock.client as never);
+
+    const res = await POST(request() as never, params);
+    const body = await res.json();
+
+    // The send is counted — the mail really was delivered.
+    expect(body.sent).toBe(1);
+    expect(body.stopped_early).toBe(true);
+    expect(body.stop_reason).toBe("STAMP_FAILED");
+    expect(body.failures).toEqual([
+      { id: "entry-a", email: "a@example.com", reason: "STAMP_FAILED" },
+    ]);
+
+    // b and c were never touched: no second and third email, no rotation.
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    expect(mock.rpcCalls.filter((c) => c.name === "rotate_interest_token")).toHaveLength(1);
   });
 
   it("rolls back the rotation of a row whose send failed", async () => {
@@ -198,6 +233,10 @@ describe("POST /api/admin/interest/[intakeId]/invite", () => {
 
     expect(body.sent).toBe(0);
     expect(body.stopped_early).toBe(true);
+    expect(body.stop_reason).toBe("SEND_FAILURES");
+    expect(body.failures.map((f: { id: string }) => f.id)).toEqual([
+      "entry-a", "entry-b", "entry-c",
+    ]);
     expect(sendEmail).toHaveBeenCalledTimes(3);
     // Every attempted rotation was undone.
     expect(mock.rpcCalls.filter((c) => c.name === "rollback_interest_rotation")).toHaveLength(3);

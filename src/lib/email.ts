@@ -595,7 +595,21 @@ export function interestConfirmationEmail(params: {
   };
 }
 
-// ── Priority window reminder email (sent by an admin before the window opens) ─
+// ── Priority window reminder email (sent by an admin) ────────────────────────
+//
+// An invitation is explicitly permitted BEFORE the window opens and AFTER it
+// has opened — the design says so, and an organiser who schedules the window
+// and then presses send is in the second case as often as the first. So the
+// copy has to branch. A template that unconditionally says "Opens Soon" and
+// "this link will not work until X" tells a recipient their working link is
+// dead at the one moment they are being urged to use it, which is worse than
+// sending nothing.
+//
+// `windowIsOpen` is passed in rather than derived here: `windowOpensAt` is
+// already formatted for display in the event's timezone, and parsing a
+// human-readable string back into an instant to make a correctness decision is
+// exactly the kind of round trip that breaks on the first locale change. The
+// caller holds the real timestamp.
 
 export function priorityWindowReminderEmail(params: {
   name: string;
@@ -603,24 +617,33 @@ export function priorityWindowReminderEmail(params: {
   link: string;
   windowOpensAt: string;
   coveredTiers: string[];
+  /** True when the window has already opened, so the link works right now. */
+  windowIsOpen?: boolean;
   tenantName?: string;
   logoUrl?: string;
 }): { subject: string; html: string } {
-  const { name, eventName, link, windowOpensAt, coveredTiers, tenantName, logoUrl } = params;
+  const {
+    name, eventName, link, windowOpensAt, coveredTiers, tenantName, logoUrl,
+  } = params;
+  const windowIsOpen = params.windowIsOpen === true;
 
   return {
-    subject: `Your Priority Window Opens Soon — ${eventName}`,
+    subject: windowIsOpen
+      ? `Your Priority Window Is Open — ${eventName}`
+      : `Your Priority Window Opens Soon — ${eventName}`,
     html: baseLayout(`
       <div style="text-align: center; margin-bottom: 24px;">
         <div style="width: 56px; height: 56px; border-radius: 50%; background: #fef3c7; margin: 0 auto 12px; display: flex; align-items: center; justify-content: center;">
           <span style="font-size: 28px;">⏰</span>
         </div>
-        <h1 style="margin: 0; font-size: 22px; color: #1a1a1a;">Your Priority Window Opens Soon</h1>
-        <p style="margin: 4px 0 0; color: #6b7280; font-family: 'Noto Sans Myanmar', sans-serif;">သင့်ဦးစားပေးအချိန် မကြာမီ ဖွင့်လှစ်တော့မည်</p>
+        <h1 style="margin: 0; font-size: 22px; color: #1a1a1a;">${windowIsOpen ? "Your Priority Window Is Open" : "Your Priority Window Opens Soon"}</h1>
+        <p style="margin: 4px 0 0; color: #6b7280; font-family: 'Noto Sans Myanmar', sans-serif;">${windowIsOpen ? "သင့်ဦးစားပေးအချိန် ဖွင့်လှစ်ပြီးဖြစ်ပါသည်" : "သင့်ဦးစားပေးအချိန် မကြာမီ ဖွင့်လှစ်တော့မည်"}</p>
       </div>
 
       <p style="font-size: 14px; color: #374151;">
-        Hi <strong>${name}</strong>, your priority window for <strong>${eventName}</strong> opens on <strong>${windowOpensAt}</strong>.
+        ${windowIsOpen
+          ? `Hi <strong>${name}</strong>, your priority window for <strong>${eventName}</strong> is open now. Use the link below to book before tickets go on general sale.`
+          : `Hi <strong>${name}</strong>, your priority window for <strong>${eventName}</strong> opens on <strong>${windowOpensAt}</strong>.`}
       </p>
 
       <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 16px; margin: 20px 0;">
@@ -645,14 +668,23 @@ export function priorityWindowReminderEmail(params: {
         <a href="${link}" style="color: #1a6b3c;">${link}</a>
       </p>
 
-      <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin: 20px 0;">
+      ${windowIsOpen
+        ? `<div style="background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 8px; padding: 16px; margin: 20px 0;">
+        <p style="margin: 0; font-size: 13px; color: #065f46;">
+          <strong>This link works right now.</strong> Your priority window opened on ${windowOpensAt} and closes when tickets go on general sale — go now.
+        </p>
+        <p style="margin: 6px 0 0; font-size: 12px; color: #047857; font-family: 'Noto Sans Myanmar', sans-serif;">
+          ဤလင့်ခ်ကို ယခုပင် အသုံးပြုနိုင်ပါပြီ။ သင့်ဦးစားပေးအချိန်သည် ${windowOpensAt} တွင် စတင်ခဲ့ပါသည်။ ယခုပင် ဝင်ရောက်ပါ။
+        </p>
+      </div>`
+        : `<div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin: 20px 0;">
         <p style="margin: 0; font-size: 13px; color: #1e3a8a;">
           <strong>This link will not work until ${windowOpensAt}.</strong> If you open it before then, you'll see a page saying the window hasn't opened yet — that is expected, not an error.
         </p>
         <p style="margin: 6px 0 0; font-size: 12px; color: #1e40af; font-family: 'Noto Sans Myanmar', sans-serif;">
           ဤလင့်ခ်သည် ${windowOpensAt} မှစတင်၍ အလုပ်လုပ်ပါမည်။ ယခုနှိပ်ပါက မဖွင့်သေးကြောင်း စာမျက်နှာကိုသာ တွေ့ရပါလိမ့်မည်၊ ချို့ယွင်းချက် မဟုတ်ပါ။
         </p>
-      </div>
+      </div>`}
       ${tierCoverageSection(coveredTiers)}
     `, tenantName, logoUrl),
   };
