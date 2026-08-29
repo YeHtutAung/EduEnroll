@@ -949,6 +949,12 @@ Judge the build by **exit code**, not by output text.
 
 Register interest → confirm the link appears on screen and in email → confirm it does nothing before `priority_open_at` → confirm it enrolls after → confirm the public can still not enroll → confirm signup is closed once the window opens.
 
+**This cannot be done until Step 3 has run.** The dev server on port 3005 reads `.env.local`, which points at the **remote dev** Supabase project — *not* the local stack that `npm run test:db` uses. So the browser never sees a migration that has only been applied locally, and every event page returns `500 Failed to fetch intake` until `intakes.priority_open_at` exists in dev.
+
+The consequence is worth stating plainly, because it inverts the usual order: **for this feature the database migration must reach dev before any end-to-end browser verification is possible at all.** Anything that does not touch the new columns — the fragment capture, the URL stripping, the `sessionStorage` write — can be verified in the browser beforehand, and should be, since those are the security-relevant behaviours. Everything else has to wait.
+
+Do not work around this by applying migrations to dev out of order, and do not query the dev database directly to compensate. Dev is one relink from production in this project.
+
 - [ ] **Step 3: Migrate the dev database**
 
 ```bash
