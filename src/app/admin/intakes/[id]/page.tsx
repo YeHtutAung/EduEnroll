@@ -843,12 +843,32 @@ interface InterestEntry {
   superseded_expires_at: string | null;
 }
 
+/** One row the run could not deliver to — matches FailedRow in the invite route. */
+interface InviteFailure {
+  id: string;
+  email: string;
+  reason: string;
+}
+
+/**
+ * Matches the invite route's response shape exactly — see
+ * src/app/api/admin/interest/[intakeId]/invite/route.ts.
+ *
+ * `stop_reason` is non-null in two distinct cases and they need different
+ * organiser reactions: "SEND_FAILURES" (three sends in a row failed — the
+ * mail provider is probably down, wait and retry) and "STAMP_FAILED" (a send
+ * succeeded but the row could not be marked invited, so it is still eligible
+ * and resuming will email that person again — the organiser should review
+ * `failures` before continuing).
+ */
 interface InviteRunResult {
   sent: number;
   failed: number;
+  failures: InviteFailure[];
   skipped: number;
   remaining: number;
   stopped_early: boolean;
+  stop_reason: "SEND_FAILURES" | "STAMP_FAILED" | null;
 }
 
 /** Grace window on the previous token is still live — a rotation now would cut it short. */
@@ -994,10 +1014,12 @@ export default function IntakeDetailPage({
     fetchInterest();
   }, [fetchInterest]);
 
-  async function handleRevoke(entry: InterestEntry) {
-    setActingEntryId(entry.id);
+  // Shared by the per-row Revoke button and the invite-failures list below —
+  // both revoke by id and only differ in what label the toast uses.
+  async function revokeById(id: string, label: string) {
+    setActingEntryId(id);
     try {
-      const res = await fetch(`/api/admin/interest/entry/${entry.id}`, {
+      const res = await fetch(`/api/admin/interest/entry/${id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "revoke" }),
@@ -1006,14 +1028,26 @@ export default function IntakeDetailPage({
       if (!res.ok) throw new Error(data.message ?? data.error ?? "Failed to revoke access.");
       const updated = data.entry as InterestEntry | null;
       if (updated) {
-        setInterest((prev) => prev.map((e) => (e.id === entry.id ? updated : e)));
+        setInterest((prev) => prev.map((e) => (e.id === id ? updated : e)));
       }
-      toast.success(`Access revoked for ${entry.name}.`);
+      toast.success(`Access revoked for ${label}.`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to revoke access.");
     } finally {
       setActingEntryId(null);
     }
+  }
+
+  async function handleRevoke(entry: InterestEntry) {
+    await revokeById(entry.id, entry.name);
+  }
+
+  // The invite route retries oldest-first, so a permanently undeliverable
+  // address sits at the head of the queue and blocks every row behind it
+  // until it is corrected or revoked — this is how the organiser unblocks it
+  // directly from the failures list without hunting for the row in the table.
+  async function handleRevokeFailure(failure: InviteFailure) {
+    await revokeById(failure.id, failure.email);
   }
 
   // Rotating while the previous token's grace window is still live shortens a
@@ -1051,16 +1085,34 @@ export default function IntakeDetailPage({
   }
 
   // Drains the invite queue by repeatedly calling the invite endpoint (each
-  // call handles one 25-row chunk). MUST loop on `sent > 0`, never on
-  // `remaining > 0` — remaining counts rows that just failed too, so during a
-  // mail-provider outage it never decreases and a loop on it would never end.
+  // call handles one 25-row chunk).
+  //
+  // The loop stops when `sent === 0` OR when `stop_reason` is non-null — not
+  // merely when `remaining` reaches 0, and NOT on the counts alone even when
+  // `sent > 0`. `remaining` counts rows that just failed, so during a
+  // mail-provider outage it never decreases and looping on it would never
+  // end. And a row can be delivered to and still remain eligible: if the
+  // invite route sends the mail but then fails to stamp `invited_at`, the row
+  // keeps invited_at NULL, so `sent > 0 && remaining > 0` both hold forever —
+  // continuing on the counts alone would rotate and re-email that same person
+  // on every subsequent call. `stop_reason` is the route's own signal that
+  // continuing is unsafe regardless of what sent/remaining say; see the "drain
+  // contract" comment atop src/app/api/admin/interest/[intakeId]/invite/route.ts.
   async function handleSendInvites() {
     if (!intake?.priority_open_at) {
       toast.error("Schedule the priority window before sending invitations.");
       return;
     }
     setSendingInvites(true);
-    const totals: InviteRunResult = { sent: 0, failed: 0, skipped: 0, remaining: 0, stopped_early: false };
+    const totals: InviteRunResult = {
+      sent: 0,
+      failed: 0,
+      failures: [],
+      skipped: 0,
+      remaining: 0,
+      stopped_early: false,
+      stop_reason: null,
+    };
     try {
       let keepGoing = true;
       while (keepGoing) {
@@ -1070,15 +1122,25 @@ export default function IntakeDetailPage({
         const chunk = data as InviteRunResult;
         totals.sent += chunk.sent;
         totals.failed += chunk.failed;
+        totals.failures = [...totals.failures, ...(chunk.failures ?? [])];
         totals.skipped += chunk.skipped;
         totals.remaining = chunk.remaining;
         totals.stopped_early = chunk.stopped_early;
+        totals.stop_reason = chunk.stop_reason;
         setInviteSummary({ ...totals });
-        keepGoing = chunk.sent > 0 && chunk.remaining > 0;
+        keepGoing = chunk.sent > 0 && chunk.remaining > 0 && !chunk.stop_reason;
       }
       if (totals.sent > 0) toast.success(`${totals.sent} invitation(s) sent.`);
-      if (totals.stopped_early) {
-        toast.error("Stopped after repeated send failures — the mail provider may be down.");
+      if (totals.stop_reason === "STAMP_FAILED") {
+        // The more serious of the two: mail already went out for this row, but
+        // it is still marked not-yet-invited, so pressing the button again
+        // will email that person a second time. Say so plainly rather than
+        // letting the organiser discover it as a duplicate complaint.
+        toast.error(
+          "Mail was delivered but not recorded for one recipient — resuming will email them again. Review the failed address below first.",
+        );
+      } else if (totals.stop_reason === "SEND_FAILURES") {
+        toast.error("Stopped after repeated send failures — the mail provider may be down. Try again later.");
       } else if (totals.sent === 0 && totals.remaining === 0 && totals.failed === 0) {
         toast.info("Everyone on the list has already been invited.");
       }
@@ -1716,9 +1778,9 @@ export default function IntakeDetailPage({
             </div>
           )}
 
-          {/* Invite run summary — sent, failed, skipped, remaining, stopped_early, all surfaced. */}
+          {/* Invite run summary — sent, failed, skipped, remaining, and stop_reason, all surfaced. */}
           {inviteSummary && (
-            <div className="px-6 py-3 border-b border-gray-100 bg-blue-50/60 text-xs text-gray-700 space-y-1">
+            <div className="px-6 py-3 border-b border-gray-100 bg-blue-50/60 text-xs text-gray-700 space-y-2">
               <p>
                 <span className="font-semibold text-[#1a6b3c]">{inviteSummary.sent}</span> sent
                 <span className="text-gray-300"> · </span>
@@ -1731,12 +1793,62 @@ export default function IntakeDetailPage({
                 <span className="text-gray-300"> · </span>
                 {inviteSummary.remaining} remaining
               </p>
-              {inviteSummary.stopped_early && (
+
+              {/* STAMP_FAILED: mail already went out for this row, but it is still
+                  marked not-yet-invited — resuming re-emails that person. The more
+                  serious of the two stop reasons, so it must not read like a
+                  generic error. */}
+              {inviteSummary.stop_reason === "STAMP_FAILED" && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[#c0392b]">
+                  <p className="font-semibold">Mail delivered, but not recorded.</p>
+                  <p className="mt-0.5">
+                    A reminder was sent, but the system failed to record that it went out — that
+                    row is still marked as not-yet-invited. Pressing &ldquo;Send
+                    Invitations&rdquo; again will email that person a second time. Review the
+                    address below — fix or revoke it — before resuming.
+                  </p>
+                </div>
+              )}
+
+              {/* SEND_FAILURES: three sends in a row failed, almost always a mail-provider outage. */}
+              {inviteSummary.stop_reason === "SEND_FAILURES" && (
                 <p className="text-amber-700">
                   Stopped after three consecutive send failures — this almost always means the
                   mail provider is down, not that these particular addresses are bad. Wait and
                   try again rather than resending immediately.
                 </p>
+              )}
+
+              {/* The addresses that failed, named so the organiser can act. The
+                  route retries oldest-first, so a permanently undeliverable
+                  address here blocks everyone behind it in the queue until it
+                  is fixed or revoked. */}
+              {inviteSummary.failures.length > 0 && (
+                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2">
+                  <p className="font-medium text-gray-600 mb-1">
+                    {inviteSummary.failures.length} address
+                    {inviteSummary.failures.length !== 1 ? "es" : ""} failed:
+                  </p>
+                  <ul className="space-y-1">
+                    {inviteSummary.failures.map((f) => (
+                      <li key={f.id} className="flex items-center justify-between gap-2">
+                        <span>
+                          <span className="font-mono text-gray-700">{f.email}</span>
+                          <span className="text-gray-400"> — {f.reason}</span>
+                        </span>
+                        {isOwner && (
+                          <button
+                            onClick={() => handleRevokeFailure(f)}
+                            disabled={actingEntryId === f.id}
+                            className="shrink-0 px-2 py-0.5 border border-gray-300 text-gray-600 text-xs font-medium rounded-lg hover:border-[#c0392b] hover:text-[#c0392b] disabled:opacity-50 transition-colors"
+                          >
+                            {actingEntryId === f.id ? "…" : "Revoke"}
+                          </button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               )}
             </div>
           )}
