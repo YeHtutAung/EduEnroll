@@ -41,6 +41,12 @@ export interface InterestMockOptions {
 
 export interface InterestMock {
   client: { from: ReturnType<typeof vi.fn>; rpc: ReturnType<typeof vi.fn> };
+  /**
+   * event_interest row ids whose UPDATE should report an error. Lets a test
+   * fail the bookkeeping write while the send itself succeeded — the state
+   * that makes a row deliverable AND still eligible.
+   */
+  stampErrorForIds: Set<string>;
   updates: RecordedUpdate[];
   rpcCalls: RecordedRpc[];
   /** Every `select()` column string the code asked for, in order. */
@@ -57,6 +63,7 @@ const ok = (result: { data?: unknown; error?: unknown; count?: unknown }) => ({
 
 export function makeInterestMock(opts: InterestMockOptions = {}): InterestMock {
   const updates: RecordedUpdate[] = [];
+  const stampErrorForIds = new Set<string>();
   const rpcCalls: RecordedRpc[] = [];
   const selectedColumns: string[] = [];
   const isFilters: { column: string; value: unknown }[] = [];
@@ -88,6 +95,9 @@ export function makeInterestMock(opts: InterestMockOptions = {}): InterestMock {
     function resolve(single = false) {
       if (state.mode === "update") {
         updates.push({ payload: state.payload, eqs: { ...state.eqs } });
+        if (typeof state.eqs.id === "string" && stampErrorForIds.has(state.eqs.id)) {
+          return ok({ error: { message: "stamp failed" } });
+        }
         return ok({});
       }
 
@@ -167,7 +177,7 @@ export function makeInterestMock(opts: InterestMockOptions = {}): InterestMock {
     }),
   };
 
-  return { client, updates, rpcCalls, selectedColumns, isFilters };
+  return { client, stampErrorForIds, updates, rpcCalls, selectedColumns, isFilters };
 }
 
 /** An intake whose priority window is scheduled — the normal case. */
