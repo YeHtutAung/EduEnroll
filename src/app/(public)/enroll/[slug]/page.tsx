@@ -238,6 +238,18 @@ function IntakeLandingContent() {
   const [errorInfo, setErrorInfo] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // Capture the priority-access token from the URL fragment (never a query
+  // param — a fragment is never sent to the server, which is the whole
+  // reason the emailed link uses `#pa=` and not `?pa=`). Stash it in
+  // sessionStorage keyed by slug and strip it from the address bar
+  // immediately so it doesn't linger in history.
+  useEffect(() => {
+    const m = /(?:^|[#&])pa=([A-Za-z0-9_-]+)/.exec(window.location.hash);
+    if (!m) return;
+    sessionStorage.setItem(`pa_${params.slug}`, m[1]);
+    history.replaceState(null, "", window.location.pathname + window.location.search);
+  }, [params.slug]);
+
   useEffect(() => {
     async function fetchIntake() {
       try {

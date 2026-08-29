@@ -290,12 +290,22 @@ function CheckoutForm() {
       if (v) form_data[f.field_key] = v;
     });
 
+    // Priority-access token captured earlier from the URL fragment (see
+    // `[slug]/page.tsx`) and stashed in sessionStorage, keyed per slug. Sent
+    // only in this POST body — never as a query param or link href.
+    const priorityToken = sessionStorage.getItem(`pa_${params.slug}`);
+
     try {
       // 1. Save attendee details
       const patchRes = await fetch(`/api/public/enrollment/${ref}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ student_name_en, email, form_data }),
+        body: JSON.stringify({
+          student_name_en,
+          email,
+          form_data,
+          ...(priorityToken ? { priority_token: priorityToken } : {}),
+        }),
       });
       if (!patchRes.ok) {
         const d = await patchRes.json();
