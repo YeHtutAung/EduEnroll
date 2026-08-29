@@ -955,6 +955,17 @@ The consequence is worth stating plainly, because it inverts the usual order: **
 
 Do not work around this by applying migrations to dev out of order, and do not query the dev database directly to compensate. Dev is one relink from production in this project.
 
+**Operator gate before any of this works: `INTEREST_IP_SECRET` must be set.**
+
+The signup route hashes the client address with it and **fails closed with a
+500 on every signup while it is unset** — no row, no mail, no token. It is
+currently set nowhere: not in `.env.local`, not in the Vercel environment. A
+documented placeholder exists in `.env.local.example`.
+
+Set a real value locally and in Vercel before expecting a signup to succeed in
+a browser. Use `printf`, not `echo`, when setting it in Vercel — `echo` appends
+a newline, which this project has already been burned by on an HMAC secret.
+
 - [ ] **Step 3: Migrate the dev database**
 
 ```bash
