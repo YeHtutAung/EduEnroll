@@ -1,5 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import { mintPriorityToken } from "@/lib/interest/token";
+import { mintPriorityToken, type MintedToken } from "@/lib/interest/token";
 import { interestConfirmationEmail, sendEmail } from "@/lib/email";
 
 // ─── Interest signup and resend ─────────────────────────────────────────────
@@ -10,7 +10,9 @@ import { interestConfirmationEmail, sendEmail } from "@/lib/email";
 // 1. PERSIST, THEN SEND. No token is ever emailed whose hash is not already
 //    stored, so a link that reaches an inbox always works. A failed send costs
 //    a *notification*, never a credential. A failed write is reported as an
-//    error, never as a false success.
+//    error, never as a false success. The mirror of this rule is that a
+//    rotation whose send failed is ROLLED BACK: an operation that did not
+//    complete leaves no durable effect.
 //
 // 2. THE ENTIRE ROTATION DECISION HAPPENS UNDER THE ROW LOCK, BEFORE ANY MAIL
 //    IS SENT. Locking only the write is not enough: two concurrent resends
@@ -26,8 +28,8 @@ import { interestConfirmationEmail, sendEmail } from "@/lib/email";
 // caller, and the ordering is tested here without HTTP.
 //
 // See docs/superpowers/specs/2026-08-26-event-interest-priority-window-design.md
-// sections "Signup and resend", "Ordering: persist, then send", and "Rotation
-// is serialized before the send, not after".
+// (v11) sections "Signup and resend", "Ordering: persist, then send", and
+// "Rotation is serialized before the send, not after".
 
 /**
  * How long the token displaced by a rotation stays usable.
@@ -56,6 +58,26 @@ const RATE_LIMIT_WINDOW = "1 hour";
 const RATE_LIMIT_PER_INTAKE = 3;
 const RATE_LIMIT_GLOBAL = 10;
 
+/** PostgreSQL unique_violation. */
+const UNIQUE_VIOLATION = "23505";
+
+/**
+ * What this module does NOT check, and the caller therefore must, before
+ * calling. None of it is enforced here or by the schema on every branch:
+ *
+ * - `intakeId` belongs to `tenantId`. The lookup below is tenant-scoped and
+ *   the insert is covered by the composite FK, so a mismatch fails closed —
+ *   but it fails as an opaque write error, not as the clear rejection a public
+ *   endpoint owes a caller.
+ * - `priority_open_at` is set and still in the future. Signup closes when the
+ *   window opens; otherwise anyone can mint themselves a head start at the
+ *   moment it starts, which defeats the feature.
+ * - The intake is neither closed nor cancelled.
+ * - At least one tier still has a future `enrollment_open_at`. If everything
+ *   is already on sale there is nothing to be early for.
+ * - Length bounds on name, email and phone. The CHECKs will reject an
+ *   over-long value, again as a write error rather than a 400.
+ */
 export interface RegisterInterestInput {
   intakeId: string;
   tenantId: string;
@@ -100,8 +122,23 @@ export type RegisterInterestResult =
     }
   | { ok: false; reason: RegisterInterestFailure };
 
-/** The response a resend produces, and the one a throttled call is given. */
-const GENERIC_SUCCESS: RegisterInterestResult = { ok: true, emailed: false };
+/**
+ * The response a resend produces, and the one a throttled call is given.
+ *
+ * Frozen because it is returned by reference from several paths: an
+ * accidental mutation anywhere would rewrite what every other caller sees.
+ */
+const GENERIC_SUCCESS: RegisterInterestResult = Object.freeze({
+  ok: true,
+  emailed: false,
+});
+
+/** The columns the repeat path needs, beyond knowing the row exists. */
+interface ExistingRow {
+  id: string;
+  token_prefix: string;
+  revoked_at: string | null;
+}
 
 export async function registerInterest(
   input: RegisterInterestInput,
@@ -151,72 +188,83 @@ export async function registerInterest(
   }
 
   // ── 2. Existing record for this address on this event? ────────────────────
-  const { data: existing, error: lookupError } = await supabase
-    .from("event_interest")
-    .select("id")
-    .eq("intake_id", input.intakeId)
-    .eq("email", email)
-    .maybeSingle();
-
-  if (lookupError) {
-    // Guessing "first signup" here would send an insert straight into the
-    // unique index, so the failure is reported rather than converted into a
-    // confusing write error.
-    console.error("[registerInterest] lookup failed:", lookupError.message);
-    return { ok: false, reason: "LOOKUP_FAILED" };
-  }
+  const lookup = await findExisting(supabase, input.tenantId, input.intakeId, email);
+  if (lookup === "ERROR") return { ok: false, reason: "LOOKUP_FAILED" };
 
   const minted = mintPriorityToken();
-  const link = `${input.linkBase}#pa=${minted.token}`;
 
-  if (!existing) {
-    // ── 3. FIRST SIGNUP — write, then send ──────────────────────────────────
-    const { data: inserted, error: insertError } = await supabase
-      .from("event_interest")
-      .insert({
-        tenant_id: input.tenantId,
-        intake_id: input.intakeId,
-        name,
-        email,
-        phone,
-        token_hash: minted.tokenHash,
-        token_prefix: minted.tokenPrefix,
-        // The first send is an attempt like any other, so the cooldown applies
-        // from the moment the row exists. Left null, it would read null on a
-        // brand-new row and an immediate resend would rotate and send again for
-        // free — one free rotation per address per event, with the griefing
-        // case landing at its most effective on the record just created. The
-        // one legitimate reason to resend immediately, mail that did not
-        // arrive, is already covered: the link is on screen and already valid.
-        last_link_attempt_at: new Date().toISOString(),
-      } as never)
-      .select("id")
-      .single();
+  if (lookup) return resendExisting(supabase, input, email, name, lookup, minted);
 
-    if (insertError || !inserted) {
-      // Nothing was created, so nothing may be emailed and nothing may be
-      // reported as success. The raw token dies here, unused.
-      console.error("[registerInterest] insert failed:", insertError?.message);
-      return { ok: false, reason: "WRITE_FAILED" };
+  // ── 3. FIRST SIGNUP — write, then send ────────────────────────────────────
+  const { data: inserted, error: insertError } = await supabase
+    .from("event_interest")
+    .insert({
+      tenant_id: input.tenantId,
+      intake_id: input.intakeId,
+      name,
+      email,
+      phone,
+      token_hash: minted.tokenHash,
+      token_prefix: minted.tokenPrefix,
+      // The first send is an attempt like any other, so the cooldown applies
+      // from the moment the row exists. Left null, it would read null on a
+      // brand-new row and an immediate resend would rotate and send again for
+      // free — one free rotation per address per event, with the griefing
+      // case landing at its most effective on the record just created. The
+      // one legitimate reason to resend immediately, mail that did not
+      // arrive, is already covered: the link is on screen and already valid.
+      last_link_attempt_at: new Date().toISOString(),
+    } as never)
+    .select("id")
+    .single();
+
+  if (insertError || !inserted) {
+    // A double-submitted form produces two calls that both saw no row. The
+    // loser hits the unique index — but the signup did succeed, so reporting
+    // an error would show a failure over a record that exists. Re-read and
+    // take the repeat path, which will find the winner's fresh attempt stamp
+    // and answer COOLDOWN.
+    if (insertError?.code === UNIQUE_VIOLATION) {
+      const retry = await findExisting(supabase, input.tenantId, input.intakeId, email);
+      if (retry === "ERROR") return { ok: false, reason: "LOOKUP_FAILED" };
+      if (retry) return resendExisting(supabase, input, email, name, retry, minted);
     }
 
-    const emailed = await sendInterestEmail(input, link, false);
-
-    if (emailed) await stampSent(supabase, (inserted as { id: string }).id);
-
-    // The token is returned whether or not the mail went out: it is already
-    // persisted, so the on-screen link works either way. `emailed: false` is
-    // what lets the page say the mail did not go out and offer a resend.
-    return { ok: true, emailed, token: minted.token };
+    // Nothing was created, so nothing may be emailed and nothing may be
+    // reported as success. The raw token dies here, unused.
+    console.error("[registerInterest] insert failed:", insertError?.message);
+    return { ok: false, reason: "WRITE_FAILED" };
   }
 
-  // ── 4. REPEAT SIGNUP — rotate under the lock, then send ───────────────────
-  const existingId = (existing as { id: string }).id;
+  const emailed = await sendInterestEmail(input, name, email, minted.token, false);
+
+  if (emailed) await stampSent(supabase, (inserted as { id: string }).id);
+
+  // The token is returned whether or not the mail went out: it is already
+  // persisted, so the on-screen link works either way. `emailed: false` is
+  // what lets the page say the mail did not go out and offer a resend.
+  return { ok: true, emailed, token: minted.token };
+}
+
+// ─── The repeat path ────────────────────────────────────────────────────────
+
+async function resendExisting(
+  supabase: AdminClient,
+  input: RegisterInterestInput,
+  email: string,
+  name: string,
+  existing: ExistingRow,
+  minted: MintedToken,
+): Promise<RegisterInterestResult> {
+  // A revoked record does not rotate. Rotating one would spend an email on a
+  // link the gate refuses, and hand the recipient something that silently does
+  // not work. Generic success, exactly like a cooldown.
+  if (existing.revoked_at) return GENERIC_SUCCESS;
 
   const { data: rotated, error: rotateError } = await supabase.rpc(
     "rotate_interest_token",
     {
-      p_interest_id: existingId,
+      p_interest_id: existing.id,
       p_new_hash: minted.tokenHash,
       p_new_prefix: minted.tokenPrefix,
       p_grace: GRACE_INTERVAL,
@@ -243,17 +291,18 @@ export async function registerInterest(
     return { ok: false, reason: "ROTATE_FAILED" };
   }
 
-  const emailed = await sendInterestEmail(input, link, true);
+  const emailed = await sendInterestEmail(input, name, email, minted.token, true);
 
   if (emailed) {
-    await stampSent(supabase, existingId);
+    await stampSent(supabase, existing.id);
   } else {
-    // The cooldown is stamped by the rotation, before the send. Clearing the
-    // attempt on failure is what makes a retry immediate instead of leaving
-    // the record locked out for the whole cooldown over mail that never
-    // arrived. If the process dies before this runs, the record is simply in
-    // cooldown until it expires — bounded and self-healing.
-    await clearAttempt(supabase, existingId);
+    // The rotation is UNDONE, not merely un-cooled. Clearing the cooldown
+    // alone would let a second failed send walk the token forward again, and
+    // the original — the link actually sitting in the recipient's inbox —
+    // would end up in neither slot while neither replacement was delivered.
+    // Since sendEmail returns false rather than throwing whenever the provider
+    // is unreachable or unconfigured, a mail outage makes that the normal path.
+    await rollbackRotation(supabase, existing, minted.tokenHash);
   }
 
   // Never the token. The recipient gets the new link at the address on file;
@@ -265,15 +314,52 @@ export async function registerInterest(
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
+/**
+ * Returns the row, `null` when there is none, or `"ERROR"` when the read
+ * itself failed — which must not be mistaken for "no row", since that would
+ * send an insert straight into the unique index.
+ *
+ * Scoped to the tenant as well as the intake. Without that, a caller passing
+ * another tenant's `intakeId` would find that tenant's record and rotate it,
+ * mailing a fresh link to its owner and killing the live token they hold. The
+ * first-signup branch is covered by the composite FK because it writes; this
+ * branch writes nothing of its own, so no constraint is ever consulted. A
+ * foreign intake now finds no row, falls through to the insert, and is
+ * rejected by the FK — fail-closed on both branches.
+ */
+async function findExisting(
+  supabase: AdminClient,
+  tenantId: string,
+  intakeId: string,
+  email: string,
+): Promise<ExistingRow | null | "ERROR"> {
+  const { data, error } = await supabase
+    .from("event_interest")
+    .select("id, token_prefix, revoked_at")
+    .eq("tenant_id", tenantId)
+    .eq("intake_id", intakeId)
+    .eq("email", email)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[registerInterest] lookup failed:", error.message);
+    return "ERROR";
+  }
+
+  return (data as ExistingRow | null) ?? null;
+}
+
 async function sendInterestEmail(
   input: RegisterInterestInput,
-  link: string,
+  name: string,
+  email: string,
+  token: string,
   isResend: boolean,
 ): Promise<boolean> {
   const { subject, html } = interestConfirmationEmail({
-    name: input.name.trim(),
+    name,
     eventName: input.eventName,
-    link,
+    link: `${input.linkBase}#pa=${token}`,
     windowOpensAt: input.windowOpensAt,
     coveredTiers: input.coveredTiers,
     isResend,
@@ -283,7 +369,7 @@ async function sendInterestEmail(
 
   // sendEmail returns false on failure and does not throw, so a mail outage
   // cannot unwind a token that is already persisted.
-  return sendEmail({ to: input.email.trim().toLowerCase(), subject, html });
+  return sendEmail({ to: email, subject, html });
 }
 
 async function stampSent(supabase: AdminClient, id: string): Promise<void> {
@@ -297,11 +383,36 @@ async function stampSent(supabase: AdminClient, id: string): Promise<void> {
   if (error) console.error("[registerInterest] stamping the send failed:", error.message);
 }
 
-async function clearAttempt(supabase: AdminClient, id: string): Promise<void> {
-  const { error } = await supabase
-    .from("event_interest")
-    .update({ last_link_attempt_at: null } as never)
-    .eq("id", id);
+/**
+ * Restores the token this attempt displaced, under the same row lock.
+ *
+ * `expectedHash` is a compare-and-swap: if another request rotated in the gap
+ * between our rotation committing and our send failing, its credential is live
+ * and may already be in an inbox, so the database refuses and returns false.
+ * The prefix has to be supplied because it cannot be derived from a hash —
+ * see the migration.
+ */
+async function rollbackRotation(
+  supabase: AdminClient,
+  existing: ExistingRow,
+  expectedHash: string,
+): Promise<void> {
+  const { data, error } = await supabase.rpc("rollback_interest_rotation", {
+    p_interest_id: existing.id,
+    p_expected_hash: expectedHash,
+    p_restore_prefix: existing.token_prefix,
+  } as never);
 
-  if (error) console.error("[registerInterest] clearing the attempt failed:", error.message);
+  if (error) {
+    // The record is left in cooldown until it expires, and the previous token
+    // stays live for its grace — bounded and self-healing, not a stuck state.
+    console.error("[registerInterest] rotation rollback failed:", error.message);
+    return;
+  }
+
+  if (data !== true) {
+    // Lost the race. Someone else's rotation is current; undoing it is not
+    // ours to do, and the user is not worse off — a live link exists either way.
+    console.warn("[registerInterest] rotation rollback skipped: superseded by a concurrent rotation");
+  }
 }
