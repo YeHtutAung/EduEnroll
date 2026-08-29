@@ -491,7 +491,15 @@ reusing the honeypot convention from `src/app/api/public/enroll/route.ts`.
   it. Signup closes when the window opens: otherwise anyone could mint
   themselves a token at that moment and the head start would be available to
   the general public, defeating the feature.
-- The intake must not be closed or cancelled.
+- The intake's status must be `open` or `draft`. `intake_status` is
+  `('draft','open','closed')` — there is no `cancelled` value, despite earlier
+  revisions of this document referring to one. Written as an allowlist rather
+  than a denylist on `closed`, so that adding a future status fails closed
+  instead of silently admitting it.
+
+  `draft` is deliberately included: a draft intake already renders publicly as
+  "coming soon", which is exactly the state in which registering interest makes
+  sense.
 - `email` is trimmed and lowercased, `name` and `phone` trimmed, before both
   lookup and insert.
 - The signup rate limits above are checked before any row is written or any
