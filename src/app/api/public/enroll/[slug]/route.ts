@@ -40,11 +40,15 @@ interface TenantLabelsView {
 }
 
 interface PublicIntakeResponse {
-  intake: Pick<Intake, "id" | "name" | "year" | "status" | "hero_image_url">;
+  intake: Pick<Intake, "id" | "name" | "year" | "status" | "hero_image_url" | "priority_open_at">;
   classes: PublicClassView[];
   labels: TenantLabelsView;
   appearance: Omit<TenantAppearance, "id" | "tenant_id" | "updated_at">;
   school_name: string;
+  // Class ids still behind the priority window — those with a future
+  // `enrollment_open_at`. A class already on public sale is exempt from the
+  // gate, so a token is irrelevant to it and it is left out of this list.
+  priority_covered_class_ids: string[];
 }
 
 // ─── Slug validation ─────────────────────────────────────────────────────────
@@ -104,7 +108,7 @@ export async function GET(
   // ── Find the matching intake by slug column ────────────────────
   const { data: intakes, error: intakeError } = await supabase
     .from("intakes")
-    .select("id, name, year, status, hero_image_url")
+    .select("id, name, year, status, hero_image_url, priority_open_at")
     .eq("tenant_id", tenantId)
     .eq("slug", params.slug.toLowerCase())
     .limit(1);
@@ -119,7 +123,7 @@ export async function GET(
     );
   }
 
-  const intake = intakes[0] as Pick<Intake, "id" | "name" | "year" | "status" | "hero_image_url">;
+  const intake = intakes[0] as Pick<Intake, "id" | "name" | "year" | "status" | "hero_image_url" | "priority_open_at">;
 
   if (intake.status === "closed") {
     // Still fetch classes so payment page can show promotions
@@ -202,12 +206,20 @@ export async function GET(
     max_tickets_per_person: c.max_tickets_per_person ?? 1,
   }));
 
+  // Tiers the priority window still covers: those with a future
+  // enrollment_open_at. A tier already on public sale needs no token.
+  const now = Date.now();
+  const priorityCoveredClassIds = sorted
+    .filter((c) => c.enrollment_open_at !== null && Date.parse(c.enrollment_open_at) > now)
+    .map((c) => c.id);
+
   const response: PublicIntakeResponse = {
     intake,
     classes: publicClasses,
     labels,
     appearance,
     school_name: tenantRow?.name ?? "",
+    priority_covered_class_ids: priorityCoveredClassIds,
   };
 
   return NextResponse.json(response);
