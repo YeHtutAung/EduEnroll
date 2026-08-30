@@ -1,0 +1,10 @@
+# Canonical identity for this repository.
+#
+# The same person has committed under more than one display name. A .mailmap
+# maps them to one identity for `git log`, `git shortlog`, `git blame` and
+# GitHub's contributor views. It rewrites nothing — every commit keeps its
+# original SHA and author record.
+#
+# Format: Canonical Name <canonical@email> Commit Name <commit@email>
+
+Ye Htut Aung <yehtutaung.yha@gmail.com> yehtutaung <yehtutaung.yha@gmail.com>
