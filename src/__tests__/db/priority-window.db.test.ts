@@ -105,15 +105,54 @@ async function createClass(
   return row.id;
 }
 
-/** Returns the raw token; the row stores only its hash, as production does. */
+/**
+ * Returns the raw token; the row stores only its hash, as production does.
+ *
+ * The signup cutoff trigger (20260830120000_interest_signup_cutoff.sql)
+ * refuses an INSERT once the intake's window has opened, and refuses one on an
+ * intake with no window at all — correctly, because in production every row
+ * was created while the window was still in the future. Most fixtures in this
+ * file need the state an hour later: a row that already exists on an intake
+ * whose window is open, which is precisely what the gate is for.
+ *
+ * Producing that by moving the window forwards for the insert and back
+ * afterwards is not available here. The intake-side window trigger requires
+ * priority_open_at <= every tier's enrollment_open_at, and several fixtures
+ * below have tiers whose sale time is already past, so for those there is no
+ * future value that satisfies both triggers at once.
+ *
+ * The cutoff is therefore suspended for the insert itself, inside a
+ * transaction, and re-enabled before the commit — so a failure anywhere in
+ * between rolls the disable back with everything else. Scoped to one named
+ * trigger, and this suite is strictly serialized (vitest.db.config.ts:
+ * fileParallelism false, maxWorkers 1), so nothing else can write through the
+ * gap. It hides nothing: the cutoff's own behaviour is asserted against real
+ * rows in interest-signup-cutoff.db.test.ts, which is where it belongs.
+ */
 async function createInterest(intakeId: string, tenantId: string, email: string): Promise<string> {
   const minted = mintPriorityToken();
-  const [row] = await sql<{ id: string }>(
-    `INSERT INTO event_interest (tenant_id, intake_id, name, email, token_hash, token_prefix)
-     VALUES ($1, $2, 'Test Interest', $3, $4, $5) RETURNING id`,
-    [tenantId, intakeId, email, minted.tokenHash, minted.tokenPrefix],
-  );
-  made.interests.push(row.id);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `ALTER TABLE event_interest DISABLE TRIGGER trg_event_interest_signup_cutoff`,
+    );
+    const { rows } = await client.query(
+      `INSERT INTO event_interest (tenant_id, intake_id, name, email, token_hash, token_prefix)
+       VALUES ($1, $2, 'Test Interest', $3, $4, $5) RETURNING id`,
+      [tenantId, intakeId, email, minted.tokenHash, minted.tokenPrefix],
+    );
+    await client.query(
+      `ALTER TABLE event_interest ENABLE TRIGGER trg_event_interest_signup_cutoff`,
+    );
+    await client.query("COMMIT");
+    made.interests.push(rows[0].id as string);
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
   return minted.token;
 }
 

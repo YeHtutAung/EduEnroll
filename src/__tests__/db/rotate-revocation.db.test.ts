@@ -52,9 +52,18 @@ async function createTenant(): Promise<string> {
   return row.id;
 }
 
+/**
+ * priority_open_at is set an hour out, and has to be. The signup cutoff
+ * trigger (20260830120000_interest_signup_cutoff.sql) refuses an event_interest
+ * INSERT on an intake with no window, so a windowless intake can no longer
+ * hold the rows these tests rotate. An hour out is also what production looks
+ * like at the moment someone signs up, and it changes nothing under test:
+ * rotation is an UPDATE, which the cutoff deliberately does not touch.
+ */
 async function createIntake(tenantId: string): Promise<string> {
   const [row] = await sql<{ id: string }>(
-    `INSERT INTO intakes (tenant_id, name, year) VALUES ($1, 'Rotate test', 2026) RETURNING id`,
+    `INSERT INTO intakes (tenant_id, name, year, priority_open_at)
+     VALUES ($1, 'Rotate test', 2026, now() + interval '1 hour') RETURNING id`,
     [tenantId],
   );
   made.intakes.push(row.id);
