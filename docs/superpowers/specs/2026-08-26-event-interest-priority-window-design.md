@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-26
 **Status:** Approved (design), pending implementation plan
-**Revision:** v14 (2026-08-30) — incorporates five rounds of external review (Codex)
+**Revision:** v15 (2026-08-30) — incorporates five rounds of external review (Codex)
 
 ## Problem
 
@@ -497,6 +497,21 @@ reusing the honeypot convention from `src/app/api/public/enroll/route.ts`.
   it. Signup closes when the window opens: otherwise anyone could mint
   themselves a token at that moment and the head start would be available to
   the general public, defeating the feature.
+
+  **The trigger takes `FOR SHARE` on the intake row.** An unlocked read is
+  still a race, one step further out: the trigger can read a future
+  `priority_open_at`, an organiser can then move the window earlier and commit,
+  and the insert still commits against the stale snapshot — creating a valid
+  token after the cutoff it was supposed to respect.
+
+  `FOR SHARE` rather than `FOR UPDATE` is deliberate. The intake is only being
+  read, and share locks coexist, so concurrent signups to the same event do not
+  serialise against each other — which matters, because a priority window
+  opening is precisely when many people arrive at once. What it does block is
+  an `UPDATE` of that intake, which is the only writer that can invalidate the
+  check. `assert_priority_window_valid` already takes `FOR UPDATE` on the same
+  row when the window moves, so the two serialise correctly against each other,
+  and both reach for `intakes` first, so there is no lock-order inversion.
 
   **The route's check is not the enforcement.** A route that checks the time,
   then awaits a rate-limiter call and a lookup, then inserts, can admit a
