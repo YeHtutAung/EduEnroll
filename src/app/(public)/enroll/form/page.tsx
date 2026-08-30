@@ -552,6 +552,11 @@ function EnrollmentFormPage() {
     // Include honeypot value (server rejects if filled)
     const hpValue = (formData.__hp ?? "").trim();
 
+    // Priority-access token captured earlier from the URL fragment (see
+    // `[slug]/page.tsx`) and stashed in sessionStorage, keyed per slug. Sent
+    // only in this POST body — never as a query param or link href.
+    const priorityToken = slug ? sessionStorage.getItem(`pa_${slug}`) : null;
+
     // Build payload based on mode
     const payload = isCartMode
       ? {
@@ -560,6 +565,7 @@ function EnrollmentFormPage() {
           idempotency_key: idempotencyKeyRef.current,
           ...(messengerPsid ? { messenger_psid: messengerPsid } : {}),
           ...(hpValue ? { __hp: hpValue } : {}),
+          ...(priorityToken ? { priority_token: priorityToken } : {}),
         }
       : {
           class_id: classInfo!.id,
@@ -568,6 +574,7 @@ function EnrollmentFormPage() {
           quantity,
           ...(messengerPsid ? { messenger_psid: messengerPsid } : {}),
           ...(hpValue ? { __hp: hpValue } : {}),
+          ...(priorityToken ? { priority_token: priorityToken } : {}),
         };
 
     try {

@@ -38,7 +38,7 @@ interface EnrollmentInfo {
   auto_cancel_minutes?: number;
   telegram_bot_username?: string | null;
   payment_mode?: "bank_transfer" | "mmqr" | "stripe" | "paypay" | "hitpay";
-  mmqr_provider?: "abank" | "mmpay";
+  mmqr_provider?: "abank" | "mmpay" | "kbzpay";
   class_image_url?: string | null;
   items?: CartItem[] | null;
   payment?: {

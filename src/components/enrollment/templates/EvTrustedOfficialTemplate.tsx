@@ -236,11 +236,19 @@ export default function EvTrustedOfficialTemplate({
       .filter((cls) => (cart[cls.id] ?? 0) > 0)
       .map((cls) => ({ class_id: cls.id, quantity: cart[cls.id] }));
 
+    // Priority-access token captured earlier from the URL fragment (see
+    // `[slug]/page.tsx`) and stashed in sessionStorage, keyed per slug. Sent
+    // only in this POST body — never as a query param or link href.
+    const priorityToken = sessionStorage.getItem(`pa_${slug}`);
+
     try {
       const res = await fetch("/api/public/enroll", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items }),
+        body: JSON.stringify({
+          items,
+          ...(priorityToken ? { priority_token: priorityToken } : {}),
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message ?? "Enrollment failed.");

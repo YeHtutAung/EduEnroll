@@ -246,6 +246,7 @@ export interface Intake {
   slug: string; // stable URL slug, set once on creation (e.g. "april-2026")
   hero_image_url: string | null; // hero banner for public enrollment page
   status: IntakeStatus;
+  priority_open_at: string | null; // start of the interest head-start window, before public sale
   created_at: string;
 }
 

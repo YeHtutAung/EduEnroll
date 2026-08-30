@@ -52,6 +52,7 @@ interface PublicIntake {
   year: number;
   status: string;
   hero_image_url?: string | null;
+  priority_open_at?: string | null;
 }
 
 interface TenantLabels {
@@ -74,6 +75,9 @@ interface ApiResponse {
   classes: PublicClass[];
   labels?: TenantLabels;
   appearance?: Omit<TenantAppearance, "id" | "tenant_id" | "updated_at">;
+  // Tiers still behind the priority window (future enrollment_open_at). Drives
+  // whether the interest CTA is shown — see InterestBanner below.
+  priority_covered_class_ids?: string[];
 }
 
 interface ApiError {
@@ -212,6 +216,47 @@ function AllClassesFullPage({ intake, labels }: { intake: PublicIntake; labels: 
   );
 }
 
+// ─── Priority-window interest CTA ────────────────────────────────────────────
+//
+// Shown only when there is something to be early for: `priority_open_at` is
+// set and still in the future, AND at least one tier is still gated behind it
+// (priority_covered_class_ids non-empty). Once the window opens the endpoint
+// stops accepting signups, so the CTA must disappear at the same instant —
+// this mirrors the check in src/app/api/public/interest/route.ts exactly.
+
+function InterestBanner({
+  slug,
+  levels,
+  primaryColor,
+}: {
+  slug: string;
+  levels: string[];
+  primaryColor: string;
+}) {
+  const tierList = levels.join(", ");
+  return (
+    <div className="sticky bottom-0 z-40 border-t border-gray-200 bg-white/95 px-4 py-3 shadow-[0_-2px_10px_rgba(0,0,0,0.06)] backdrop-blur sm:px-6">
+      <div className="mx-auto flex max-w-4xl flex-col items-center justify-between gap-3 sm:flex-row">
+        <div className="text-center sm:text-left">
+          <p className="text-sm font-medium text-gray-900">
+            Get priority access to {tierList} before it opens to the public.
+          </p>
+          <p className="font-myanmar text-xs text-gray-500">
+            အများပြည်သူအတွက် မဖွင့်လှစ်မီ {tierList} အတွက် ဦးစားပေးအခွင့်အရေး ရယူပါ
+          </p>
+        </div>
+        <a
+          href={`/enroll/${slug}/interest`}
+          className="shrink-0 rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
+          style={{ backgroundColor: primaryColor }}
+        >
+          Register Interest / <span className="font-myanmar">စိတ်ဝင်စားမှု မှတ်ပုံတင်ရန်</span>
+        </a>
+      </div>
+    </div>
+  );
+}
+
 // ─── Template routing helpers ─────────────────────────────────────────────────
 
 function defaultTemplateForOrg(orgType: string): string {
@@ -237,6 +282,18 @@ function IntakeLandingContent() {
   const [data, setData] = useState<ApiResponse | null>(null);
   const [errorInfo, setErrorInfo] = useState<ApiError | null>(null);
   const [loading, setLoading] = useState(true);
+
+  // Capture the priority-access token from the URL fragment (never a query
+  // param — a fragment is never sent to the server, which is the whole
+  // reason the emailed link uses `#pa=` and not `?pa=`). Stash it in
+  // sessionStorage keyed by slug and strip it from the address bar
+  // immediately so it doesn't linger in history.
+  useEffect(() => {
+    const m = /(?:^|[#&])pa=([A-Za-z0-9_-]+)/.exec(window.location.hash);
+    if (!m) return;
+    sessionStorage.setItem(`pa_${params.slug}`, m[1]);
+    history.replaceState(null, "", window.location.pathname + window.location.search);
+  }, [params.slug]);
 
   useEffect(() => {
     async function fetchIntake() {
@@ -288,6 +345,18 @@ function IntakeLandingContent() {
   const tl = data.labels ?? DEFAULT_LABELS;
   const appearance = data.appearance ?? DEFAULT_APPEARANCE;
 
+  // Interest CTA eligibility — see InterestBanner's docblock for why both
+  // conditions are required.
+  const coveredClassIds = data.priority_covered_class_ids ?? [];
+  const priorityStillOpen = !!intake.priority_open_at && Date.parse(intake.priority_open_at) > Date.now();
+  const showInterestCta = priorityStillOpen && coveredClassIds.length > 0;
+  const coveredLevels = Array.from(
+    new Set(allClasses.filter((c) => coveredClassIds.includes(c.id)).map((c) => c.level)),
+  );
+  const interestBanner = showInterestCta ? (
+    <InterestBanner slug={params.slug} levels={coveredLevels} primaryColor={appearance.primary_color || "#2563eb"} />
+  ) : null;
+
   // All classes full — show generic full page
   const allFull = allClasses.length > 0 && allClasses.every((c) => c.seat_remaining === 0 || c.status === "full");
   if (allFull) return <PageShell><AllClassesFullPage intake={intake} labels={tl} /></PageShell>;
@@ -317,9 +386,13 @@ function IntakeLandingContent() {
       onSelect: handleSelectClass,
       onCartCheckout: handleCartCheckout,
     };
-    if (effectiveTemplateId === "ev-festival") return <EvFestivalTemplate {...eventProps} />;
-    if (effectiveTemplateId === "ev-corporate") return <EvCorporateTemplate {...eventProps} />;
-    return <EvLuxuryTemplate {...eventProps} />;
+    if (effectiveTemplateId === "ev-festival") {
+      return <><EvFestivalTemplate {...eventProps} />{interestBanner}</>;
+    }
+    if (effectiveTemplateId === "ev-corporate") {
+      return <><EvCorporateTemplate {...eventProps} />{interestBanner}</>;
+    }
+    return <><EvLuxuryTemplate {...eventProps} />{interestBanner}</>;
   }
 
   // ── Language school / default templates ───────────────────────
@@ -331,7 +404,11 @@ function IntakeLandingContent() {
     slug: params.slug,
     onSelectClass: handleSelectClass,
   };
-  if (effectiveTemplateId === "ls-modern") return <LsModernTemplate {...templateProps} />;
-  if (effectiveTemplateId === "ls-warm") return <LsWarmTemplate {...templateProps} />;
-  return <LsClassicTemplate {...templateProps} />;
+  if (effectiveTemplateId === "ls-modern") {
+    return <><LsModernTemplate {...templateProps} />{interestBanner}</>;
+  }
+  if (effectiveTemplateId === "ls-warm") {
+    return <><LsWarmTemplate {...templateProps} />{interestBanner}</>;
+  }
+  return <><LsClassicTemplate {...templateProps} />{interestBanner}</>;
 }
