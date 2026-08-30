@@ -13,6 +13,7 @@ import {
   EvCorporateTemplate,
 } from "@/components/enrollment/templates";
 import type { TemplateProps, EventTemplateProps } from "@/components/enrollment/templates";
+import { applyPriorityUnlock, capturePriorityToken } from "@/lib/interest/priorityUnlock";
 
 // Shell wrapper for non-template states (loading, error, coming-soon, etc.)
 function PageShell({ children }: { children: React.ReactNode }) {
@@ -288,11 +289,15 @@ function IntakeLandingContent() {
   // reason the emailed link uses `#pa=` and not `?pa=`). Stash it in
   // sessionStorage keyed by slug and strip it from the address bar
   // immediately so it doesn't linger in history.
+  //
+  // Held in state, not merely written to storage: the token decides whether a
+  // covered tier renders unlocked, so a render has to be able to see it. It is
+  // also read back unconditionally rather than only when a fragment is present,
+  // so a visitor who arrived by link earlier in the session and then navigated
+  // back to this page keeps their access.
+  const [priorityToken, setPriorityToken] = useState<string | null>(null);
   useEffect(() => {
-    const m = /(?:^|[#&])pa=([A-Za-z0-9_-]+)/.exec(window.location.hash);
-    if (!m) return;
-    sessionStorage.setItem(`pa_${params.slug}`, m[1]);
-    history.replaceState(null, "", window.location.pathname + window.location.search);
+    setPriorityToken(capturePriorityToken(params.slug));
   }, [params.slug]);
 
   useEffect(() => {
@@ -340,7 +345,19 @@ function IntakeLandingContent() {
 
   if (!data) return <PageShell><ErrorPage message="Unknown error" /></PageShell>;
 
-  const { intake, classes: allClasses } = data;
+  const { intake, classes: rawClasses } = data;
+
+  // Lift the "not open yet" shutter on covered tiers for a token holder whose
+  // window has opened. Applied before the level filter so the flag is present
+  // whichever subset ends up rendered, and applied here rather than in the API
+  // because it depends on this visitor's sessionStorage, which the server
+  // cannot see. The database gate remains the authority at submit.
+  const allClasses = applyPriorityUnlock(rawClasses, {
+    priorityOpenAt: intake.priority_open_at,
+    coveredClassIds: data.priority_covered_class_ids ?? [],
+    token: priorityToken,
+  });
+
   const classes = levelFilter ? allClasses.filter((c) => c.level === levelFilter) : allClasses;
   const tl = data.labels ?? DEFAULT_LABELS;
   const appearance = data.appearance ?? DEFAULT_APPEARANCE;
