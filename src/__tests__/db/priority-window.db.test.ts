@@ -108,43 +108,96 @@ async function createClass(
 /**
  * Returns the raw token; the row stores only its hash, as production does.
  *
- * The signup cutoff trigger (20260830120000_interest_signup_cutoff.sql)
- * refuses an INSERT once the intake's window has opened, and refuses one on an
- * intake with no window at all — correctly, because in production every row
- * was created while the window was still in the future. Most fixtures in this
- * file need the state an hour later: a row that already exists on an intake
- * whose window is open, which is precisely what the gate is for.
+ * Most fixtures below need a row on an intake whose window has already opened,
+ * or has none at all — the state every real signup is in an hour later. The
+ * signup cutoff trigger (20260830120000_interest_signup_cutoff.sql) forbids
+ * CREATING a row in that state, and rightly so: in production every row is
+ * written while the window is still in the future. Only the creation path is
+ * closed, so the row is built here the way production builds it — by moving
+ * the schedule around the insert rather than by suspending the rule.
  *
- * Producing that by moving the window forwards for the insert and back
- * afterwards is not available here. The intake-side window trigger requires
- * priority_open_at <= every tier's enrollment_open_at, and several fixtures
- * below have tiers whose sale time is already past, so for those there is no
- * future value that satisfies both triggers at once.
+ * The order is the whole trick. Every intermediate state satisfies the
+ * intake-side invariant (priority_open_at <= every tier's enrollment_open_at),
+ * so no trigger is disabled and every write goes through the front door:
  *
- * The cutoff is therefore suspended for the insert itself, inside a
- * transaction, and re-enabled before the commit — so a failure anywhere in
- * between rolls the disable back with everything else. Scoped to one named
- * trigger, and this suite is strictly serialized (vitest.db.config.ts:
- * fileParallelism false, maxWorkers 1), so nothing else can write through the
- * gap. It hides nothing: the cutoff's own behaviour is asserted against real
- * rows in interest-signup-cutoff.db.test.ts, which is where it belongs.
+ *   1. Any tier already on sale is moved a year out. Raising a tier's sale
+ *      time can never place it before priority_open_at, so this is always
+ *      valid, whatever the intake's window currently is.
+ *   2. priority_open_at is set to the earliest remaining tier sale time, or an
+ *      hour out when no tier has one. Future, so the cutoff admits the insert;
+ *      no later than any tier, so the window trigger is satisfied.
+ *   3. The row is inserted with the cutoff live.
+ *   4. priority_open_at is restored. From step 2 it can only move earlier, and
+ *      moving it earlier cannot violate the invariant.
+ *   5. The tiers from step 1 are restored. Valid because the caller's own end
+ *      state already satisfied the invariant — a class INSERT is checked by
+ *      the same trigger, so no fixture can ask for a state where it does not.
+ *
+ * All of it in one transaction, so a failure anywhere rolls the schedule back
+ * with the insert. The margin in step 1 keeps any tier left in place at least
+ * a minute out, so the window step 2 chooses is still open when the insert
+ * runs.
+ *
+ * One caution for future fixtures: step 1 and step 5 are ordinary UPDATEs on
+ * classes, so they fire trg_auto_reopen_class, which flips a 'full' tier to
+ * 'open' when it has seats left. No fixture in this file uses status 'full',
+ * so it cannot fire today; one that did would need to set the status back.
  */
 async function createInterest(intakeId: string, tenantId: string, email: string): Promise<string> {
   const minted = mintPriorityToken();
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query(
-      `ALTER TABLE event_interest DISABLE TRIGGER trg_event_interest_signup_cutoff`,
+
+    // 1. Tiers already on sale, out of the way.
+    const { rows: onSale } = await client.query(
+      `SELECT id, enrollment_open_at FROM classes
+        WHERE intake_id = $1
+          AND enrollment_open_at IS NOT NULL
+          AND enrollment_open_at <= now() + interval '1 minute'`,
+      [intakeId],
     );
+    for (const tier of onSale) {
+      await client.query(
+        `UPDATE classes SET enrollment_open_at = now() + interval '1 year' WHERE id = $1`,
+        [tier.id],
+      );
+    }
+
+    // 2. The window this signup happens in.
+    const {
+      rows: [before],
+    } = await client.query(
+      `SELECT i.priority_open_at,
+              (SELECT min(enrollment_open_at) FROM classes WHERE intake_id = i.id) AS earliest
+         FROM intakes i WHERE i.id = $1`,
+      [intakeId],
+    );
+    const openAt: Date = before.earliest ?? new Date(Date.now() + 3_600_000);
+    await client.query(`UPDATE intakes SET priority_open_at = $2 WHERE id = $1`, [
+      intakeId,
+      openAt,
+    ]);
+
+    // 3. The signup itself, with the cutoff live.
     const { rows } = await client.query(
       `INSERT INTO event_interest (tenant_id, intake_id, name, email, token_hash, token_prefix)
        VALUES ($1, $2, 'Test Interest', $3, $4, $5) RETURNING id`,
       [tenantId, intakeId, email, minted.tokenHash, minted.tokenPrefix],
     );
-    await client.query(
-      `ALTER TABLE event_interest ENABLE TRIGGER trg_event_interest_signup_cutoff`,
-    );
+
+    // 4 and 5. The schedule the caller asked for, restored in the safe order.
+    await client.query(`UPDATE intakes SET priority_open_at = $2 WHERE id = $1`, [
+      intakeId,
+      before.priority_open_at,
+    ]);
+    for (const tier of onSale) {
+      await client.query(`UPDATE classes SET enrollment_open_at = $2 WHERE id = $1`, [
+        tier.id,
+        tier.enrollment_open_at,
+      ]);
+    }
+
     await client.query("COMMIT");
     made.interests.push(rows[0].id as string);
   } catch (error) {
