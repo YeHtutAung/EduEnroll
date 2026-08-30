@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { formatCurrency, formatAmount } from "@/lib/utils";
+import { getCardState } from "./types";
 import type { EventTemplateProps, TemplateClass } from "./types";
 
 // ─── Seat badge ───────────────────────────────────────────────────────────────
@@ -55,15 +56,14 @@ function TicketCard({
   const maxTix = cls.max_tickets_per_person ?? 1;
   const [qty, setQty] = useState(1);
   const effectiveQty = cartMode ? (cartQty ?? 0) : qty;
-  const isFull = cls.status === "full" || cls.seat_remaining === 0;
-  const now = new Date();
-  const notYetOpen = cls.enrollment_open_at ? now < new Date(cls.enrollment_open_at) : false;
-  const alreadyClosed = cls.enrollment_close_at ? now > new Date(cls.enrollment_close_at) : false;
-  const isDisabled = isFull || notYetOpen || alreadyClosed;
+  // Card state comes from the shared helper rather than being recomputed here.
+  // This template used to inline the same four booleans, and that is exactly
+  // how it drifted: the priority window shipped, getCardState learned to honour
+  // priority_unlocked, and this copy went on locking token holders out.
+  const { isDisabled, overlayState } = getCardState(cls);
   const fmtOpts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "numeric" };
   const closeDate = cls.enrollment_close_at ? new Date(cls.enrollment_close_at).toLocaleDateString("en-GB", fmtOpts) : null;
   const openDate = cls.enrollment_open_at ? new Date(cls.enrollment_open_at).toLocaleDateString("en-GB", { ...fmtOpts, hour: "2-digit", minute: "2-digit" }) : null;
-  const overlayState = isFull ? "full" : notYetOpen ? "not_open" : alreadyClosed ? "closed" : null;
 
   return (
     <div
