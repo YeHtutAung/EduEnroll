@@ -20,6 +20,15 @@ import { mintPriorityToken } from "@/lib/interest/token";
 // leave the gap: reading a stale intake, and reading the transaction's clock
 // instead of the write's.
 //
+// S7 closes the third, and it is the only case here that needs two
+// connections racing rather than merely taking turns. S5 proves the trigger
+// re-reads a change that has ALREADY committed — which an unlocked read does
+// correctly under READ COMMITTED, so S5 passes with or without the lock. S7
+// is the interleaving that an unlocked read gets wrong: the organiser's move
+// is still uncommitted when the trigger looks, so the trigger sees the old
+// future window, admits the row, and only then does the organiser commit.
+// Covers 20260830120100_cutoff_locks_intake.sql.
+//
 // S4 is the counterweight. The trigger must NOT fire on UPDATE: rotation is
 // an UPDATE, and someone already on the list has to be able to recover a lost
 // link during the window. A cutoff that also stopped resend would be a
@@ -280,6 +289,122 @@ describe("S. event_interest signup cutoff", () => {
       await c1.end();
     }
 
+    expect(await countInterest(intakeId)).toBe(0);
+  });
+
+  it("S7 refuses a signup that read the window while an organiser was already moving it", async () => {
+    // THE test for the lock. Everything above this line passes against a
+    // trigger that reads the intake without one — including S5, which only
+    // proves the trigger re-reads a change that has already COMMITTED. This
+    // is the interleaving where the change has not:
+    //
+    //   B: BEGIN; UPDATE intakes SET priority_open_at = <past>   -- open
+    //   A:        INSERT event_interest  -- trigger reads the intake
+    //   B: COMMIT
+    //   A: commits
+    //
+    // Unlocked, A's trigger reads the last committed value — the OLD one, an
+    // hour in the future — admits the row, and a valid priority token exists
+    // for a window that had already been moved into the past. Neither
+    // transaction saw the other and neither was wrong at any instant.
+    //
+    // FOR SHARE makes step A wait on step B instead of reading around it, and
+    // a READ COMMITTED locking read re-evaluates against the version it was
+    // blocked on — so once B commits, A sees the new priority_open_at and
+    // raises. Measured on both bodies: locked, A waits ~818ms and is REFUSED
+    // with nothing written; unlocked, A also waits ~818ms (see the note on the
+    // "blocked" assertion — a different lock, taken too late to matter) and is
+    // then ADMITTED. Same wait, opposite outcome, which is why the outcome is
+    // the assertion this test rests on.
+    //
+    // Note which session is which. B is the organiser and moves the window
+    // through a real UPDATE on intakes, so it fires
+    // trg_intakes_assert_priority_window, which takes FOR UPDATE on the same
+    // row. This test therefore exercises the two lock-takers against each
+    // other for real: if the ordering were inverted they would deadlock here
+    // rather than serialise, which the statement_timeout below turns into a
+    // red test instead of a hung suite.
+    const tenantId = await createTenant();
+    const intakeId = await createIntake(tenantId, hoursFromNow(1));
+
+    const organiser = new Client({ connectionString: process.env.DATABASE_URL });
+    const signup = new Client({ connectionString: process.env.DATABASE_URL });
+    await organiser.connect();
+    await signup.connect();
+    // A per-step ceiling, the same device E1 uses in priority-window.db.test.ts:
+    // a deadlock or a broken lock ordering fails this test instead of hanging
+    // the whole suite. Generous relative to the ~800ms the signup actually
+    // waits, so it can only fire on a genuine ordering fault.
+    await organiser.query(`SET statement_timeout = '5s'`);
+    await signup.query(`SET statement_timeout = '5s'`);
+
+    try {
+      // B: the organiser moves the window into the past, and holds it open.
+      // This is the synchronisation point — the whole race is what the signup
+      // is allowed to see while this transaction is uncommitted.
+      await organiser.query("BEGIN");
+      await organiser.query(`UPDATE intakes SET priority_open_at = $2 WHERE id = $1`, [
+        intakeId,
+        hoursFromNow(-1),
+      ]);
+
+      // A: the signup, issued strictly inside B's open transaction. Resolved
+      // rather than thrown so the outcome can be inspected after B commits —
+      // an immediate rejection and a rejection after the wait are different
+      // results and this test has to tell them apart.
+      const aPromise = insertInterest(intakeId, tenantId, signup).then(
+        () => ({ outcome: "admitted" as const, message: "" }),
+        (e: Error) => ({ outcome: "refused" as const, message: e.message }),
+      );
+
+      const raced = await Promise.race([
+        aPromise,
+        new Promise<{ outcome: "blocked"; message: string }>((resolve) =>
+          setTimeout(() => resolve({ outcome: "blocked", message: "" }), 800),
+        ),
+      ]);
+
+      // A SYNCHRONISATION DEVICE, not evidence of which lock is blocking —
+      // the same caveat E1 carries in priority-window.db.test.ts, and for the
+      // same reason. It guarantees only that A is still queued, not yet
+      // resolved, at the moment we choose to commit B, which is what makes
+      // this a genuine race rather than two statements in program order.
+      //
+      // Measured directly against the unlocked body: A blocks here anyway,
+      // for ~818ms, on transactionid/ShareLock. The blocker is not this
+      // trigger's read. B's UPDATE fires trg_intakes_assert_priority_window,
+      // whose assert_priority_window_valid() takes FOR UPDATE on the same
+      // intake row; A's insert then hits the composite FK to intakes, which
+      // takes FOR KEY SHARE, and FOR KEY SHARE does conflict with FOR UPDATE.
+      // Confirmed by removing that trigger from the picture: with the mutant
+      // installed and B updating only intakes.name — which the trigger
+      // short-circuits, so no FOR UPDATE is taken — A completes in 5ms and
+      // does not block at all.
+      //
+      // The distinction matters. That FK wait happens at the AFTER-trigger
+      // stage, long after the BEFORE trigger has already made its decision on
+      // the stale value, so it blocks without protecting anything: released,
+      // the unlocked body returns "admitted". The assertion that actually
+      // carries this test is the outcome below.
+      expect(
+        raced.outcome,
+        "the signup must still be queued when the organiser commits — otherwise this is not a race",
+      ).toBe("blocked");
+
+      await organiser.query("COMMIT"); // the window is now, committed, in the past
+
+      // And the outcome, which is what actually carries the test: released
+      // from the lock, the trigger must re-read the row it waited on rather
+      // than the snapshot it started with.
+      const a = await aPromise;
+      expect(a.outcome).toBe("refused");
+      expect(a.message).toMatch(/priority window for intake .* has already opened/);
+    } finally {
+      await organiser.end();
+      await signup.end();
+    }
+
+    // Refused, not merely reported.
     expect(await countInterest(intakeId)).toBe(0);
   });
 });
