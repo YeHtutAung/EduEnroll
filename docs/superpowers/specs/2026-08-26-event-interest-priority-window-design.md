@@ -2,7 +2,7 @@
 
 **Date:** 2026-08-26
 **Status:** Approved (design), pending implementation plan
-**Revision:** v13 (2026-08-29) — incorporates five rounds of external review (Codex)
+**Revision:** v14 (2026-08-30) — incorporates five rounds of external review (Codex)
 
 ## Problem
 
@@ -274,8 +274,14 @@ table exists to count, not to build a log of who visited. A keyed MAC rather
 than `sha256(ip + salt)` — concatenating a salt leaves the delimiter and
 ordering as unstated conventions that a later edit can silently change, while
 HMAC states the construction. `canonical_ip` is normalised first (IPv6
-lowercased and compressed, IPv4-mapped forms reduced) so one client cannot
-occupy several buckets. The secret lives in an environment variable alongside
+lowercased **and compressed to RFC 5952 form**, IPv4-mapped forms reduced) so
+one client cannot occupy several buckets.
+
+Compression is not cosmetic. A single IPv6 address has many valid textual
+forms — leading zeros in any group, and `::` at any run of zeros — so lowercase
+alone lets one client mint a fresh bucket per spelling and walk straight past
+the limit. That is a bypass, not a degradation, and it is the whole reason the
+limiter exists. The secret lives in an environment variable alongside
 the others.
 
 Two limits, both checked before any insert or send:
@@ -491,6 +497,18 @@ reusing the honeypot convention from `src/app/api/public/enroll/route.ts`.
   it. Signup closes when the window opens: otherwise anyone could mint
   themselves a token at that moment and the head start would be available to
   the general public, defeating the feature.
+
+  **The route's check is not the enforcement.** A route that checks the time,
+  then awaits a rate-limiter call and a lookup, then inserts, can admit a
+  request before the window and create the row after it — the cutoff is a
+  moment in time and those awaits are not free. A `BEFORE INSERT` trigger on
+  `event_interest` re-reads the intake and raises once the window has opened,
+  making the check and the write one operation and closing it for every writer,
+  not just this route.
+
+  The trigger fires on `INSERT` only. Rotation is an `UPDATE`, so someone
+  already on the list can still recover a lost link during the window — they
+  are not signing up, they are re-reading something they were already owed.
 - The intake's status must be `open` or `draft`. `intake_status` is
   `('draft','open','closed')` — there is no `cancelled` value, despite earlier
   revisions of this document referring to one. Written as an allowlist rather
