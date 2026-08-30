@@ -1007,3 +1007,130 @@ describe("E. the revoke race, two connections", () => {
     expect(await seatRemaining(classId)).toBe(5);
   });
 });
+
+// ════════════════════════════════════════════════════════════════════════════
+// F. Privilege boundary — the same writes, as service_role
+// ════════════════════════════════════════════════════════════════════════════
+//
+// Everything above runs on `pool`, which connects as DATABASE_URL's role — an
+// owner-privileged one, and the only role that can always make the nested
+// call. So groups A-E stayed green straight through the outage that
+// 20260830130000_priority_window_triggers_secdef.sql repairs:
+//
+//   20260827120000 revoked EXECUTE on assert_priority_window_valid(uuid) from
+//   every client role, correctly, but left the two trigger wrappers SECURITY
+//   INVOKER. The PERFORM inside them is privilege-checked against whoever is
+//   writing, so every INSERT into intakes and classes failed with
+//   "42501 permission denied for function assert_priority_window_valid".
+//   Creating an event, and creating a ticket tier, were impossible for every
+//   role the application actually uses, for three days.
+//
+// The migration's own guards assert prosecdef in the catalog. That proves the
+// wrappers are MARKED SECURITY DEFINER; it cannot prove that a service_role
+// write reaches the helper and comes back. Only a write as that role does.
+
+describe("F. privilege boundary, as service_role", () => {
+  // Fail loudly rather than testing something else by accident. Without
+  // BYPASSRLS, F1 and F2 would go red on an RLS policy instead of the function
+  // privilege — a red for the wrong reason, indistinguishable from the real
+  // defect, which is the failure mode setup.ts exists to prevent.
+  beforeAll(async () => {
+    const [role] = await sql<{ rolbypassrls: boolean }>(
+      `SELECT rolbypassrls FROM pg_roles WHERE rolname = 'service_role'`,
+    );
+    if (!role) {
+      throw new Error(
+        "service_role does not exist in this stack, so F cannot test the boundary it exists for.",
+      );
+    }
+    if (!role.rolbypassrls) {
+      throw new Error(
+        "service_role lacks BYPASSRLS here: F1/F2 would fail on an RLS policy rather than on the " +
+          "function privilege, and would then pass again the moment someone re-broke the privilege.",
+      );
+    }
+  });
+
+  /**
+   * Runs `fn` on a dedicated connection that has SET ROLE service_role.
+   *
+   * Dedicated, not pooled: SET ROLE persists for the life of the session, so a
+   * pooled connection handed back with the role still set would silently
+   * demote unrelated tests later in the run. Group E takes its own Clients for
+   * the same reason.
+   */
+  async function asServiceRole<T>(fn: (c: Client) => Promise<T>): Promise<T> {
+    const client = new Client({ connectionString: process.env.DATABASE_URL });
+    await client.connect();
+    try {
+      await client.query("SET ROLE service_role");
+      return await fn(client);
+    } finally {
+      await client.end();
+    }
+  }
+
+  it("F1 service_role can create an intake, reaching the locked-down helper", async () => {
+    const tenantId = await createTenant();
+
+    const intakeId = await asServiceRole(async (c) => {
+      const { rows } = await c.query(
+        `INSERT INTO intakes (tenant_id, name, year, priority_open_at)
+         VALUES ($1, 'Test intake', 2026, NULL) RETURNING id`,
+        [tenantId],
+      );
+      return rows[0].id as string;
+    });
+    made.intakes.push(intakeId);
+
+    expect(intakeId).toEqual(expect.any(String));
+  });
+
+  it("F2 service_role can create a ticket tier under it", async () => {
+    const tenantId = await createTenant();
+    const intakeId = await createIntake(tenantId, null);
+
+    const classId = await asServiceRole(async (c) => {
+      const { rows } = await c.query(
+        `INSERT INTO classes
+           (tenant_id, intake_id, level, fee_amount, seat_total, seat_remaining, enrollment_open_at, status)
+         VALUES ($1, $2, $3, 100, 10, 10, NULL, 'draft'::class_status) RETURNING id`,
+        [tenantId, intakeId, `L${uniq()}`],
+      );
+      return rows[0].id as string;
+    });
+    made.classes.push(classId);
+
+    expect(classId).toEqual(expect.any(String));
+  });
+
+  it("F3 still refuses an invalid schedule as service_role", async () => {
+    // The case that proves the helper RAN rather than being skipped. F1 and F2
+    // would both pass if availability had been restored by dropping the
+    // triggers, which would restore it by deleting the invariant.
+    const tenantId = await createTenant();
+    const intakeId = await createIntake(tenantId, null);
+    await createClass(intakeId, tenantId, { enrollmentOpenAt: hoursFromNow(1) });
+
+    await expect(
+      asServiceRole((c) =>
+        c.query(`UPDATE intakes SET priority_open_at = $2 WHERE id = $1`, [
+          intakeId,
+          hoursFromNow(2),
+        ]),
+      ),
+    ).rejects.toThrow(/priority_open_at must not be later/);
+  });
+
+  it("F4 still refuses a direct call to the helper as service_role", async () => {
+    // The property the repair had to preserve. Granting EXECUTE back to
+    // service_role would have turned F1-F3 green too, while handing every
+    // client role a function that takes FOR UPDATE on any intake id it names.
+    const tenantId = await createTenant();
+    const intakeId = await createIntake(tenantId, null);
+
+    await expect(
+      asServiceRole((c) => c.query(`SELECT assert_priority_window_valid($1)`, [intakeId])),
+    ).rejects.toThrow(/permission denied for function assert_priority_window_valid/);
+  });
+});
