@@ -41,7 +41,8 @@
     "recharts": "^3.7.0",
     "resend": "^6.9.3",
     "stripe": "^22.0.2",
-    "supabase": "^2.77.0"
+    "supabase": "^2.77.0",
+    "undici": "^6.28.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
