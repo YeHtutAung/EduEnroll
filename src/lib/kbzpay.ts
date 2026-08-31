@@ -175,15 +175,27 @@ async function call(
   };
   request.sign = sign(request, APP_KEY());
 
-  let res: Response;
+  // The status check and the body read stay inside the guard. The timeout
+  // signal remains armed until the body is consumed, so a response whose
+  // headers arrive and whose body then stalls rejects here — outside it, that
+  // rejection would escape call() and surface as a 500 at the payment route
+  // instead of a handled { ok: false }. Malformed JSON lands here too.
+  let json: { Response?: Record<string, KbzField> } | undefined;
   try {
-    res = await fetch(`${BASE()}/${path}`, {
+    const res = await fetch(`${BASE()}/${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ Request: request }),
       signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
       dispatcher: egressDispatcher(),
     } as RequestInit & { dispatcher?: ProxyAgent });
+
+    if (!res.ok) {
+      console.error(`[kbzpay] ${method} HTTP ${res.status}`);
+      return { ok: false };
+    }
+
+    json = (await res.json()) as { Response?: Record<string, KbzField> };
   } catch (err) {
     // Never log the signing input — it ends with the app key.
     const timedOut = err instanceof Error && err.name === "TimeoutError";
@@ -194,12 +206,6 @@ async function call(
     return { ok: false };
   }
 
-  if (!res.ok) {
-    console.error(`[kbzpay] ${method} HTTP ${res.status}`);
-    return { ok: false };
-  }
-
-  const json = (await res.json()) as { Response?: Record<string, KbzField> };
   const body = json?.Response;
   if (!body) return { ok: false };
 
