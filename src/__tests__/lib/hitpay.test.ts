@@ -40,7 +40,7 @@ describe("hitpay.parseWebhookPayload", () => {
     const result = hitpay.parseWebhookPayload(payload);
     expect(result.id).toBe("req-abc");
     expect(result.status).toBe("completed");
-    expect(result.payments[0].payment_type).toBe("paynow_online");
+    expect(result.payments?.[0]?.payment_type).toBe("paynow_online");
   });
 
   it("throws on invalid JSON", () => {

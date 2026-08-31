@@ -87,6 +87,7 @@ describe("precreate", () => {
       amount: 1,
       title: "t",
       notifyUrl: "https://x/y",
+      timeoutMinutes: 30,
     });
     expect(res.ok).toBe(false);
   });
@@ -100,6 +101,7 @@ describe("precreate", () => {
       amount: 1,
       title: "t",
       notifyUrl: "https://x/y",
+      timeoutMinutes: 30,
     });
     expect(res.ok).toBe(false);
   });
@@ -113,6 +115,7 @@ describe("precreate", () => {
       amount: 1,
       title: "t",
       notifyUrl: "https://x/y",
+      timeoutMinutes: 30,
     });
     expect(res.ok).toBe(false);
   });
