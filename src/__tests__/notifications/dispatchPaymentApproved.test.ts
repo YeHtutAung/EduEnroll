@@ -62,7 +62,7 @@ const BASE_INPUT = {
   classId: "class-1",
   tenantName: "Nihon Moment",
   orgType: "language_school",
-  logoUrl: null,
+  logoUrl: undefined,
   smsOnPayment: true,
 } as const;
 
@@ -102,7 +102,7 @@ describe("dispatchPaymentApproved", () => {
       feeFormatted: "50,000 MMK",
       orgType: "language_school",
       tenantName: "Nihon Moment",
-      logoUrl: null,
+      logoUrl: undefined,
     });
   });
 

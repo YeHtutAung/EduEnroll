@@ -17,7 +17,7 @@ const noSleep = () => Promise.resolve();
 
 function seq(...responses: (Response | Error)[]) {
   let i = 0;
-  return vi.fn(async () => {
+  return vi.fn<(input: RequestInfo | URL, init?: RequestInit) => Promise<Response>>(async () => {
     const r = responses[Math.min(i++, responses.length - 1)];
     if (r instanceof Error) throw r;
     return r;
@@ -122,6 +122,6 @@ describe("verifyStripeReturn — no outcome leaves a spinner", () => {
   it("session id is URI-encoded into the query", async () => {
     const fetchImpl = seq(ok({ status: "confirmed" }));
     await verifyStripeReturn({ sessionId: "cs 1&x=y", fetchImpl, sleep: noSleep });
-    expect(fetchImpl.mock.calls[0][0]).toContain("session_id=cs%201%26x%3Dy");
+    expect(String(fetchImpl.mock.calls[0][0])).toContain("session_id=cs%201%26x%3Dy");
   });
 });
