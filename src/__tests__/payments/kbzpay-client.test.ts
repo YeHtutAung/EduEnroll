@@ -119,6 +119,50 @@ describe("precreate", () => {
     });
     expect(res.ok).toBe(false);
   });
+
+  it("reports failure when the response body stalls past the timeout", async () => {
+    const { precreate } = await import("@/lib/kbzpay");
+    // Headers arrive, then the body never completes: the abort signal is still
+    // armed, so json() rejects after fetch() has already resolved.
+    const stalled = new Error("The operation was aborted due to timeout");
+    stalled.name = "TimeoutError";
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw stalled;
+      },
+    });
+
+    const res = await precreate({
+      merchOrderId: "KBZ_x_y",
+      amount: 1,
+      title: "t",
+      notifyUrl: "https://x/y",
+      timeoutMinutes: 30,
+    });
+    expect(res).toEqual({ ok: false });
+  });
+
+  it("reports failure on a malformed response body rather than throwing", async () => {
+    const { precreate } = await import("@/lib/kbzpay");
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new SyntaxError("Unexpected token < in JSON at position 0");
+      },
+    });
+
+    const res = await precreate({
+      merchOrderId: "KBZ_x_y",
+      amount: 1,
+      title: "t",
+      notifyUrl: "https://x/y",
+      timeoutMinutes: 30,
+    });
+    expect(res).toEqual({ ok: false });
+  });
 });
 
 describe("queryOrder", () => {

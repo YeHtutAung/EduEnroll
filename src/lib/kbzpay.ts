@@ -6,6 +6,7 @@
 // against the vectors the provider publishes.
 
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
+import { ProxyAgent } from "undici";
 
 export type KbzField = string | number | null | undefined | unknown;
 
@@ -119,6 +120,32 @@ const BASE = () =>
     ? "https://api.kbzpay.com/payment/gateway"
     : "https://api-uat.kbzpay.com/payment/gateway/uat";
 
+// ── Egress proxy and timeout ───────────────────────────────────────────────
+
+// KBZPay allowlists caller IP addresses and silently drops everything else —
+// an unregistered source sees a connection timeout, not a rejection. Vercel
+// functions egress from a shared, rotating pool, so there is no address we can
+// register. KBZPAY_PROXY_URL points at a host holding a reserved static IP,
+// through which this client's traffic — and only this client's traffic — is
+// routed. Unset means direct egress, exactly as before.
+//
+// The dispatcher is passed per request on purpose. Node ignores HTTP(S)_PROXY,
+// and setGlobalDispatcher() would drag Supabase and every other integration
+// through the proxy too.
+let cachedProxy: ProxyAgent | null | undefined;
+
+function egressDispatcher(): ProxyAgent | undefined {
+  if (cachedProxy === undefined) {
+    const url = process.env.KBZPAY_PROXY_URL;
+    cachedProxy = url ? new ProxyAgent(url) : null;
+  }
+  return cachedProxy ?? undefined;
+}
+
+// A blackholed request would otherwise hang until the platform kills the
+// function, leaving the payer watching a spinner.
+const CALL_TIMEOUT_MS = 15_000;
+
 function nonce(): string {
   return randomBytes(16).toString("hex").toUpperCase();
 }
@@ -148,25 +175,37 @@ async function call(
   };
   request.sign = sign(request, APP_KEY());
 
-  let res: Response;
+  // The status check and the body read stay inside the guard. The timeout
+  // signal remains armed until the body is consumed, so a response whose
+  // headers arrive and whose body then stalls rejects here — outside it, that
+  // rejection would escape call() and surface as a 500 at the payment route
+  // instead of a handled { ok: false }. Malformed JSON lands here too.
+  let json: { Response?: Record<string, KbzField> } | undefined;
   try {
-    res = await fetch(`${BASE()}/${path}`, {
+    const res = await fetch(`${BASE()}/${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ Request: request }),
-    });
+      signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+      dispatcher: egressDispatcher(),
+    } as RequestInit & { dispatcher?: ProxyAgent });
+
+    if (!res.ok) {
+      console.error(`[kbzpay] ${method} HTTP ${res.status}`);
+      return { ok: false };
+    }
+
+    json = (await res.json()) as { Response?: Record<string, KbzField> };
   } catch (err) {
     // Never log the signing input — it ends with the app key.
-    console.error(`[kbzpay] ${method} transport error:`, err instanceof Error ? err.message : err);
+    const timedOut = err instanceof Error && err.name === "TimeoutError";
+    console.error(
+      `[kbzpay] ${method} transport error${timedOut ? " (timeout — check IP allowlisting)" : ""}:`,
+      err instanceof Error ? err.message : err,
+    );
     return { ok: false };
   }
 
-  if (!res.ok) {
-    console.error(`[kbzpay] ${method} HTTP ${res.status}`);
-    return { ok: false };
-  }
-
-  const json = (await res.json()) as { Response?: Record<string, KbzField> };
   const body = json?.Response;
   if (!body) return { ok: false };
 
