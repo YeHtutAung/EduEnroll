@@ -3,6 +3,22 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { verifySign, queryOrder, type KbzField } from "@/lib/kbzpay";
 import { settleMmqrPayment } from "@/server/payments/settleMmqrPayment";
 
+// Same 10s platform cap as the creation route. Declared rather than
+// inherited so the limit is visible next to the gateway call it bounds.
+export const maxDuration = 10;
+
+/**
+ * How much of the function budget the gateway call may consume.
+ *
+ * Deliberately smaller than the creation route's. Settlement runs AFTER the
+ * call here and it is the write path — it marks the payment verified,
+ * decrements seats and issues the ticket. Letting queryorder run its full
+ * timeout regardless of time already spent could leave under a second for
+ * that, and being interrupted mid-settlement is far worse than failing before
+ * the gateway call. The remainder of the 10s cap is reserved for it.
+ */
+const GATEWAY_BUDGET_MS = 6_000;
+
 // ─── POST /api/webhooks/kbzmmqr ─────────────────────────────────────────────
 // KBZPay asynchronous payment notification.
 // Design: docs/superpowers/specs/2026-08-20-kbzpay-mmqr-integration-design.md §5.2
@@ -19,6 +35,10 @@ const ack = () =>
   });
 
 export async function POST(request: NextRequest) {
+  // Anchored at request start, so the gateway call is bounded by time actually
+  // remaining rather than by its own timeout in isolation.
+  const budget = { deadlineMs: Date.now() + GATEWAY_BUDGET_MS };
+
   // ── 1. Parse ───────────────────────────────────────────────
   let fields: Record<string, KbzField>;
   try {
@@ -69,7 +89,7 @@ export async function POST(request: NextRequest) {
   // outbound call makes a signature bug a nuisance rather than a route to free
   // enrollments. Settlement therefore uses the QUERY's values, never the
   // callback's.
-  const confirmed = await queryOrder(merchOrderId);
+  const confirmed = await queryOrder(merchOrderId, budget);
 
   if (!confirmed.ok) {
     console.error(`[kbzpay-webhook] queryOrder unreachable for ${merchOrderId}`);

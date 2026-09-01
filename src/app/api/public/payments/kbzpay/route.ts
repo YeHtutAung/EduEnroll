@@ -6,6 +6,21 @@ import { precreate, buildMerchOrderId } from "@/lib/kbzpay";
 import { resolveKbzpayOrder } from "@/server/payments/resolveKbzpayOrder";
 import { orderWindow } from "@/server/payments/kbzpayOrderWindow";
 
+// The Vercel plan caps a function at 10s and it cannot be raised, so declare
+// it rather than inherit it silently. This route can make FOUR sequential
+// gateway calls (queryorder, closeorder, queryorder, precreate), and the old
+// 15s per-call timeout was longer than the whole function budget — so on a
+// blocked connection the platform killed the function at ~10s and returned a
+// raw 502, and the handled error below could never run. Seen twice on staging
+// at 10.87s and 10.82s.
+export const maxDuration = 10;
+
+/**
+ * How much of the function budget the gateway may consume, leaving room for
+ * the database work and the response after it.
+ */
+const GATEWAY_BUDGET_MS = 8_000;
+
 // ─── POST /api/public/payments/kbzpay ───────────────────────────────────────
 // Creates a KBZPay MMQR order and returns a QR string for the user to scan.
 // Design: docs/superpowers/specs/2026-08-20-kbzpay-mmqr-integration-design.md §5.1
@@ -91,6 +106,9 @@ const gatewayError = () =>
   fail(502, "Failed to generate QR code. Please try again.", "Payment Gateway Error");
 
 export async function POST(request: NextRequest) {
+  // One deadline shared by every gateway call this request makes.
+  const budget = { deadlineMs: Date.now() + GATEWAY_BUDGET_MS };
+
   const tenantId = await resolveTenantId();
   if (tenantId instanceof NextResponse) return tenantId;
 
@@ -228,7 +246,7 @@ export async function POST(request: NextRequest) {
   // ── 7. unresolved → resolve against KBZPay, then swap ──────
   if (claimed.outcome === "unresolved") {
     const oldRef = claimed.ref!;
-    const resolution = await resolveKbzpayOrder({ oldRef, source: "create" });
+    const resolution = await resolveKbzpayOrder({ oldRef, source: "create", budget });
 
     if (resolution.kind === "already_paid") {
       // §5.1a — the browser contract, not the settlement object (R10/R11/R12).
@@ -305,7 +323,7 @@ export async function POST(request: NextRequest) {
     title: `Payment for ${enrollment.enrollment_ref}`,
     notifyUrl,
     timeoutMinutes: windowMinutes,
-  });
+  }, budget);
 
   if (!created.ok) {
     // Deliberately NOT marked FAILED. A failed call proves our REQUEST failed,

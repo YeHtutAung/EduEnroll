@@ -143,7 +143,10 @@ describe("server-side confirmation (§7)", () => {
   it("confirms via queryOrder before settling", async () => {
     await POST(signedRequest());
 
-    expect(mockQueryOrder).toHaveBeenCalledWith(REF);
+    expect(mockQueryOrder.mock.calls[0][0]).toBe(REF);
+    // Bounded by time remaining, not by its own timeout in isolation, so
+    // settlement after it cannot be cut off by the function cap.
+    expect(mockQueryOrder.mock.calls[0][1]).toMatchObject({ deadlineMs: expect.any(Number) });
     expect(mockQueryOrder.mock.invocationCallOrder[0]).toBeLessThan(
       mockSettle.mock.invocationCallOrder[0],
     );

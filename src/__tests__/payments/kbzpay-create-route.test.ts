@@ -208,7 +208,7 @@ describe("ordering — row before provider call (R2)", () => {
   it("builds notify_url from platformOrigin, never the inbound Host", async () => {
     await POST(req());
 
-    expect(mockPrecreate).toHaveBeenCalledWith(
+    expect(mockPrecreate.mock.calls[0][0]).toEqual(
       expect.objectContaining({ notifyUrl: "https://www.kuunyi.com/api/webhooks/kbzmmqr" }),
     );
   });
@@ -228,7 +228,7 @@ describe("KBZPAY_NOTIFY_ORIGIN", () => {
 
     await POST(req());
 
-    expect(mockPrecreate).toHaveBeenCalledWith(
+    expect(mockPrecreate.mock.calls[0][0]).toEqual(
       expect.objectContaining({ notifyUrl: "https://brave.kuunyi.com/api/webhooks/kbzmmqr" }),
     );
   });
@@ -240,7 +240,7 @@ describe("KBZPAY_NOTIFY_ORIGIN", () => {
 
     await POST(req());
 
-    expect(mockPrecreate).toHaveBeenCalledWith(
+    expect(mockPrecreate.mock.calls[0][0]).toEqual(
       expect.objectContaining({ notifyUrl: "https://brave.kuunyi.com/api/webhooks/kbzmmqr" }),
     );
   });
@@ -248,7 +248,7 @@ describe("KBZPAY_NOTIFY_ORIGIN", () => {
   it("falls back to platformOrigin when unset", async () => {
     await POST(req());
 
-    expect(mockPrecreate).toHaveBeenCalledWith(
+    expect(mockPrecreate.mock.calls[0][0]).toEqual(
       expect.objectContaining({ notifyUrl: "https://www.kuunyi.com/api/webhooks/kbzmmqr" }),
     );
   });
@@ -260,7 +260,7 @@ describe("KBZPAY_NOTIFY_ORIGIN", () => {
 
     await POST(req());
 
-    expect(mockPrecreate).toHaveBeenCalledWith(
+    expect(mockPrecreate.mock.calls[0][0]).toEqual(
       expect.objectContaining({ notifyUrl: "https://www.kuunyi.com/api/webhooks/kbzmmqr" }),
     );
   });
@@ -277,7 +277,7 @@ describe("KBZPAY_NOTIFY_ORIGIN", () => {
 
     await POST(req());
 
-    expect(mockPrecreate).toHaveBeenCalledWith(
+    expect(mockPrecreate.mock.calls[0][0]).toEqual(
       expect.objectContaining({ notifyUrl: "https://www.kuunyi.com/api/webhooks/kbzmmqr" }),
     );
   });

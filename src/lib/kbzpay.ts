@@ -206,7 +206,44 @@ function egressDispatcher(): ProxyAgent | undefined {
 
 // A blackholed request would otherwise hang until the platform kills the
 // function, leaving the payer watching a spinner.
-const CALL_TIMEOUT_MS = 15_000;
+//
+// 6s, not 15s. The old value was longer than the serverless function limit it
+// runs inside, which made it unreachable: on a blocked connection the platform
+// killed the function at ~10s and returned a raw 502, so the handled
+// { ok: false } path — and the friendly error built on it — could never run.
+// Observed twice on staging at 10.87s and 10.82s.
+const CALL_TIMEOUT_MS = 6_000;
+
+/**
+ * Below this, a call is not worth starting: it cannot plausibly complete, and
+ * beginning one risks the platform killing the function mid-flight instead of
+ * letting us answer.
+ */
+const MIN_CALL_MS = 1_000;
+
+export type CallBudget = {
+  /** Absolute epoch ms by which the whole request must be done. */
+  deadlineMs: number;
+};
+
+/**
+ * How long this call may take: its own timeout, or whatever is left of the
+ * request budget, whichever is smaller. Returns null when there is not enough
+ * left to bother.
+ *
+ * This exists because one request can make up to FOUR sequential gateway calls
+ * (queryorder, closeorder, queryorder, precreate) and the function budget is
+ * shared across all of them. Timing each call in isolation is what let the
+ * total overrun the platform limit.
+ */
+function timeoutFor(budget: CallBudget | undefined, now: number): number | null {
+  if (!budget) return CALL_TIMEOUT_MS;
+
+  const remaining = budget.deadlineMs - now;
+  if (remaining < MIN_CALL_MS) return null;
+
+  return Math.min(CALL_TIMEOUT_MS, remaining);
+}
 
 function nonce(): string {
   return randomBytes(16).toString("hex").toUpperCase();
@@ -225,7 +262,15 @@ async function call(
   version: string,
   bizContent: Record<string, KbzField>,
   extraCommon: Record<string, KbzField> = {},
+  budget?: CallBudget,
 ): Promise<CallResult> {
+  const timeout = timeoutFor(budget, Date.now());
+  if (timeout === null) {
+    // Answer rather than start something the platform will interrupt.
+    console.error(`[kbzpay] ${method} skipped: request budget exhausted`);
+    return { ok: false };
+  }
+
   const request: Record<string, KbzField> = {
     timestamp: Math.floor(Date.now() / 1000).toString(),
     method,
@@ -253,7 +298,7 @@ async function call(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ Request: request }),
-      signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+      signal: AbortSignal.timeout(timeout),
       dispatcher: egressDispatcher(),
     } as RequestInit & { dispatcher?: ProxyAgent });
 
@@ -322,7 +367,7 @@ function safeTimeoutMinutes(value: number): number {
   return Math.min(Math.max(Math.floor(value), 1), 120);
 }
 
-export async function precreate(p: PrecreateParams): Promise<PrecreateResult> {
+export async function precreate(p: PrecreateParams, budget?: CallBudget): Promise<PrecreateResult> {
   const r = await call(
     "precreate",
     "kbz.payment.precreate",
@@ -338,6 +383,7 @@ export async function precreate(p: PrecreateParams): Promise<PrecreateResult> {
       timeout_express: `${safeTimeoutMinutes(p.timeoutMinutes)}m`,
     },
     { notify_url: p.notifyUrl },
+    budget,
   );
 
   if (!r.ok || typeof r.body?.qrCode !== "string") return { ok: false };
@@ -376,12 +422,12 @@ export type QueryResult =
  * no terminal mmqr_status transition and no order-slot release may be decided
  * from local state; only from this call's answer.
  */
-export async function queryOrder(merchOrderId: string): Promise<QueryResult> {
+export async function queryOrder(merchOrderId: string, budget?: CallBudget): Promise<QueryResult> {
   const r = await call("queryorder", "kbz.payment.queryorder", "3.0", {
     appid: APPID(),
     merch_code: MERCH_CODE(),
     merch_order_id: merchOrderId,
-  });
+  }, {}, budget);
 
   // "The order does not exist" is an ANSWER, not a failure: it is the only
   // thing that proves KBZPay holds no order under this reference, which is
@@ -428,12 +474,12 @@ export async function queryOrder(merchOrderId: string): Promise<QueryResult> {
  * not payable *now*, without saying whether it was cancelled or completed.
  * The caller MUST re-query afterwards. Spec §5.1 step 7b, R12.
  */
-export async function closeOrder(merchOrderId: string): Promise<{ ok: boolean }> {
+export async function closeOrder(merchOrderId: string, budget?: CallBudget): Promise<{ ok: boolean }> {
   const r = await call("closeorder", "kbz.payment.closeorder", "3.0", {
     appid: APPID(),
     merch_code: MERCH_CODE(),
     merch_order_id: merchOrderId,
-  });
+  }, {}, budget);
 
   if (r.ok) return { ok: true };
   if (r.code === "ORDER_ALREADY_CLOSED" || r.code === "QUERYORDER_FAIL") return { ok: true };
