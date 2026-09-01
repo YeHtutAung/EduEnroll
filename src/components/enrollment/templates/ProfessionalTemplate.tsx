@@ -63,7 +63,7 @@ function ClassRow({
       {/* Image if any */}
       {cls.image_url && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={cls.image_url} alt={cls.level} className="h-12 w-16 shrink-0 rounded object-cover" />
+        <img src={cls.image_url} alt={`${cls.level} ticket`} className="h-12 w-16 shrink-0 rounded object-contain" loading="lazy" decoding="async" />
       )}
 
       {/* CTA */}
@@ -131,7 +131,7 @@ export default function ProfessionalTemplate({ appearance, intake, classes, labe
       {heroSrc && (
         <div className="overflow-hidden">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={heroSrc} alt={intake.name} className="w-full object-cover" style={{ maxHeight: "30vh" }} />
+          <img src={heroSrc} alt={intake.name} className="mx-auto block w-full h-auto object-contain" style={{ maxHeight: "30vh" }} />
         </div>
       )}
 

@@ -80,7 +80,7 @@ function ClassCard({
       <div className="bg-white p-5">
         {cls.image_url && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={cls.image_url} alt={cls.level} className="mb-4 w-full rounded-lg object-cover h-32" />
+          <img src={cls.image_url} alt={`${cls.level} ticket`} className="mb-4 block w-full h-auto max-h-[420px] rounded-lg object-contain" loading="lazy" decoding="async" />
         )}
 
         <p className="text-3xl font-black text-gray-900">{cls.fee_formatted}</p>
@@ -114,7 +114,7 @@ export default function BoldTemplate({ appearance, intake, classes, labels, slug
       {heroSrc ? (
         <div className="relative overflow-hidden">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={heroSrc} alt={intake.name} className="w-full object-cover" style={{ maxHeight: "50vh" }} />
+          <img src={heroSrc} alt={intake.name} className="mx-auto block w-full h-auto object-contain" style={{ maxHeight: "50vh" }} />
           <div className="absolute inset-0" style={{ background: `linear-gradient(to top, rgba(${rgb},0.85) 0%, rgba(${rgb},0.4) 50%, transparent 100%)` }} />
           <div className="absolute bottom-0 left-0 right-0 px-6 pb-10">
             {logo_url && (
