@@ -3,6 +3,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { verifySign, queryOrder, type KbzField } from "@/lib/kbzpay";
 import { settleMmqrPayment } from "@/server/payments/settleMmqrPayment";
 
+// Same 10s platform cap as the creation route. Declared rather than
+// inherited so the limit is visible next to the gateway call it bounds.
+export const maxDuration = 10;
+
 // ─── POST /api/webhooks/kbzmmqr ─────────────────────────────────────────────
 // KBZPay asynchronous payment notification.
 // Design: docs/superpowers/specs/2026-08-20-kbzpay-mmqr-integration-design.md §5.2

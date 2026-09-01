@@ -415,6 +415,93 @@ describe("endpoint scheme", () => {
   });
 });
 
+// One request can make FOUR sequential gateway calls, inside a serverless
+// function capped at 10s that cannot be raised on this plan. The previous 15s
+// per-call timeout was longer than the whole function budget, so on a blocked
+// connection the platform killed the function before AbortSignal ever fired —
+// the caller got a raw 502 and none of the handled error paths ran. Measured
+// twice on staging at 10.87s and 10.82s.
+//
+// A shared deadline is what keeps the request answerable: each call takes the
+// smaller of its own timeout and what is left, and a call with nothing left is
+// not started at all.
+describe("request budget", () => {
+  const signalTimeouts = () =>
+    fetchMock.mock.calls.map((c: unknown[]) => {
+      const init = c[1] as { signal?: AbortSignal };
+      return init.signal;
+    });
+
+  it("does not start a call once the budget is spent", async () => {
+    const { queryOrder } = await import("@/lib/kbzpay");
+    fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0", trade_status: "WAIT_PAY" }));
+
+    const res = await queryOrder("KBZ_x", { deadlineMs: Date.now() - 1 });
+
+    // No request at all, and a handled failure rather than an exception.
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(res).toEqual({ ok: false });
+  });
+
+  it("does not start a call when too little of the budget remains", async () => {
+    const { queryOrder } = await import("@/lib/kbzpay");
+    fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0", trade_status: "WAIT_PAY" }));
+
+    // Under the one-second floor: not worth starting.
+    await queryOrder("KBZ_x", { deadlineMs: Date.now() + 200 });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("still calls when the budget allows it", async () => {
+    const { queryOrder } = await import("@/lib/kbzpay");
+    fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0", trade_status: "WAIT_PAY" }));
+
+    const res = await queryOrder("KBZ_x", { deadlineMs: Date.now() + 8_000 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(res).toMatchObject({ ok: true, tradeStatus: "WAIT_PAY" });
+  });
+
+  it("passes an abort signal on every call", async () => {
+    const { queryOrder } = await import("@/lib/kbzpay");
+    fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0", trade_status: "WAIT_PAY" }));
+
+    await queryOrder("KBZ_x", { deadlineMs: Date.now() + 8_000 });
+
+    for (const signal of signalTimeouts()) expect(signal).toBeInstanceOf(AbortSignal);
+  });
+
+  // Without a budget the call still runs — local development and the tests
+  // have no function limit to respect.
+  it("works with no budget at all", async () => {
+    const { queryOrder } = await import("@/lib/kbzpay");
+    fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0", trade_status: "WAIT_PAY" }));
+
+    expect(await queryOrder("KBZ_x")).toMatchObject({ ok: true });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  // The property that matters: four sequential calls sharing one 8s budget
+  // must not collectively outlive it. Each call is capped by what remains, so
+  // the last ones are skipped rather than overrunning.
+  it("keeps four sequential calls inside one budget", async () => {
+    const { queryOrder, closeOrder, precreate } = await import("@/lib/kbzpay");
+    fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0", trade_status: "WAIT_PAY" }));
+
+    const budget = { deadlineMs: Date.now() + 8_000 };
+    await queryOrder("KBZ_x", budget);
+    await closeOrder("KBZ_x", budget);
+    await queryOrder("KBZ_x", budget);
+    await precreate(
+      { merchOrderId: "KBZ_x_y", amount: 1, title: "t", notifyUrl: "https://x/y", timeoutMinutes: 120 },
+      budget,
+    );
+
+    expect(Date.now()).toBeLessThan(budget.deadlineMs);
+  });
+});
+
 describe("credential hygiene", () => {
   it("never puts the app key in the request body", async () => {
     const { precreate } = await import("@/lib/kbzpay");

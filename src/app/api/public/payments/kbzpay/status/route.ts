@@ -3,6 +3,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { queryOrder, type TradeStatus } from "@/lib/kbzpay";
 import { settleMmqrPayment } from "@/server/payments/settleMmqrPayment";
 
+// Same 10s platform cap as the creation route. Declared rather than
+// inherited so the limit is visible next to the gateway call it bounds.
+export const maxDuration = 10;
+
 // ─── GET /api/public/payments/kbzpay/status?ref=KBZ_xxx ─────────────────────
 // Browser poller for QRPaymentModal, which reads `mmqr_status`.
 // Design: docs/superpowers/specs/2026-08-20-kbzpay-mmqr-integration-design.md §5.3
