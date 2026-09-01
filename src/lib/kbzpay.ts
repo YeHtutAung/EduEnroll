@@ -385,8 +385,24 @@ export async function queryOrder(merchOrderId: string): Promise<QueryResult> {
 
   // "The order does not exist" is an ANSWER, not a failure: it is the only
   // thing that proves KBZPay holds no order under this reference, which is
-  // what lets a row become FAILED. Spec R13.
-  if (!r.ok && r.code === "QUERYORDER_FAIL") {
+  // what lets a row become FAILED and releases the seat. Spec R13.
+  //
+  // Two codes carry that meaning and only QUERYORDER_FAIL is in KBZPay's error
+  // table. AOP14505 is what the live gateway actually returns, and it appears
+  // in the docs solely as an example headed "auth_code is expired /Customer
+  // close the pin pad" — which reads like a customer mid-payment, so it was
+  // deliberately left unmapped until KBZPay confirmed the semantics.
+  //
+  // They confirmed in writing on 2026-09-01: an order that has been created and
+  // is still payable returns WAIT_PAY, and "Could not find the order." comes
+  // back when the order was never created. Every other created-order state has
+  // its own trade_status (PAYING, ORDER_EXPIRED, ORDER_CLOSED), so no live
+  // order can hide behind either code.
+  //
+  // Nothing else belongs in this list. SYSTEM_ERROR, FLOW_CONTROL and friends
+  // mean "we could not tell you", which is not the same as "there is nothing
+  // there", and treating them as an answer would release a paid-for seat.
+  if (!r.ok && (r.code === "QUERYORDER_FAIL" || r.code === "AOP14505")) {
     return { ok: true, tradeStatus: "ORDER_NOT_FOUND" };
   }
 

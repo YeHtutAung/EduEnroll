@@ -82,6 +82,22 @@ UAT against test money; production never asks for it. See §11, gate G2.
 Interface `version` differs per call: `precreate` uses `"1.0"`, `queryorder` and `closeorder`
 use `"3.0"`.
 
+**Two codes mean "no such order", and only one is documented as such.** The published error
+table lists `QUERYORDER_FAIL` = "The queried order does not exist.". The live gateway
+returns `AOP14505` / "Could not find the order." instead, a code absent from that table and
+present in the docs only as an example headed "auth_code is expired /Customer close the pin
+pad" — which reads like a customer mid-payment. It was therefore left unmapped through the
+first UAT rounds, at the cost of a spurious 502, rather than risk releasing a seat under
+someone still paying.
+
+KBZPay resolved it in writing on 2026-09-01: an order that has been created and is still
+payable returns `WAIT_PAY`, and "Could not find the order." is returned when the order was
+never created. Since every other created-order state carries its own `trade_status`
+(`PAYING`, `ORDER_EXPIRED`, `ORDER_CLOSED`), no live order can hide behind either code, and
+both now map to `ORDER_NOT_FOUND`. Nothing else may join them: `SYSTEM_ERROR`,
+`FLOW_CONTROL` and the rest mean "we could not tell you", which is not "there is nothing
+there".
+
 `closeorder` is **idempotent** — `ORDER_ALREADY_CLOSED` and `QUERYORDER_FAIL` ("the order does
 not exist") are not transport-level failures and do not need retrying. A transport failure,
 `SYSTEM_ERROR`, `FLOW_CONTROL` or `AOP03028` ("close order failed") do.
@@ -385,7 +401,7 @@ is retained purely so a reference is recognisable during support and log triage.
       | Provider says | Meaning | Action |
       |---|---|---|
       | `PAY_SUCCESS` | Already paid | Settle the old reference; return `{ status: 'already_paid' }` (§5.1a). **No replacement.** |
-      | order does not exist (`QUERYORDER_FAIL`) | `precreate` never landed | Proceed to (c) with reason `FAILED`. |
+      | order does not exist (`QUERYORDER_FAIL` or `AOP14505`) | `precreate` never landed | Proceed to (c) with reason `FAILED`. |
       | `ORDER_EXPIRED`, `ORDER_CLOSED`, `PAY_FAILED` | Confirmed dead, unpaid | Proceed to (c) with reason `EXPIRED`. |
       | `WAIT_PAY`, `PAYING` | **Still payable** | Go to (b). |
 

@@ -201,16 +201,49 @@ describe("queryOrder", () => {
   // "The order does not exist" is an ANSWER, not a failure: it is the only
   // thing that proves KBZPay holds no order under a reference, which is what
   // lets a row become FAILED. Spec R13.
-  it("reports ORDER_NOT_FOUND distinctly from a transport failure", async () => {
+  // Two codes mean "no such order", and only one of them is in KBZPay's error
+  // table. AOP14505 is what the live gateway actually returns; it appears in
+  // the docs only as an example labelled "auth_code is expired /Customer close
+  // the pin pad", which reads like a mid-payment state and is why it was left
+  // unmapped at first. KBZ confirmed in writing on 2026-09-01: an order that
+  // has been created and is still payable returns WAIT_PAY, and "Could not
+  // find the order." is returned when the order was never created. Every other
+  // created-order state has its own trade_status (PAYING, ORDER_EXPIRED,
+  // ORDER_CLOSED), which leaves AOP14505 meaning exactly one thing.
+  it.each([
+    ["QUERYORDER_FAIL", "The order does not exist."],
+    ["AOP14505", "Could not find the order."],
+  ])("reports ORDER_NOT_FOUND distinctly from a transport failure (%s)", async (code, msg) => {
     const { queryOrder } = await import("@/lib/kbzpay");
-    fetchMock.mockResolvedValue(
-      ok({ result: "FAIL", code: "QUERYORDER_FAIL", msg: "The order does not exist." }),
-    );
+    fetchMock.mockResolvedValue(ok({ result: "FAIL", code, msg }));
 
     expect(await queryOrder("KBZ_missing")).toMatchObject({
       ok: true,
       tradeStatus: "ORDER_NOT_FOUND",
     });
+  });
+
+  // The guard on the above: ORDER_NOT_FOUND is what lets a payment go FAILED
+  // and releases the seat, so anything that is NOT one of those two codes must
+  // stay a transport failure rather than being read as an answer.
+  it.each(["SYSTEM_ERROR", "FLOW_CONTROL", "AOP18034", "REQUEST_FAIL"])(
+    "does NOT treat %s as proof the order is absent",
+    async (code) => {
+      const { queryOrder } = await import("@/lib/kbzpay");
+      fetchMock.mockResolvedValue(ok({ result: "FAIL", code, msg: "x" }));
+
+      expect(await queryOrder("KBZ_x")).toEqual({ ok: false });
+    },
+  );
+
+  // A still-payable order is the case that must never be mistaken for absence.
+  it("passes WAIT_PAY through untouched", async () => {
+    const { queryOrder } = await import("@/lib/kbzpay");
+    fetchMock.mockResolvedValue(
+      ok({ result: "SUCCESS", code: "0", trade_status: "WAIT_PAY" }),
+    );
+
+    expect(await queryOrder("KBZ_x")).toMatchObject({ ok: true, tradeStatus: "WAIT_PAY" });
   });
 
   it("reports ok:false for a genuine failure, which is NOT an answer", async () => {
