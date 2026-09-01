@@ -810,6 +810,7 @@ function PaymentContent() {
               enrollmentRef={ref}
               amount={totalAmount}
               studentName={studentName}
+              receiverName={orgName}
               provider={qrProvider as "abank" | "mmpay" | "paypay" | "kbzpay"}
               onSuccess={() => router.push(`/enroll/${params.slug}/checkout/success/?ref=${ref}`)}
               onClose={() => setShowQRModal(false)}
