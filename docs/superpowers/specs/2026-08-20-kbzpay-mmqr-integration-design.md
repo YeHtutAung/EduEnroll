@@ -664,7 +664,7 @@ usefully do. Everything transient stays non-`success` to buy the two retries.
 KBZPAY_APPID=          # 32-char application id
 KBZPAY_MERCH_CODE=     # merchant short code
 KBZPAY_APP_KEY=        # signing key — secret
-KBZPAY_MODE=           # 'production' | anything else → UAT
+KBZPAY_MODE=           # 'production' | unset or 'uat' → UAT | anything else throws
 KBZPAY_NOTIFY_ORIGIN=  # e.g. https://brave.kuunyi.com — origin KBZPay calls back
 ```
 
