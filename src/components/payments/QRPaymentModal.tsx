@@ -312,7 +312,13 @@ export default function QRPaymentModal({
       />
 
       {/* Panel */}
-      <div className="relative w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
+      {/* max-h + scroll: the panel is vertically centred in a fixed shell, so
+          without them a panel taller than the viewport is clipped at BOTH ends
+          and the close button, Save QR and the reference all become
+          unreachable. The MMQR card is roughly twice the height of the bare QR
+          it replaced, which turns that latent bug into a routine one on short
+          phones. */}
+      <div className="relative max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
         {/* Close button */}
         <button
           onClick={onClose}
