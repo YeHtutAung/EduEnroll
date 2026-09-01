@@ -112,13 +112,75 @@ const APPID = () => process.env.KBZPAY_APPID!;
 const MERCH_CODE = () => process.env.KBZPAY_MERCH_CODE!;
 const APP_KEY = () => process.env.KBZPAY_APP_KEY!;
 
-// Always HTTPS. The UAT docs print http:// for precreate and queryorder, but
-// merchant credentials and signatures must not cross the wire in the clear.
-// Spec §3.1, gate G2.
-const BASE = () =>
-  process.env.KBZPAY_MODE === "production"
-    ? "https://api.kbzpay.com/payment/gateway"
-    : "https://api-uat.kbzpay.com/payment/gateway/uat";
+// KBZPay's UAT gateway is split by scheme, and not by any choice of ours.
+// Probing all six host/scheme pairs on 2026-09-01 gave:
+//
+//   precreate    http 200 (gateway)   https 404 (bare nginx)
+//   queryorder   http 200 (gateway)   https 404 (bare nginx)
+//   closeorder   http 404             https 200 (gateway)
+//
+// exactly as the published docs print. Port 443 on api-uat.kbzpay.com exists
+// but routes closeorder alone, so an all-HTTPS client cannot create an order
+// at all. Production (api.kbzpay.com) answered 200 over HTTPS on all three.
+//
+// The plaintext hop is therefore accepted for UAT and ONLY for UAT. The app
+// key itself never travels — it is the trailing term of a SHA256 preimage, so
+// only the derived signature is sent — but appid, merch_code, the order
+// reference and the amount do, in the clear and without integrity. Against
+// test money that is a considered trade; production never asks for it.
+//
+// The production branch is taken first and unconditionally: no entry in the
+// UAT table can downgrade it. Spec §3.1, gate G2.
+const UAT_HTTPS_ENDPOINTS = new Set(["closeorder"]);
+
+/**
+ * Resolves KBZPAY_MODE, failing closed.
+ *
+ * Treating "anything that isn't production" as UAT is safe on a laptop and
+ * catastrophic on a production deployment. Two UAT endpoints are plaintext,
+ * call() never verifies a response signature, and queryorder is what this
+ * design treats as the settlement authority (§5.1, R13) — so an on-path actor
+ * answering a forged PAY_SUCCESS over HTTP would settle an order nobody paid.
+ * A missing or misspelled KBZPAY_MODE must therefore refuse to run, not
+ * quietly pick the plaintext table.
+ *
+ * Two rules, both required:
+ *   - an unrecognised value is always an error, so `prod` surfaces as a typo
+ *     rather than silently selecting UAT;
+ *   - on VERCEL_ENV=production, only "production" is accepted at all.
+ *
+ * Preview and local are unaffected: they legitimately run UAT, and an unset
+ * value stays the documented way to say so.
+ */
+function resolveMode(): "production" | "uat" {
+  const raw = (process.env.KBZPAY_MODE ?? "").trim().toLowerCase();
+  const isProductionDeployment = process.env.VERCEL_ENV === "production";
+
+  if (raw === "production") return "production";
+
+  if (isProductionDeployment) {
+    throw new Error(
+      'KBZPAY_MODE must be "production" on a production deployment — refusing to call the plaintext UAT gateway with production credentials.',
+    );
+  }
+
+  // Deliberately not echoed: whatever is in there is operator-controlled and
+  // has no business in a log line.
+  if (raw !== "" && raw !== "uat") {
+    throw new Error('KBZPAY_MODE is set to an unrecognised value — expected "production" or "uat".');
+  }
+
+  return "uat";
+}
+
+function endpointUrl(path: string): string {
+  if (resolveMode() === "production") {
+    return `https://api.kbzpay.com/payment/gateway/${path}`;
+  }
+
+  const scheme = UAT_HTTPS_ENDPOINTS.has(path) ? "https" : "http";
+  return `${scheme}://api-uat.kbzpay.com/payment/gateway/uat/${path}`;
+}
 
 // ── Egress proxy and timeout ───────────────────────────────────────────────
 
@@ -175,6 +237,11 @@ async function call(
   };
   request.sign = sign(request, APP_KEY());
 
+  // Resolved outside the try on purpose. A bad KBZPAY_MODE is an operator
+  // error, not a transport failure, and must not be laundered into a handled
+  // { ok: false } that reads as KBZPay being unreachable.
+  const url = endpointUrl(path);
+
   // The status check and the body read stay inside the guard. The timeout
   // signal remains armed until the body is consumed, so a response whose
   // headers arrive and whose body then stalls rejects here — outside it, that
@@ -182,7 +249,7 @@ async function call(
   // instead of a handled { ok: false }. Malformed JSON lands here too.
   let json: { Response?: Record<string, KbzField> } | undefined;
   try {
-    const res = await fetch(`${BASE()}/${path}`, {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ Request: request }),
