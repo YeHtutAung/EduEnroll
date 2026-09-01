@@ -20,6 +20,7 @@
 
 import { queryOrder, closeOrder, type TradeStatus } from "@/lib/kbzpay";
 import { settleMmqrPayment, type SettleMmqrSource } from "@/server/payments/settleMmqrPayment";
+import type { CallBudget } from "@/lib/kbzpay";
 
 export type RetireReason = "FAILED" | "EXPIRED" | "SUPERSEDED";
 
@@ -37,6 +38,17 @@ export type ResolveInput = {
   /** payment_ref of the live row we could not serve. */
   oldRef: string;
   source: SettleMmqrSource;
+  /**
+   * Absolute epoch ms by which the caller must be done.
+   *
+   * This path makes up to THREE sequential gateway calls (queryorder,
+   * closeorder, queryorder) and the caller usually needs a fourth (precreate)
+   * afterwards. On a 10s serverless budget, timing each call in isolation lets
+   * the total overrun the platform limit, which kills the function and returns
+   * a raw 502 instead of the handled error. Sharing one deadline is what keeps
+   * the whole request answerable.
+   */
+  budget?: CallBudget;
 };
 
 /** Terminal at the provider AND unpaid — the order can never be paid now. */
@@ -48,7 +60,7 @@ export async function resolveKbzpayOrder(input: ResolveInput): Promise<ResolveOu
   // ── a. Ask the provider ───────────────────────────────────────────────────
   // Before any close: "not found" means precreate never landed (FAILED), and a
   // terminal status means the order died on its own (EXPIRED).
-  const first = await queryOrder(oldRef);
+  const first = await queryOrder(oldRef, input.budget);
   const firstOutcome = await classify(first, "initial query", {
     notFound: "FAILED",
     terminal: "EXPIRED",
@@ -62,7 +74,7 @@ export async function resolveKbzpayOrder(input: ResolveInput): Promise<ResolveOu
   // (a) and this call, and the settling callback need not have arrived yet — so
   // the local row still reads PENDING and looks perfectly retirable. Trusting
   // the close code here re-opens the over-collection R5 exists to prevent.
-  const closed = await closeOrder(oldRef);
+  const closed = await closeOrder(oldRef, input.budget);
   if (!closed.ok) {
     return {
       kind: "blocked",
@@ -72,7 +84,7 @@ export async function resolveKbzpayOrder(input: ResolveInput): Promise<ResolveOu
 
   // After a close we performed, any dead-or-absent answer means WE retired it,
   // so the recorded reason is SUPERSEDED rather than EXPIRED or FAILED.
-  const second = await queryOrder(oldRef);
+  const second = await queryOrder(oldRef, input.budget);
   const secondOutcome = await classify(second, "re-query after close", {
     notFound: "SUPERSEDED",
     terminal: "SUPERSEDED",

@@ -3,6 +3,22 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { queryOrder, type TradeStatus } from "@/lib/kbzpay";
 import { settleMmqrPayment } from "@/server/payments/settleMmqrPayment";
 
+// Same 10s platform cap as the creation route. Declared rather than
+// inherited so the limit is visible next to the gateway call it bounds.
+export const maxDuration = 10;
+
+/**
+ * How much of the function budget the gateway call may consume.
+ *
+ * Deliberately smaller than the creation route's. Settlement runs AFTER the
+ * call here and it is the write path — it marks the payment verified,
+ * decrements seats and issues the ticket. Letting queryorder run its full
+ * timeout regardless of time already spent could leave under a second for
+ * that, and being interrupted mid-settlement is far worse than failing before
+ * the gateway call. The remainder of the 10s cap is reserved for it.
+ */
+const GATEWAY_BUDGET_MS = 6_000;
+
 // ─── GET /api/public/payments/kbzpay/status?ref=KBZ_xxx ─────────────────────
 // Browser poller for QRPaymentModal, which reads `mmqr_status`.
 // Design: docs/superpowers/specs/2026-08-20-kbzpay-mmqr-integration-design.md §5.3
@@ -25,6 +41,10 @@ const STATUS_MAP: Partial<Record<TradeStatus, string>> = {
 };
 
 export async function GET(request: NextRequest) {
+  // Anchored at request start, so the gateway call is bounded by time actually
+  // remaining rather than by its own timeout in isolation.
+  const budget = { deadlineMs: Date.now() + GATEWAY_BUDGET_MS };
+
   const paymentRef = request.nextUrl.searchParams.get("ref");
   if (!paymentRef) {
     return NextResponse.json({ error: "Bad Request", message: "ref is required." }, { status: 400 });
@@ -54,7 +74,7 @@ export async function GET(request: NextRequest) {
   }
 
   // ── Ask KBZPay ─────────────────────────────────────────────
-  const result = await queryOrder(paymentRef);
+  const result = await queryOrder(paymentRef, budget);
   if (!result.ok) {
     // Unreachable is not failed. Keep polling.
     return NextResponse.json({ mmqr_status: "PENDING" });

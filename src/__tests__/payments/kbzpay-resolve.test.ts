@@ -110,7 +110,7 @@ describe("still payable → close, then re-query (R12)", () => {
 
     expect(await resolve()).toEqual({ kind: "retire", reason: "SUPERSEDED" });
 
-    expect(mockCloseOrder).toHaveBeenCalledWith(OLD_REF);
+    expect(mockCloseOrder.mock.calls[0][0]).toBe(OLD_REF);
     // The re-query is the whole point: the close return code is not evidence.
     expect(mockQueryOrder).toHaveBeenCalledTimes(2);
   });
