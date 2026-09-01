@@ -112,13 +112,35 @@ const APPID = () => process.env.KBZPAY_APPID!;
 const MERCH_CODE = () => process.env.KBZPAY_MERCH_CODE!;
 const APP_KEY = () => process.env.KBZPAY_APP_KEY!;
 
-// Always HTTPS. The UAT docs print http:// for precreate and queryorder, but
-// merchant credentials and signatures must not cross the wire in the clear.
-// Spec §3.1, gate G2.
-const BASE = () =>
-  process.env.KBZPAY_MODE === "production"
-    ? "https://api.kbzpay.com/payment/gateway"
-    : "https://api-uat.kbzpay.com/payment/gateway/uat";
+// KBZPay's UAT gateway is split by scheme, and not by any choice of ours.
+// Probing all six host/scheme pairs on 2026-09-01 gave:
+//
+//   precreate    http 200 (gateway)   https 404 (bare nginx)
+//   queryorder   http 200 (gateway)   https 404 (bare nginx)
+//   closeorder   http 404             https 200 (gateway)
+//
+// exactly as the published docs print. Port 443 on api-uat.kbzpay.com exists
+// but routes closeorder alone, so an all-HTTPS client cannot create an order
+// at all. Production (api.kbzpay.com) answered 200 over HTTPS on all three.
+//
+// The plaintext hop is therefore accepted for UAT and ONLY for UAT. The app
+// key itself never travels — it is the trailing term of a SHA256 preimage, so
+// only the derived signature is sent — but appid, merch_code, the order
+// reference and the amount do, in the clear and without integrity. Against
+// test money that is a considered trade; production never asks for it.
+//
+// The production branch is taken first and unconditionally: no entry in the
+// UAT table can downgrade it. Spec §3.1, gate G2.
+const UAT_HTTPS_ENDPOINTS = new Set(["closeorder"]);
+
+function endpointUrl(path: string): string {
+  if (process.env.KBZPAY_MODE === "production") {
+    return `https://api.kbzpay.com/payment/gateway/${path}`;
+  }
+
+  const scheme = UAT_HTTPS_ENDPOINTS.has(path) ? "https" : "http";
+  return `${scheme}://api-uat.kbzpay.com/payment/gateway/uat/${path}`;
+}
 
 // ── Egress proxy and timeout ───────────────────────────────────────────────
 
@@ -182,7 +204,7 @@ async function call(
   // instead of a handled { ok: false }. Malformed JSON lands here too.
   let json: { Response?: Record<string, KbzField> } | undefined;
   try {
-    const res = await fetch(`${BASE()}/${path}`, {
+    const res = await fetch(endpointUrl(path), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ Request: request }),
