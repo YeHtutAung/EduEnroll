@@ -63,7 +63,17 @@ answered 200 on all three.
 
 `endpointUrl()` therefore resolves the scheme per endpoint, and only for UAT: the
 production branch is taken first and unconditionally, so no entry in the UAT table can
-downgrade it. The app key never travels — it is the trailing term of a SHA256 preimage, so
+downgrade it.
+
+**And the mode itself fails closed.** Review of PR #236 caught that "anything that is not
+`production` means UAT" is safe on a laptop and catastrophic on a production deployment:
+a missing or misspelled `KBZPAY_MODE` there would send live merchant traffic to the
+plaintext UAT endpoints, and since `call()` never verifies a response signature while
+`queryorder` is the settlement authority (R13), an on-path actor answering a forged
+`PAY_SUCCESS` would settle an order nobody paid. `resolveMode()` now throws on an
+unrecognised value, and on `VERCEL_ENV=production` accepts nothing but `production`.
+Preview and local are untouched — they legitimately run UAT, and an unset value remains
+the documented way to say so. The app key never travels — it is the trailing term of a SHA256 preimage, so
 only the derived signature is sent — but `appid`, `merch_code`, the order reference and the
 amount cross in the clear and without integrity, which also means an on-path attacker could
 forge the `queryorder` response this design treats as the settlement authority. Accepted for

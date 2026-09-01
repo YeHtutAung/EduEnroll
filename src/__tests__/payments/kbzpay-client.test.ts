@@ -15,6 +15,9 @@ let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   Object.assign(process.env, ENV);
+  // Deployment context is per-test. A leaked VERCEL_ENV would silently change
+  // which branch of the mode guard runs.
+  delete process.env.VERCEL_ENV;
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -323,6 +326,58 @@ describe("endpoint scheme", () => {
         fetchMock.mockClear();
         expect(await urlFor(fn)).toMatch(/^https:\/\//);
       }
+    });
+  });
+
+  // Defaulting to UAT is safe on a laptop and catastrophic on a production
+  // deployment: two UAT endpoints are plaintext, call() never verifies a
+  // response signature, and queryorder is what this design treats as the
+  // settlement authority. An on-path actor answering a forged PAY_SUCCESS
+  // would settle an order nobody paid. So the mode must FAIL CLOSED rather
+  // than fall through to UAT.
+  describe("mode guard", () => {
+    it.each(["", "uat", "UAT"])(
+      "still resolves to UAT off a production deployment (mode %j)",
+      async (mode) => {
+        process.env.KBZPAY_MODE = mode;
+        expect(await urlFor("precreate")).toBe(
+          "http://api-uat.kbzpay.com/payment/gateway/uat/precreate",
+        );
+      },
+    );
+
+    it("accepts production regardless of case or padding", async () => {
+      process.env.KBZPAY_MODE = "  Production  ";
+      expect(await urlFor("precreate")).toBe("https://api.kbzpay.com/payment/gateway/precreate");
+    });
+
+    it("refuses an unrecognised mode rather than guessing UAT", async () => {
+      process.env.KBZPAY_MODE = "prod"; // the typo that would have gone unnoticed
+      await expect(urlFor("precreate")).rejects.toThrow(/KBZPAY_MODE/);
+    });
+
+    it.each(["", "uat", "prod"])(
+      "refuses to run UAT on a production deployment (mode %j)",
+      async (mode) => {
+        process.env.VERCEL_ENV = "production";
+        process.env.KBZPAY_MODE = mode;
+        await expect(urlFor("precreate")).rejects.toThrow(/KBZPAY_MODE/);
+      },
+    );
+
+    it("allows production mode on a production deployment", async () => {
+      process.env.VERCEL_ENV = "production";
+      process.env.KBZPAY_MODE = "production";
+      expect(await urlFor("precreate")).toBe("https://api.kbzpay.com/payment/gateway/precreate");
+    });
+
+    // Preview/staging is not production and legitimately runs UAT.
+    it("leaves preview deployments on UAT", async () => {
+      process.env.VERCEL_ENV = "preview";
+      process.env.KBZPAY_MODE = "";
+      expect(await urlFor("precreate")).toBe(
+        "http://api-uat.kbzpay.com/payment/gateway/uat/precreate",
+      );
     });
   });
 });
