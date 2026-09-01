@@ -34,7 +34,7 @@ function arrangeImageFetch() {
 describe("PayNow QR save", () => {
   it("uses the native mobile share sheet with a PNG file", async () => {
     arrangeImageFetch();
-    const share = vi.fn(async () => undefined);
+    const share = vi.fn<(data: { files: File[] }) => Promise<undefined>>(async () => undefined);
     const canShare = vi.fn(() => true);
     vi.stubGlobal("navigator", { share, canShare });
 

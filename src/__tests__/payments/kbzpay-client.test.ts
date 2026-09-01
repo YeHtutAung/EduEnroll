@@ -15,6 +15,9 @@ let fetchMock: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   Object.assign(process.env, ENV);
+  // Deployment context is per-test. A leaked VERCEL_ENV would silently change
+  // which branch of the mode guard runs.
+  delete process.env.VERCEL_ENV;
   fetchMock = vi.fn();
   vi.stubGlobal("fetch", fetchMock);
 });
@@ -32,7 +35,7 @@ function requestBody(callIndex = 0) {
 }
 
 describe("precreate", () => {
-  it("posts a signed PAY_BY_QRCODE order over HTTPS and returns the QR", async () => {
+  it("posts a signed PAY_BY_QRCODE order and returns the QR", async () => {
     const { precreate } = await import("@/lib/kbzpay");
     fetchMock.mockResolvedValue(
       ok({ result: "SUCCESS", code: "0", qrCode: "0002010102...", prepay_id: "KBZ00abc" }),
@@ -48,11 +51,9 @@ describe("precreate", () => {
 
     expect(res).toEqual({ ok: true, qrCode: "0002010102...", prepayId: "KBZ00abc" });
 
-    // Never plaintext, even though the UAT docs print http:// for this
-    // endpoint — merchant credentials must not cross the wire in the clear.
-    // Spec §3.1, gate G2.
+    // Plaintext in UAT, and not by choice — see the "endpoint scheme" suite.
     const url = fetchMock.mock.calls[0][0];
-    expect(url).toBe("https://api-uat.kbzpay.com/payment/gateway/uat/precreate");
+    expect(url).toBe("http://api-uat.kbzpay.com/payment/gateway/uat/precreate");
 
     const body = requestBody();
     expect(body.method).toBe("kbz.payment.precreate");
@@ -87,6 +88,7 @@ describe("precreate", () => {
       amount: 1,
       title: "t",
       notifyUrl: "https://x/y",
+      timeoutMinutes: 30,
     });
     expect(res.ok).toBe(false);
   });
@@ -100,6 +102,7 @@ describe("precreate", () => {
       amount: 1,
       title: "t",
       notifyUrl: "https://x/y",
+      timeoutMinutes: 30,
     });
     expect(res.ok).toBe(false);
   });
@@ -113,8 +116,53 @@ describe("precreate", () => {
       amount: 1,
       title: "t",
       notifyUrl: "https://x/y",
+      timeoutMinutes: 30,
     });
     expect(res.ok).toBe(false);
+  });
+
+  it("reports failure when the response body stalls past the timeout", async () => {
+    const { precreate } = await import("@/lib/kbzpay");
+    // Headers arrive, then the body never completes: the abort signal is still
+    // armed, so json() rejects after fetch() has already resolved.
+    const stalled = new Error("The operation was aborted due to timeout");
+    stalled.name = "TimeoutError";
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw stalled;
+      },
+    });
+
+    const res = await precreate({
+      merchOrderId: "KBZ_x_y",
+      amount: 1,
+      title: "t",
+      notifyUrl: "https://x/y",
+      timeoutMinutes: 30,
+    });
+    expect(res).toEqual({ ok: false });
+  });
+
+  it("reports failure on a malformed response body rather than throwing", async () => {
+    const { precreate } = await import("@/lib/kbzpay");
+    fetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => {
+        throw new SyntaxError("Unexpected token < in JSON at position 0");
+      },
+    });
+
+    const res = await precreate({
+      merchOrderId: "KBZ_x_y",
+      amount: 1,
+      title: "t",
+      notifyUrl: "https://x/y",
+      timeoutMinutes: 30,
+    });
+    expect(res).toEqual({ ok: false });
   });
 });
 
@@ -136,7 +184,7 @@ describe("queryOrder", () => {
     const res = await queryOrder("KBZ_1a2b3c4d_9f3c7b21d0e4a856");
 
     expect(fetchMock.mock.calls[0][0]).toBe(
-      "https://api-uat.kbzpay.com/payment/gateway/uat/queryorder",
+      "http://api-uat.kbzpay.com/payment/gateway/uat/queryorder",
     );
     expect(requestBody().version).toBe("3.0");
     expect(requestBody().method).toBe("kbz.payment.queryorder");
@@ -153,16 +201,49 @@ describe("queryOrder", () => {
   // "The order does not exist" is an ANSWER, not a failure: it is the only
   // thing that proves KBZPay holds no order under a reference, which is what
   // lets a row become FAILED. Spec R13.
-  it("reports ORDER_NOT_FOUND distinctly from a transport failure", async () => {
+  // Two codes mean "no such order", and only one of them is in KBZPay's error
+  // table. AOP14505 is what the live gateway actually returns; it appears in
+  // the docs only as an example labelled "auth_code is expired /Customer close
+  // the pin pad", which reads like a mid-payment state and is why it was left
+  // unmapped at first. KBZ confirmed in writing on 2026-09-01: an order that
+  // has been created and is still payable returns WAIT_PAY, and "Could not
+  // find the order." is returned when the order was never created. Every other
+  // created-order state has its own trade_status (PAYING, ORDER_EXPIRED,
+  // ORDER_CLOSED), which leaves AOP14505 meaning exactly one thing.
+  it.each([
+    ["QUERYORDER_FAIL", "The order does not exist."],
+    ["AOP14505", "Could not find the order."],
+  ])("reports ORDER_NOT_FOUND distinctly from a transport failure (%s)", async (code, msg) => {
     const { queryOrder } = await import("@/lib/kbzpay");
-    fetchMock.mockResolvedValue(
-      ok({ result: "FAIL", code: "QUERYORDER_FAIL", msg: "The order does not exist." }),
-    );
+    fetchMock.mockResolvedValue(ok({ result: "FAIL", code, msg }));
 
     expect(await queryOrder("KBZ_missing")).toMatchObject({
       ok: true,
       tradeStatus: "ORDER_NOT_FOUND",
     });
+  });
+
+  // The guard on the above: ORDER_NOT_FOUND is what lets a payment go FAILED
+  // and releases the seat, so anything that is NOT one of those two codes must
+  // stay a transport failure rather than being read as an answer.
+  it.each(["SYSTEM_ERROR", "FLOW_CONTROL", "AOP18034", "REQUEST_FAIL"])(
+    "does NOT treat %s as proof the order is absent",
+    async (code) => {
+      const { queryOrder } = await import("@/lib/kbzpay");
+      fetchMock.mockResolvedValue(ok({ result: "FAIL", code, msg: "x" }));
+
+      expect(await queryOrder("KBZ_x")).toEqual({ ok: false });
+    },
+  );
+
+  // A still-payable order is the case that must never be mistaken for absence.
+  it("passes WAIT_PAY through untouched", async () => {
+    const { queryOrder } = await import("@/lib/kbzpay");
+    fetchMock.mockResolvedValue(
+      ok({ result: "SUCCESS", code: "0", trade_status: "WAIT_PAY" }),
+    );
+
+    expect(await queryOrder("KBZ_x")).toMatchObject({ ok: true, tradeStatus: "WAIT_PAY" });
   });
 
   it("reports ok:false for a genuine failure, which is NOT an answer", async () => {
@@ -207,8 +288,130 @@ describe("closeOrder", () => {
     fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0", msg: "success" }));
 
     expect((await closeOrder("KBZ_x")).ok).toBe(true);
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://api-uat.kbzpay.com/payment/gateway/uat/closeorder",
+    );
     expect(requestBody().version).toBe("3.0");
     expect(requestBody().method).toBe("kbz.payment.closeorder");
+  });
+});
+
+// KBZPay's UAT gateway is split by scheme, and not by any choice of ours.
+// Probing all six host/scheme pairs on 2026-09-01 gave:
+//
+//   precreate    http 200 (gateway)   https 404 (bare nginx)
+//   queryorder   http 200 (gateway)   https 404 (bare nginx)
+//   closeorder   http 404             https 200 (gateway)
+//
+// which is exactly what the published docs print. Port 443 on
+// api-uat.kbzpay.com exists but routes closeorder alone. Production
+// (api.kbzpay.com) answered 200 over HTTPS on all three.
+//
+// So the plaintext hop is UAT-only and must stay that way: the production
+// branch is taken first and unconditionally, and no per-endpoint rule can
+// reach it. That is the property these tests exist to hold.
+describe("endpoint scheme", () => {
+  async function urlFor(fn: "precreate" | "queryOrder" | "closeOrder") {
+    const mod = await import("@/lib/kbzpay");
+    fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0", qrCode: "q", prepay_id: "p" }));
+
+    if (fn === "precreate") {
+      await mod.precreate({
+        merchOrderId: "KBZ_x_y",
+        amount: 1,
+        title: "t",
+        notifyUrl: "https://x/y",
+        timeoutMinutes: 120,
+      });
+    } else {
+      await mod[fn]("KBZ_x");
+    }
+
+    return fetchMock.mock.calls[0][0] as string;
+  }
+
+  describe("UAT", () => {
+    it.each([
+      ["precreate", "http://api-uat.kbzpay.com/payment/gateway/uat/precreate"],
+      ["queryOrder", "http://api-uat.kbzpay.com/payment/gateway/uat/queryorder"],
+      ["closeOrder", "https://api-uat.kbzpay.com/payment/gateway/uat/closeorder"],
+    ] as const)("%s uses the scheme KBZPay actually serves", async (fn, expected) => {
+      process.env.KBZPAY_MODE = "uat";
+      expect(await urlFor(fn)).toBe(expected);
+    });
+  });
+
+  describe("production", () => {
+    it.each([
+      ["precreate", "https://api.kbzpay.com/payment/gateway/precreate"],
+      ["queryOrder", "https://api.kbzpay.com/payment/gateway/queryorder"],
+      ["closeOrder", "https://api.kbzpay.com/payment/gateway/closeorder"],
+    ] as const)("%s is HTTPS — the UAT rule cannot reach it", async (fn, expected) => {
+      process.env.KBZPAY_MODE = "production";
+      expect(await urlFor(fn)).toBe(expected);
+    });
+
+    // The guard that matters: whatever the per-endpoint UAT table says, a
+    // production build must never emit an http:// URL.
+    it("never emits a plaintext URL for any endpoint", async () => {
+      for (const fn of ["precreate", "queryOrder", "closeOrder"] as const) {
+        process.env.KBZPAY_MODE = "production";
+        fetchMock.mockClear();
+        expect(await urlFor(fn)).toMatch(/^https:\/\//);
+      }
+    });
+  });
+
+  // Defaulting to UAT is safe on a laptop and catastrophic on a production
+  // deployment: two UAT endpoints are plaintext, call() never verifies a
+  // response signature, and queryorder is what this design treats as the
+  // settlement authority. An on-path actor answering a forged PAY_SUCCESS
+  // would settle an order nobody paid. So the mode must FAIL CLOSED rather
+  // than fall through to UAT.
+  describe("mode guard", () => {
+    it.each(["", "uat", "UAT"])(
+      "still resolves to UAT off a production deployment (mode %j)",
+      async (mode) => {
+        process.env.KBZPAY_MODE = mode;
+        expect(await urlFor("precreate")).toBe(
+          "http://api-uat.kbzpay.com/payment/gateway/uat/precreate",
+        );
+      },
+    );
+
+    it("accepts production regardless of case or padding", async () => {
+      process.env.KBZPAY_MODE = "  Production  ";
+      expect(await urlFor("precreate")).toBe("https://api.kbzpay.com/payment/gateway/precreate");
+    });
+
+    it("refuses an unrecognised mode rather than guessing UAT", async () => {
+      process.env.KBZPAY_MODE = "prod"; // the typo that would have gone unnoticed
+      await expect(urlFor("precreate")).rejects.toThrow(/KBZPAY_MODE/);
+    });
+
+    it.each(["", "uat", "prod"])(
+      "refuses to run UAT on a production deployment (mode %j)",
+      async (mode) => {
+        process.env.VERCEL_ENV = "production";
+        process.env.KBZPAY_MODE = mode;
+        await expect(urlFor("precreate")).rejects.toThrow(/KBZPAY_MODE/);
+      },
+    );
+
+    it("allows production mode on a production deployment", async () => {
+      process.env.VERCEL_ENV = "production";
+      process.env.KBZPAY_MODE = "production";
+      expect(await urlFor("precreate")).toBe("https://api.kbzpay.com/payment/gateway/precreate");
+    });
+
+    // Preview/staging is not production and legitimately runs UAT.
+    it("leaves preview deployments on UAT", async () => {
+      process.env.VERCEL_ENV = "preview";
+      process.env.KBZPAY_MODE = "";
+      expect(await urlFor("precreate")).toBe(
+        "http://api-uat.kbzpay.com/payment/gateway/uat/precreate",
+      );
+    });
   });
 });
 

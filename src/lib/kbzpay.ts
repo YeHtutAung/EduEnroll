@@ -6,6 +6,7 @@
 // against the vectors the provider publishes.
 
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
+import { ProxyAgent } from "undici";
 
 export type KbzField = string | number | null | undefined | unknown;
 
@@ -111,13 +112,101 @@ const APPID = () => process.env.KBZPAY_APPID!;
 const MERCH_CODE = () => process.env.KBZPAY_MERCH_CODE!;
 const APP_KEY = () => process.env.KBZPAY_APP_KEY!;
 
-// Always HTTPS. The UAT docs print http:// for precreate and queryorder, but
-// merchant credentials and signatures must not cross the wire in the clear.
-// Spec §3.1, gate G2.
-const BASE = () =>
-  process.env.KBZPAY_MODE === "production"
-    ? "https://api.kbzpay.com/payment/gateway"
-    : "https://api-uat.kbzpay.com/payment/gateway/uat";
+// KBZPay's UAT gateway is split by scheme, and not by any choice of ours.
+// Probing all six host/scheme pairs on 2026-09-01 gave:
+//
+//   precreate    http 200 (gateway)   https 404 (bare nginx)
+//   queryorder   http 200 (gateway)   https 404 (bare nginx)
+//   closeorder   http 404             https 200 (gateway)
+//
+// exactly as the published docs print. Port 443 on api-uat.kbzpay.com exists
+// but routes closeorder alone, so an all-HTTPS client cannot create an order
+// at all. Production (api.kbzpay.com) answered 200 over HTTPS on all three.
+//
+// The plaintext hop is therefore accepted for UAT and ONLY for UAT. The app
+// key itself never travels — it is the trailing term of a SHA256 preimage, so
+// only the derived signature is sent — but appid, merch_code, the order
+// reference and the amount do, in the clear and without integrity. Against
+// test money that is a considered trade; production never asks for it.
+//
+// The production branch is taken first and unconditionally: no entry in the
+// UAT table can downgrade it. Spec §3.1, gate G2.
+const UAT_HTTPS_ENDPOINTS = new Set(["closeorder"]);
+
+/**
+ * Resolves KBZPAY_MODE, failing closed.
+ *
+ * Treating "anything that isn't production" as UAT is safe on a laptop and
+ * catastrophic on a production deployment. Two UAT endpoints are plaintext,
+ * call() never verifies a response signature, and queryorder is what this
+ * design treats as the settlement authority (§5.1, R13) — so an on-path actor
+ * answering a forged PAY_SUCCESS over HTTP would settle an order nobody paid.
+ * A missing or misspelled KBZPAY_MODE must therefore refuse to run, not
+ * quietly pick the plaintext table.
+ *
+ * Two rules, both required:
+ *   - an unrecognised value is always an error, so `prod` surfaces as a typo
+ *     rather than silently selecting UAT;
+ *   - on VERCEL_ENV=production, only "production" is accepted at all.
+ *
+ * Preview and local are unaffected: they legitimately run UAT, and an unset
+ * value stays the documented way to say so.
+ */
+function resolveMode(): "production" | "uat" {
+  const raw = (process.env.KBZPAY_MODE ?? "").trim().toLowerCase();
+  const isProductionDeployment = process.env.VERCEL_ENV === "production";
+
+  if (raw === "production") return "production";
+
+  if (isProductionDeployment) {
+    throw new Error(
+      'KBZPAY_MODE must be "production" on a production deployment — refusing to call the plaintext UAT gateway with production credentials.',
+    );
+  }
+
+  // Deliberately not echoed: whatever is in there is operator-controlled and
+  // has no business in a log line.
+  if (raw !== "" && raw !== "uat") {
+    throw new Error('KBZPAY_MODE is set to an unrecognised value — expected "production" or "uat".');
+  }
+
+  return "uat";
+}
+
+function endpointUrl(path: string): string {
+  if (resolveMode() === "production") {
+    return `https://api.kbzpay.com/payment/gateway/${path}`;
+  }
+
+  const scheme = UAT_HTTPS_ENDPOINTS.has(path) ? "https" : "http";
+  return `${scheme}://api-uat.kbzpay.com/payment/gateway/uat/${path}`;
+}
+
+// ── Egress proxy and timeout ───────────────────────────────────────────────
+
+// KBZPay allowlists caller IP addresses and silently drops everything else —
+// an unregistered source sees a connection timeout, not a rejection. Vercel
+// functions egress from a shared, rotating pool, so there is no address we can
+// register. KBZPAY_PROXY_URL points at a host holding a reserved static IP,
+// through which this client's traffic — and only this client's traffic — is
+// routed. Unset means direct egress, exactly as before.
+//
+// The dispatcher is passed per request on purpose. Node ignores HTTP(S)_PROXY,
+// and setGlobalDispatcher() would drag Supabase and every other integration
+// through the proxy too.
+let cachedProxy: ProxyAgent | null | undefined;
+
+function egressDispatcher(): ProxyAgent | undefined {
+  if (cachedProxy === undefined) {
+    const url = process.env.KBZPAY_PROXY_URL;
+    cachedProxy = url ? new ProxyAgent(url) : null;
+  }
+  return cachedProxy ?? undefined;
+}
+
+// A blackholed request would otherwise hang until the platform kills the
+// function, leaving the payer watching a spinner.
+const CALL_TIMEOUT_MS = 15_000;
 
 function nonce(): string {
   return randomBytes(16).toString("hex").toUpperCase();
@@ -148,25 +237,42 @@ async function call(
   };
   request.sign = sign(request, APP_KEY());
 
-  let res: Response;
+  // Resolved outside the try on purpose. A bad KBZPAY_MODE is an operator
+  // error, not a transport failure, and must not be laundered into a handled
+  // { ok: false } that reads as KBZPay being unreachable.
+  const url = endpointUrl(path);
+
+  // The status check and the body read stay inside the guard. The timeout
+  // signal remains armed until the body is consumed, so a response whose
+  // headers arrive and whose body then stalls rejects here — outside it, that
+  // rejection would escape call() and surface as a 500 at the payment route
+  // instead of a handled { ok: false }. Malformed JSON lands here too.
+  let json: { Response?: Record<string, KbzField> } | undefined;
   try {
-    res = await fetch(`${BASE()}/${path}`, {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ Request: request }),
-    });
+      signal: AbortSignal.timeout(CALL_TIMEOUT_MS),
+      dispatcher: egressDispatcher(),
+    } as RequestInit & { dispatcher?: ProxyAgent });
+
+    if (!res.ok) {
+      console.error(`[kbzpay] ${method} HTTP ${res.status}`);
+      return { ok: false };
+    }
+
+    json = (await res.json()) as { Response?: Record<string, KbzField> };
   } catch (err) {
     // Never log the signing input — it ends with the app key.
-    console.error(`[kbzpay] ${method} transport error:`, err instanceof Error ? err.message : err);
+    const timedOut = err instanceof Error && err.name === "TimeoutError";
+    console.error(
+      `[kbzpay] ${method} transport error${timedOut ? " (timeout — check IP allowlisting)" : ""}:`,
+      err instanceof Error ? err.message : err,
+    );
     return { ok: false };
   }
 
-  if (!res.ok) {
-    console.error(`[kbzpay] ${method} HTTP ${res.status}`);
-    return { ok: false };
-  }
-
-  const json = (await res.json()) as { Response?: Record<string, KbzField> };
   const body = json?.Response;
   if (!body) return { ok: false };
 
@@ -279,8 +385,24 @@ export async function queryOrder(merchOrderId: string): Promise<QueryResult> {
 
   // "The order does not exist" is an ANSWER, not a failure: it is the only
   // thing that proves KBZPay holds no order under this reference, which is
-  // what lets a row become FAILED. Spec R13.
-  if (!r.ok && r.code === "QUERYORDER_FAIL") {
+  // what lets a row become FAILED and releases the seat. Spec R13.
+  //
+  // Two codes carry that meaning and only QUERYORDER_FAIL is in KBZPay's error
+  // table. AOP14505 is what the live gateway actually returns, and it appears
+  // in the docs solely as an example headed "auth_code is expired /Customer
+  // close the pin pad" — which reads like a customer mid-payment, so it was
+  // deliberately left unmapped until KBZPay confirmed the semantics.
+  //
+  // They confirmed in writing on 2026-09-01: an order that has been created and
+  // is still payable returns WAIT_PAY, and "Could not find the order." comes
+  // back when the order was never created. Every other created-order state has
+  // its own trade_status (PAYING, ORDER_EXPIRED, ORDER_CLOSED), so no live
+  // order can hide behind either code.
+  //
+  // Nothing else belongs in this list. SYSTEM_ERROR, FLOW_CONTROL and friends
+  // mean "we could not tell you", which is not the same as "there is nothing
+  // there", and treating them as an answer would release a paid-for seat.
+  if (!r.ok && (r.code === "QUERYORDER_FAIL" || r.code === "AOP14505")) {
     return { ok: true, tradeStatus: "ORDER_NOT_FOUND" };
   }
 

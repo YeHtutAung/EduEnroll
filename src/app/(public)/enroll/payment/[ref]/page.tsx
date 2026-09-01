@@ -1961,6 +1961,7 @@ export default function PaymentInstructionsPage() {
             ? enrollment.payment.remaining_amount
             : totalFee}
           studentName={enrollment.student_name_en}
+          receiverName={schoolName}
           provider={paymentMode === "paypay" ? "paypay" : mmqrProvider}
           onSuccess={() => {
             setShowQRModal(false);

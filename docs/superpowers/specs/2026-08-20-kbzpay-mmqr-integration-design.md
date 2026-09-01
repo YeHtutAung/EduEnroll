@@ -45,12 +45,58 @@ Source: KBZPay Payment Gateway UAT docs, `https://wap.kbzpay.com/pgw/uat/api/`
 | Query order | `kbz.payment.queryorder` | `api-uat.kbzpay.com/payment/gateway/uat/queryorder` | `api.kbzpay.com/payment/gateway/queryorder` |
 | Close order | `kbz.payment.closeorder` | `api-uat.kbzpay.com/payment/gateway/uat/closeorder` | `api.kbzpay.com/payment/gateway/closeorder` |
 
-Transport: HTTPS, POST, JSON, UTF-8. **Note:** the UAT docs print `precreate` and
-`queryorder` with an `http://` scheme and `closeorder` with `https://`. We will always
-use HTTPS — see §11, gate G2.
+Transport: POST, JSON, UTF-8.
+
+**Scheme differs per endpoint in UAT, and the docs are right about it.** Revision 7 said
+"we will always use HTTPS". That was wrong, and it would have failed on the first live
+call. Probing all six host/scheme pairs on 2026-09-01 gave:
+
+| Endpoint | `http://` | `https://` |
+|---|---|---|
+| `precreate` | **200** (gateway) | 404 (bare nginx) |
+| `queryorder` | **200** (gateway) | 404 (bare nginx) |
+| `closeorder` | 404 | **200** (gateway) |
+
+Port 443 on `api-uat.kbzpay.com` exists but routes `closeorder` alone, so an all-HTTPS
+client cannot create an order at all. **Production is uniformly HTTPS** — `api.kbzpay.com`
+answered 200 on all three.
+
+`endpointUrl()` therefore resolves the scheme per endpoint, and only for UAT: the
+production branch is taken first and unconditionally, so no entry in the UAT table can
+downgrade it.
+
+**And the mode itself fails closed.** Review of PR #236 caught that "anything that is not
+`production` means UAT" is safe on a laptop and catastrophic on a production deployment:
+a missing or misspelled `KBZPAY_MODE` there would send live merchant traffic to the
+plaintext UAT endpoints, and since `call()` never verifies a response signature while
+`queryorder` is the settlement authority (R13), an on-path actor answering a forged
+`PAY_SUCCESS` would settle an order nobody paid. `resolveMode()` now throws on an
+unrecognised value, and on `VERCEL_ENV=production` accepts nothing but `production`.
+Preview and local are untouched — they legitimately run UAT, and an unset value remains
+the documented way to say so. The app key never travels — it is the trailing term of a SHA256 preimage, so
+only the derived signature is sent — but `appid`, `merch_code`, the order reference and the
+amount cross in the clear and without integrity, which also means an on-path attacker could
+forge the `queryorder` response this design treats as the settlement authority. Accepted for
+UAT against test money; production never asks for it. See §11, gate G2.
 
 Interface `version` differs per call: `precreate` uses `"1.0"`, `queryorder` and `closeorder`
 use `"3.0"`.
+
+**Two codes mean "no such order", and only one is documented as such.** The published error
+table lists `QUERYORDER_FAIL` = "The queried order does not exist.". The live gateway
+returns `AOP14505` / "Could not find the order." instead, a code absent from that table and
+present in the docs only as an example headed "auth_code is expired /Customer close the pin
+pad" — which reads like a customer mid-payment. It was therefore left unmapped through the
+first UAT rounds, at the cost of a spurious 502, rather than risk releasing a seat under
+someone still paying.
+
+KBZPay resolved it in writing on 2026-09-01: an order that has been created and is still
+payable returns `WAIT_PAY`, and "Could not find the order." is returned when the order was
+never created. Since every other created-order state carries its own `trade_status`
+(`PAYING`, `ORDER_EXPIRED`, `ORDER_CLOSED`), no live order can hide behind either code, and
+both now map to `ORDER_NOT_FOUND`. Nothing else may join them: `SYSTEM_ERROR`,
+`FLOW_CONTROL` and the rest mean "we could not tell you", which is not "there is nothing
+there".
 
 `closeorder` is **idempotent** — `ORDER_ALREADY_CLOSED` and `QUERYORDER_FAIL` ("the order does
 not exist") are not transport-level failures and do not need retrying. A transport failure,
@@ -355,7 +401,7 @@ is retained purely so a reference is recognisable during support and log triage.
       | Provider says | Meaning | Action |
       |---|---|---|
       | `PAY_SUCCESS` | Already paid | Settle the old reference; return `{ status: 'already_paid' }` (§5.1a). **No replacement.** |
-      | order does not exist (`QUERYORDER_FAIL`) | `precreate` never landed | Proceed to (c) with reason `FAILED`. |
+      | order does not exist (`QUERYORDER_FAIL` or `AOP14505`) | `precreate` never landed | Proceed to (c) with reason `FAILED`. |
       | `ORDER_EXPIRED`, `ORDER_CLOSED`, `PAY_FAILED` | Confirmed dead, unpaid | Proceed to (c) with reason `EXPIRED`. |
       | `WAIT_PAY`, `PAYING` | **Still payable** | Go to (b). |
 
@@ -634,7 +680,7 @@ usefully do. Everything transient stays non-`success` to buy the two retries.
 KBZPAY_APPID=          # 32-char application id
 KBZPAY_MERCH_CODE=     # merchant short code
 KBZPAY_APP_KEY=        # signing key — secret
-KBZPAY_MODE=           # 'production' | anything else → UAT
+KBZPAY_MODE=           # 'production' | unset or 'uat' → UAT | anything else throws
 KBZPAY_NOTIFY_ORIGIN=  # e.g. https://brave.kuunyi.com — origin KBZPay calls back
 ```
 
@@ -783,7 +829,7 @@ mocks cannot prove.
 | # | Gate | Owner |
 |---|---|---|
 | G1 | KBZPay UAT credentials (`appid`, `merch_code`, app key) issued. Blocks live verification, not implementation. | KBZPay onboarding |
-| G2 | **Confirm HTTPS on `api-uat.kbzpay.com`.** The docs print `http://` for `precreate` and `queryorder`. Merchant credentials must not cross plaintext HTTP; if UAT genuinely offers HTTP only, that is a finding to raise with KBZPay before any real key is used. | Us → KBZPay |
+| G2 | **CLOSED 2026-09-01 by measurement, not by asking.** UAT serves `precreate` and `queryorder` over HTTP only and `closeorder` over HTTPS only; production is HTTPS throughout. `endpointUrl()` encodes exactly that, with production hard-guarded. Plaintext accepted for UAT only — see §3.1. | Us |
 | G3 | Register the production `notify_url` with KBZPay and confirm whether they require IP allowlisting. | KBZPay onboarding |
 | G4 | `KBZPAY_NOTIFY_ORIGIN` must be set per environment — `https://brave.kuunyi.com` in production, `https://brave.staging.kuunyi.com` on staging — and **must match the URL registered with KBZPay**. The apex 307-redirects and a redirected POST is not followed, so an apex value fails silently. Confirm both hosts resolve; staging subdomains are not wildcard. | Us |
 | G5 | Confirm the `total_amount` decimal convention for MMK (docs allow up to 2 decimals; MMK is normally whole-kyat). Affects the amount comparison. | Us → KBZPay |

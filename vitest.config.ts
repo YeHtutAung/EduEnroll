@@ -19,7 +19,18 @@ export default defineConfig({
     // sequentially, so it has its own config (vitest.db.config.ts) and is
     // excluded here. Otherwise `npm test` would fail on any machine without
     // the stack.
-    exclude: [...configDefaults.exclude, "e2e/**", "src/__tests__/db/**"],
+    // Nested git worktrees live under .claude/worktrees/** and .worktrees/**
+    // and carry their own copy of src/__tests__. Those copies are stale by
+    // definition, and because "@" resolves to the ROOT src they run old
+    // assertions against current source — a duplicate suite that fails for
+    // reasons no one is working on. Never collect them.
+    exclude: [
+      ...configDefaults.exclude,
+      "e2e/**",
+      "src/__tests__/db/**",
+      ".claude/**",
+      ".worktrees/**",
+    ],
   },
   resolve: {
     alias: {

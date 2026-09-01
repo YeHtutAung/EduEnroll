@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import QRCode from "qrcode";
 import { formatCurrencySimple } from "@/lib/utils";
+import MmqrCard from "@/components/payments/MmqrCard";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -45,6 +46,12 @@ interface QRPaymentModalProps {
   amount: number;
   currency?: string;
   studentName: string;
+  /**
+   * Who receives the money — the merchant, never the payer. Required because
+   * MyanmarPay's brand guideline puts the receiver on the card, and defaulting
+   * it would risk quietly printing the student's name in that slot.
+   */
+  receiverName: string;
   onSuccess: () => void;
   onClose: () => void;
   provider?: QRProvider;
@@ -59,6 +66,7 @@ export default function QRPaymentModal({
   amount,
   currency = "MMK",
   studentName,
+  receiverName,
   onSuccess,
   onClose,
   provider = "mmpay",
@@ -304,7 +312,13 @@ export default function QRPaymentModal({
       />
 
       {/* Panel */}
-      <div className="relative w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
+      {/* max-h + scroll: the panel is vertically centred in a fixed shell, so
+          without them a panel taller than the viewport is clipped at BOTH ends
+          and the close button, Save QR and the reference all become
+          unreachable. The MMQR card is roughly twice the height of the bare QR
+          it replaced, which turns that latent bug into a routine one on short
+          phones. */}
+      <div className="relative max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
         {/* Close button */}
         <button
           onClick={onClose}
@@ -331,48 +345,61 @@ export default function QRPaymentModal({
         {/* ── QR state ──────────────────────────────────────── */}
         {state === "qr" && (
           <div className="flex flex-col items-center">
-            {/* Header — provider-specific branding */}
+            {/* PayPay is not an MMQR scheme, so it keeps its own presentation.
+                Everything else is an MMQR code and must be shown in the card
+                layout MyanmarPay's Digital & POS brand guideline specifies —
+                see MmqrCard, which carries the figures. */}
             {provider === "paypay" ? (
               <>
                 <div className="mb-2 flex h-14 items-center justify-center">
                   <span className="text-3xl font-bold text-[#ff0033]">PayPay</span>
                 </div>
                 <h3 className="text-lg font-semibold text-gray-900">Pay with PayPay</h3>
+
+                {/* Amount */}
+                <div className="mt-3 rounded-lg bg-gray-50 px-4 py-2 text-center">
+                  <p className="text-xs text-gray-500">Amount / <span className="font-myanmar">ပမာဏ</span></p>
+                  <p className="text-xl font-bold text-gray-900">{formatCurrencySimple(amount, currency)}</p>
+                </div>
+
+                {/* Student name */}
+                <p className="mt-2 text-xs text-gray-500">{studentName}</p>
+
+                {/* QR Image */}
+                {qrImageUrl ? (
+                  <div className="mt-4 rounded-xl border border-gray-200 bg-white p-3">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={qrImageUrl}
+                      alt="PayPay Payment Code"
+                      className="h-56 w-56 object-contain"
+                    />
+                  </div>
+                ) : qrData ? (
+                  <div className="mt-4 rounded-xl border border-gray-200 bg-white p-3">
+                    <p className="text-xs text-gray-500 text-center">Rendering QR...</p>
+                  </div>
+                ) : (
+                  <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-6 text-center">
+                    <p className="text-sm text-amber-800">QR code not available from payment gateway.</p>
+                    <p className="font-myanmar mt-1 text-xs text-amber-700">QR ကုဒ် မရရှိနိုင်သေးပါ။</p>
+                  </div>
+                )}
               </>
-            ) : (
+            ) : qrImageUrl || qrData ? (
               <>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/mmqr-logo.png" alt="MyanmarPay MMQR" className="mb-2 h-14 w-auto" />
-                <h3 className="text-lg font-semibold text-gray-900">Pay with MMQR</h3>
-                <p className="font-myanmar mt-0.5 text-sm text-gray-500">MMQR ဖြင့် ငွေပေးချေပါ</p>
-              </>
-            )}
-
-            {/* Amount */}
-            <div className="mt-3 rounded-lg bg-gray-50 px-4 py-2 text-center">
-              <p className="text-xs text-gray-500">Amount / <span className="font-myanmar">ပမာဏ</span></p>
-              <p className="text-xl font-bold text-gray-900">{formatCurrencySimple(amount, currency)}</p>
-            </div>
-
-            {/* Student name */}
-            <p className="mt-2 text-xs text-gray-500">
-              {studentName}
-            </p>
-
-            {/* QR Image */}
-            {qrImageUrl ? (
-              <div className="mt-4 rounded-xl border border-gray-200 bg-white p-3">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={qrImageUrl}
-                  alt="MMQR Payment Code"
-                  className="h-56 w-56 object-contain"
+                <MmqrCard
+                  qrImageUrl={qrImageUrl}
+                  receiverName={receiverName}
+                  amount={amount}
+                  currency={currency}
                 />
-              </div>
-            ) : qrData ? (
-              <div className="mt-4 rounded-xl border border-gray-200 bg-white p-3">
-                <p className="text-xs text-gray-500 text-center">Rendering QR...</p>
-              </div>
+
+                {/* The payer, kept outside the card: the guideline's card shows
+                    the RECEIVER, and adding a second name inside it would
+                    misrepresent who is being paid. */}
+                <p className="mt-2 text-xs text-gray-500">{studentName}</p>
+              </>
             ) : (
               <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-6 text-center">
                 <p className="text-sm text-amber-800">QR code not available from payment gateway.</p>
