@@ -49,7 +49,7 @@ function TicketCard({
       style={{ borderColor: "#e2e8f0" }}>
       {cls.image_url && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={cls.image_url} alt={cls.level} className="w-full h-36 object-cover" />
+        <img src={cls.image_url} alt={`${cls.level} ticket`} className="block w-full h-auto max-h-[420px] object-contain" loading="lazy" decoding="async" />
       )}
       <div className="h-1 w-full" style={{ backgroundColor: primaryColor }} />
 
