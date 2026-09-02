@@ -190,9 +190,9 @@ export async function GET(request: NextRequest) {
   // ── Fetch tenant org_type ─────────────────────────────────────
   const { data: tenantInfo } = await supabase
     .from("tenants")
-    .select("org_type, currency, auto_cancel_hours, payment_mode, mmqr_provider")
+    .select("org_type, currency, auto_cancel_hours, payment_mode, mmqr_provider, platform_fee_mode, platform_fee_amount")
     .eq("id", tenantId)
-    .single() as { data: { org_type: string; currency: string; auto_cancel_hours: number; payment_mode: string; mmqr_provider: string } | null; error: unknown };
+    .single() as { data: { org_type: string; currency: string; auto_cancel_hours: number; payment_mode: string; mmqr_provider: string; platform_fee_mode: string | null; platform_fee_amount: number | null } | null; error: unknown };
 
   // Telegram config lives in tenant_telegram_configs (moved in migration 068)
   const { data: tgConfig } = await supabase
@@ -225,6 +225,10 @@ export async function GET(request: NextRequest) {
     auto_cancel_minutes: tenantInfo?.auto_cancel_hours ?? 4320,
     telegram_bot_username: tgConfig?.enabled ? (tgConfig.bot_username ?? null) : null,
     payment_mode: tenantInfo?.payment_mode ?? "bank_transfer",
+    // Fee settings, so the payment and confirmation screens can show the split
+    // rather than a single figure the buyer cannot account for.
+    platform_fee_mode: tenantInfo?.platform_fee_mode ?? "none",
+    platform_fee_amount: tenantInfo?.platform_fee_amount ?? 0,
     mmqr_provider: tenantInfo?.mmqr_provider ?? "abank",
   });
 }

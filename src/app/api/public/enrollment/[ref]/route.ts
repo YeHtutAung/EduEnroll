@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import { getStripe } from "@/lib/stripe";
 import { signTicketJwt } from "@/lib/tickets/sign";
+import { computePlatformFee } from "@/server/payments/platformFee";
 
 // ─── GET /api/public/enrollment/[ref] ────────────────────────────────────────
 // Returns enrollment summary for the Trusted Official checkout flow.
@@ -50,7 +51,7 @@ export async function GET(
       ? [{ level: enrollment.classes.level, quantity: enrollment.quantity ?? 1, fee_amount: enrollment.classes.fee_amount }]
       : [];
 
-  const totalAmount = items.reduce((s, i) => s + i.fee_amount * i.quantity, 0);
+  const ticketSubtotal = items.reduce((s, i) => s + i.fee_amount * i.quantity, 0);
 
   // Conditionally retrieve stripe client_secret if an active PaymentIntent exists
   let stripeClientSecret: string | undefined;
@@ -86,9 +87,9 @@ export async function GET(
       .single() as unknown as Promise<{ data: { logo_url: string | null; primary_color: string | null; sponsor_config: unknown } | null; error: unknown }>,
     supabase
       .from("tenants")
-      .select("payment_mode, mmqr_provider")
+      .select("payment_mode, mmqr_provider, platform_fee_mode, platform_fee_amount")
       .eq("id", tenantId)
-      .single() as unknown as Promise<{ data: { payment_mode: string | null; mmqr_provider: string | null } | null; error: unknown }>,
+      .single() as unknown as Promise<{ data: { payment_mode: string | null; mmqr_provider: string | null; platform_fee_mode: string | null; platform_fee_amount: number | null } | null; error: unknown }>,
     supabase
       .from("bank_accounts")
       .select("bank_name, account_number, account_holder, qr_code_url")
@@ -139,12 +140,27 @@ export async function GET(
       }));
   }
 
+  const platformFee = computePlatformFee(
+    {
+      payment_mode: tenant?.payment_mode,
+      platform_fee_mode: tenant?.platform_fee_mode,
+      platform_fee_amount: tenant?.platform_fee_amount,
+    },
+    ticketSubtotal,
+    items.reduce((s, i) => s + i.quantity, 0),
+  );
+
   return NextResponse.json({
     enrollment_ref: enrollment.enrollment_ref,
     status: enrollment.status,
     student_name_en: enrollment.student_name_en ?? "",
     email: enrollment.email ?? "",
-    total_amount: totalAmount,
+    // Ticket subtotal and the fee, plus the combined figure the payer was
+    // charged. Sent as a split so the confirmation screen can show what the
+    // total is made of instead of one number the buyer cannot account for.
+    ticket_subtotal: ticketSubtotal,
+    platform_fee: platformFee,
+    total_amount: ticketSubtotal + platformFee,
     items,
     intake_id:
       (enrollment.classes as { intakes?: { id: string } | null } | null)?.intakes?.id ??

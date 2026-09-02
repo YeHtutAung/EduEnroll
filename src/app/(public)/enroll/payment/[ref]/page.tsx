@@ -10,6 +10,7 @@ import PayNowQrSaveButton from "@/components/payments/PayNowQrSaveButton";
 import BrandHeader from "@/components/enrollment/BrandHeader";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
+import { computePlatformFee } from "@/server/payments/platformFee";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CartItem {
@@ -39,6 +40,8 @@ interface EnrollmentInfo {
   telegram_bot_username?: string | null;
   payment_mode?: "bank_transfer" | "mmqr" | "stripe" | "paypay" | "hitpay";
   mmqr_provider?: "abank" | "mmpay" | "kbzpay";
+  platform_fee_mode?: string | null;
+  platform_fee_amount?: number | null;
   class_image_url?: string | null;
   items?: CartItem[] | null;
   payment?: {
@@ -1339,8 +1342,24 @@ export default function PaymentInstructionsPage() {
   const totalFee = isCart
     ? enrollment.items!.reduce((sum, i) => sum + i.subtotal, 0)
     : (enrollment.fee_amount ?? 0) * qty;
-  const feeEn = formatCurrencySimple(totalFee, currency);
-  const feeMm = currency === "MMK" ? formatAmount(totalFee) : null;
+  // Ticket subtotal above; the fee is added here from the same calculator the
+  // payment routes use, so the figure shown matches what the gateway charged.
+  const ticketCount = isCart
+    ? enrollment.items!.reduce((sum, i) => sum + i.quantity, 0)
+    : qty;
+  const platformFee = computePlatformFee(
+    {
+      payment_mode: enrollment.payment_mode,
+      platform_fee_mode: enrollment.platform_fee_mode,
+      platform_fee_amount: enrollment.platform_fee_amount,
+    },
+    totalFee,
+    ticketCount,
+  );
+  const grandTotal = totalFee + platformFee;
+
+  const feeEn = formatCurrencySimple(grandTotal, currency);
+  const feeMm = currency === "MMK" ? formatAmount(grandTotal) : null;
   const showUpload = enrollment.status === "pending_payment" || enrollment.status === "partial_payment";
   const isPartialReUpload = enrollment.status === "partial_payment";
   const paymentMode = enrollment.payment_mode ?? "bank_transfer";
@@ -1503,7 +1522,7 @@ export default function PaymentInstructionsPage() {
             <div className="border-t border-gray-100 bg-gray-50/50 px-6 py-4">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold text-gray-600">Total Paid</span>
-                <span className="text-lg font-bold text-[#1a6b3c]">{formatCurrencySimple(totalFee, currency)}</span>
+                <span className="text-lg font-bold text-[#1a6b3c]">{formatCurrencySimple(grandTotal, currency)}</span>
               </div>
             </div>
 
@@ -1585,9 +1604,15 @@ export default function PaymentInstructionsPage() {
                   </span>
                 </div>
               )}
+              {platformFee > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-700">Online Platform Fee / <span className="font-myanmar">အွန်လိုင်း ဝန်ဆောင်ခ</span></span>
+                  <span className="font-medium text-gray-900">{formatCurrencySimple(platformFee, currency)}</span>
+                </div>
+              )}
               <div className="border-t pt-2 mt-2 flex justify-between font-semibold text-gray-900">
                 <span>Total</span>
-                <span>{formatCurrencySimple(totalFee, currency)}</span>
+                <span>{formatCurrencySimple(grandTotal, currency)}</span>
               </div>
             </div>
           </div>
