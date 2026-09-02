@@ -781,12 +781,15 @@ function DownloadReceiptButton({
   enrollment,
   orgType,
   totalFee,
+  platformFee,
   feeFormatted,
   isCart,
 }: {
   enrollment: EnrollmentInfo;
   orgType: string;
+  /** Tickets only. The fee is its own line so the rows sum to the total. */
   totalFee: number;
+  platformFee: number;
   feeFormatted: string;
   isCart: boolean;
 }) {
@@ -949,6 +952,13 @@ function DownloadReceiptButton({
                   </span>
                 </div>
               </div>
+
+              {platformFee > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 14px", fontSize: "12.5px", color: "#6b7280" }}>
+                  <span>Online Platform Fee</span>
+                  <span style={{ color: "#1f2937" }}>{platformFee.toLocaleString()}</span>
+                </div>
+              )}
 
               {/* Total / fee */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#f9fafb", borderRadius: "8px" }}>
@@ -1528,7 +1538,7 @@ export default function PaymentInstructionsPage() {
                       </div>
                     </div>
                     <span className="text-sm font-semibold text-gray-900">
-                      {formatCurrencySimple(totalFee, currency)}
+                      {formatCurrencySimple(grandTotal, currency)}
                     </span>
                   </div>
                 )}
@@ -1564,6 +1574,7 @@ export default function PaymentInstructionsPage() {
             enrollment={enrollment}
             orgType={orgType}
             totalFee={totalFee}
+            platformFee={platformFee}
             feeFormatted={feeEn}
             isCart={isCart}
           />
@@ -1791,7 +1802,7 @@ export default function PaymentInstructionsPage() {
               <p className="mt-1 text-3xl font-bold font-mono text-white">
                 {isPartialReUpload && enrollment.payment?.remaining_amount
                   ? formatCurrencySimple(enrollment.payment.remaining_amount, currency)
-                  : formatCurrencySimple(totalFee, currency)}
+                  : formatCurrencySimple(grandTotal, currency)}
               </p>
               <button
                 onClick={() => setShowQRModal(true)}
@@ -1836,7 +1847,7 @@ export default function PaymentInstructionsPage() {
                   : (orgType === "event" ? "Pay to complete your order" : <>Pay to complete your enrollment / <span className="font-myanmar">ငွေပေးချေပြီး အပြီးသတ်ပါ</span></>)}
               </p>
               <p className="mt-1 text-3xl font-bold font-mono text-white">
-                {isPartialReUpload && enrollment.payment?.remaining_amount ? formatCurrencySimple(enrollment.payment.remaining_amount, currency) : formatCurrencySimple(totalFee, currency)}
+                {isPartialReUpload && enrollment.payment?.remaining_amount ? formatCurrencySimple(enrollment.payment.remaining_amount, currency) : formatCurrencySimple(grandTotal, currency)}
               </p>
               <button
                 onClick={() => setShowQRModal(true)}
@@ -2001,7 +2012,7 @@ export default function PaymentInstructionsPage() {
           enrollmentRef={enrollment.enrollment_ref}
           amount={isPartialReUpload && enrollment.payment?.remaining_amount
             ? enrollment.payment.remaining_amount
-            : totalFee}
+            : grandTotal}
           studentName={enrollment.student_name_en}
           receiverName={schoolName}
           provider={paymentMode === "paypay" ? "paypay" : mmqrProvider}
