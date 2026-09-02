@@ -5,6 +5,7 @@ import { platformOrigin } from "@/lib/origin";
 import { precreate, buildMerchOrderId, type CallBudget } from "@/lib/kbzpay";
 import { resolveKbzpayOrder } from "@/server/payments/resolveKbzpayOrder";
 import { orderWindow } from "@/server/payments/kbzpayOrderWindow";
+import { computeOrderTotal } from "@/server/payments/platformFee";
 
 // The Vercel plan caps a function at 10s and it cannot be raised, so declare
 // it rather than inherit it silently. This route can make FOUR sequential
@@ -164,10 +165,15 @@ export async function POST(request: NextRequest) {
   // ── 3a. Order window, from the tenant's auto-cancel setting ─
   const { data: tenant, error: tenantError } = (await supabase
     .from("tenants")
-    .select("auto_cancel_hours")
+    .select("auto_cancel_hours, payment_mode, platform_fee_mode, platform_fee_amount")
     .eq("id", enrollment.tenant_id)
     .maybeSingle()) as {
-    data: { auto_cancel_hours: number | null } | null;
+    data: {
+      auto_cancel_hours: number | null;
+      payment_mode: string | null;
+      platform_fee_mode: string | null;
+      platform_fee_amount: number | null;
+    } | null;
     error: { message: string } | null;
   };
 
@@ -216,17 +222,20 @@ export async function POST(request: NextRequest) {
   const isCart =
     !enrollment.class_id && enrollment.enrollment_items && enrollment.enrollment_items.length > 0;
 
-  let totalFee: number;
-  if (isCart) {
-    totalFee = enrollment.enrollment_items!.reduce(
-      (sum, item) => sum + item.fee_amount * item.quantity,
-      0,
-    );
-  } else if (enrollment.classes) {
-    totalFee = enrollment.classes.fee_amount * (enrollment.quantity ?? 1);
-  } else {
-    return fail(500, "Class data not found.", "Internal Server Error");
-  }
+  const orderItems = isCart
+    ? enrollment.enrollment_items!.map((i) => ({ fee_amount: i.fee_amount, quantity: i.quantity }))
+    : enrollment.classes
+      ? [{ fee_amount: enrollment.classes.fee_amount, quantity: enrollment.quantity ?? 1 }]
+      : null;
+
+  if (!orderItems) return fail(500, "Class data not found.", "Internal Server Error");
+
+  // The online platform fee is added here, never as a second transaction: the
+  // gateway is sent one combined amount and settlement compares against it.
+  // computeOrderTotal is shared with every other payment route so no two can
+  // disagree about the figure — a disagreement means the payer is charged and
+  // then refused with amount_mismatch.
+  let totalFee = computeOrderTotal(orderItems, tenant ?? {}).total;
 
   if (enrollment.status === "partial_payment") {
     const { data: existingPayment } = (await supabase

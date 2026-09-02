@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import paypay from "@/lib/paypay";
+import { resolveOrderTotal } from "@/server/payments/platformFee";
 
 // ─── POST /api/public/payments/paypay ───────────────────────────────────────
 // Creates a PayPay QR payment order and returns the payment URL.
@@ -91,6 +92,13 @@ export async function POST(request: NextRequest) {
       { status: 500 },
     );
   }
+
+  // Online platform fee. Resolved by the shared calculator rather than worked
+  // out here, so no two payment routes can disagree about the amount — a
+  // disagreement surfaces as amount_mismatch at settlement, after the payer
+  // has already been charged.
+  const { platformFee } = await resolveOrderTotal(supabase, enrollment);
+  totalFee += platformFee;
 
   // ── 5. Adjust for partial payment ──────────────────────────
   if (enrollment.status === "partial_payment") {

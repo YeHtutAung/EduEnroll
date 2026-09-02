@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import { platformOrigin } from "@/lib/origin";
 import mmpay from "@/lib/mmpay";
+import { resolveOrderTotal } from "@/server/payments/platformFee";
 
 // ─── POST /api/public/payments/mmqr ─────────────────────────────────────────
 // Creates an MMQR payment via MyanMyanPay and returns a QR code.
@@ -106,6 +107,15 @@ export async function POST(request: NextRequest) {
       { error: "Internal Server Error", message: "Class data not found." },
       { status: 500 },
     );
+  }
+
+  // Online platform fee, from the shared calculator. MMPay is sent line items
+  // as well as a total, so the fee needs its own line — otherwise the items do
+  // not sum to the amount and the gateway rejects the order.
+  const { platformFee } = await resolveOrderTotal(supabase, enrollment);
+  if (platformFee > 0) {
+    totalFee += platformFee;
+    items.push({ name: "Online platform fee", amount: platformFee, quantity: 1 });
   }
 
   // ── 5. Check for partial payment — reduce amount by received ──

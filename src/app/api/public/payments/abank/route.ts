@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import { platformOrigin } from "@/lib/origin";
 import abank from "@/lib/abank";
+import { resolveOrderTotal } from "@/server/payments/platformFee";
 
 // ─── POST /api/public/payments/abank ────────────────────────────────────────
 // Creates an ABank MMQR order and returns a QR string for the user to scan.
@@ -92,6 +93,13 @@ export async function POST(request: NextRequest) {
       { status: 500 },
     );
   }
+
+  // Online platform fee. Resolved by the shared calculator rather than worked
+  // out here, so no two payment routes can disagree about the amount — a
+  // disagreement surfaces as amount_mismatch at settlement, after the payer
+  // has already been charged.
+  const { platformFee } = await resolveOrderTotal(supabase, enrollment);
+  totalFee += platformFee;
 
   // ── 5. Adjust for partial payment ──────────────────────────
   if (enrollment.status === "partial_payment") {

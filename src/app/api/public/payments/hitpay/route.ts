@@ -4,6 +4,7 @@ import { resolveTenantId } from "@/lib/api";
 import hitpay from "@/lib/hitpay";
 import { tenantOrigin } from "@/lib/origin";
 import { isAllowedRedirect } from "@/lib/payments/redirect-allowlist";
+import { resolveOrderTotal } from "@/server/payments/platformFee";
 
 // ─── POST /api/public/payments/hitpay ─────────────────────────────────────────
 // Creates a HitPay payment request for PayNow QR or Card.
@@ -111,6 +112,13 @@ export async function POST(request: NextRequest) {
       { status: 500 },
     );
   }
+
+  // Online platform fee. Resolved by the shared calculator rather than worked
+  // out here, so no two payment routes can disagree about the amount — a
+  // disagreement surfaces as amount_mismatch at settlement, after the payer
+  // has already been charged.
+  const { platformFee } = await resolveOrderTotal(supabase, enrollment);
+  totalFee += platformFee;
 
   // ── 5. Adjust for partial payment ──────────────────────────────────────────
   if (enrollment.status === "partial_payment") {

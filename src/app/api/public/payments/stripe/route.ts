@@ -13,6 +13,7 @@ import {
 } from "@/server/payments/stripeAttempt";
 import { settlePaidPayment } from "@/server/payments/settlePaidPayment";
 import { recordConflict } from "@/server/payments/settlementConflicts";
+import { resolveOrderTotal } from "@/server/payments/platformFee";
 
 // ─── POST /api/public/payments/stripe ────────────────────────────────────────
 // Hosted Checkout creation (Plan v18 §3). Discriminated results (§3c);
@@ -165,6 +166,23 @@ export async function POST(request: NextRequest) {
         { error: "Internal Server Error", message: "Class data not found." },
         { status: 500 },
       );
+    }
+
+    // Online platform fee. Stripe is sent line items as well as a total, so
+    // the fee gets its own line — otherwise the lines do not sum to the amount
+    // charged. platform_fee_amount is in whole major units, the same unit as
+    // totalMajor, so the minor-unit conversion happens here as it does above.
+    const { platformFee } = await resolveOrderTotal(supabase, enrollment);
+    if (platformFee > 0) {
+      totalMajor += platformFee;
+      lineItems.push({
+        price_data: {
+          currency,
+          unit_amount: toMinorUnits(platformFee, currency),
+          product_data: { name: "Online platform fee" },
+        },
+        quantity: 1,
+      });
     }
 
     // ── Partial payment: single remaining-balance line ──────────────────────
