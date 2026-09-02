@@ -71,6 +71,21 @@ export async function GET(
   }
 
   const verifiedPayment = payments?.find((p) => p.status === "verified");
+
+  // The row that represents the WHOLE order, chosen deterministically. The
+  // embedded relation has no ORDER BY, so `find` above returns whichever row
+  // the database happened to hand back — fine for reading a card brand, not
+  // for reporting money.
+  //
+  // The largest amount is the order-level row: a partial-payment top-up is by
+  // definition a remainder, and a superseded KBZPay attempt carries the same
+  // total as the one that replaced it. displayTotals rejects anything below
+  // the ticket subtotal regardless, so a surprise here cannot understate what
+  // an order cost.
+  const orderPayment = (payments ?? []).reduce<PaymentRow | null>(
+    (best, p) => ((p.amount ?? 0) > (best?.amount ?? -1) ? p : best),
+    null,
+  );
   // Fall back to any payment so the success page can show the method even before verification
   const anyPayment = payments?.[0];
 
@@ -147,7 +162,7 @@ export async function GET(
   //
   // Before payment there is no such record, and quoting the current setting is
   // correct: it is what the buyer would be charged.
-  const chargedAmount = verifiedPayment?.amount ?? null;
+  const chargedAmount = orderPayment?.amount ?? null;
 
   const { platformFee, total: displayTotal } = displayTotals(
     ticketSubtotal,

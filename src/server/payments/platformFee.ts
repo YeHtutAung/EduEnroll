@@ -185,14 +185,25 @@ export function displayTotals(
   chargedAmount: number | null,
   feeIfUnpaid: number,
 ): { platformFee: number; total: number } {
-  if (chargedAmount === null) {
+  // An order total can never be less than the tickets it contains. A smaller
+  // figure is a REMAINDER, not a total — a partial-payment top-up row, whose
+  // amount is the balance left over.
+  //
+  // That distinction is load-bearing. `request_remaining` sets verified_at and
+  // received_amount on the original row but never moves its status to
+  // 'verified', so on a partial order the only row that looks verified can be
+  // the top-up. Reporting its amount would tell a customer their 1,000 order
+  // cost 600. Rejecting anything below the subtotal makes the answer
+  // independent of which row is found, and of the order rows come back in.
+  const isOrderTotal = chargedAmount !== null && chargedAmount >= ticketSubtotal;
+
+  if (!isOrderTotal) {
     return { platformFee: feeIfUnpaid, total: ticketSubtotal + feeIfUnpaid };
   }
 
-  // Derived rather than stored. A partial payment makes the charged amount a
-  // remainder, which would give a negative fee — clamped, because a negative
-  // fee reads as a discount that was never given.
-  return { platformFee: Math.max(0, chargedAmount - ticketSubtotal), total: chargedAmount };
+  // Derived rather than stored, against a subtotal that cannot move because
+  // enrollment_items snapshot their price.
+  return { platformFee: chargedAmount - ticketSubtotal, total: chargedAmount };
 }
 
 // ─── Gateway line items ─────────────────────────────────────────────────────

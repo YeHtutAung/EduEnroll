@@ -168,11 +168,39 @@ describe("what a completed order reports", () => {
     expect(displayTotals(1000, null, 500)).toEqual({ platformFee: 500, total: 1500 });
   });
 
-  // A partial payment makes the charged amount a remainder, so the subtraction
-  // goes negative. A negative fee would read as a discount never given.
+  // ── Review of PR #245, finding 3 ─────────────────────────────────────────
+  //
+  // A partial order's top-up row holds the REMAINDER, and `request_remaining`
+  // never moves the original row's status to 'verified' — so the only row that
+  // looks verified can be the top-up. Reporting its amount told a customer
+  // their 1,000 order cost 600.
+  //
+  // The rule that removes the whole class of bug: an order total can never be
+  // less than the tickets it contains.
+  it("never reports a remainder as the order total", () => {
+    // 1,000 of tickets, top-up row of 600. The reported figure was 600.
+    const shown = displayTotals(1000, 600, 0);
+
+    expect(shown.total).toBe(1000);
+    expect(shown.total).toBeGreaterThanOrEqual(1000);
+  });
+
+  it("falls back to the configured fee when only a remainder is known", () => {
+    expect(displayTotals(1000, 600, 500)).toEqual({ platformFee: 500, total: 1500 });
+  });
+
   it("never reports a negative fee", () => {
     expect(displayTotals(3000, 1500, 0).platformFee).toBe(0);
   });
+
+  // The property, rather than the examples: whatever row is found, the total
+  // never falls below the tickets on the order.
+  it.each([null, 0, 600, 999, 1000, 1200, 5000])(
+    "reports at least the ticket subtotal (charged %s)",
+    (charged) => {
+      expect(displayTotals(1000, charged, 0).total).toBeGreaterThanOrEqual(1000);
+    },
+  );
 });
 
 // ─── Review of PR #245, finding 2 ───────────────────────────────────────────
