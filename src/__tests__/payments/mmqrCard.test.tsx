@@ -92,20 +92,8 @@ describe("responsive behaviour", () => {
 });
 
 describe("proportions", () => {
-  it("sizes the header at 18.5% and the MMQR wording at 12.5% of height", () => {
-    const html = render();
-    // The header rule sits at the header's full height.
-    expect(html).toContain(`y1="${VB_H * 0.185}"`);
-    // Wording baseline sits inside the 12.5% band that follows it.
-    expect(html).toContain(`font-size="${VB_H * 0.125 * 0.42}"`);
-  });
-
-  it("sizes the QR at 44% of height", () => {
-    expect(render()).toContain(`width="${VB_H * 0.44}"`);
-  });
-
-  it("caps the QR at 75% of width", () => {
-    expect(VB_H * 0.44).toBeLessThanOrEqual(VB_W * 0.75);
+  it("sizes the QR at 70% of width", () => {
+    expect(render()).toContain(`width="${VB_W * 0.7}"`);
   });
 
   it("sizes name, amount and currency at 3%, 6% and 3% of height", () => {
@@ -117,22 +105,66 @@ describe("proportions", () => {
     expect(html).toContain(`font-size="${amount}"`);
     expect(amount).toBe(name * 2);
   });
+
+  it("leaves a bottom margin below the QR", () => {
+    const qrBottom = VB_H - VB_H * 0.05;
+    expect(qrBottom).toBeLessThan(VB_H);
+    expect(render()).toContain(`y="${VB_H - VB_H * 0.05 - VB_W * 0.7}"`);
+  });
 });
 
-// Explicit in the guideline, with a cited reason: a Cambodia Bakong user study
-// found left-aligned values are read in ~0.5s against 1-2s when centred.
-describe("left alignment (guideline §5)", () => {
-  it("puts the QR and the text on the same 12.5% left margin", () => {
-    const margin = VB_W * 0.125;
-    const html = render();
-
-    expect(html).toContain(`x="${margin}"`);
-    // QR, receiver name and amount all start there.
-    expect(html.split(`x="${margin}"`).length - 1).toBeGreaterThanOrEqual(3);
+// The reference card KBZPay signed off: mark on the rule, receiver and amount
+// centred ABOVE the QR, dotted separator, MMQR wording, then the QR. An
+// earlier version put the text left-aligned below the QR and was rejected.
+describe("approved reference layout", () => {
+  it("centres the receiver name, the amount and the MMQR wording", () => {
+    // Three centred texts, not one.
+    expect(render().split('text-anchor="middle"').length - 1).toBeGreaterThanOrEqual(3);
   });
 
-  it("centres only the MMQR wording", () => {
-    expect(render().split('text-anchor="middle"').length - 1).toBe(1);
+  it("puts the receiver and amount above the QR", () => {
+    const html = render();
+    const qrY = VB_H - VB_H * 0.05 - VB_W * 0.7;
+
+    expect(VB_H * 0.285).toBeLessThan(qrY); // receiver baseline
+    expect(VB_H * 0.355).toBeLessThan(qrY); // amount baseline
+    expect(html).toContain(`y="${VB_H * 0.285}"`);
+  });
+
+  it("draws the dotted separator", () => {
+    expect(render()).toContain('stroke-dasharray="2 6"');
+  });
+
+  // The mark carries its own "MMQR" wordmark, which the card already shows
+  // above the QR. Cropping the source removes the duplicate.
+  it("crops the wordmark off the MyanmarPay mark", () => {
+    const html = render();
+    expect(html).toContain("/mmqr-logo.png");
+    // A nested viewBox shorter than the source height is what does the crop.
+    expect(html).toContain(`viewBox="0 0 1920 ${Math.round(2943 * 0.817)}"`);
+  });
+});
+
+// A wallet mark covers modules, so it may only appear when the QR was
+// generated at error correction H — and only for the provider it belongs to.
+describe("provider mark", () => {
+  it("is absent by default", () => {
+    expect(render()).not.toContain("kbzpay-logo");
+  });
+
+  it("is centred on the QR when supplied", () => {
+    const html = render({ providerLogoUrl: "/kbzpay-logo.png" });
+    const qr = VB_W * 0.7;
+    const mark = qr * 0.18;
+
+    expect(html).toContain("/kbzpay-logo.png");
+    expect(html).toContain(`width="${mark}"`);
+  });
+
+  it("is not drawn while the QR is still rendering", () => {
+    // Nothing to sit on top of yet, and a mark alone would read as a failure.
+    const html = render({ qrImageUrl: null, providerLogoUrl: "/kbzpay-logo.png" });
+    expect(html).not.toContain("/kbzpay-logo.png");
   });
 });
 

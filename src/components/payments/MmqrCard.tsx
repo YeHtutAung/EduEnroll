@@ -1,70 +1,69 @@
 // ─── MMQR payment card ──────────────────────────────────────────────────────
-// Layout is dictated by the MyanmarPay "Digital & POS Brand Guideline
-// (Dynamic QR)", which KBZPay require merchants to follow when displaying an
-// MMQR code. Every number here is the guideline's own figure:
+//
+// Layout follows the reference card MyanmarPay/KBZPay signed off, which the
+// "Digital & POS Brand Guideline (Dynamic QR)" underpins:
 //
 //   card ratio        20:29
 //   side margins      12.5% of width
-//   header            18.5% of height, logo ~centre of header
-//   header/footer     rules inset 3% of card
-//   MMQR wording      12.5% of height, top centre of the QR
-//   QR area           44% of height, capped at 75% of width
-//   receiver name     3% of height
-//   amount            6% of height
-//   currency          3% of height
+//   header            logo sits ON the yellow rule
+//   receiver + amount centred, ABOVE the QR
+//   separator         dotted yellow rule
+//   MMQR wording      centred, directly above the QR
+//   QR                70% of width, centred, on the bottom margin
+//   receiver name     3% of height, amount 6%, currency 3%
 //   font              Arial, letter-spacing 0%
 //   colours           #ffffff  #000000  #FBD913  #17479E
+//
+// The MyanmarPay mark is cropped to drop its own "MMQR" wordmark: the card
+// already carries MMQR above the QR, and the duplicate was flagged for removal.
+// 0-81.7% of the source height cuts through the blank band between
+// "MyanmarPay" and that wordmark.
 //
 // ── Why this is an SVG ──────────────────────────────────────────────────────
 //
 // The card must hold one ratio and one set of internal proportions at any
-// width, and two earlier attempts to do that in CSS both failed:
+// width, and two attempts to do that in CSS both failed:
 //
-//  1. A custom property holding `min(320px, 100%)`, with sizes as
-//     `calc(var(--w) * 0.0435)`. A custom property containing a percentage is
-//     substituted as tokens and re-resolved against whatever the USING
-//     property means by `%` — and in font-size that is the parent's font size.
-//     Labels rendered at 16px * 0.0435 = 0.7px while widths stayed right.
+//  1. A custom property holding `min(320px, 100%)` with `calc(var(--w) * k)`
+//     sizes. `%` inside a custom property is re-resolved per property, and in
+//     font-size it means the parent's font size — every label rendered at
+//     0.7px while the widths stayed correct.
+//  2. Fixed pixels with `maxWidth: 100%`. The box narrowed while the height
+//     and internals stayed pinned: on a 320px phone, a 240x464 card at ratio
+//     1.93 against the required 1.45, with the QR overflowing the panel.
 //
-//  2. Pixels from a fixed `width` with `maxWidth: 100%`. The box narrowed while
-//     the height and internals stayed pinned: measured inside the real panel, a
-//     320px phone gave a 240x464 card, ratio 1.93 against the required 1.45,
-//     with the QR overflowing the panel. Caught in review of PR #238.
-//
-// Measuring the container with ResizeObserver would fix (2), but it makes
-// layout depend on a JS API that is throttled in background tabs and unreliable
-// in embedded webviews — and payers open this inside bank and messenger
-// in-app browsers.
-//
-// An SVG viewBox has none of these problems. Every coordinate below is in
-// viewBox units on a 500x725 canvas, the browser scales the whole thing —
-// text included — and `width: 100%` with `max-width` makes it responsive with
-// no script and no percentage arithmetic. Container query units would also
-// work but need Chrome 105+/Safari 16+, which is not a safe assumption here.
+// A viewBox has neither problem: coordinates are fixed in the markup and the
+// browser scales the whole thing, text included.
 
 const VB_W = 500;
 const VB_H = VB_W * (29 / 20); // 725
 
-const HEADER_H = VB_H * 0.185;
-const WORDING_H = VB_H * 0.125;
-const QR = Math.min(VB_H * 0.44, VB_W * 0.75);
 const SIDE = VB_W * 0.125;
 const RULE_INSET = VB_W * 0.03;
+const QR = VB_W * 0.7;
 const NAME_SIZE = VB_H * 0.03;
 const AMOUNT_SIZE = VB_H * 0.06;
 const CURRENCY_SIZE = VB_H * 0.03;
 
+// Vertical rhythm, in viewBox units.
+const RULE_Y = VB_H * 0.125;
+const NAME_BASELINE = VB_H * 0.285;
+const AMOUNT_BASELINE = VB_H * 0.355;
+const DOTTED_Y = VB_H * 0.405;
+const WORDING_BASELINE = VB_H * 0.455;
+const BOTTOM_MARGIN = VB_H * 0.05;
+const QR_Y = VB_H - BOTTOM_MARGIN - QR;
+const QR_X = (VB_W - QR) / 2;
+
+/** Logo height, straddling the rule. */
+const LOGO_H = VB_H * 0.15;
+/** Fraction of the logo's own height kept — drops its "MMQR" wordmark. */
+const LOGO_CROP = 0.817;
+/** Native aspect of the cropped mark, used to centre it without distortion. */
+const LOGO_ASPECT = 1920 / 2432;
+
 const YELLOW = "#FBD913";
 const BLUE = "#17479E";
-
-// Vertical rhythm, in viewBox units.
-const RULE_Y = HEADER_H;
-const WORDING_BASELINE = RULE_Y + WORDING_H * 0.72;
-const QR_Y = RULE_Y + WORDING_H;
-const NAME_BASELINE = QR_Y + QR + NAME_SIZE * 2;
-const AMOUNT_BASELINE = NAME_BASELINE + AMOUNT_SIZE * 1.15;
-const FOOTER_Y = VB_H - VB_H * 0.04;
-
 const FONT = "Arial, Helvetica, sans-serif";
 
 interface MmqrCardProps {
@@ -74,6 +73,14 @@ interface MmqrCardProps {
   receiverName: string;
   amount: number;
   currency: string;
+  /**
+   * Wallet mark to place at the centre of the QR, or null for none.
+   *
+   * Only set this for a provider whose mark belongs there — an ABank or MMPay
+   * tenant must not show KBZPay's. The QR must also be generated at error
+   * correction H, or the covered modules cannot be recovered.
+   */
+  providerLogoUrl?: string | null;
   /** Widest the card may render. It shrinks freely below this. */
   maxWidth?: number;
 }
@@ -83,8 +90,16 @@ export default function MmqrCard({
   receiverName,
   amount,
   currency,
+  providerLogoUrl = null,
   maxWidth = 320,
 }: MmqrCardProps) {
+  // 18% of the QR. Level H recovers ~30% of modules, so a mark this size sits
+  // well inside budget; the white plate gives the decoder a clean quiet zone.
+  const markSize = QR * 0.18;
+  const plate = markSize * 1.18;
+  const qrCentreX = QR_X + QR / 2;
+  const qrCentreY = QR_Y + QR / 2;
+
   return (
     <svg
       data-testid="mmqr-card"
@@ -96,45 +111,96 @@ export default function MmqrCard({
     >
       <rect width={VB_W} height={VB_H} fill="#ffffff" />
 
-      {/* Header — logo at the centre, 18.5% of height */}
-      <image
-        href="/mmqr-logo.png"
-        x={(VB_W - HEADER_H * 0.652) / 2}
-        y={HEADER_H * 0.1}
-        height={HEADER_H * 0.8}
-        preserveAspectRatio="xMidYMid meet"
-      />
-
+      {/* Header rule, with the logo sitting over it */}
       <line
         x1={RULE_INSET}
         y1={RULE_Y}
         x2={VB_W - RULE_INSET}
         y2={RULE_Y}
         stroke={YELLOW}
+        strokeWidth={4}
+      />
+      {/* White plate so the rule does not run through the mark */}
+      <rect
+        x={(VB_W - LOGO_H * LOGO_ASPECT) / 2 - 8}
+        y={RULE_Y - LOGO_H / 2 - 4}
+        width={LOGO_H * LOGO_ASPECT + 16}
+        height={LOGO_H + 8}
+        fill="#ffffff"
+      />
+      {/* Cropped to drop the logo's own MMQR wordmark — the card carries one
+          already, directly above the QR. */}
+      <svg
+        x={(VB_W - LOGO_H * LOGO_ASPECT) / 2}
+        y={RULE_Y - LOGO_H / 2}
+        width={LOGO_H * LOGO_ASPECT}
+        height={LOGO_H}
+        viewBox={`0 0 1920 ${Math.round(2943 * LOGO_CROP)}`}
+        preserveAspectRatio="xMidYMid meet"
+      >
+        <image href="/mmqr-logo.png" x={0} y={0} width={1920} height={2943} />
+      </svg>
+
+      {/* Receiver and amount — centred, above the QR */}
+      <text
+        x={VB_W / 2}
+        y={NAME_BASELINE}
+        textAnchor="middle"
+        fontFamily={FONT}
+        fontSize={NAME_SIZE}
+        letterSpacing="0"
+        fill="#000000"
+      >
+        {receiverName}
+      </text>
+      <text
+        x={VB_W / 2}
+        y={AMOUNT_BASELINE}
+        textAnchor="middle"
+        fontFamily={FONT}
+        fontWeight="bold"
+        fontSize={AMOUNT_SIZE}
+        letterSpacing="0"
+        fill="#000000"
+      >
+        {amount.toLocaleString("en-US")}
+        <tspan fontSize={CURRENCY_SIZE} fontWeight="normal" dx={10}>
+          {currency}
+        </tspan>
+      </text>
+
+      {/* Dotted separator */}
+      <line
+        x1={SIDE}
+        y1={DOTTED_Y}
+        x2={VB_W - SIDE}
+        y2={DOTTED_Y}
+        stroke={YELLOW}
         strokeWidth={3}
+        strokeDasharray="2 6"
+        strokeLinecap="round"
       />
 
-      {/* MMQR wording — top centre of the QR, 12.5% of height */}
+      {/* MMQR wording, directly above the QR */}
       <text
         x={VB_W / 2}
         y={WORDING_BASELINE}
         textAnchor="middle"
         fontFamily={FONT}
-        fontWeight="bold"
-        fontSize={WORDING_H * 0.42}
+        fontSize={VB_H * 0.042}
         letterSpacing="0"
         fill={BLUE}
       >
         MMQR
       </text>
 
-      {/* QR — 44% of height, left aligned with the text below it */}
+      {/* QR */}
       {qrImageUrl ? (
-        <image href={qrImageUrl} x={SIDE} y={QR_Y} width={QR} height={QR} />
+        <image href={qrImageUrl} x={QR_X} y={QR_Y} width={QR} height={QR} />
       ) : (
         <>
           <rect
-            x={SIDE}
+            x={QR_X}
             y={QR_Y}
             width={QR}
             height={QR}
@@ -143,8 +209,8 @@ export default function MmqrCard({
             strokeWidth={2}
           />
           <text
-            x={SIDE + QR / 2}
-            y={QR_Y + QR / 2}
+            x={qrCentreX}
+            y={qrCentreY}
             textAnchor="middle"
             fontFamily={FONT}
             fontSize={NAME_SIZE}
@@ -155,43 +221,27 @@ export default function MmqrCard({
         </>
       )}
 
-      {/* Receiver and amount — left aligned with the QR. The guideline is
-          explicit about this and gives its reason: a Cambodia Bakong user study
-          found left-aligned values read in ~0.5s against 1-2s when centred.
-          Not a taste call. */}
-      <text
-        x={SIDE}
-        y={NAME_BASELINE}
-        fontFamily={FONT}
-        fontSize={NAME_SIZE}
-        letterSpacing="0"
-        fill="#000000"
-      >
-        {receiverName}
-      </text>
-      <text
-        x={SIDE}
-        y={AMOUNT_BASELINE}
-        fontFamily={FONT}
-        fontWeight="bold"
-        fontSize={AMOUNT_SIZE}
-        letterSpacing="0"
-        fill="#000000"
-      >
-        {amount.toLocaleString("en-US")}
-        <tspan fontSize={CURRENCY_SIZE} fontWeight="normal" dx={8}>
-          {currency}
-        </tspan>
-      </text>
-
-      <line
-        x1={RULE_INSET}
-        y1={FOOTER_Y}
-        x2={VB_W - RULE_INSET}
-        y2={FOOTER_Y}
-        stroke={YELLOW}
-        strokeWidth={3}
-      />
+      {/* Wallet mark at the centre of the QR */}
+      {qrImageUrl && providerLogoUrl && (
+        <>
+          <rect
+            x={qrCentreX - plate / 2}
+            y={qrCentreY - plate / 2}
+            width={plate}
+            height={plate}
+            rx={plate * 0.14}
+            fill="#ffffff"
+          />
+          <image
+            href={providerLogoUrl}
+            x={qrCentreX - markSize / 2}
+            y={qrCentreY - markSize / 2}
+            width={markSize}
+            height={markSize}
+            preserveAspectRatio="xMidYMid meet"
+          />
+        </>
+      )}
     </svg>
   );
 }

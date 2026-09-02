@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import { platformOrigin } from "@/lib/origin";
-import { precreate, buildMerchOrderId } from "@/lib/kbzpay";
+import { precreate, buildMerchOrderId, type CallBudget } from "@/lib/kbzpay";
 import { resolveKbzpayOrder } from "@/server/payments/resolveKbzpayOrder";
 import { orderWindow } from "@/server/payments/kbzpayOrderWindow";
 
@@ -105,9 +105,24 @@ const fail = (status: number, message: string, error: string) =>
 const gatewayError = () =>
   fail(502, "Failed to generate QR code. Please try again.", "Payment Gateway Error");
 
+/**
+ * The request budget, or none when nothing is capping the request.
+ *
+ * The budget exists solely to respect a serverless function limit. Running
+ * locally there is no such limit, and clamping to an imaginary one is actively
+ * harmful: the first gateway call of a session pays a ~9.5s connection cost,
+ * and an 8s budget aborts it. That broke local UAT until it was measured.
+ *
+ * VERCEL is set on every Vercel runtime and unset locally, which is exactly
+ * the distinction that matters here.
+ */
+function gatewayBudget(): CallBudget | undefined {
+  if (!process.env.VERCEL) return undefined;
+  return { deadlineMs: Date.now() + GATEWAY_BUDGET_MS };
+}
+
 export async function POST(request: NextRequest) {
-  // One deadline shared by every gateway call this request makes.
-  const budget = { deadlineMs: Date.now() + GATEWAY_BUDGET_MS };
+  const budget = gatewayBudget();
 
   const tenantId = await resolveTenantId();
   if (tenantId instanceof NextResponse) return tenantId;

@@ -76,6 +76,10 @@ export default function QRPaymentModal({
     : provider === "paypay" ? "/api/public/payments/paypay"
     : provider === "kbzpay" ? "/api/public/payments/kbzpay"
     : "/api/public/payments/mmpay";
+  // The wallet mark that belongs at the centre of the QR, if any. Provider
+  // specific on purpose: an ABank or MMPay tenant must not display KBZPay's.
+  const providerLogoUrl = provider === "kbzpay" ? "/kbzpay-logo.png" : null;
+
   const [state, setState] = useState<ModalState>("loading");
   const [qrData, setQrData] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
@@ -84,6 +88,23 @@ export default function QRPaymentModal({
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const slowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The parent passes an inline arrow at both call sites, so `onSuccess` is a
+  // new function on every parent render — and the payment page re-renders on
+  // every status poll. Holding it in a ref keeps the effects below from
+  // depending on an identity that churns, which was minting a fresh KBZPay
+  // order each time and superseding the one on screen.
+  const onSuccessRef = useRef(onSuccess);
+  useEffect(() => {
+    onSuccessRef.current = onSuccess;
+  }, [onSuccess]);
+
+  // Creation must happen once per enrollment, not once per effect run. React
+  // StrictMode double-invokes effects in development, which produced two
+  // orders seconds apart with the first left SUPERSEDED or FAILED — and the
+  // modal then polled the dead one and showed "Payment Failed / Retry" over a
+  // perfectly good QR.
+  const createdForRef = useRef<string | null>(null);
+
   const [paypayUrl, setPaypayUrl] = useState<string | null>(null);
   const [paypayDeeplink, setPaypayDeeplink] = useState<string | null>(null);
 
@@ -125,7 +146,7 @@ export default function QRPaymentModal({
             if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
             if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
             setState("success");
-            onSuccess();
+            onSuccessRef.current();
           } else if (status === "FAILED" || status === "CANCELED" || status === "EXPIRED") {
             if (pollRef.current) clearInterval(pollRef.current);
             if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
@@ -159,11 +180,14 @@ export default function QRPaymentModal({
         setErrorMsg("QR code has expired. Please try again.");
       }, 10 * 60 * 1000);
     },
-    [onSuccess, apiBase],
+    [apiBase],
   );
 
   // ── Create payment on mount ────────────────────────────────
   useEffect(() => {
+    if (createdForRef.current === enrollmentRef) return;
+    createdForRef.current = enrollmentRef;
+
     async function createPayment() {
       setState("loading");
       try {
@@ -189,7 +213,7 @@ export default function QRPaymentModal({
         // and start NO poller — there is no order to poll for.
         if (interpreted?.kind === "already_paid") {
           setState("success");
-          onSuccess();
+          onSuccessRef.current();
           return;
         }
 
@@ -207,7 +231,12 @@ export default function QRPaymentModal({
         // Generate QR image from either EMVCo string or PayPay URL
         if (qrSource) {
           try {
-            const dataUrl = await QRCode.toDataURL(qrSource, { width: 280, margin: 2 });
+            const dataUrl = await QRCode.toDataURL(qrSource, {
+              width: 280,
+              margin: 2,
+              // A centre mark destroys modules; H recovers ~30% of them.
+              errorCorrectionLevel: providerLogoUrl ? "H" : "M",
+            });
             setQrImageUrl(dataUrl);
           } catch {
             console.error("[QRPaymentModal] QR render failed");
@@ -231,7 +260,7 @@ export default function QRPaymentModal({
     // This does not change when the effect re-runs: startPolling is already a
     // dependency and is itself a useCallback over [onSuccess, apiBase], so an
     // unstable onSuccess already re-triggered this effect through it.
-  }, [enrollmentRef, startPolling, apiBase, onSuccess]);
+  }, [enrollmentRef, startPolling, apiBase, providerLogoUrl]);
 
   function handleRetry() {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -281,7 +310,12 @@ export default function QRPaymentModal({
         setOrderId(interpreted.orderId);
         if (qrSource) {
           try {
-            const dataUrl = await QRCode.toDataURL(qrSource, { width: 280, margin: 2 });
+            const dataUrl = await QRCode.toDataURL(qrSource, {
+              width: 280,
+              margin: 2,
+              // A centre mark destroys modules; H recovers ~30% of them.
+              errorCorrectionLevel: providerLogoUrl ? "H" : "M",
+            });
             setQrImageUrl(dataUrl);
           } catch {
             console.error("[QRPaymentModal] QR render failed");
@@ -393,6 +427,7 @@ export default function QRPaymentModal({
                   receiverName={receiverName}
                   amount={amount}
                   currency={currency}
+                  providerLogoUrl={providerLogoUrl}
                 />
 
                 {/* The payer, kept outside the card: the guideline's card shows
