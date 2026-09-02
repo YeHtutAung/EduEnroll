@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { formatCurrency, formatCurrencySimple } from "@/lib/utils";
 import type { JlptLevel, ClassStatus } from "@/types/database";
 import BrandHeader from "@/components/enrollment/BrandHeader";
+import { randomId } from "@/lib/randomId";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -416,7 +417,7 @@ function EnrollmentFormPage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
-  const idempotencyKeyRef = useRef(crypto.randomUUID());
+  const idempotencyKeyRef = useRef(randomId());
   const [submitError, setSubmitError] = useState<{ en: string; mm: string } | null>(null);
 
   // ── Read cart from sessionStorage ──────────────────────────────
