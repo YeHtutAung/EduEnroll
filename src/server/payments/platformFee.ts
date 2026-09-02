@@ -229,3 +229,32 @@ export function reconcileLineItems(
 
   return [{ name: balanceLabel, amount: total, quantity: 1 }];
 }
+
+// ─── Which payment row speaks for the order ─────────────────────────────────
+
+export type SettledPaymentRow = { status: string; amount: number | null };
+
+/**
+ * The settled row representing the whole order, or null if none has settled.
+ *
+ * Two rules, each learned from a defect:
+ *
+ * 1. Only 'verified' rows count. A payment row exists from the moment an order
+ *    is created, long before money moves, so an abandoned attempt — made when
+ *    the fee was higher, or before an admin reduced it — would otherwise be
+ *    reported as the amount charged.
+ *
+ * 2. Among settled rows, the largest speaks for the order. A partial-payment
+ *    top-up is by definition a remainder, and the embedded payments relation
+ *    carries no ORDER BY, so picking "the first verified row" returns whichever
+ *    row the database happened to hand back.
+ *
+ * Callers still pass the result through displayTotals, which refuses anything
+ * below the ticket subtotal — so even an unforeseen row cannot understate what
+ * an order cost.
+ */
+export function selectOrderPayment<T extends SettledPaymentRow>(rows: T[] | null): T | null {
+  return (rows ?? [])
+    .filter((p) => p.status === "verified")
+    .reduce<T | null>((best, p) => ((p.amount ?? 0) > (best?.amount ?? -1) ? p : best), null);
+}

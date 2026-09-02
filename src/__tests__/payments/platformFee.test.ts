@@ -4,6 +4,7 @@ import {
   computePlatformFee,
   displayTotals,
   reconcileLineItems,
+  selectOrderPayment,
 } from "@/server/payments/platformFee";
 
 // ─── Online platform fee ────────────────────────────────────────────────────
@@ -230,5 +231,52 @@ describe("gateway line items", () => {
   it.each([2500, 1500, 1, 0])("always sums to the total (%i)", (total) => {
     const out = reconcileLineItems(items, total);
     expect(out.reduce((n, i) => n + i.amount * i.quantity, 0)).toBe(total);
+  });
+});
+
+// ─── Review of PR #245, finding 4 ───────────────────────────────────────────
+//
+// Choosing the largest amount across ALL rows treated an unpaid attempt as
+// money charged. A payment row exists from the moment an order is created, so
+// a customer who abandons an attempt — or an admin who reduces the fee before
+// payment — leaves a larger, never-paid row behind. Reporting it contradicted
+// the very rule the code above states: once money has moved, the payment row
+// is the truth. A row where money has NOT moved is not that truth.
+describe("which payment row speaks for the order", () => {
+  const verified = (amount: number) => ({ status: "verified", amount });
+  const unpaid = (amount: number) => ({ status: "awaiting_payment", amount });
+
+  it("ignores a larger unpaid attempt", () => {
+    // Abandoned at the old 500 fee, then paid after the fee was removed.
+    expect(selectOrderPayment([unpaid(1500), verified(1000)])).toEqual(verified(1000));
+  });
+
+  it.each(["awaiting_payment", "pending", "failed", "expired"])(
+    "does not treat a %s row as money charged",
+    (status) => {
+      expect(selectOrderPayment([{ status, amount: 9999 }])).toBeNull();
+    },
+  );
+
+  it("returns null when nothing has settled, so the caller quotes the current fee", () => {
+    expect(selectOrderPayment([unpaid(1500)])).toBeNull();
+    expect(selectOrderPayment([])).toBeNull();
+    expect(selectOrderPayment(null)).toBeNull();
+  });
+
+  // The order-level row, not whichever the relation happened to return first.
+  it("picks the largest settled row, whatever the order", () => {
+    const rows = [verified(600), verified(1500)];
+    expect(selectOrderPayment(rows)).toEqual(verified(1500));
+    expect(selectOrderPayment([...rows].reverse())).toEqual(verified(1500));
+  });
+
+  // The two guards composed: an unpaid inflated row is ignored, and the
+  // remaining top-up is below the subtotal, so the configured fee is used.
+  it("composes with displayTotals on a partial order", () => {
+    const rows = [unpaid(1500), verified(600)];
+    const charged = selectOrderPayment(rows)?.amount ?? null;
+
+    expect(displayTotals(1000, charged, 0).total).toBe(1000);
   });
 });

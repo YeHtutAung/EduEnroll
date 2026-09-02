@@ -3,7 +3,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import { getStripe } from "@/lib/stripe";
 import { signTicketJwt } from "@/lib/tickets/sign";
-import { computePlatformFee, displayTotals } from "@/server/payments/platformFee";
+import {
+  computePlatformFee,
+  displayTotals,
+  selectOrderPayment,
+} from "@/server/payments/platformFee";
 
 // ─── GET /api/public/enrollment/[ref] ────────────────────────────────────────
 // Returns enrollment summary for the Trusted Official checkout flow.
@@ -72,20 +76,20 @@ export async function GET(
 
   const verifiedPayment = payments?.find((p) => p.status === "verified");
 
-  // The row that represents the WHOLE order, chosen deterministically. The
-  // embedded relation has no ORDER BY, so `find` above returns whichever row
-  // the database happened to hand back — fine for reading a card brand, not
-  // for reporting money.
+  // The row that represents the WHOLE order, chosen deterministically.
   //
-  // The largest amount is the order-level row: a partial-payment top-up is by
-  // definition a remainder, and a superseded KBZPay attempt carries the same
-  // total as the one that replaced it. displayTotals rejects anything below
-  // the ticket subtotal regardless, so a surprise here cannot understate what
-  // an order cost.
-  const orderPayment = (payments ?? []).reduce<PaymentRow | null>(
-    (best, p) => ((p.amount ?? 0) > (best?.amount ?? -1) ? p : best),
-    null,
-  );
+  // Only settled rows count. A payment row exists from the moment an order is
+  // created, long before any money moves, so an abandoned attempt — made when
+  // the fee was higher, or before an admin reduced it — would otherwise be
+  // reported as the amount charged. 'verified' is the one status that means
+  // the money arrived: settleMmqrPayment and verifyPayment both transition to
+  // it, and nothing else does.
+  //
+  // Among settled rows the largest is the order-level one, since a
+  // partial-payment top-up is by definition a remainder. The embedded relation
+  // has no ORDER BY, so `find` above returns whichever row the database
+  // happened to hand back — fine for reading a card brand, not for money.
+  const orderPayment = selectOrderPayment(payments);
   // Fall back to any payment so the success page can show the method even before verification
   const anyPayment = payments?.[0];
 
