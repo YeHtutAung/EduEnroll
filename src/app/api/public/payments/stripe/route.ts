@@ -129,6 +129,9 @@ export async function POST(request: NextRequest) {
     enrollment.enrollment_items &&
     enrollment.enrollment_items.length > 0;
 
+  // Declared out here, alongside totalMajor, because the fee is computed
+  // inside the pricing try-block but recorded on the row far below it.
+  let recordedFee = 0;
   let totalMajor: number;
   let lineItems: { price_data: { currency: string; unit_amount: number; product_data: { name: string } }; quantity: number }[];
 
@@ -175,6 +178,7 @@ export async function POST(request: NextRequest) {
     const { platformFee } = await resolveOrderTotal(supabase, enrollment);
     if (platformFee > 0) {
       totalMajor += platformFee;
+      recordedFee = platformFee;
       lineItems.push({
         price_data: {
           currency,
@@ -202,6 +206,9 @@ export async function POST(request: NextRequest) {
       }
       if (prevPayment?.received_amount) {
         totalMajor = totalMajor - prevPayment.received_amount;
+        // A remainder is not the order total, so this row records no fee — it
+        // stays on the row that quoted the order.
+        recordedFee = 0;
         lineItems = [
           {
             price_data: {
@@ -379,6 +386,7 @@ export async function POST(request: NextRequest) {
       sessionId: session.id,
       amountMajor: totalMajor,
       amountMinor,
+      platformFee: recordedFee,
       currency,
       predecessorId: ctx.predecessorId,
       source,

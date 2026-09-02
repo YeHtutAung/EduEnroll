@@ -260,6 +260,7 @@ export async function POST(request: NextRequest) {
       sessionId: null,
       amountMajor: totalMajor,
       amountMinor,
+      platformFee,
       currency,
       predecessorId: ctx.predecessorId,
       source,

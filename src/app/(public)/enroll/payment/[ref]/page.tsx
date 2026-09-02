@@ -48,6 +48,7 @@ interface EnrollmentInfo {
     admin_note?: string | null;
     received_amount?: number | null;
     total_amount?: number | null;
+    platform_fee?: number | null;
     remaining_amount?: number | null;
     status?: string | null;
   } | null;
@@ -1369,11 +1370,16 @@ export default function PaymentInstructionsPage() {
   // buyer will actually be charged. displayTotals falls back to the configured
   // fee whenever that amount is below the ticket subtotal — a partial-payment
   // remainder — so a top-up row cannot be mistaken for an order total.
-  const gatewayAmount = enrollment.payment?.total_amount ?? null;
+  const gatewayRow = enrollment.payment
+    ? {
+        amount: enrollment.payment.total_amount ?? null,
+        platform_fee: enrollment.payment.platform_fee ?? null,
+      }
+    : null;
 
   const { platformFee, total: grandTotal } = displayTotals(
     totalFee,
-    gatewayAmount,
+    gatewayRow,
     computePlatformFee(
       {
         payment_mode: enrollment.payment_mode,

@@ -65,4 +65,32 @@ describe.each(pricingRoutes.map((f) => [rel(f), f] as const))("%s", (_label, fil
         `disagree with what settlement expects`,
     ).toBe(true);
   });
+
+  // A route that records the amount but not its split does not fail loudly. It
+  // writes platform_fee 0 against a fee-bearing amount, and the confirmation
+  // screen then reports the whole charge as tickets — understating the fee
+  // rather than erroring. Nothing at runtime catches that, so it is caught here.
+  it("records the fee alongside the amount it is part of", () => {
+    if (file.includes("status")) return;
+
+    const writesRow =
+      src.includes('.from("payments")') ||
+      src.includes("claim_kbzpay_order_slot") ||
+      src.includes("complete_kbzpay_supersede") ||
+      src.includes("finalizeStripeAttempt");
+    if (!writesRow) return;
+
+    // Matches the fee being PASSED — an object property or a shorthand — not
+    // merely destructured out of the calculator, which every route does and
+    // which an earlier version of this check accepted, making it vacuous.
+    const passesFee = src
+      .split("\n")
+      .some((line) => /^(platform_fee|p_platform_fee|platformFee)\s*[:,]/.test(line.trim()));
+
+    expect(
+      passesFee,
+      `${rel(file)} creates a payment row without recording platform_fee, so ` +
+        `the charged amount cannot be broken down into tickets and fee`,
+    ).toBe(true);
+  });
 });

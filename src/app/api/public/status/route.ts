@@ -58,7 +58,7 @@ interface EnrollmentWithClass extends Enrollment {
 }
 
 type EnrollmentResult = { data: EnrollmentWithClass | null; error: unknown };
-type PaymentResult    = { data: Pick<Payment, "id" | "status" | "created_at" | "admin_note" | "received_amount" | "amount"> | null; error: unknown };
+type PaymentResult    = { data: Pick<Payment, "id" | "status" | "created_at" | "admin_note" | "received_amount" | "amount" | "platform_fee"> | null; error: unknown };
 
 // ─── GET /api/public/status?ref=NM-2026-XXXXX ─────────────────────────────────
 // Public — no authentication required.
@@ -119,7 +119,7 @@ export async function GET(request: NextRequest) {
   // ── Fetch most recent payment (if any) ───────────────────────────
   const { data: payment } = await supabase
     .from("payments")
-    .select("id, status, created_at, admin_note, received_amount, amount")
+    .select("id, status, created_at, admin_note, received_amount, amount, platform_fee")
     .eq("enrollment_id", enrollment.id)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -170,6 +170,8 @@ export async function GET(request: NextRequest) {
         admin_note:          payment.admin_note ?? null,
         received_amount: payment.received_amount ?? null,
         total_amount:    payment.amount,
+        // The fee inside total_amount, as recorded when the row was created.
+        platform_fee:    payment.platform_fee ?? 0,
         remaining_amount: payment.received_amount != null
           ? payment.amount - payment.received_amount
           : null,

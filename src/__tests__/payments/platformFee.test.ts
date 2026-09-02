@@ -150,17 +150,65 @@ describe("edges that would otherwise reach the gateway", () => {
 // editing the fee afterwards changed what a completed order reported, so the
 // receipt disagreed with the money. payments.amount is immutable; the settings
 // are not.
+/**
+ * A row created before `payments.platform_fee` existed: an amount, and no
+ * record of what it was made of. Every case below that passes one is checking
+ * the fallback that keeps such rows adding up.
+ */
+const legacy = (amount: number) => ({ amount, platform_fee: 0 });
+
+// ─── Review of PR #245, findings 1 and 4-6 ──────────────────────────────────
+//
+// Four of the six findings on that branch were one decision: the fee was not
+// stored, so every display site re-derived it as `amount - ticket_subtotal`.
+// The derivation is only valid when the amount IS the order total, and each
+// site had to rediscover that. The column removes the derivation.
+describe("the recorded split", () => {
+  it("reports the fee that was charged, not one derived from the amount", () => {
+    const shown = displayTotals(1000, { amount: 1300, platform_fee: 300 }, 0);
+
+    expect(shown).toEqual({ platformFee: 300, total: 1300 });
+  });
+
+  // The case the subtraction got wrong: the item set read at display time is
+  // not the one that was priced. The recorded fee does not move with it.
+  it("is unmoved by a subtotal that differs from the one priced", () => {
+    const row = { amount: 1300, platform_fee: 300 };
+
+    expect(displayTotals(900, row, 0).platformFee).toBe(300);
+    expect(displayTotals(1000, row, 0).platformFee).toBe(300);
+  });
+
+  it("beats the tenant's current setting once a row exists", () => {
+    // Charged at a 300 fee; the setting has since been raised to 900.
+    expect(displayTotals(1000, { amount: 1300, platform_fee: 300 }, 900))
+      .toEqual({ platformFee: 300, total: 1300 });
+  });
+
+  // A top-up row records no fee — it stays on the row that quoted the order —
+  // and is a remainder besides, so it is refused as an order total either way.
+  it("still refuses a remainder", () => {
+    expect(displayTotals(1000, { amount: 600, platform_fee: 0 }, 0).total).toBe(1000);
+  });
+
+  it("treats a missing column as unrecorded rather than zero", () => {
+    // A row selected without platform_fee must not silently report the whole
+    // charge as tickets.
+    expect(displayTotals(1000, { amount: 1300 }, 0).platformFee).toBe(300);
+  });
+});
+
 describe("what a completed order reports", () => {
   it("uses the amount actually charged, not the current setting", () => {
     // Order was charged 1,200. Fee has since been raised to 900.
-    const shown = displayTotals(1000, 1200, 900);
+    const shown = displayTotals(1000, legacy(1200), 900);
 
     expect(shown.total).toBe(1200);
     expect(shown.platformFee).toBe(200);
   });
 
   it("is unaffected by the setting being removed after payment", () => {
-    expect(displayTotals(1000, 1200, 0)).toEqual({ platformFee: 200, total: 1200 });
+    expect(displayTotals(1000, legacy(1200), 0)).toEqual({ platformFee: 200, total: 1200 });
   });
 
   // Before payment there is nothing charged to report, so the current setting
@@ -180,18 +228,18 @@ describe("what a completed order reports", () => {
   // less than the tickets it contains.
   it("never reports a remainder as the order total", () => {
     // 1,000 of tickets, top-up row of 600. The reported figure was 600.
-    const shown = displayTotals(1000, 600, 0);
+    const shown = displayTotals(1000, legacy(600), 0);
 
     expect(shown.total).toBe(1000);
     expect(shown.total).toBeGreaterThanOrEqual(1000);
   });
 
   it("falls back to the configured fee when only a remainder is known", () => {
-    expect(displayTotals(1000, 600, 500)).toEqual({ platformFee: 500, total: 1500 });
+    expect(displayTotals(1000, legacy(600), 500)).toEqual({ platformFee: 500, total: 1500 });
   });
 
   it("never reports a negative fee", () => {
-    expect(displayTotals(3000, 1500, 0).platformFee).toBe(0);
+    expect(displayTotals(3000, legacy(1500), 0).platformFee).toBe(0);
   });
 
   // The property, rather than the examples: whatever row is found, the total
@@ -199,7 +247,8 @@ describe("what a completed order reports", () => {
   it.each([null, 0, 600, 999, 1000, 1200, 5000])(
     "reports at least the ticket subtotal (charged %s)",
     (charged) => {
-      expect(displayTotals(1000, charged, 0).total).toBeGreaterThanOrEqual(1000);
+      const row = charged === null ? null : legacy(charged);
+      expect(displayTotals(1000, row, 0).total).toBeGreaterThanOrEqual(1000);
     },
   );
 });
@@ -275,9 +324,8 @@ describe("which payment row speaks for the order", () => {
   // remaining top-up is below the subtotal, so the configured fee is used.
   it("composes with displayTotals on a partial order", () => {
     const rows = [unpaid(1500), verified(600)];
-    const charged = selectOrderPayment(rows)?.amount ?? null;
 
-    expect(displayTotals(1000, charged, 0).total).toBe(1000);
+    expect(displayTotals(1000, selectOrderPayment(rows), 0).total).toBe(1000);
   });
 });
 
@@ -294,14 +342,14 @@ describe("which payment row speaks for the order", () => {
 describe("an order already at the gateway", () => {
   it("shows what the existing QR will charge, not the new setting", () => {
     // Order created at a 500 fee; admin has since raised it to 900.
-    const shown = displayTotals(1000, 1500, 900);
+    const shown = displayTotals(1000, legacy(1500), 900);
 
     expect(shown.total).toBe(1500);
     expect(shown.platformFee).toBe(500);
   });
 
   it("shows the old total after the fee is removed entirely", () => {
-    expect(displayTotals(1000, 1500, 0)).toEqual({ platformFee: 500, total: 1500 });
+    expect(displayTotals(1000, legacy(1500), 0)).toEqual({ platformFee: 500, total: 1500 });
   });
 
   // No gateway order yet, so there is nothing committed and the current
@@ -313,6 +361,6 @@ describe("an order already at the gateway", () => {
   // A top-up row is a remainder, not an order total, so it must not be shown
   // as one even though it is the most recent payment row.
   it("ignores a partial-payment top-up row", () => {
-    expect(displayTotals(1000, 400, 0).total).toBe(1000);
+    expect(displayTotals(1000, legacy(400), 0).total).toBe(1000);
   });
 });

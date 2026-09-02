@@ -235,7 +235,12 @@ export async function POST(request: NextRequest) {
   // computeOrderTotal is shared with every other payment route so no two can
   // disagree about the figure — a disagreement means the payer is charged and
   // then refused with amount_mismatch.
-  let totalFee = computeOrderTotal(orderItems, tenant ?? {}).total;
+  const order = computeOrderTotal(orderItems, tenant ?? {});
+  let totalFee = order.total;
+  // What THIS ROW records. The partial-payment branch below charges a
+  // remainder rather than the order total, and a remainder is not the row that
+  // quoted the fee — the row that did keeps it, and this one records none.
+  let recordedFee = order.platformFee;
 
   if (enrollment.status === "partial_payment") {
     const { data: existingPayment } = (await supabase
@@ -248,6 +253,7 @@ export async function POST(request: NextRequest) {
 
     if (existingPayment?.received_amount) {
       totalFee = totalFee - existingPayment.received_amount;
+      recordedFee = 0;
     }
   }
 
@@ -297,6 +303,7 @@ export async function POST(request: NextRequest) {
       p_reason: resolution.reason,
       p_new_ref: newRef,
       p_amount: totalFee,
+      p_platform_fee: recordedFee,
       p_expires_at: expiresAtIso,
       // `as never` matches the convention for RPCs absent from the generated
       // Database types — see settlementConflicts.ts.
@@ -392,6 +399,7 @@ export async function POST(request: NextRequest) {
         p_tenant_id: enrollment!.tenant_id,
         p_payment_ref: buildMerchOrderId(enrollment!.id),
         p_amount: totalFee,
+        p_platform_fee: recordedFee,
         p_expires_at: expiresAtIso,
       } as never)) as { data: ClaimRow[] | null; error: { message: string } | null };
 

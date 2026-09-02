@@ -119,6 +119,10 @@ export async function POST(request: NextRequest) {
   // has already been charged.
   const { platformFee } = await resolveOrderTotal(supabase, enrollment);
   totalFee += platformFee;
+  // What THIS ROW records. The partial-payment branch below charges a
+  // remainder rather than the order total, and a remainder is not the row that
+  // quoted the fee — the row that did keeps it, and this one records none.
+  let recordedFee = platformFee;
 
   // ── 5. Adjust for partial payment ──────────────────────────────────────────
   if (enrollment.status === "partial_payment") {
@@ -132,6 +136,7 @@ export async function POST(request: NextRequest) {
 
     if (existingPayment?.received_amount) {
       totalFee = totalFee - existingPayment.received_amount;
+      recordedFee = 0;
     }
   }
 
@@ -227,6 +232,7 @@ export async function POST(request: NextRequest) {
       enrollment_id: enrollment.id,
       tenant_id: enrollment.tenant_id,
       amount: totalFee,
+      platform_fee: recordedFee,
       payment_method: "hitpay",
       hitpay_payment_id: result.id,
       status: "awaiting_payment",

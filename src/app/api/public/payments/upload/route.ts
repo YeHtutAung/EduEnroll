@@ -182,13 +182,12 @@ export async function POST(request: NextRequest) {
 
   }
 
-  {
-    // Bank transfer charges no online fee, so this resolves to 0 today. Routed
-    // through the shared calculator anyway so the rule lives in one place and
-    // a future payment_mode change cannot silently skip it.
-    const { platformFee } = await resolveOrderTotal(supabase, enrollment);
-    totalFee += platformFee;
-  }
+  // Bank transfer charges no online fee, so this resolves to 0 today. Routed
+  // through the shared calculator anyway so the rule lives in one place and a
+  // future payment_mode change cannot silently skip it. This route has no
+  // partial-payment branch, so the row always carries the whole fee.
+  const { platformFee: recordedFee } = await resolveOrderTotal(supabase, enrollment);
+  totalFee += recordedFee;
 
   // ── 5. Upload all files to storage ─────────────────────────────
   const uploadedPaths: string[] = [];
@@ -289,6 +288,7 @@ export async function POST(request: NextRequest) {
       enrollment_id:    enrollment.id,
       tenant_id:        enrollment.tenant_id,
       amount:       totalFee,
+      platform_fee: recordedFee,
       proof_image_url:  uploadedPaths[0],   // legacy field — first image
       proof_image_urls: uploadedPaths,       // all images
       status:           "pending",

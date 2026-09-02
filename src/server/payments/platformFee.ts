@@ -172,22 +172,25 @@ export async function resolveOrderTotal(
 /**
  * The split to display for an order.
  *
- * Once money has moved the payment row is the truth: `payments.amount` is
- * immutable, while the tenant's fee settings are not. Recomputing from current
- * settings would let an admin edit the setting and change what a COMPLETED
- * order says it was charged, so the receipt would disagree with the money.
+ * Reads the split that was RECORDED when the row was created; it does not
+ * recompute one. The fee is decided once, by the calculator that priced the
+ * gateway call, and stored next to the amount it is part of — so a display site
+ * adds no arithmetic of its own and cannot disagree with what was charged.
  *
- * Before payment there is no such record, and quoting the current setting is
- * right — it is what the buyer would be charged.
+ * Before any payment there is no such record, and quoting the tenant's current
+ * setting is right: it is what the buyer would be charged.
  */
 export function displayTotals(
   ticketSubtotal: number,
-  chargedAmount: number | null,
+  orderPayment: OrderPaymentRow | null,
   feeIfUnpaid: number,
 ): { platformFee: number; total: number } {
+  const chargedAmount = orderPayment?.amount ?? null;
+
   // An order total can never be less than the tickets it contains. A smaller
   // figure is a REMAINDER, not a total — a partial-payment top-up row, whose
-  // amount is the balance left over.
+  // amount is the balance left over and whose platform_fee is 0 because the fee
+  // stayed on the row that quoted the order.
   //
   // That distinction is load-bearing. `request_remaining` sets verified_at and
   // received_amount on the original row but never moves its status to
@@ -201,9 +204,16 @@ export function displayTotals(
     return { platformFee: feeIfUnpaid, total: ticketSubtotal + feeIfUnpaid };
   }
 
-  // Derived rather than stored, against a subtotal that cannot move because
-  // enrollment_items snapshot their price.
-  return { platformFee: chargedAmount - ticketSubtotal, total: chargedAmount };
+  const recorded = Math.max(0, Math.trunc(orderPayment?.platform_fee ?? 0));
+
+  // Rows that predate `payments.platform_fee` store 0 against an amount that
+  // may already have included a fee. Falling back to the difference keeps their
+  // displayed lines summing to the total instead of overstating the tickets.
+  // It cannot misfire on a genuinely fee-free row: there the difference is 0.
+  return {
+    platformFee: recorded > 0 ? recorded : chargedAmount - ticketSubtotal,
+    total: chargedAmount,
+  };
 }
 
 // ─── Gateway line items ─────────────────────────────────────────────────────
@@ -232,7 +242,10 @@ export function reconcileLineItems(
 
 // ─── Which payment row speaks for the order ─────────────────────────────────
 
-export type SettledPaymentRow = { status: string; amount: number | null };
+/** What a display site needs from the row that settled an order. */
+export type OrderPaymentRow = { amount: number | null; platform_fee?: number | null };
+
+export type SettledPaymentRow = OrderPaymentRow & { status: string };
 
 /**
  * The settled row representing the whole order, or null if none has settled.

@@ -37,19 +37,16 @@ comment on column public.tenants.platform_fee_amount is
   'Flat fee in the tenant currency''s whole units. Meaningless when '
   'platform_fee_mode is none.';
 
--- ── Why nothing is added to payments ────────────────────────────────────────
+-- ── The fee is also recorded per payment ────────────────────────────────────
 --
--- The fee could be recorded per transaction, but the payment row is created by
--- claim_kbzpay_order_slot() and complete_kbzpay_supersede(), so storing it
--- would mean changing both signatures — hash-guarded functions, changed for a
--- display detail.
+-- This migration originally stored the fee on the TENANT only, arguing that
+-- `amount - ticket_subtotal` could recover it wherever the split was needed and
+-- that changing the two kbzpay RPCs for a display detail was not worth it.
 --
--- It is not needed. enrollment_items snapshot fee_amount at purchase, so the
--- ticket subtotal of an order never moves, and the same calculator that priced
--- the order reproduces the split exactly.
+-- That was wrong, and review found it six times over. The subtraction is only
+-- valid when the amount charged IS the order total — not for a partial-payment
+-- remainder, and not once a display site is free to read a different item set
+-- than the one that was priced. Each new reader had to rediscover both rules.
 --
--- The one gap: an organisation that changes its fee AFTER an order would see
--- the new split on that order''s confirmation screen, while payments.amount —
--- the money — stays correct. Acceptable for screens shown at purchase time; if
--- long-lived receipts are wanted later, add payments.platform_fee then and
--- change both RPCs deliberately.
+-- 20260903090000 adds `payments.platform_fee` and threads it through every
+-- creation path, so the split is decided once and read, never re-derived.

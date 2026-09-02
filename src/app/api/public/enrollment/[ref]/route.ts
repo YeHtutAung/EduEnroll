@@ -29,7 +29,7 @@ export async function GET(
       enrollment_items(quantity, fee_amount, classes(level, intakes(id, name, slug))),
       classes(level, fee_amount, intakes(id, name, slug)),
       quantity,
-      payments(stripe_payment_intent_id, status, payment_method, card_brand, card_last4, amount)
+      payments(stripe_payment_intent_id, status, payment_method, card_brand, card_last4, amount, platform_fee)
     `)
     .eq("enrollment_ref", params.ref.trim())
     .eq("tenant_id", tenantId)
@@ -160,17 +160,15 @@ export async function GET(
   }
 
   // Once money has moved, the payment row is the truth and the tenant's current
-  // settings are not. Recomputing the fee here would let an admin edit the
-  // setting and change what a completed order says it was charged — the
-  // receipt would disagree with the money, and payments.amount is immutable.
+  // settings are not. The row carries both the amount and the fee inside it, so
+  // this reports the split that was charged rather than one recomputed from
+  // settings an admin can still edit.
   //
   // Before payment there is no such record, and quoting the current setting is
   // correct: it is what the buyer would be charged.
-  const chargedAmount = orderPayment?.amount ?? null;
-
   const { platformFee, total: displayTotal } = displayTotals(
     ticketSubtotal,
-    chargedAmount,
+    orderPayment,
     computePlatformFee(
       {
         payment_mode: tenant?.payment_mode,
@@ -274,6 +272,7 @@ interface PaymentRow {
   stripe_payment_intent_id: string | null;
   status: string;
   amount: number | null;
+  platform_fee: number | null;
   payment_method: string;
   card_brand: string | null;
   card_last4: string | null;

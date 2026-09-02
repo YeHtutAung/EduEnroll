@@ -149,6 +149,8 @@ export async function finalizeStripeAttempt(args: {
   sessionId: string | null;
   amountMajor: number;
   amountMinor: number;
+  /** The online platform fee included in amountMajor, recorded on the row. */
+  platformFee: number;
   currency: string;
   predecessorId: string | null;
   source: ConflictSource;
@@ -167,6 +169,7 @@ export async function finalizeStripeAttempt(args: {
     p_session_id: args.sessionId,
     p_amount: args.amountMajor,
     p_amount_minor: args.amountMinor,
+    p_platform_fee: args.platformFee,
     p_currency: args.currency,
     p_predecessor_payment_id: args.predecessorId,
   } as never);
