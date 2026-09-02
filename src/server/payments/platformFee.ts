@@ -166,3 +166,55 @@ export async function resolveOrderTotal(
 
   return computeOrderTotal(items, config, alreadyPaid);
 }
+
+// ─── What a completed order reports ─────────────────────────────────────────
+
+/**
+ * The split to display for an order.
+ *
+ * Once money has moved the payment row is the truth: `payments.amount` is
+ * immutable, while the tenant's fee settings are not. Recomputing from current
+ * settings would let an admin edit the setting and change what a COMPLETED
+ * order says it was charged, so the receipt would disagree with the money.
+ *
+ * Before payment there is no such record, and quoting the current setting is
+ * right — it is what the buyer would be charged.
+ */
+export function displayTotals(
+  ticketSubtotal: number,
+  chargedAmount: number | null,
+  feeIfUnpaid: number,
+): { platformFee: number; total: number } {
+  if (chargedAmount === null) {
+    return { platformFee: feeIfUnpaid, total: ticketSubtotal + feeIfUnpaid };
+  }
+
+  // Derived rather than stored. A partial payment makes the charged amount a
+  // remainder, which would give a negative fee — clamped, because a negative
+  // fee reads as a discount that was never given.
+  return { platformFee: Math.max(0, chargedAmount - ticketSubtotal), total: chargedAmount };
+}
+
+// ─── Gateway line items ─────────────────────────────────────────────────────
+
+export type GatewayLineItem = { name: string; amount: number; quantity: number };
+
+/**
+ * Line items that sum to `total`, or a single balance line when they cannot.
+ *
+ * MMPay and Stripe are sent line items alongside a total and reject the order
+ * when the two disagree. The items describe the WHOLE order, so the moment a
+ * partial payment reduces the amount to a remainder they stop summing to it.
+ * Stripe already collapsed to one line here; MMPay did not, and had been
+ * sending a mismatched payload since before the platform fee existed.
+ */
+export function reconcileLineItems(
+  items: GatewayLineItem[],
+  total: number,
+  balanceLabel = "Remaining balance",
+): GatewayLineItem[] {
+  const sum = items.reduce((n, i) => n + i.amount * i.quantity, 0);
+  if (sum === total) return items;
+
+  return [{ name: balanceLabel, amount: total, quantity: 1 }];
+}

@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { computeOrderTotal, computePlatformFee } from "@/server/payments/platformFee";
+import {
+  computeOrderTotal,
+  computePlatformFee,
+  displayTotals,
+  reconcileLineItems,
+} from "@/server/payments/platformFee";
 
 // ─── Online platform fee ────────────────────────────────────────────────────
 //
@@ -134,5 +139,68 @@ describe("edges that would otherwise reach the gateway", () => {
 
   it("handles missing settings on a tenant row read before the migration", () => {
     expect(computeOrderTotal(items([1000, 2]), ONLINE).total).toBe(2000);
+  });
+});
+
+// ─── Review of PR #245, finding 1 ───────────────────────────────────────────
+//
+// The confirmation screen recomputed the fee from the tenant's CURRENT
+// settings and returned it as the amount the customer "was charged". An admin
+// editing the fee afterwards changed what a completed order reported, so the
+// receipt disagreed with the money. payments.amount is immutable; the settings
+// are not.
+describe("what a completed order reports", () => {
+  it("uses the amount actually charged, not the current setting", () => {
+    // Order was charged 1,200. Fee has since been raised to 900.
+    const shown = displayTotals(1000, 1200, 900);
+
+    expect(shown.total).toBe(1200);
+    expect(shown.platformFee).toBe(200);
+  });
+
+  it("is unaffected by the setting being removed after payment", () => {
+    expect(displayTotals(1000, 1200, 0)).toEqual({ platformFee: 200, total: 1200 });
+  });
+
+  // Before payment there is nothing charged to report, so the current setting
+  // is the right answer — it is what the buyer would pay.
+  it("quotes the current setting when nothing has been charged yet", () => {
+    expect(displayTotals(1000, null, 500)).toEqual({ platformFee: 500, total: 1500 });
+  });
+
+  // A partial payment makes the charged amount a remainder, so the subtraction
+  // goes negative. A negative fee would read as a discount never given.
+  it("never reports a negative fee", () => {
+    expect(displayTotals(3000, 1500, 0).platformFee).toBe(0);
+  });
+});
+
+// ─── Review of PR #245, finding 2 ───────────────────────────────────────────
+//
+// MMPay and Stripe are sent line items alongside a total and reject the order
+// when they disagree. The lines describe the whole order, so a partial payment
+// reducing the amount to a remainder leaves them mismatched. This predates the
+// platform fee, which merely added another line to a broken payload.
+describe("gateway line items", () => {
+  const items = [
+    { name: "GA", amount: 1000, quantity: 2 },
+    { name: "Online platform fee", amount: 500, quantity: 1 },
+  ];
+
+  it("leaves the lines alone when they already sum to the total", () => {
+    expect(reconcileLineItems(items, 2500)).toEqual(items);
+  });
+
+  it("collapses to one balance line when a partial payment shrinks the total", () => {
+    // 2,500 order, 1,000 already received: the lines still describe 2,500.
+    expect(reconcileLineItems(items, 1500)).toEqual([
+      { name: "Remaining balance", amount: 1500, quantity: 1 },
+    ]);
+  });
+
+  // The property the gateway actually enforces.
+  it.each([2500, 1500, 1, 0])("always sums to the total (%i)", (total) => {
+    const out = reconcileLineItems(items, total);
+    expect(out.reduce((n, i) => n + i.amount * i.quantity, 0)).toBe(total);
   });
 });

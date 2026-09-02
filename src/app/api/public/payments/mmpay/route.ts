@@ -3,7 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import { platformOrigin } from "@/lib/origin";
 import mmpay from "@/lib/mmpay";
-import { resolveOrderTotal } from "@/server/payments/platformFee";
+import { resolveOrderTotal, reconcileLineItems } from "@/server/payments/platformFee";
 
 // ─── POST /api/public/payments/mmqr ─────────────────────────────────────────
 // Creates an MMQR payment via MyanMyanPay and returns a QR code.
@@ -130,6 +130,13 @@ export async function POST(request: NextRequest) {
 
     if (existingPayment?.received_amount) {
       totalFee = totalFee - existingPayment.received_amount;
+
+      // MMPay rejects an order whose line items do not sum to the amount. The
+      // lines describe the WHOLE order, so a remainder no longer matches them.
+      // This mismatch predates the platform fee — items were already built
+      // from the full order while the amount was reduced — but the fee adds
+      // another line to an already-inconsistent payload.
+      items = reconcileLineItems(items, totalFee);
     }
   }
 
