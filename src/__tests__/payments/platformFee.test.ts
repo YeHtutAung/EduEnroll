@@ -280,3 +280,39 @@ describe("which payment row speaks for the order", () => {
     expect(displayTotals(1000, charged, 0).total).toBe(1000);
   });
 });
+
+// ─── Review of PR #245, finding 5 ───────────────────────────────────────────
+//
+// The payment screen recalculated the fee from the tenant's CURRENT settings
+// while a gateway order already existed. That order's amount is immutable —
+// the QR encodes it and the provider charges exactly that — so an admin
+// changing the fee mid-flight made the screen disagree with the code the buyer
+// was about to scan.
+//
+// This is the same rule as the receipt, applied one step earlier: a figure the
+// provider has already committed to wins over one derived from settings.
+describe("an order already at the gateway", () => {
+  it("shows what the existing QR will charge, not the new setting", () => {
+    // Order created at a 500 fee; admin has since raised it to 900.
+    const shown = displayTotals(1000, 1500, 900);
+
+    expect(shown.total).toBe(1500);
+    expect(shown.platformFee).toBe(500);
+  });
+
+  it("shows the old total after the fee is removed entirely", () => {
+    expect(displayTotals(1000, 1500, 0)).toEqual({ platformFee: 500, total: 1500 });
+  });
+
+  // No gateway order yet, so there is nothing committed and the current
+  // setting is the honest answer — it is what the buyer will be charged.
+  it("quotes the current setting before any order exists", () => {
+    expect(displayTotals(1000, null, 900)).toEqual({ platformFee: 900, total: 1900 });
+  });
+
+  // A top-up row is a remainder, not an order total, so it must not be shown
+  // as one even though it is the most recent payment row.
+  it("ignores a partial-payment top-up row", () => {
+    expect(displayTotals(1000, 400, 0).total).toBe(1000);
+  });
+});

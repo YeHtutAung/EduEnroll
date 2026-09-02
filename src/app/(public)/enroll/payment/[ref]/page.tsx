@@ -10,7 +10,7 @@ import PayNowQrSaveButton from "@/components/payments/PayNowQrSaveButton";
 import BrandHeader from "@/components/enrollment/BrandHeader";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
-import { computePlatformFee } from "@/server/payments/platformFee";
+import { computePlatformFee, displayTotals } from "@/server/payments/platformFee";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CartItem {
@@ -49,6 +49,7 @@ interface EnrollmentInfo {
     received_amount?: number | null;
     total_amount?: number | null;
     remaining_amount?: number | null;
+    status?: string | null;
   } | null;
 }
 
@@ -1347,16 +1348,32 @@ export default function PaymentInstructionsPage() {
   const ticketCount = isCart
     ? enrollment.items!.reduce((sum, i) => sum + i.quantity, 0)
     : qty;
-  const platformFee = computePlatformFee(
-    {
-      payment_mode: enrollment.payment_mode,
-      platform_fee_mode: enrollment.platform_fee_mode,
-      platform_fee_amount: enrollment.platform_fee_amount,
-    },
+  // Once a gateway order exists its amount is fixed — the QR encodes it, and
+  // the provider will charge exactly that. Recomputing from the tenant's
+  // current settings means an admin changing the fee while an order is
+  // awaiting payment makes this screen disagree with the code the buyer is
+  // about to scan.
+  //
+  // The status endpoint returns the most recent payment row, which for a
+  // superseded KBZPay order is the live one, so its amount is the figure the
+  // buyer will actually be charged. displayTotals falls back to the configured
+  // fee whenever that amount is below the ticket subtotal — a partial-payment
+  // remainder — so a top-up row cannot be mistaken for an order total.
+  const gatewayAmount = enrollment.payment?.total_amount ?? null;
+
+  const { platformFee, total: grandTotal } = displayTotals(
     totalFee,
-    ticketCount,
+    gatewayAmount,
+    computePlatformFee(
+      {
+        payment_mode: enrollment.payment_mode,
+        platform_fee_mode: enrollment.platform_fee_mode,
+        platform_fee_amount: enrollment.platform_fee_amount,
+      },
+      totalFee,
+      ticketCount,
+    ),
   );
-  const grandTotal = totalFee + platformFee;
 
   const feeEn = formatCurrencySimple(grandTotal, currency);
   const feeMm = currency === "MMK" ? formatAmount(grandTotal) : null;
