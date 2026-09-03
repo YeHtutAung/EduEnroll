@@ -10,6 +10,7 @@ import PayNowQrSaveButton from "@/components/payments/PayNowQrSaveButton";
 import BrandHeader from "@/components/enrollment/BrandHeader";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
+import { computePlatformFee, displayTotals } from "@/server/payments/platformFee";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CartItem {
@@ -39,13 +40,17 @@ interface EnrollmentInfo {
   telegram_bot_username?: string | null;
   payment_mode?: "bank_transfer" | "mmqr" | "stripe" | "paypay" | "hitpay";
   mmqr_provider?: "abank" | "mmpay" | "kbzpay";
+  platform_fee_mode?: string | null;
+  platform_fee_amount?: number | null;
   class_image_url?: string | null;
   items?: CartItem[] | null;
   payment?: {
     admin_note?: string | null;
     received_amount?: number | null;
     total_amount?: number | null;
+    platform_fee?: number | null;
     remaining_amount?: number | null;
+    status?: string | null;
   } | null;
 }
 
@@ -777,12 +782,15 @@ function DownloadReceiptButton({
   enrollment,
   orgType,
   totalFee,
+  platformFee,
   feeFormatted,
   isCart,
 }: {
   enrollment: EnrollmentInfo;
   orgType: string;
+  /** Tickets only. The fee is its own line so the rows sum to the total. */
   totalFee: number;
+  platformFee: number;
   feeFormatted: string;
   isCart: boolean;
 }) {
@@ -945,6 +953,13 @@ function DownloadReceiptButton({
                   </span>
                 </div>
               </div>
+
+              {platformFee > 0 && (
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 14px", fontSize: "12.5px", color: "#6b7280" }}>
+                  <span>Online Platform Fee</span>
+                  <span style={{ color: "#1f2937" }}>{platformFee.toLocaleString()}</span>
+                </div>
+              )}
 
               {/* Total / fee */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 14px", background: "#f9fafb", borderRadius: "8px" }}>
@@ -1339,8 +1354,45 @@ export default function PaymentInstructionsPage() {
   const totalFee = isCart
     ? enrollment.items!.reduce((sum, i) => sum + i.subtotal, 0)
     : (enrollment.fee_amount ?? 0) * qty;
-  const feeEn = formatCurrencySimple(totalFee, currency);
-  const feeMm = currency === "MMK" ? formatAmount(totalFee) : null;
+  // Ticket subtotal above; the fee is added here from the same calculator the
+  // payment routes use, so the figure shown matches what the gateway charged.
+  const ticketCount = isCart
+    ? enrollment.items!.reduce((sum, i) => sum + i.quantity, 0)
+    : qty;
+  // Once a gateway order exists its amount is fixed — the QR encodes it, and
+  // the provider will charge exactly that. Recomputing from the tenant's
+  // current settings means an admin changing the fee while an order is
+  // awaiting payment makes this screen disagree with the code the buyer is
+  // about to scan.
+  //
+  // The status endpoint returns the most recent payment row, which for a
+  // superseded KBZPay order is the live one, so its amount is the figure the
+  // buyer will actually be charged. displayTotals falls back to the configured
+  // fee whenever that amount is below the ticket subtotal — a partial-payment
+  // remainder — so a top-up row cannot be mistaken for an order total.
+  const gatewayRow = enrollment.payment
+    ? {
+        amount: enrollment.payment.total_amount ?? null,
+        platform_fee: enrollment.payment.platform_fee ?? null,
+      }
+    : null;
+
+  const { platformFee, total: grandTotal } = displayTotals(
+    totalFee,
+    gatewayRow,
+    computePlatformFee(
+      {
+        payment_mode: enrollment.payment_mode,
+        platform_fee_mode: enrollment.platform_fee_mode,
+        platform_fee_amount: enrollment.platform_fee_amount,
+      },
+      totalFee,
+      ticketCount,
+    ),
+  );
+
+  const feeEn = formatCurrencySimple(grandTotal, currency);
+  const feeMm = currency === "MMK" ? formatAmount(grandTotal) : null;
   const showUpload = enrollment.status === "pending_payment" || enrollment.status === "partial_payment";
   const isPartialReUpload = enrollment.status === "partial_payment";
   const paymentMode = enrollment.payment_mode ?? "bank_transfer";
@@ -1492,7 +1544,7 @@ export default function PaymentInstructionsPage() {
                       </div>
                     </div>
                     <span className="text-sm font-semibold text-gray-900">
-                      {formatCurrencySimple(totalFee, currency)}
+                      {formatCurrencySimple(grandTotal, currency)}
                     </span>
                   </div>
                 )}
@@ -1503,7 +1555,7 @@ export default function PaymentInstructionsPage() {
             <div className="border-t border-gray-100 bg-gray-50/50 px-6 py-4">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold text-gray-600">Total Paid</span>
-                <span className="text-lg font-bold text-[#1a6b3c]">{formatCurrencySimple(totalFee, currency)}</span>
+                <span className="text-lg font-bold text-[#1a6b3c]">{formatCurrencySimple(grandTotal, currency)}</span>
               </div>
             </div>
 
@@ -1528,6 +1580,7 @@ export default function PaymentInstructionsPage() {
             enrollment={enrollment}
             orgType={orgType}
             totalFee={totalFee}
+            platformFee={platformFee}
             feeFormatted={feeEn}
             isCart={isCart}
           />
@@ -1585,9 +1638,15 @@ export default function PaymentInstructionsPage() {
                   </span>
                 </div>
               )}
+              {platformFee > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-700">Online Platform Fee / <span className="font-myanmar">အွန်လိုင်း ဝန်ဆောင်ခ</span></span>
+                  <span className="font-medium text-gray-900">{formatCurrencySimple(platformFee, currency)}</span>
+                </div>
+              )}
               <div className="border-t pt-2 mt-2 flex justify-between font-semibold text-gray-900">
                 <span>Total</span>
-                <span>{formatCurrencySimple(totalFee, currency)}</span>
+                <span>{formatCurrencySimple(grandTotal, currency)}</span>
               </div>
             </div>
           </div>
@@ -1749,7 +1808,7 @@ export default function PaymentInstructionsPage() {
               <p className="mt-1 text-3xl font-bold font-mono text-white">
                 {isPartialReUpload && enrollment.payment?.remaining_amount
                   ? formatCurrencySimple(enrollment.payment.remaining_amount, currency)
-                  : formatCurrencySimple(totalFee, currency)}
+                  : formatCurrencySimple(grandTotal, currency)}
               </p>
               <button
                 onClick={() => setShowQRModal(true)}
@@ -1794,7 +1853,7 @@ export default function PaymentInstructionsPage() {
                   : (orgType === "event" ? "Pay to complete your order" : <>Pay to complete your enrollment / <span className="font-myanmar">ငွေပေးချေပြီး အပြီးသတ်ပါ</span></>)}
               </p>
               <p className="mt-1 text-3xl font-bold font-mono text-white">
-                {isPartialReUpload && enrollment.payment?.remaining_amount ? formatCurrencySimple(enrollment.payment.remaining_amount, currency) : formatCurrencySimple(totalFee, currency)}
+                {isPartialReUpload && enrollment.payment?.remaining_amount ? formatCurrencySimple(enrollment.payment.remaining_amount, currency) : formatCurrencySimple(grandTotal, currency)}
               </p>
               <button
                 onClick={() => setShowQRModal(true)}
@@ -1959,7 +2018,7 @@ export default function PaymentInstructionsPage() {
           enrollmentRef={enrollment.enrollment_ref}
           amount={isPartialReUpload && enrollment.payment?.remaining_amount
             ? enrollment.payment.remaining_amount
-            : totalFee}
+            : grandTotal}
           studentName={enrollment.student_name_en}
           receiverName={schoolName}
           provider={paymentMode === "paypay" ? "paypay" : mmqrProvider}

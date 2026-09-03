@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import { platformOrigin } from "@/lib/origin";
 import abank from "@/lib/abank";
+import { resolveOrderTotal } from "@/server/payments/platformFee";
 
 // ─── POST /api/public/payments/abank ────────────────────────────────────────
 // Creates an ABank MMQR order and returns a QR string for the user to scan.
@@ -93,6 +94,17 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Online platform fee. Resolved by the shared calculator rather than worked
+  // out here, so no two payment routes can disagree about the amount — a
+  // disagreement surfaces as amount_mismatch at settlement, after the payer
+  // has already been charged.
+  const { platformFee } = await resolveOrderTotal(supabase, enrollment);
+  totalFee += platformFee;
+  // What THIS ROW records. The partial-payment branch below charges a
+  // remainder rather than the order total, and a remainder is not the row that
+  // quoted the fee — the row that did keeps it, and this one records none.
+  let recordedFee = platformFee;
+
   // ── 5. Adjust for partial payment ──────────────────────────
   if (enrollment.status === "partial_payment") {
     const { data: existingPayment } = (await supabase
@@ -105,6 +117,7 @@ export async function POST(request: NextRequest) {
 
     if (existingPayment?.received_amount) {
       totalFee = totalFee - existingPayment.received_amount;
+      recordedFee = 0;
     }
   }
 
@@ -135,6 +148,7 @@ export async function POST(request: NextRequest) {
       enrollment_id: enrollment.id,
       tenant_id: enrollment.tenant_id,
       amount: totalFee,
+      platform_fee: recordedFee,
       payment_ref: orderId,
       payment_method: "abank_mmqr",
       mmqr_status: "PENDING",

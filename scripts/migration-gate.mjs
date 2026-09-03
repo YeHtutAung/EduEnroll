@@ -56,6 +56,7 @@ const CATALOG_ASSERTIONS = `
 do $assert$
 declare
   n int;
+  fn oid;
 begin
   -- Row-contract constraints present on payments
   select count(*) into n from pg_constraint
@@ -80,20 +81,31 @@ begin
                          'last_source_type','last_source_id','cleanup_status');
   if n <> 5 then raise exception 'gate: conflicts table missing source/cleanup columns (%)', n; end if;
 
-  -- Finalizer is locked down: anon/authenticated cannot execute
-  if has_function_privilege('anon'::name,
-       'public.finalize_stripe_payment_attempt(uuid,uuid,text,integer,text,text,numeric,bigint,text,uuid)'::regprocedure::oid,
-       'execute'::text) then
+  -- Finalizer is locked down: anon/authenticated cannot execute.
+  --
+  -- Resolved by NAME, not by a written-out argument list. The signature was
+  -- pinned here in three places and every one of them broke the day a
+  -- parameter was added (20260903090000 threads the platform fee through), so
+  -- the gate reported "function does not exist" for a function that was
+  -- present and correctly locked down. Name lookup cannot go stale that way,
+  -- and asserting exactly one match is the stronger check besides: it catches
+  -- an old overload left behind by a DROP that missed, which is precisely how
+  -- a revoked signature comes back executable.
+  select oid into fn from pg_proc
+   where pronamespace = 'public'::regnamespace
+     and proname = 'finalize_stripe_payment_attempt';
+  get diagnostics n = row_count;
+  if n <> 1 then
+    raise exception 'gate: expected exactly 1 finalize_stripe_payment_attempt, found %', n;
+  end if;
+
+  if has_function_privilege('anon'::name, fn, 'execute'::text) then
     raise exception 'gate: anon can execute the finalizer';
   end if;
-  if has_function_privilege('authenticated'::name,
-       'public.finalize_stripe_payment_attempt(uuid,uuid,text,integer,text,text,numeric,bigint,text,uuid)'::regprocedure::oid,
-       'execute'::text) then
+  if has_function_privilege('authenticated'::name, fn, 'execute'::text) then
     raise exception 'gate: authenticated can execute the finalizer';
   end if;
-  if not has_function_privilege('service_role'::name,
-       'public.finalize_stripe_payment_attempt(uuid,uuid,text,integer,text,text,numeric,bigint,text,uuid)'::regprocedure::oid,
-       'execute'::text) then
+  if not has_function_privilege('service_role'::name, fn, 'execute'::text) then
     raise exception 'gate: service_role cannot execute the finalizer';
   end if;
 end $assert$;

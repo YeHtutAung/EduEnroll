@@ -58,7 +58,7 @@ interface EnrollmentWithClass extends Enrollment {
 }
 
 type EnrollmentResult = { data: EnrollmentWithClass | null; error: unknown };
-type PaymentResult    = { data: Pick<Payment, "id" | "status" | "created_at" | "admin_note" | "received_amount" | "amount"> | null; error: unknown };
+type PaymentResult    = { data: Pick<Payment, "id" | "status" | "created_at" | "admin_note" | "received_amount" | "amount" | "platform_fee"> | null; error: unknown };
 
 // ─── GET /api/public/status?ref=NM-2026-XXXXX ─────────────────────────────────
 // Public — no authentication required.
@@ -119,7 +119,7 @@ export async function GET(request: NextRequest) {
   // ── Fetch most recent payment (if any) ───────────────────────────
   const { data: payment } = await supabase
     .from("payments")
-    .select("id, status, created_at, admin_note, received_amount, amount")
+    .select("id, status, created_at, admin_note, received_amount, amount, platform_fee")
     .eq("enrollment_id", enrollment.id)
     .order("created_at", { ascending: false })
     .limit(1)
@@ -170,6 +170,8 @@ export async function GET(request: NextRequest) {
         admin_note:          payment.admin_note ?? null,
         received_amount: payment.received_amount ?? null,
         total_amount:    payment.amount,
+        // The fee inside total_amount, as recorded when the row was created.
+        platform_fee:    payment.platform_fee ?? 0,
         remaining_amount: payment.received_amount != null
           ? payment.amount - payment.received_amount
           : null,
@@ -190,9 +192,9 @@ export async function GET(request: NextRequest) {
   // ── Fetch tenant org_type ─────────────────────────────────────
   const { data: tenantInfo } = await supabase
     .from("tenants")
-    .select("org_type, currency, auto_cancel_hours, payment_mode, mmqr_provider")
+    .select("org_type, currency, auto_cancel_hours, payment_mode, mmqr_provider, platform_fee_mode, platform_fee_amount")
     .eq("id", tenantId)
-    .single() as { data: { org_type: string; currency: string; auto_cancel_hours: number; payment_mode: string; mmqr_provider: string } | null; error: unknown };
+    .single() as { data: { org_type: string; currency: string; auto_cancel_hours: number; payment_mode: string; mmqr_provider: string; platform_fee_mode: string | null; platform_fee_amount: number | null } | null; error: unknown };
 
   // Telegram config lives in tenant_telegram_configs (moved in migration 068)
   const { data: tgConfig } = await supabase
@@ -225,6 +227,10 @@ export async function GET(request: NextRequest) {
     auto_cancel_minutes: tenantInfo?.auto_cancel_hours ?? 4320,
     telegram_bot_username: tgConfig?.enabled ? (tgConfig.bot_username ?? null) : null,
     payment_mode: tenantInfo?.payment_mode ?? "bank_transfer",
+    // Fee settings, so the payment and confirmation screens can show the split
+    // rather than a single figure the buyer cannot account for.
+    platform_fee_mode: tenantInfo?.platform_fee_mode ?? "none",
+    platform_fee_amount: tenantInfo?.platform_fee_amount ?? 0,
     mmqr_provider: tenantInfo?.mmqr_provider ?? "abank",
   });
 }

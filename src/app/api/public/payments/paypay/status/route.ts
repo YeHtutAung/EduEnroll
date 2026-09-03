@@ -126,7 +126,10 @@ export async function GET(request: NextRequest) {
               classLevel = items
                 .map((i) => (i.quantity > 1 ? `${i.classes?.level ?? "?"} x${i.quantity}` : (i.classes?.level ?? "?")))
                 .join(", ");
-              const total = items.reduce((s, i) => s + i.fee_amount * i.quantity, 0);
+            // The payer was charged the fee-inclusive amount recorded on the
+            // payment row, so the notification quotes that rather than
+            // re-summing the tickets, which would understate what they paid.
+              const total = payment.amount ?? items.reduce((s, i) => s + i.fee_amount * i.quantity, 0);
               feeFormatted = `${String(total).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} ${tenantCurrency}`;
             }
           } else {

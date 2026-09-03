@@ -28,14 +28,12 @@ const claim = (
   ref: string,
   amount = AMOUNT,
   expiresAt: string = future(),
+  platformFee = 0,
 ) =>
-  sql<ClaimRow>(`SELECT * FROM public.claim_kbzpay_order_slot($1,$2,$3,$4,$5::timestamptz)`, [
-    enrollmentId,
-    tenantId,
-    ref,
-    amount,
-    expiresAt,
-  ]);
+  sql<ClaimRow>(
+    `SELECT * FROM public.claim_kbzpay_order_slot($1,$2,$3,$4,$5::timestamptz,$6)`,
+    [enrollmentId, tenantId, ref, amount, expiresAt, platformFee],
+  );
 
 const supersede = (
   enrollmentId: string,
@@ -44,10 +42,11 @@ const supersede = (
   reason: string,
   newRef: string,
   amount = AMOUNT,
+  platformFee = 0,
 ) =>
   sql<SupersedeRow>(
-    `SELECT * FROM public.complete_kbzpay_supersede($1,$2,$3,$4,$5,$6,$7::timestamptz)`,
-    [enrollmentId, tenantId, oldRef, reason, newRef, amount, future()],
+    `SELECT * FROM public.complete_kbzpay_supersede($1,$2,$3,$4,$5,$6,$7::timestamptz,$8)`,
+    [enrollmentId, tenantId, oldRef, reason, newRef, amount, future(), platformFee],
   );
 
 // ── Fixtures ────────────────────────────────────────────────────────────────
@@ -410,5 +409,70 @@ describe("complete_kbzpay_supersede", () => {
 
     expect(r.outcome).toBe("invalid_enrollment");
     expect(await allKbzRows(enrollmentId)).toHaveLength(1);
+  });
+});
+
+// ─── The recorded split (20260903090000) ────────────────────────────────────
+//
+// The fee used to be recoverable only as `amount - ticket_subtotal`, which is
+// wrong the moment the amount is not the order total. These functions are two
+// of the four paths that create a payment row, and a path that fails to record
+// the fee does not error — it writes 0 against a fee-bearing amount, and the
+// receipt then reports the whole charge as tickets.
+describe("platform_fee is recorded on the row it belongs to", () => {
+  const feeOf = (paymentId: string) =>
+    sql<{ amount: number; platform_fee: number }>(
+      `SELECT amount, platform_fee FROM payments WHERE id = $1`,
+      [paymentId],
+    );
+
+  it("claim stores the fee passed to it", async () => {
+    const { tenantId, enrollmentId } = await makeWorld();
+
+    const [r] = await claim(enrollmentId, tenantId, "KBZ_f_1", AMOUNT + 300, future(), 300);
+
+    expect(r.outcome).toBe("created");
+    expect(await feeOf(r.payment_id!)).toEqual([{ amount: AMOUNT + 300, platform_fee: 300 }]);
+  });
+
+  it("supersede carries the fee onto the replacement row", async () => {
+    const { tenantId, enrollmentId } = await makeWorld();
+    await seedLive(enrollmentId, tenantId, "KBZ_f_old");
+
+    const [r] = await supersede(
+      enrollmentId, tenantId, "KBZ_f_old", "EXPIRED", "KBZ_f_new", AMOUNT + 300, 300);
+
+    expect(r.outcome).toBe("replaced");
+    expect(await feeOf(r.payment_id!)).toEqual([{ amount: AMOUNT + 300, platform_fee: 300 }]);
+  });
+
+  // The parameter defaults to 0 so the migration can be deployed before the
+  // code that passes it. A row created in that window records no fee, which is
+  // exactly what it was charged.
+  it("defaults to 0 for a caller that does not pass one", async () => {
+    const { tenantId, enrollmentId } = await makeWorld();
+
+    const [r] = await sql<ClaimRow>(
+      `SELECT * FROM public.claim_kbzpay_order_slot($1,$2,$3,$4,$5::timestamptz)`,
+      [enrollmentId, tenantId, "KBZ_f_2", AMOUNT, future()],
+    );
+
+    expect(r.outcome).toBe("created");
+    expect((await feeOf(r.payment_id!))[0].platform_fee).toBe(0);
+  });
+
+  // A live row whose split differs from the current quote is not reusable, for
+  // the same reason a differing amount is not: reusing it would attach a stale
+  // breakdown to the order the buyer is about to pay.
+  it("refuses to reuse a live order whose split has changed", async () => {
+    const { tenantId, enrollmentId } = await makeWorld();
+    const [created] = await claim(enrollmentId, tenantId, "KBZ_f_3", AMOUNT, future(), 0);
+    await sql(`UPDATE payments SET provider_qr = '0002010102QR' WHERE id = $1`, [created.payment_id]);
+
+    const [same] = await claim(enrollmentId, tenantId, "KBZ_f_4", AMOUNT, future(), 0);
+    expect(same.outcome).toBe("reuse");
+
+    const [changed] = await claim(enrollmentId, tenantId, "KBZ_f_5", AMOUNT, future(), 300);
+    expect(changed.outcome).toBe("unresolved");
   });
 });

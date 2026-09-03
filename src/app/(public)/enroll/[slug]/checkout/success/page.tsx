@@ -32,6 +32,8 @@ interface EnrollmentData {
   status: string;
   student_name_en: string;
   total_amount: number;
+  ticket_subtotal?: number;
+  platform_fee?: number;
   items: { level: string; quantity: number; fee_amount: number }[];
   event_name: string;
   logo_url?: string | null;
@@ -1197,6 +1199,26 @@ function SuccessContent() {
                     </span>
                   </div>
                 </div>
+
+                {(data.platform_fee ?? 0) > 0 && (
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "0 14px 8px",
+                      fontSize: "12.5px",
+                      color: "#6b7280",
+                    }}
+                  >
+                    <span>
+                      Online Platform Fee / <span className="font-myanmar">အွန်လိုင်း ဝန်ဆောင်ခ</span>
+                    </span>
+                    <span style={{ color: "#0f1f42" }}>
+                      {(data.platform_fee ?? 0).toLocaleString()}
+                    </span>
+                  </div>
+                )}
 
                 {/* Total */}
                 <div
