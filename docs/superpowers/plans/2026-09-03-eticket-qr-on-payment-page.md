@@ -184,6 +184,44 @@ Follow the pattern the success page already proves
 Without 2b an implementation can satisfy 2a exactly and still render a confirmed
 ticket list with missing QR images.
 
+**2b-bis. "Unknown" is a state, and it fails closed.**
+
+Review found that collapsing "not fetched yet" and "fetch failed" into "no
+tickets" defeats 2b entirely: `preparing` goes false and the download takes the
+empty-ticket branch — the QR-less receipt — for every confirmed event order
+while the request is in flight, and permanently after a failed one.
+
+Whether an order has a ticket is therefore a tri-state:
+
+| State | Download | Shows |
+|---|---|---|
+| not started / loading | disabled | "Preparing ticket..." |
+| error | disabled | support line quoting the order ref |
+| loaded, has tickets | enabled | the QR e-ticket |
+| loaded, empty, **event** | disabled | "No e-ticket was issued for this order" |
+| loaded, empty, language school | enabled | the existing receipt |
+
+Confirmed by the reviewer: a QR-bearing e-ticket is a **gate credential**, so a
+QR-less receipt returned while ticket state is unknown recreates the original
+defect. A language-school buyer having to reload on a failed lookup is the
+narrower harm, and is accepted deliberately.
+
+A confirmed EVENT order with a genuinely empty ticket list is blocked too. It is
+an anomaly — issuance failed — and the receipt looks like proof of purchase
+while being no use at the gate, so it says so instead of handing one over. A
+language school issues no tickets by design, so an empty list there is the
+normal case and keeps the receipt.
+
+`org_type` is read from the **status** response, which carries it alongside
+`status`, not from the later intake fetch — reading the late copy would
+reintroduce the same unknown-state race this gating exists to close.
+
+The test is written as **"not positively ticketless"** (`org_type !==
+"language_school"`), not as "is an event". An absent, empty or later-added
+org_type therefore blocks rather than quietly producing a receipt. Only a tenant
+we can positively identify as issuing no tickets is allowed to skip the ticket.
+Verified by stripping `org_type` from the status response: the download blocked.
+
 **2c. Fallbacks unchanged.**
 
 Render QR tickets when `tickets.length > 0`; keep today's receipt PDF when the
