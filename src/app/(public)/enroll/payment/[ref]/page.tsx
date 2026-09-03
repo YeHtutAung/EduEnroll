@@ -11,6 +11,7 @@ import BrandHeader from "@/components/enrollment/BrandHeader";
 import html2canvas from "html2canvas";
 import { buildTicketPdf } from "@/lib/tickets/render/ticketPdf";
 import { buildQrMap } from "@/lib/tickets/render/ticketPng";
+import { successRedirectUrl } from "@/lib/enrollment/successRedirect";
 import type { QrMap, TicketData, TicketRenderContext } from "@/lib/tickets/render/types";
 import type { SponsorPlacements } from "@/types/database";
 import { jsPDF } from "jspdf";
@@ -1485,8 +1486,16 @@ export default function PaymentInstructionsPage() {
         if (data.enrollmentStatus === "confirmed") {
           clearInterval(interval);
           setHitpayPolling(false);
-          const intakeSlug = enrollment?.intake_slug ?? "";
-          window.location.href = `/enroll/${encodeURIComponent(intakeSlug)}/checkout/success/?ref=${encodeURIComponent(params.ref)}`;
+          // `intake_slug ?? ""` used to build /enroll//checkout/success/ — a
+          // 404 served to someone who has just paid. When there is no slug to
+          // build a URL from, stay here and refresh instead: this page renders
+          // the e-ticket itself, so staying is a complete outcome.
+          const dest = successRedirectUrl(enrollment?.intake_slug, params.ref);
+          if (dest) {
+            window.location.href = dest;
+          } else {
+            handleUploadSuccess();
+          }
         } else if (data.enrollmentStatus === "rejected" || data.enrollmentStatus === "cancelled") {
           clearInterval(interval);
           setHitpayPolling(false);
@@ -1499,7 +1508,7 @@ export default function PaymentInstructionsPage() {
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [hitpayPolling, params.ref, enrollment?.intake_slug]);
+  }, [hitpayPolling, params.ref, enrollment?.intake_slug, handleUploadSuccess]);
 
   const brandHeader = schoolName ? (
     <BrandHeader schoolName={schoolName} primaryColor={primaryColor} logoUrl={logoUrl} />
