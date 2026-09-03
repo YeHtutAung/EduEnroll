@@ -54,8 +54,6 @@ MMQR_ORDER_ID=""
 
 # Auth cookie header — populated by login()
 AUTH_H=()
-# Tenant slug header — populated after login()
-TENANT_H=()
 # Access token for direct Supabase queries
 ACCESS_TOKEN=""
 
@@ -94,8 +92,30 @@ _curl_check() {
     return 1
   fi
 }
-pub_get()    { _curl_check "${BYPASS_H[@]}" "${TENANT_H[@]}" "$BASE_URL$1"; }
-pub_post()   { _curl_check "${BYPASS_H[@]}" "${TENANT_H[@]}" -X POST  -H "Content-Type: application/json" -d "$2" "$BASE_URL$1"; }
+# Appends the tenant selector to a public-route URL.
+#
+# x-tenant-slug used to do this job as a request header. Middleware now
+# deliberately deletes any caller-supplied x-tenant-slug on every request
+# (src/middleware.ts) — the #164 trust-boundary fix, closing exactly the kind
+# of spoofing this script was doing. BASE_URL here is always a Vercel preview
+# host (see this workflow's own comment: *.vercel.app), which middleware's
+# isDevHost() accepts, so a `?tenant=` query param is the supported way to
+# select a tenant against this deployment — the same fallback local dev uses.
+# Confirmed against a real deployment: the same intake slug returns a
+# different tenant's data (or its 404) depending only on this parameter.
+tenant_url() {
+  local path="$1"
+  if [[ -z "$TENANT_SUBDOMAIN" ]]; then
+    echo "${BASE_URL}${path}"
+    return
+  fi
+  local sep="?"
+  [[ "$path" == *\?* ]] && sep="&"
+  echo "${BASE_URL}${path}${sep}tenant=${TENANT_SUBDOMAIN}"
+}
+
+pub_get()    { _curl_check "${BYPASS_H[@]}" "$(tenant_url "$1")"; }
+pub_post()   { _curl_check "${BYPASS_H[@]}" -X POST  -H "Content-Type: application/json" -d "$2" "$(tenant_url "$1")"; }
 admin_get()  { _curl_check "${BYPASS_H[@]}" "${AUTH_H[@]}" "$BASE_URL$1"; }
 admin_post() { _curl_check "${BYPASS_H[@]}" "${AUTH_H[@]}" -X POST  -H "Content-Type: application/json" -d "$2" "$BASE_URL$1"; }
 admin_patch(){ _curl_check "${BYPASS_H[@]}" "${AUTH_H[@]}" -X PATCH -H "Content-Type: application/json" -d "$2" "$BASE_URL$1"; }
@@ -104,7 +124,7 @@ admin_del()  { _curl_check "${BYPASS_H[@]}" "${AUTH_H[@]}" -X DELETE "$BASE_URL$
 # Return HTTP status code only (-L follows redirects)
 http_code() { curl -sL "${BYPASS_H[@]}" -o /dev/null -w "%{http_code}" "${@}"; }
 # HTTP status code with tenant header
-http_code_pub() { curl -sL "${BYPASS_H[@]}" "${TENANT_H[@]}" -o /dev/null -w "%{http_code}" "${@}"; }
+http_code_pub() { curl -sL "${BYPASS_H[@]}" -o /dev/null -w "%{http_code}" "${@}"; }
 
 check_deps() {
   local missing=()
@@ -170,11 +190,9 @@ login() {
 
   TENANT_SUBDOMAIN=$(echo "$TENANT_RESP" | jq -r '.[0].subdomain // empty')
   if [[ -n "$TENANT_SUBDOMAIN" ]]; then
-    TENANT_H=(-H "x-tenant-slug: ${TENANT_SUBDOMAIN}")
     echo -e "  ${GREEN}✓${RESET} Tenant subdomain: ${TENANT_SUBDOMAIN}"
   else
     echo -e "  ${YELLOW}!${RESET} Could not resolve tenant subdomain — public tests may fail"
-    TENANT_H=()
   fi
 
   SKIP_ADMIN=0
@@ -332,7 +350,7 @@ test_public_intake() {
   fi
 
   # 404 on a non-existent slug (valid format, no matching intake)
-  local CODE; CODE=$(http_code_pub "$BASE_URL/api/public/enroll/nonexistent-slug-${TIMESTAMP}")
+  local CODE; CODE=$(http_code_pub "$(tenant_url "/api/public/enroll/nonexistent-slug-${TIMESTAMP}")")
   if [[ "$CODE" == "404" ]]; then
     pass "GET /api/public/enroll/nonexistent-slug — 404 for non-existent intake"
   else
@@ -379,7 +397,7 @@ test_submit_enrollment() {
   local CODE
   CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
     -d '{"form_data":{"name_en":"Test"}}' \
-    "$BASE_URL/api/public/enroll")
+    "$(tenant_url "/api/public/enroll")")
   if [[ "$CODE" == "400" ]]; then
     pass "POST /api/public/enroll — 400 when class_id is missing"
   else
@@ -389,7 +407,7 @@ test_submit_enrollment() {
   # Validation: invalid class_id UUID should 400
   CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
     -d '{"class_id":"not-a-uuid"}' \
-    "$BASE_URL/api/public/enroll")
+    "$(tenant_url "/api/public/enroll")")
   if [[ "$CODE" == "400" ]]; then
     pass "POST /api/public/enroll — 400 on invalid class_id UUID"
   else
@@ -399,7 +417,7 @@ test_submit_enrollment() {
   # Non-existent class_id should 404
   CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
     -d '{"class_id":"00000000-0000-0000-0000-000000000000"}' \
-    "$BASE_URL/api/public/enroll")
+    "$(tenant_url "/api/public/enroll")")
   if [[ "$CODE" == "404" ]]; then
     pass "POST /api/public/enroll — 404 on non-existent class"
   else
@@ -490,7 +508,7 @@ test_submit_cart_enrollment() {
   local CODE
   CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
     -d '{"items":[], "form_data":{"name_en":"Test"}}' \
-    "$BASE_URL/api/public/enroll")
+    "$(tenant_url "/api/public/enroll")")
   if [[ "$CODE" == "400" ]]; then
     pass "POST /api/public/enroll (cart) — 400 on empty items array"
   else
@@ -500,7 +518,7 @@ test_submit_cart_enrollment() {
   # Validation: items with invalid class_id should 400
   CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
     -d '{"items":[{"class_id":"not-a-uuid","quantity":1}]}' \
-    "$BASE_URL/api/public/enroll")
+    "$(tenant_url "/api/public/enroll")")
   if [[ "$CODE" == "400" ]]; then
     pass "POST /api/public/enroll (cart) — 400 on invalid item class_id"
   else
@@ -510,7 +528,7 @@ test_submit_cart_enrollment() {
   # Non-existent class in cart should 404
   CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
     -d '{"items":[{"class_id":"00000000-0000-0000-0000-000000000000","quantity":1}]}' \
-    "$BASE_URL/api/public/enroll")
+    "$(tenant_url "/api/public/enroll")")
   if [[ "$CODE" == "404" ]]; then
     pass "POST /api/public/enroll (cart) — 404 on non-existent class in cart"
   else
@@ -597,7 +615,7 @@ test_enrollment_status() {
   fi
 
   # 400 on missing ref
-  local CODE; CODE=$(http_code_pub "$BASE_URL/api/public/status")
+  local CODE; CODE=$(http_code_pub "$(tenant_url "/api/public/status")")
   if [[ "$CODE" == "400" ]]; then
     pass "GET /api/public/status — 400 when ref is missing"
   else
@@ -605,7 +623,7 @@ test_enrollment_status() {
   fi
 
   # 404 on unknown ref
-  CODE=$(http_code_pub "$BASE_URL/api/public/status?ref=NM-9999-99999")
+  CODE=$(http_code_pub "$(tenant_url "/api/public/status?ref=NM-9999-99999")")
   if [[ "$CODE" == "404" ]]; then
     pass "GET /api/public/status — 404 for unknown ref"
   else
@@ -629,8 +647,8 @@ test_receipt_upload() {
 
   # Test: successful upload for single enrollment
   local RESP STATUS
-  RESP=$(curl -sL -w "\n%{http_code}" "${BYPASS_H[@]}" "${TENANT_H[@]}" \
-    -X POST "$BASE_URL/api/public/payments/upload" \
+  RESP=$(curl -sL -w "\n%{http_code}" "${BYPASS_H[@]}" \
+    -X POST "$(tenant_url "/api/public/payments/upload")" \
     -F "enrollment_ref=${ENROLLMENT_REF}" \
     -F "proof_image=@${TMPIMG};type=image/png")
   STATUS=$(echo "$RESP" | tail -1)
@@ -657,8 +675,8 @@ test_receipt_upload() {
 
   # Test: missing enrollment_ref should 400
   local CODE
-  CODE=$(curl -sL "${BYPASS_H[@]}" "${TENANT_H[@]}" -o /dev/null -w "%{http_code}" \
-    -X POST "$BASE_URL/api/public/payments/upload" \
+  CODE=$(curl -sL "${BYPASS_H[@]}" -o /dev/null -w "%{http_code}" \
+    -X POST "$(tenant_url "/api/public/payments/upload")" \
     -F "proof_image=@${TMPIMG};type=image/png")
   if [[ "$CODE" == "400" ]]; then
     pass "POST /api/public/payments/upload — 400 on missing enrollment_ref"
@@ -667,8 +685,8 @@ test_receipt_upload() {
   fi
 
   # Test: unknown ref should 404
-  CODE=$(curl -sL "${BYPASS_H[@]}" "${TENANT_H[@]}" -o /dev/null -w "%{http_code}" \
-    -X POST "$BASE_URL/api/public/payments/upload" \
+  CODE=$(curl -sL "${BYPASS_H[@]}" -o /dev/null -w "%{http_code}" \
+    -X POST "$(tenant_url "/api/public/payments/upload")" \
     -F "enrollment_ref=NM-9999-99999" \
     -F "proof_image=@${TMPIMG};type=image/png")
   if [[ "$CODE" == "404" ]]; then
@@ -678,8 +696,8 @@ test_receipt_upload() {
   fi
 
   # Test: re-upload for already submitted should 409
-  CODE=$(curl -sL "${BYPASS_H[@]}" "${TENANT_H[@]}" -o /dev/null -w "%{http_code}" \
-    -X POST "$BASE_URL/api/public/payments/upload" \
+  CODE=$(curl -sL "${BYPASS_H[@]}" -o /dev/null -w "%{http_code}" \
+    -X POST "$(tenant_url "/api/public/payments/upload")" \
     -F "enrollment_ref=${ENROLLMENT_REF}" \
     -F "proof_image=@${TMPIMG};type=image/png")
   if [[ "$CODE" == "409" ]]; then
@@ -707,8 +725,8 @@ test_cart_receipt_upload() {
 
   # Test: successful upload for cart enrollment (class_id=NULL)
   local RESP STATUS
-  RESP=$(curl -sL -w "\n%{http_code}" "${BYPASS_H[@]}" "${TENANT_H[@]}" \
-    -X POST "$BASE_URL/api/public/payments/upload" \
+  RESP=$(curl -sL -w "\n%{http_code}" "${BYPASS_H[@]}" \
+    -X POST "$(tenant_url "/api/public/payments/upload")" \
     -F "enrollment_ref=${CART_ENROLLMENT_REF}" \
     -F "proof_image=@${TMPIMG};type=image/png")
   STATUS=$(echo "$RESP" | tail -1)
@@ -841,7 +859,7 @@ test_mmqr_payment() {
   local CODE
   CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
     -d '{"enrollmentRef":"NM-0000-99999"}' \
-    "$BASE_URL/api/public/payments/mmpay")
+    "$(tenant_url "/api/public/payments/mmpay")")
   if [[ "$CODE" == "404" ]]; then
     pass "POST /api/public/payments/mmpay — 404 on non-existent enrollment"
   else
@@ -851,7 +869,7 @@ test_mmqr_payment() {
   # ── Test 3: Missing enrollmentRef should 400 ──────────────
   CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
     -d '{}' \
-    "$BASE_URL/api/public/payments/mmpay")
+    "$(tenant_url "/api/public/payments/mmpay")")
   if [[ "$CODE" == "400" ]]; then
     pass "POST /api/public/payments/mmpay — 400 on missing enrollmentRef"
   else
@@ -882,7 +900,7 @@ test_mmqr_payment() {
   fi
 
   # ── Test 6: Poll status with missing ref — should 400 ────
-  CODE=$(http_code_pub "$BASE_URL/api/public/payments/mmpay/status")
+  CODE=$(http_code_pub "$(tenant_url "/api/public/payments/mmpay/status")")
   if [[ "$CODE" == "400" ]]; then
     pass "GET /api/public/payments/mmpay/status — 400 on missing ref param"
   else
@@ -904,7 +922,7 @@ test_mmqr_payment() {
     if [[ "$ENROLL_STATUS" != "pending_payment" && "$ENROLL_STATUS" != "partial_payment" ]]; then
       CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
         -d "{\"enrollmentRef\":\"${ENROLLMENT_REF}\"}" \
-        "$BASE_URL/api/public/payments/mmpay")
+        "$(tenant_url "/api/public/payments/mmpay")")
       if [[ "$CODE" == "409" ]]; then
         pass "POST /api/public/payments/mmpay — 409 on non-pending enrollment"
       else
