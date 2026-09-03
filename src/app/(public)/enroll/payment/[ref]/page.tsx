@@ -9,6 +9,10 @@ import QRPaymentModal from "@/components/payments/QRPaymentModal";
 import PayNowQrSaveButton from "@/components/payments/PayNowQrSaveButton";
 import BrandHeader from "@/components/enrollment/BrandHeader";
 import html2canvas from "html2canvas";
+import { buildTicketPdf } from "@/lib/tickets/render/ticketPdf";
+import { buildQrMap } from "@/lib/tickets/render/ticketPng";
+import type { QrMap, TicketData, TicketRenderContext } from "@/lib/tickets/render/types";
+import type { SponsorPlacements } from "@/types/database";
 import { jsPDF } from "jspdf";
 import { computePlatformFee, displayTotals } from "@/server/payments/platformFee";
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -785,6 +789,9 @@ function DownloadReceiptButton({
   platformFee,
   feeFormatted,
   isCart,
+  ticketInfo,
+  qrMap,
+  qrError,
 }: {
   enrollment: EnrollmentInfo;
   orgType: string;
@@ -793,6 +800,10 @@ function DownloadReceiptButton({
   platformFee: number;
   feeFormatted: string;
   isCart: boolean;
+  /** Null until the enrollment endpoint answers, or when it failed. */
+  ticketInfo: { tickets: TicketData[]; ctx: TicketRenderContext } | null;
+  qrMap: QrMap | null;
+  qrError: boolean;
 }) {
   const receiptRef = useRef<HTMLDivElement>(null);
   const [generating, setGenerating] = useState(false);
@@ -813,13 +824,39 @@ function DownloadReceiptButton({
     ? enrollment.items.map((i) => ({ label: i.class_level, qty: i.quantity, subtotal: formatCurrencySimple(i.subtotal, curr) }))
     : [{ label: enrollment.class_level ?? "", qty, subtotal: formatCurrencySimple(totalFee, curr) }];
 
+  const ticketCount = ticketInfo?.tickets.length ?? 0;
+  // Ready when the QR map has landed, or when there are no tickets and the
+  // receipt is what gets produced.
+  const preparing = ticketCount > 0 && !qrMap && !qrError;
+
   async function handleDownload() {
-    if (!receiptRef.current || generating) return;
+    if (generating || preparing) return;
+    // The receipt node is only needed for the no-ticket fallback.
+    if (ticketCount === 0 && !receiptRef.current) return;
     setGenerating(true);
 
     try {
+      // A scannable e-ticket where one exists. This page used to hand out the
+      // receipt screenshot below under an "E-Ticket" label, which carries no QR
+      // and cannot be scanned at the gate.
+      //
+      // Placed before the receipt's image-wait: the ticket is drawn with jsPDF
+      // primitives and does not read a single node from that hidden card.
+      const tickets = ticketInfo?.tickets ?? [];
+      if (tickets.length > 0 && ticketInfo) {
+        // Regenerated defensively: the button can be tapped before the effect
+        // that fills qrMap has settled.
+        const map = await buildQrMap(tickets, qrMap ?? {});
+        const pdf = await buildTicketPdf(ticketInfo.ctx, tickets, map);
+        pdf.save(`eticket-${enrollment.enrollment_ref}.pdf`);
+        return;
+      }
+
+      const receipt = receiptRef.current;
+      if (!receipt) return;
+
       // Wait for images to load
-      const imgs = receiptRef.current.querySelectorAll("img");
+      const imgs = receipt.querySelectorAll("img");
       await Promise.all(
         Array.from(imgs).map(
           (img) =>
@@ -831,7 +868,7 @@ function DownloadReceiptButton({
         ),
       );
 
-      const canvas = await html2canvas(receiptRef.current, {
+      const canvas = await html2canvas(receipt, {
         scale: 2,
         useCORS: true,
         backgroundColor: "#f5f7fa",
@@ -981,16 +1018,16 @@ function DownloadReceiptButton({
       <div className="mt-4 text-center">
         <button
           onClick={handleDownload}
-          disabled={generating}
+          disabled={generating || preparing}
           className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:opacity-50"
         >
-          {generating ? (
+          {generating || preparing ? (
             <>
               <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
                 <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
               </svg>
-              Generating...
+              {preparing ? "Preparing ticket..." : "Generating..."}
             </>
           ) : (
             <>
@@ -1001,6 +1038,12 @@ function DownloadReceiptButton({
             </>
           )}
         </button>
+        {qrError && (
+          <p className="mt-2 text-xs text-amber-700">
+            The ticket QR could not be prepared. Reload the page, or contact support
+            quoting {enrollment.enrollment_ref}.
+          </p>
+        )}
       </div>
     </>
   );
@@ -1245,6 +1288,80 @@ export default function PaymentInstructionsPage() {
       setHitpayLoading(false);
     }
   }
+
+  // ── E-ticket data ─────────────────────────────────────────
+  //
+  // Keyed on the STATUS, not on a transition to it. A buyer arriving from an
+  // emailed, Telegram or status-page link on an already-settled order renders
+  // `confirmed` on the very first pass — there is no transition to hook, and a
+  // transition-keyed fetch would have covered only the live in-session case,
+  // which is the one case that never needed this.
+  //
+  // /api/public/status carries no tickets and is polled every 5s; signing
+  // ticket JWTs on every poll would be wasteful, so the tickets come from the
+  // enrollment endpoint, fetched once per confirmation.
+  const [ticketInfo, setTicketInfo] = useState<{
+    tickets: TicketData[];
+    ctx: TicketRenderContext;
+  } | null>(null);
+  const [qrMap, setQrMap] = useState<QrMap | null>(null);
+  const [qrError, setQrError] = useState(false);
+
+  useEffect(() => {
+    if (!params.ref || enrollment?.status !== "confirmed") return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/public/enrollment/${encodeURIComponent(params.ref)}`);
+        if (!res.ok) return;
+        const d = (await res.json()) as {
+          tickets?: TicketData[];
+          event_name?: string;
+          sponsor_config?: SponsorPlacements | null;
+          enrollment_ref?: string;
+        };
+        // Guarded: the 5s status poll makes overlapping responses reachable, and
+        // a slow one must not install stale tickets over a newer answer.
+        if (cancelled) return;
+        setTicketInfo({
+          tickets: d.tickets ?? [],
+          ctx: {
+            enrollmentRef: d.enrollment_ref ?? params.ref,
+            eventName: d.event_name ?? "",
+            sponsorConfig: d.sponsor_config ?? null,
+          },
+        });
+      } catch {
+        // Leave ticketInfo null — the receipt fallback still works.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [params.ref, enrollment?.status]);
+
+  // QR data URLs, one per ticket. Download stays disabled until this settles,
+  // otherwise the artifact renders with blank QR panels.
+  useEffect(() => {
+    const tickets = ticketInfo?.tickets ?? [];
+    if (tickets.length === 0) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const map = await buildQrMap(tickets);
+        if (!cancelled) setQrMap(map);
+      } catch {
+        if (!cancelled) setQrError(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ticketInfo]);
 
   const handleUploadSuccess = useCallback(() => {
     fetch(`/api/public/status?ref=${encodeURIComponent(params.ref)}`)
@@ -1583,6 +1700,9 @@ export default function PaymentInstructionsPage() {
             platformFee={platformFee}
             feeFormatted={feeEn}
             isCart={isCart}
+            ticketInfo={ticketInfo}
+            qrMap={qrMap}
+            qrError={qrError}
           />
         </>
       ) : (
