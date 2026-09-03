@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import { platformOrigin } from "@/lib/origin";
-import { precreate, buildMerchOrderId } from "@/lib/kbzpay";
+import { precreate, buildMerchOrderId, type CallBudget } from "@/lib/kbzpay";
 import { resolveKbzpayOrder } from "@/server/payments/resolveKbzpayOrder";
 import { orderWindow } from "@/server/payments/kbzpayOrderWindow";
+import { computeOrderTotal } from "@/server/payments/platformFee";
 
 // The Vercel plan caps a function at 10s and it cannot be raised, so declare
 // it rather than inherit it silently. This route can make FOUR sequential
@@ -105,9 +106,24 @@ const fail = (status: number, message: string, error: string) =>
 const gatewayError = () =>
   fail(502, "Failed to generate QR code. Please try again.", "Payment Gateway Error");
 
+/**
+ * The request budget, or none when nothing is capping the request.
+ *
+ * The budget exists solely to respect a serverless function limit. Running
+ * locally there is no such limit, and clamping to an imaginary one is actively
+ * harmful: the first gateway call of a session pays a ~9.5s connection cost,
+ * and an 8s budget aborts it. That broke local UAT until it was measured.
+ *
+ * VERCEL is set on every Vercel runtime and unset locally, which is exactly
+ * the distinction that matters here.
+ */
+function gatewayBudget(): CallBudget | undefined {
+  if (!process.env.VERCEL) return undefined;
+  return { deadlineMs: Date.now() + GATEWAY_BUDGET_MS };
+}
+
 export async function POST(request: NextRequest) {
-  // One deadline shared by every gateway call this request makes.
-  const budget = { deadlineMs: Date.now() + GATEWAY_BUDGET_MS };
+  const budget = gatewayBudget();
 
   const tenantId = await resolveTenantId();
   if (tenantId instanceof NextResponse) return tenantId;
@@ -149,10 +165,15 @@ export async function POST(request: NextRequest) {
   // ── 3a. Order window, from the tenant's auto-cancel setting ─
   const { data: tenant, error: tenantError } = (await supabase
     .from("tenants")
-    .select("auto_cancel_hours")
+    .select("auto_cancel_hours, payment_mode, platform_fee_mode, platform_fee_amount")
     .eq("id", enrollment.tenant_id)
     .maybeSingle()) as {
-    data: { auto_cancel_hours: number | null } | null;
+    data: {
+      auto_cancel_hours: number | null;
+      payment_mode: string | null;
+      platform_fee_mode: string | null;
+      platform_fee_amount: number | null;
+    } | null;
     error: { message: string } | null;
   };
 
@@ -201,17 +222,25 @@ export async function POST(request: NextRequest) {
   const isCart =
     !enrollment.class_id && enrollment.enrollment_items && enrollment.enrollment_items.length > 0;
 
-  let totalFee: number;
-  if (isCart) {
-    totalFee = enrollment.enrollment_items!.reduce(
-      (sum, item) => sum + item.fee_amount * item.quantity,
-      0,
-    );
-  } else if (enrollment.classes) {
-    totalFee = enrollment.classes.fee_amount * (enrollment.quantity ?? 1);
-  } else {
-    return fail(500, "Class data not found.", "Internal Server Error");
-  }
+  const orderItems = isCart
+    ? enrollment.enrollment_items!.map((i) => ({ fee_amount: i.fee_amount, quantity: i.quantity }))
+    : enrollment.classes
+      ? [{ fee_amount: enrollment.classes.fee_amount, quantity: enrollment.quantity ?? 1 }]
+      : null;
+
+  if (!orderItems) return fail(500, "Class data not found.", "Internal Server Error");
+
+  // The online platform fee is added here, never as a second transaction: the
+  // gateway is sent one combined amount and settlement compares against it.
+  // computeOrderTotal is shared with every other payment route so no two can
+  // disagree about the figure — a disagreement means the payer is charged and
+  // then refused with amount_mismatch.
+  const order = computeOrderTotal(orderItems, tenant ?? {});
+  let totalFee = order.total;
+  // What THIS ROW records. The partial-payment branch below charges a
+  // remainder rather than the order total, and a remainder is not the row that
+  // quoted the fee — the row that did keeps it, and this one records none.
+  let recordedFee = order.platformFee;
 
   if (enrollment.status === "partial_payment") {
     const { data: existingPayment } = (await supabase
@@ -224,6 +253,7 @@ export async function POST(request: NextRequest) {
 
     if (existingPayment?.received_amount) {
       totalFee = totalFee - existingPayment.received_amount;
+      recordedFee = 0;
     }
   }
 
@@ -273,6 +303,7 @@ export async function POST(request: NextRequest) {
       p_reason: resolution.reason,
       p_new_ref: newRef,
       p_amount: totalFee,
+      p_platform_fee: recordedFee,
       p_expires_at: expiresAtIso,
       // `as never` matches the convention for RPCs absent from the generated
       // Database types — see settlementConflicts.ts.
@@ -368,6 +399,7 @@ export async function POST(request: NextRequest) {
         p_tenant_id: enrollment!.tenant_id,
         p_payment_ref: buildMerchOrderId(enrollment!.id),
         p_amount: totalFee,
+        p_platform_fee: recordedFee,
         p_expires_at: expiresAtIso,
       } as never)) as { data: ClaimRow[] | null; error: { message: string } | null };
 

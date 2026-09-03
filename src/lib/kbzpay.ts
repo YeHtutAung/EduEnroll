@@ -6,7 +6,7 @@
 // against the vectors the provider publishes.
 
 import { createHash, randomBytes, timingSafeEqual } from "crypto";
-import { ProxyAgent } from "undici";
+import { Agent, ProxyAgent } from "undici";
 
 export type KbzField = string | number | null | undefined | unknown;
 
@@ -194,25 +194,53 @@ function endpointUrl(path: string): string {
 // The dispatcher is passed per request on purpose. Node ignores HTTP(S)_PROXY,
 // and setGlobalDispatcher() would drag Supabase and every other integration
 // through the proxy too.
+// KBZPay publishes no AAAA record, and on some networks the resolver leaves
+// the AAAA query hanging before Node falls back to IPv4. Measured against
+// api-uat.kbzpay.com from a Windows dev machine:
+//
+//   dns.lookup (both families) : 10,548ms
+//   dns.lookup family: 4       :      2ms
+//   tcp connect by IP          :     55ms
+//
+// So ~10s of every gateway call was a DNS lookup for an address family the
+// host does not have. curl never showed it — curl asks for A only — which is
+// why the gateway looked healthy at 0.17s while the app timed out. Resolving
+// over IPv4 removes it. If KBZPay ever publish AAAA records this still works,
+// since the A records remain.
+// The cast is needed because undici types `connect` as a full TcpNetConnectOpts
+// requiring `port`, which is supplied per request — there is no port to state
+// here, only the address family to prefer.
+const ipv4Agent = new Agent({ connect: { family: 4 } } as unknown as Agent.Options);
+
 let cachedProxy: ProxyAgent | null | undefined;
 
-function egressDispatcher(): ProxyAgent | undefined {
+function egressDispatcher(): ProxyAgent | Agent {
   if (cachedProxy === undefined) {
     const url = process.env.KBZPAY_PROXY_URL;
     cachedProxy = url ? new ProxyAgent(url) : null;
   }
-  return cachedProxy ?? undefined;
+  return cachedProxy ?? ipv4Agent;
 }
 
 // A blackholed request would otherwise hang until the platform kills the
 // function, leaving the payer watching a spinner.
 //
-// 6s, not 15s. The old value was longer than the serverless function limit it
-// runs inside, which made it unreachable: on a blocked connection the platform
-// killed the function at ~10s and returned a raw 502, so the handled
-// { ok: false } path — and the friendly error built on it — could never run.
-// Observed twice on staging at 10.87s and 10.82s.
-const CALL_TIMEOUT_MS = 6_000;
+// The FIRST call from a fresh Node process pays a large connection cost:
+// measured at 9,534ms against KBZPay UAT, with every call after it at 59-115ms
+// once undici pools the socket. curl hides this — each curl is a new process
+// doing a plain connect, and it answered in 0.24s throughout.
+//
+// A 6s value was tried and broke local UAT outright: the first QR of every
+// session aborted before that cold connection completed. Worse, with Node's
+// default DNS result order the socket is not reused, so EVERY call pays it —
+// measured at 9.8s and 10.1s back to back, and two real QR requests at 11.8s
+// and 12.1s. `dns.setDefaultResultOrder("ipv4first")` restores reuse (second
+// call 115ms) and is worth adopting separately.
+//
+// 20s leaves room for that unreused cost without sitting a hair under it.
+// This value only governs where nothing else caps the request: on a platform
+// with a function limit the budget clamps it far below this.
+const CALL_TIMEOUT_MS = 20_000;
 
 /**
  * Below this, a call is not worth starting: it cannot plausibly complete, and
@@ -300,7 +328,7 @@ async function call(
       body: JSON.stringify({ Request: request }),
       signal: AbortSignal.timeout(timeout),
       dispatcher: egressDispatcher(),
-    } as RequestInit & { dispatcher?: ProxyAgent });
+    } as RequestInit & { dispatcher?: ProxyAgent | Agent });
 
     if (!res.ok) {
       console.error(`[kbzpay] ${method} HTTP ${res.status}`);

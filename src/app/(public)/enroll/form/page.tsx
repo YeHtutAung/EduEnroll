@@ -5,6 +5,8 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { formatCurrency, formatCurrencySimple } from "@/lib/utils";
 import type { JlptLevel, ClassStatus } from "@/types/database";
 import BrandHeader from "@/components/enrollment/BrandHeader";
+import { randomId } from "@/lib/randomId";
+import { computePlatformFee } from "@/server/payments/platformFee";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -34,6 +36,9 @@ interface TenantLabels {
   fee: string;
   orgType: string;
   currency: string;
+  paymentMode?: string;
+  platformFeeMode?: string;
+  platformFeeAmount?: number;
 }
 
 interface FormFieldDef {
@@ -416,7 +421,7 @@ function EnrollmentFormPage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
-  const idempotencyKeyRef = useRef(crypto.randomUUID());
+  const idempotencyKeyRef = useRef(randomId());
   const [submitError, setSubmitError] = useState<{ en: string; mm: string } | null>(null);
 
   // ── Read cart from sessionStorage ──────────────────────────────
@@ -441,6 +446,20 @@ function EnrollmentFormPage() {
   const cartTotalQty = isCartMode
     ? cartItems.reduce((sum, item) => sum + item.quantity, 0)
     : 0;
+
+  // The same calculator the payment routes use, so the figure reviewed here is
+  // the figure the gateway is sent. Computing it separately in the UI is how
+  // the two drift apart.
+  const platformFee = computePlatformFee(
+    {
+      payment_mode: labels?.paymentMode,
+      platform_fee_mode: labels?.platformFeeMode,
+      platform_fee_amount: labels?.platformFeeAmount,
+    },
+    cartTotalFee,
+    cartTotalQty,
+  );
+  const grandTotal = cartTotalFee + platformFee;
 
   // ── Fetch intake + class + form fields ────────────────────────
   useEffect(() => {
@@ -678,9 +697,15 @@ function EnrollmentFormPage() {
                   <span className="font-medium text-gray-900">{formatCurrencySimple(item.fee_amount * item.quantity, labels?.currency ?? "MMK")}</span>
                 </div>
               ))}
+              {platformFee > 0 && (
+                <div className="flex justify-between text-sm text-gray-700">
+                  <span>Online Platform Fee / <span className="font-myanmar">အွန်လိုင်း ဝန်ဆောင်ခ</span></span>
+                  <span className="font-medium text-gray-900">{formatCurrencySimple(platformFee, labels?.currency ?? "MMK")}</span>
+                </div>
+              )}
               <div className="border-t pt-2 flex justify-between font-semibold text-gray-900">
                 <span>Total ({cartTotalQty} tickets)</span>
-                <span>{formatCurrencySimple(cartTotalFee, labels?.currency ?? "MMK")}</span>
+                <span>{formatCurrencySimple(grandTotal, labels?.currency ?? "MMK")}</span>
               </div>
             </div>
           </div>
@@ -783,9 +808,15 @@ function EnrollmentFormPage() {
                 <span className="font-medium text-gray-900">{formatCurrencySimple(item.fee_amount * item.quantity, labels?.currency ?? "MMK")}</span>
               </div>
             ))}
+            {platformFee > 0 && (
+              <div className="flex justify-between text-sm text-gray-700">
+                <span>Online Platform Fee / <span className="font-myanmar">အွန်လိုင်း ဝန်ဆောင်ခ</span></span>
+                <span className="font-medium text-gray-900">{formatCurrencySimple(platformFee, labels?.currency ?? "MMK")}</span>
+              </div>
+            )}
             <div className="border-t pt-2 mt-2 flex justify-between font-semibold text-gray-900">
               <span>Total ({cartTotalQty} tickets)</span>
-              <span>{formatCurrencySimple(cartTotalFee, labels?.currency ?? "MMK")}</span>
+              <span>{formatCurrencySimple(grandTotal, labels?.currency ?? "MMK")}</span>
             </div>
           </div>
         </div>

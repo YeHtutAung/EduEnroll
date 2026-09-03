@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { queryOrder, type TradeStatus } from "@/lib/kbzpay";
+import { queryOrder, type TradeStatus, type CallBudget } from "@/lib/kbzpay";
 import { settleMmqrPayment } from "@/server/payments/settleMmqrPayment";
 
 // Same 10s platform cap as the creation route. Declared rather than
@@ -40,10 +40,24 @@ const STATUS_MAP: Partial<Record<TradeStatus, string>> = {
   ORDER_NOT_FOUND: "PENDING",
 };
 
+/**
+ * The request budget, or none when nothing is capping the request.
+ *
+ * The budget exists solely to respect a serverless function limit. Running
+ * locally there is no such limit, and clamping to an imaginary one is actively
+ * harmful: the first gateway call of a session pays a ~9.5s connection cost,
+ * and an 8s budget aborts it. That broke local UAT until it was measured.
+ *
+ * VERCEL is set on every Vercel runtime and unset locally, which is exactly
+ * the distinction that matters here.
+ */
+function gatewayBudget(): CallBudget | undefined {
+  if (!process.env.VERCEL) return undefined;
+  return { deadlineMs: Date.now() + GATEWAY_BUDGET_MS };
+}
+
 export async function GET(request: NextRequest) {
-  // Anchored at request start, so the gateway call is bounded by time actually
-  // remaining rather than by its own timeout in isolation.
-  const budget = { deadlineMs: Date.now() + GATEWAY_BUDGET_MS };
+  const budget = gatewayBudget();
 
   const paymentRef = request.nextUrl.searchParams.get("ref");
   if (!paymentRef) {

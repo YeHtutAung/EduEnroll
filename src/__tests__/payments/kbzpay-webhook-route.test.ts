@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { NextRequest } from "next/server";
 
 // ─── POST /api/webhooks/kbzmmqr ─────────────────────────────────────────────
@@ -137,6 +137,26 @@ describe("signature verification", () => {
   });
 });
 
+// The budget is applied only where a function cap exists. VERCEL is set on
+// every Vercel runtime and unset locally, which is the distinction that
+// decides whether clamping helps or hurts.
+describe("request budget is platform-aware", () => {
+  const original = process.env.VERCEL;
+  afterEach(() => {
+    if (original === undefined) delete process.env.VERCEL;
+    else process.env.VERCEL = original;
+  });
+
+  it("bounds the gateway call when running on Vercel", async () => {
+    process.env.VERCEL = "1";
+    mockQueryOrder.mockClear();
+
+    await POST(signedRequest());
+
+    expect(mockQueryOrder.mock.calls[0][1]).toMatchObject({ deadlineMs: expect.any(Number) });
+  });
+});
+
 describe("server-side confirmation (§7)", () => {
   // A valid signature says the message is authentic, not that money arrived.
   // Only KBZPay's own query response may decide settlement.
@@ -144,9 +164,11 @@ describe("server-side confirmation (§7)", () => {
     await POST(signedRequest());
 
     expect(mockQueryOrder.mock.calls[0][0]).toBe(REF);
-    // Bounded by time remaining, not by its own timeout in isolation, so
-    // settlement after it cannot be cut off by the function cap.
-    expect(mockQueryOrder.mock.calls[0][1]).toMatchObject({ deadlineMs: expect.any(Number) });
+
+    // No budget off-platform. The budget exists only to respect a serverless
+    // function cap; applying it locally aborted a legitimate ~9.5s cold
+    // connection and broke UAT until that was measured.
+    expect(mockQueryOrder.mock.calls[0][1]).toBeUndefined();
     expect(mockQueryOrder.mock.invocationCallOrder[0]).toBeLessThan(
       mockSettle.mock.invocationCallOrder[0],
     );

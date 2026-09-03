@@ -12,6 +12,7 @@ import {
   finalizeStripeAttempt,
 } from "@/server/payments/stripeAttempt";
 import { settlePaidPayment } from "@/server/payments/settlePaidPayment";
+import { resolveOrderTotal } from "@/server/payments/platformFee";
 
 // ─── POST /api/public/payments/stripe/intent ─────────────────────────────────
 // Direct-PaymentIntent creation (Plan v18 §3). Idempotent via predecessor-
@@ -110,6 +111,11 @@ export async function POST(request: NextRequest) {
       { status: 500 },
     );
   }
+
+  // platform_fee_amount is in whole major units, the same unit as totalMajor,
+  // so it is added before the minor-unit conversion rather than after.
+  const { platformFee } = await resolveOrderTotal(supabase, enrollment);
+  totalMajor += platformFee;
   let amountMinor: number;
   try {
     amountMinor = toMinorUnits(totalMajor, currency);
@@ -254,6 +260,7 @@ export async function POST(request: NextRequest) {
       sessionId: null,
       amountMajor: totalMajor,
       amountMinor,
+      platformFee,
       currency,
       predecessorId: ctx.predecessorId,
       source,

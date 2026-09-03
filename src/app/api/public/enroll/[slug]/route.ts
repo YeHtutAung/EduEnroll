@@ -37,6 +37,11 @@ interface TenantLabelsView {
   fee: string;
   orgType: string;
   currency: string;
+  // Fee settings travel with the labels because Review & Confirm has to show
+  // the split before any enrollment exists to read it from.
+  paymentMode: string;
+  platformFeeMode: string;
+  platformFeeAmount: number;
 }
 
 interface PublicIntakeResponse {
@@ -88,10 +93,10 @@ export async function GET(
   // ── Fetch tenant labels ────────────────────────────────────────
   const { data: tenantRow } = (await supabase
     .from("tenants")
-    .select("name, org_type, currency, label_intake, label_class, label_student, label_seat, label_fee")
+    .select("name, org_type, currency, label_intake, label_class, label_student, label_seat, label_fee, payment_mode, platform_fee_mode, platform_fee_amount")
     .eq("id", tenantId)
     .single()) as {
-    data: { name: string; org_type: string; currency: string; label_intake: string; label_class: string; label_student: string; label_seat: string; label_fee: string } | null;
+    data: { name: string; org_type: string; currency: string; label_intake: string; label_class: string; label_student: string; label_seat: string; label_fee: string; payment_mode: string | null; platform_fee_mode: string | null; platform_fee_amount: number | null } | null;
     error: unknown;
   };
   const labels: TenantLabelsView = {
@@ -102,6 +107,9 @@ export async function GET(
     fee:      tenantRow?.label_fee     || "Fee",
     orgType:  tenantRow?.org_type      || "language_school",
     currency: tenantRow?.currency      || "MMK",
+    paymentMode:      tenantRow?.payment_mode        || "bank_transfer",
+    platformFeeMode:  tenantRow?.platform_fee_mode   || "none",
+    platformFeeAmount: tenantRow?.platform_fee_amount ?? 0,
   };
   const tenantCurrency = tenantRow?.currency || "MMK";
 

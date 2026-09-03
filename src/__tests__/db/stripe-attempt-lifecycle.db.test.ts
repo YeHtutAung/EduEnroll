@@ -532,14 +532,23 @@ describe("migration contract (M4, M5) — live schema", () => {
   });
 
   it("M5: anon and authenticated cannot execute the finalizer; service_role can", async () => {
-    const fn =
-      "public.finalize_stripe_payment_attempt(uuid,uuid,text,integer,text,text,numeric,bigint,text,uuid)";
-    const [row] = await sql<{ anon: boolean; auth: boolean; service: boolean }>(
-      `SELECT has_function_privilege('anon'::name, $1::regprocedure::oid, 'execute') AS anon,
-              has_function_privilege('authenticated'::name, $1::regprocedure::oid, 'execute') AS auth,
-              has_function_privilege('service_role'::name, $1::regprocedure::oid, 'execute') AS service`,
-      [fn],
+    // Resolved by NAME, not by a written-out argument list. The signature was
+    // spelled out here and in the migration gate, and both went stale the day a
+    // parameter was added (20260903090000), reporting "does not exist" for a
+    // function that was present and locked down. Requiring exactly one match is
+    // also the stronger assertion: a DROP that misses leaves an old overload
+    // behind, still carrying the PUBLIC execute grant this test exists to deny.
+    const rows = await sql<{ anon: boolean; auth: boolean; service: boolean }>(
+      `SELECT has_function_privilege('anon'::name, p.oid, 'execute') AS anon,
+              has_function_privilege('authenticated'::name, p.oid, 'execute') AS auth,
+              has_function_privilege('service_role'::name, p.oid, 'execute') AS service
+         FROM pg_proc p
+        WHERE p.pronamespace = 'public'::regnamespace
+          AND p.proname = 'finalize_stripe_payment_attempt'`,
+      [],
     );
+    expect(rows).toHaveLength(1);
+    const [row] = rows;
     expect(row.anon).toBe(false);
     expect(row.auth).toBe(false);
     expect(row.service).toBe(true);
@@ -574,7 +583,18 @@ describe("migration replay (M1-M3, M6, M7) — the shipped artifact", () => {
 
   /** Reverse the migration inside the open transaction of `c`. */
   async function reverse(c: Client) {
-    await c.query(`DROP FUNCTION public.finalize_stripe_payment_attempt(uuid,uuid,text,integer,text,text,numeric,bigint,text,uuid)`);
+    // Every overload, by name. Spelling the argument list out here made
+    // "reverse the migration" mean "reverse the migration AS IT WAS SHIPPED",
+    // so all six replay cases broke the day a parameter was added
+    // (20260903090000) — the live function was no longer the one named.
+    await c.query(`DO $drop$
+      DECLARE r record;
+      BEGIN
+        FOR r IN SELECT oid::regprocedure AS sig FROM pg_proc
+                  WHERE pronamespace = 'public'::regnamespace
+                    AND proname = 'finalize_stripe_payment_attempt'
+        LOOP EXECUTE 'DROP FUNCTION ' || r.sig; END LOOP;
+      END $drop$`);
     await c.query(`DROP TABLE public.payment_settlement_conflicts`);
     await c.query(`DROP INDEX payments_stripe_payment_intent_id_uniq`);
     await c.query(`DROP INDEX payments_stripe_session_id_uniq`);
