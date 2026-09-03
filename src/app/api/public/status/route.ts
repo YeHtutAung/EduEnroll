@@ -190,11 +190,15 @@ export async function GET(request: NextRequest) {
     : null);
 
   // ── Fetch tenant org_type ─────────────────────────────────────
-  const { data: tenantInfo } = await supabase
+  const { data: tenantInfo, error: tenantError } = await supabase
     .from("tenants")
     .select("org_type, currency, auto_cancel_hours, payment_mode, mmqr_provider, platform_fee_mode, platform_fee_amount")
     .eq("id", tenantId)
     .single() as { data: { org_type: string; currency: string; auto_cancel_hours: number; payment_mode: string; mmqr_provider: string; platform_fee_mode: string | null; platform_fee_amount: number | null } | null; error: unknown };
+
+  if (tenantError || !tenantInfo) {
+    console.error("[status] tenant lookup failed for", tenantId, tenantError ?? "no row");
+  }
 
   // Telegram config lives in tenant_telegram_configs (moved in migration 068)
   const { data: tgConfig } = await supabase
@@ -222,7 +226,12 @@ export async function GET(request: NextRequest) {
     payment:          paymentBlock,
     class_image_url:  enrollment.classes?.image_url ?? null,
     items:            cartItems,
-    org_type:         tenantInfo?.org_type ?? "language_school",
+    // NULL, not a default. Reporting "language_school" for a tenant we could
+    // not read tells the payment page this order is positively ticketless,
+    // which re-enables the QR-less receipt for an event order whose ticket
+    // list is empty — the exact defect the gate there was built to close.
+    // Unknown has to stay unknown all the way to the consumer.
+    org_type:         tenantInfo?.org_type ?? null,
     enrolled_at:      enrollment.enrolled_at,
     auto_cancel_minutes: tenantInfo?.auto_cancel_hours ?? 4320,
     telegram_bot_username: tgConfig?.enabled ? (tgConfig.bot_username ?? null) : null,
