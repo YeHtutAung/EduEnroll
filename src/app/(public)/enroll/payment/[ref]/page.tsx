@@ -9,6 +9,11 @@ import QRPaymentModal from "@/components/payments/QRPaymentModal";
 import PayNowQrSaveButton from "@/components/payments/PayNowQrSaveButton";
 import BrandHeader from "@/components/enrollment/BrandHeader";
 import html2canvas from "html2canvas";
+import { buildTicketPdf } from "@/lib/tickets/render/ticketPdf";
+import { buildQrMap } from "@/lib/tickets/render/ticketPng";
+import { successRedirectUrl } from "@/lib/enrollment/successRedirect";
+import type { QrMap, TicketData, TicketRenderContext } from "@/lib/tickets/render/types";
+import type { SponsorPlacements } from "@/types/database";
 import { jsPDF } from "jspdf";
 import { computePlatformFee, displayTotals } from "@/server/payments/platformFee";
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -23,6 +28,12 @@ interface CartItem {
 
 interface EnrollmentInfo {
   enrollment_ref: string;
+  /**
+   * From /api/public/status, so it arrives with `status` rather than from the
+   * later intake fetch — reading the late copy would reintroduce exactly the
+   * kind of unknown-state race the ticket gating exists to close.
+   */
+  org_type?: string | null;
   student_name_en: string;
   student_name_mm: string | null;
   class_id: string | null;
@@ -785,6 +796,9 @@ function DownloadReceiptButton({
   platformFee,
   feeFormatted,
   isCart,
+  ticketFetch,
+  qrMap,
+  qrError,
 }: {
   enrollment: EnrollmentInfo;
   orgType: string;
@@ -793,6 +807,18 @@ function DownloadReceiptButton({
   platformFee: number;
   feeFormatted: string;
   isCart: boolean;
+  /**
+   * Null before the lookup starts. "loading" and "error" are NOT "no tickets" —
+   * treating them as such is what let a confirmed event order download the
+   * QR-less receipt.
+   */
+  ticketFetch:
+    | { state: "loading" }
+    | { state: "loaded"; tickets: TicketData[]; ctx: TicketRenderContext }
+    | { state: "error" }
+    | null;
+  qrMap: QrMap | null;
+  qrError: boolean;
 }) {
   const receiptRef = useRef<HTMLDivElement>(null);
   const [generating, setGenerating] = useState(false);
@@ -813,13 +839,60 @@ function DownloadReceiptButton({
     ? enrollment.items.map((i) => ({ label: i.class_level, qty: i.quantity, subtotal: formatCurrencySimple(i.subtotal, curr) }))
     : [{ label: enrollment.class_level ?? "", qty, subtotal: formatCurrencySimple(totalFee, curr) }];
 
+  const loaded = ticketFetch?.state === "loaded" ? ticketFetch : null;
+  const tickets = loaded?.tickets ?? [];
+
+  // Whether this order has a ticket is still unknown: the lookup has not
+  // started or has not answered. Downloading now would silently produce the
+  // receipt, so the button waits.
+  const ticketsUnknown = ticketFetch === null || ticketFetch.state === "loading";
+  // Known-failed. We cannot tell a ticketless order from a ticketed one, so
+  // this fails closed rather than guessing "no ticket" and handing out a
+  // receipt to someone holding a paid seat.
+  const ticketsFailed = ticketFetch?.state === "error" || qrError;
+
+  // A confirmed EVENT order with no ticket is an anomaly — issuance failed —
+  // and the receipt looks like proof of purchase while being no use at the
+  // gate. Say so instead of handing one over. A language school issues no
+  // tickets by design, so an empty list there is the normal case.
+  //
+  // Written as "not positively ticketless" rather than "is an event", so an
+  // absent, empty or later-added org_type blocks rather than quietly handing
+  // out a receipt. Unknown is not an answer here — it is the same failure the
+  // rest of this gating exists to close, one field further out.
+  const ticketsExpected = enrollment.org_type !== "language_school";
+  const ticketsMissing = loaded !== null && tickets.length === 0 && ticketsExpected;
+
+  const preparing = ticketsUnknown || (tickets.length > 0 && !qrMap && !qrError);
+  const blocked = ticketsFailed || ticketsMissing;
+
   async function handleDownload() {
-    if (!receiptRef.current || generating) return;
+    if (generating || preparing || blocked) return;
+    // The receipt node is only needed for the no-ticket fallback.
+    if (tickets.length === 0 && !receiptRef.current) return;
     setGenerating(true);
 
     try {
+      // A scannable e-ticket where one exists. This page used to hand out the
+      // receipt screenshot below under an "E-Ticket" label, which carries no QR
+      // and cannot be scanned at the gate.
+      //
+      // Placed before the receipt's image-wait: the ticket is drawn with jsPDF
+      // primitives and does not read a single node from that hidden card.
+      if (tickets.length > 0 && loaded) {
+        // Regenerated defensively: the button can be tapped before the effect
+        // that fills qrMap has settled.
+        const map = await buildQrMap(tickets, qrMap ?? {});
+        const pdf = await buildTicketPdf(loaded.ctx, tickets, map);
+        pdf.save(`eticket-${enrollment.enrollment_ref}.pdf`);
+        return;
+      }
+
+      const receipt = receiptRef.current;
+      if (!receipt) return;
+
       // Wait for images to load
-      const imgs = receiptRef.current.querySelectorAll("img");
+      const imgs = receipt.querySelectorAll("img");
       await Promise.all(
         Array.from(imgs).map(
           (img) =>
@@ -831,7 +904,7 @@ function DownloadReceiptButton({
         ),
       );
 
-      const canvas = await html2canvas(receiptRef.current, {
+      const canvas = await html2canvas(receipt, {
         scale: 2,
         useCORS: true,
         backgroundColor: "#f5f7fa",
@@ -981,16 +1054,16 @@ function DownloadReceiptButton({
       <div className="mt-4 text-center">
         <button
           onClick={handleDownload}
-          disabled={generating}
+          disabled={generating || preparing || blocked}
           className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:opacity-50"
         >
-          {generating ? (
+          {generating || preparing ? (
             <>
               <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
                 <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
               </svg>
-              Generating...
+              {preparing ? "Preparing ticket..." : "Generating..."}
             </>
           ) : (
             <>
@@ -1001,6 +1074,17 @@ function DownloadReceiptButton({
             </>
           )}
         </button>
+        {ticketsMissing ? (
+          <p className="mt-2 text-xs text-amber-700">
+            No e-ticket was issued for this order. Contact support quoting{" "}
+            {enrollment.enrollment_ref}.
+          </p>
+        ) : blocked ? (
+          <p className="mt-2 text-xs text-amber-700">
+            Your e-ticket could not be prepared. Reload the page, or contact support
+            quoting {enrollment.enrollment_ref}.
+          </p>
+        ) : null}
       </div>
     </>
   );
@@ -1246,6 +1330,93 @@ export default function PaymentInstructionsPage() {
     }
   }
 
+  // ── E-ticket data ─────────────────────────────────────────
+  //
+  // Keyed on the STATUS, not on a transition to it. A buyer arriving from an
+  // emailed, Telegram or status-page link on an already-settled order renders
+  // `confirmed` on the very first pass — there is no transition to hook, and a
+  // transition-keyed fetch would have covered only the live in-session case,
+  // which is the one case that never needed this.
+  //
+  // /api/public/status carries no tickets and is polled every 5s; signing
+  // ticket JWTs on every poll would be wasteful, so the tickets come from the
+  // enrollment endpoint, fetched once per confirmation.
+  //
+  // Tri-state on purpose. Collapsing "not fetched yet" into "no tickets" is how
+  // a confirmed event order hands out the QR-less receipt this whole change
+  // exists to remove: the download would be enabled during the in-flight window
+  // and permanently after a failed request, taking the empty-ticket fallback in
+  // both cases. "Unknown" has to be its own answer, and it fails closed.
+  const [ticketFetch, setTicketFetch] = useState<
+    | { state: "loading" }
+    | { state: "loaded"; tickets: TicketData[]; ctx: TicketRenderContext }
+    | { state: "error" }
+    | null
+  >(null);
+  const [qrMap, setQrMap] = useState<QrMap | null>(null);
+  const [qrError, setQrError] = useState(false);
+
+  useEffect(() => {
+    if (!params.ref || enrollment?.status !== "confirmed") return;
+    let cancelled = false;
+    setTicketFetch({ state: "loading" });
+
+    (async () => {
+      try {
+        const res = await fetch(`/api/public/enrollment/${encodeURIComponent(params.ref)}`);
+        if (!res.ok) throw new Error(`enrollment lookup failed: ${res.status}`);
+        const d = (await res.json()) as {
+          tickets?: TicketData[];
+          event_name?: string;
+          sponsor_config?: SponsorPlacements | null;
+          enrollment_ref?: string;
+        };
+        // Guarded: the 5s status poll makes overlapping responses reachable, and
+        // a slow one must not install stale tickets over a newer answer.
+        if (cancelled) return;
+        setTicketFetch({
+          state: "loaded",
+          tickets: d.tickets ?? [],
+          ctx: {
+            enrollmentRef: d.enrollment_ref ?? params.ref,
+            eventName: d.event_name ?? "",
+            sponsorConfig: d.sponsor_config ?? null,
+          },
+        });
+      } catch (err) {
+        // Never fall through to the receipt: we do not know whether this order
+        // has a ticket, and guessing "no" is the defect.
+        console.error("[eticket] ticket lookup failed:", err);
+        if (!cancelled) setTicketFetch({ state: "error" });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [params.ref, enrollment?.status]);
+
+  // QR data URLs, one per ticket. Download stays disabled until this settles,
+  // otherwise the artifact renders with blank QR panels.
+  useEffect(() => {
+    const tickets = ticketFetch?.state === "loaded" ? ticketFetch.tickets : [];
+    if (tickets.length === 0) return;
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const map = await buildQrMap(tickets);
+        if (!cancelled) setQrMap(map);
+      } catch {
+        if (!cancelled) setQrError(true);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ticketFetch]);
+
   const handleUploadSuccess = useCallback(() => {
     fetch(`/api/public/status?ref=${encodeURIComponent(params.ref)}`)
       .then((res) => res.json())
@@ -1315,8 +1486,16 @@ export default function PaymentInstructionsPage() {
         if (data.enrollmentStatus === "confirmed") {
           clearInterval(interval);
           setHitpayPolling(false);
-          const intakeSlug = enrollment?.intake_slug ?? "";
-          window.location.href = `/enroll/${encodeURIComponent(intakeSlug)}/checkout/success/?ref=${encodeURIComponent(params.ref)}`;
+          // `intake_slug ?? ""` used to build /enroll//checkout/success/ — a
+          // 404 served to someone who has just paid. When there is no slug to
+          // build a URL from, stay here and refresh instead: this page renders
+          // the e-ticket itself, so staying is a complete outcome.
+          const dest = successRedirectUrl(enrollment?.intake_slug, params.ref);
+          if (dest) {
+            window.location.href = dest;
+          } else {
+            handleUploadSuccess();
+          }
         } else if (data.enrollmentStatus === "rejected" || data.enrollmentStatus === "cancelled") {
           clearInterval(interval);
           setHitpayPolling(false);
@@ -1329,7 +1508,7 @@ export default function PaymentInstructionsPage() {
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [hitpayPolling, params.ref, enrollment?.intake_slug]);
+  }, [hitpayPolling, params.ref, enrollment?.intake_slug, handleUploadSuccess]);
 
   const brandHeader = schoolName ? (
     <BrandHeader schoolName={schoolName} primaryColor={primaryColor} logoUrl={logoUrl} />
@@ -1583,6 +1762,9 @@ export default function PaymentInstructionsPage() {
             platformFee={platformFee}
             feeFormatted={feeEn}
             isCart={isCart}
+            ticketFetch={ticketFetch}
+            qrMap={qrMap}
+            qrError={qrError}
           />
         </>
       ) : (
