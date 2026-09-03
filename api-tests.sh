@@ -92,26 +92,74 @@ _curl_check() {
     return 1
   fi
 }
-# Appends the tenant selector to a public-route URL.
+# Bash port of isDevHost() in src/lib/tenant.ts — must classify hosts exactly
+# the way middleware does, or this script asks for a mechanism the app is not
+# offering on that host.
+is_dev_host() {
+  # Strips the port internally, exactly like isDevHost() does — a caller
+  # passing "localhost:3005" through unstripped must still classify as dev.
+  local host="${1%%:*}"
+  [[ "$host" == "localhost" ]] && return 0
+  [[ "$host" == *.localhost ]] && return 0
+  [[ "$host" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] && return 0
+  [[ "$host" == *.vercel.app ]] && return 0
+  return 1
+}
+
+# The origin to hit for a given tenant.
 #
-# x-tenant-slug used to do this job as a request header. Middleware now
-# deliberately deletes any caller-supplied x-tenant-slug on every request
-# (src/middleware.ts) — the #164 trust-boundary fix, closing exactly the kind
-# of spoofing this script was doing. BASE_URL here is always a Vercel preview
-# host (see this workflow's own comment: *.vercel.app), which middleware's
-# isDevHost() accepts, so a `?tenant=` query param is the supported way to
-# select a tenant against this deployment — the same fallback local dev uses.
-# Confirmed against a real deployment: the same intake slug returns a
-# different tenant's data (or its 404) depending only on this parameter.
-tenant_url() {
-  local path="$1"
-  if [[ -z "$TENANT_SUBDOMAIN" ]]; then
-    echo "${BASE_URL}${path}"
+# x-tenant-slug used to do the whole job as a request header, on any host.
+# Middleware now deliberately deletes any caller-supplied x-tenant-slug on
+# every request (src/middleware.ts) — the #164 trust-boundary fix, closing
+# exactly the kind of spoofing this script was doing.
+#
+# What replaces it depends on the host, because the app itself branches on it
+# (isDevHost(), src/middleware.ts): a real custom domain resolves tenant from
+# the SUBDOMAIN — extractSubdomainFromHost() runs unconditionally, before any
+# fallback — so this inserts the tenant into BASE_URL's host, exactly like
+# tmf.staging.kuunyi.com does for a human. A dev host (localhost, an IP, a raw
+# *.vercel.app preview URL) cannot be subdomained that way — Vercel does not
+# wildcard-route arbitrary labels prepended to a *.vercel.app preview URL, and
+# a bare "localhost" has no subdomain to extract from at all — so THOSE fall
+# back to appending ?tenant=, which middleware only honours on exactly this
+# set of hosts (VERCEL_ENV=production is excluded too; irrelevant here since
+# this script refuses to run against a production URL at all, checked above).
+#
+# Confirmed against the real deployment, not assumed: tmf.staging.kuunyi.com
+# returns tmf's own 404 (X-Matched-Path, Server: Vercel — genuinely routed,
+# not deployment-protection-intercepted), and inserting a DIFFERENT tenant
+# changes which intake resolves. Confirmed separately on localhost with
+# ?tenant=: the same slug returns one tenant's data with none, and another
+# tenant's 404 with ?tenant=<other>.
+tenant_origin() {
+  local sub="$1"
+  local hostpart; hostpart=$(echo "$BASE_URL" | sed -E 's#^[a-z]+://##; s#/.*##')
+  if [[ -z "$sub" ]] || is_dev_host "$hostpart"; then
+    echo "$BASE_URL"
     return
   fi
+  echo "$BASE_URL" | sed -E "s#^([a-z]+://)#\\1${sub}.#"
+}
+
+tenant_url() {
+  local path="$1"
+  local hostpart; hostpart=$(echo "$BASE_URL" | sed -E 's#^[a-z]+://##; s#/.*##')
+  local origin; origin=$(tenant_origin "$TENANT_SUBDOMAIN")
+
+  # Subdomain-routed origin already carries the tenant — nothing more to add.
+  if [[ -n "$TENANT_SUBDOMAIN" ]] && ! is_dev_host "$hostpart"; then
+    echo "${origin}${path}"
+    return
+  fi
+
+  if [[ -z "$TENANT_SUBDOMAIN" ]]; then
+    echo "${origin}${path}"
+    return
+  fi
+
   local sep="?"
   [[ "$path" == *\?* ]] && sep="&"
-  echo "${BASE_URL}${path}${sep}tenant=${TENANT_SUBDOMAIN}"
+  echo "${origin}${path}${sep}tenant=${TENANT_SUBDOMAIN}"
 }
 
 pub_get()    { _curl_check "${BYPASS_H[@]}" "$(tenant_url "$1")"; }
@@ -182,17 +230,47 @@ login() {
 
   echo -e "  ${GREEN}✓${RESET} Logged in as ${TEST_EMAIL} (project: ${PROJECT_REF})"
 
-  # Fetch tenant subdomain for public endpoint tests
+  # Fetch tenant subdomains for public endpoint tests
   local TENANT_RESP
-  TENANT_RESP=$(curl -sf "${SUPABASE_URL}/rest/v1/tenants?select=subdomain" \
+  TENANT_RESP=$(curl -sf "${SUPABASE_URL}/rest/v1/tenants?select=subdomain&limit=20" \
     -H "apikey: ${SUPABASE_ANON_KEY}" \
     -H "Authorization: Bearer ${ACCESS_TOKEN}" 2>/dev/null) || TENANT_RESP="[]"
 
-  TENANT_SUBDOMAIN=$(echo "$TENANT_RESP" | jq -r '.[0].subdomain // empty')
-  if [[ -n "$TENANT_SUBDOMAIN" ]]; then
-    echo -e "  ${GREEN}✓${RESET} Tenant subdomain: ${TENANT_SUBDOMAIN}"
+  # On a real custom domain, tenant selection is via subdomain (see
+  # tenant_url() below), and a tenant's staging subdomain is added to Vercel
+  # individually rather than existing for every dev-DB tenant automatically.
+  # The unordered query above can return one that was never wired up there —
+  # it did, consistently, for weeks: the very first tenant ever created in
+  # this DB has no staging DNS record, and an unordered select=subdomain
+  # kept landing on it. So each candidate is probed for real reachability
+  # rather than trusting whichever one sorts first.
+  #
+  # On a dev host (isDevHost() — localhost, an IP, *.vercel.app) tenant
+  # selection is via ?tenant= against the SAME origin regardless of DNS, so
+  # no probing is needed there — the first candidate is fine.
+  if is_dev_host "$(echo "$BASE_URL" | sed -E 's#^[a-z]+://##; s#/.*##')"; then
+    TENANT_SUBDOMAIN=$(echo "$TENANT_RESP" | jq -r '.[0].subdomain // empty')
   else
-    echo -e "  ${YELLOW}!${RESET} Could not resolve tenant subdomain — public tests may fail"
+    TENANT_SUBDOMAIN=""
+    local candidate
+    for candidate in $(echo "$TENANT_RESP" | jq -r '.[].subdomain // empty'); do
+      local probe_origin; probe_origin=$(tenant_origin "$candidate")
+      local probe_code
+      probe_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${probe_origin}/api/public/status" 2>/dev/null) || probe_code="000"
+      # Any HTTP response — even 400 for a missing ref — means DNS, TLS and
+      # the app all resolved this tenant. Only a genuine connection failure
+      # (curl's own "000") disqualifies a candidate.
+      if [[ "$probe_code" != "000" ]]; then
+        TENANT_SUBDOMAIN="$candidate"
+        break
+      fi
+    done
+  fi
+
+  if [[ -n "$TENANT_SUBDOMAIN" ]]; then
+    echo -e "  ${GREEN}✓${RESET} Tenant subdomain: ${TENANT_SUBDOMAIN} (origin: $(tenant_origin "$TENANT_SUBDOMAIN"))"
+  else
+    echo -e "  ${YELLOW}!${RESET} Could not resolve a reachable tenant subdomain — public tests may fail"
   fi
 
   SKIP_ADMIN=0
