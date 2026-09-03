@@ -33,10 +33,10 @@ export async function GET(request: NextRequest) {
   // Check local DB first — if already finalized, skip API call
   const { data: payment } = (await supabase
     .from("payments")
-    .select("id, enrollment_id, mmqr_status, status")
+    .select("id, enrollment_id, mmqr_status, status, amount")
     .eq("payment_ref", paymentRef)
     .single()) as {
-    data: { id: string; enrollment_id: string; mmqr_status: string; status: string } | null;
+    data: { id: string; enrollment_id: string; mmqr_status: string; status: string; amount: number | null } | null;
     error: unknown;
   };
 
@@ -123,7 +123,10 @@ export async function GET(request: NextRequest) {
             classLevel = items
               .map((i) => (i.quantity > 1 ? `${i.classes?.level ?? "?"} x${i.quantity}` : (i.classes?.level ?? "?")))
               .join(", ");
-            const total = items.reduce((s, i) => s + i.fee_amount * i.quantity, 0);
+            // The payer was charged the fee-inclusive amount recorded on the
+            // payment row, so the notification quotes that rather than
+            // re-summing the tickets, which would understate what they paid.
+            const total = payment.amount ?? items.reduce((s, i) => s + i.fee_amount * i.quantity, 0);
             feeFormatted = String(total).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
           }
         } else {

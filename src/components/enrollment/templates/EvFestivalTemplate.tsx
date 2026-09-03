@@ -50,7 +50,7 @@ function TicketCard({
       style={{ background: "rgba(255,255,255,0.07)", border: "1.5px solid rgba(255,255,255,0.12)", backdropFilter: "blur(12px)" }}>
       {cls.image_url && (
         // eslint-disable-next-line @next/next/no-img-element
-        <img src={cls.image_url} alt={cls.level} className="w-full h-40 object-cover" />
+        <img src={cls.image_url} alt={`${cls.level} ticket`} className="block w-full h-auto max-h-[420px] object-contain" loading="lazy" decoding="async" />
       )}
 
       {sellingFast && !isSoldOut && (

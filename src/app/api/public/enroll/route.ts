@@ -5,6 +5,7 @@ import { formatCurrency } from "@/lib/utils";
 import { tenantOrigin } from "@/lib/origin";
 import { createEnrollment } from "@/server/enrollment/createEnrollment";
 import { createCartEnrollment } from "@/server/enrollment/createCartEnrollment";
+import { hashPriorityToken } from "@/lib/interest/token";
 import { sendEnrollmentConfirmationEmail } from "@/server/enrollment/enrollmentEmails";
 import type { BankAccount } from "@/types/database";
 
@@ -22,8 +23,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { class_id, form_data, idempotency_key, quantity, items, messenger_psid, __hp } =
+  const { class_id, form_data, idempotency_key, quantity, items, messenger_psid, __hp, priority_token } =
     body as Record<string, unknown>;
+
+  // Hash immediately — the raw token must never be logged, stored, or echoed
+  // back, and must never be passed further down than this line.
+  const priorityTokenHash =
+    typeof priority_token === "string" && priority_token.length > 0
+      ? hashPriorityToken(priority_token)
+      : null;
 
   // Honeypot — fake success to fool bots
   if (__hp && typeof __hp === "string" && __hp.trim().length > 0) {
@@ -42,6 +50,7 @@ export async function POST(request: NextRequest) {
       items: items as { class_id: string; quantity: number }[],
       form_data: fd,
       messenger_psid: typeof messenger_psid === "string" ? messenger_psid : null,
+      priority_token_hash: priorityTokenHash,
     });
 
     if (!outcome.ok) {
@@ -100,6 +109,7 @@ export async function POST(request: NextRequest) {
     idempotency_key: typeof idempotency_key === "string" ? idempotency_key : null,
     quantity: typeof quantity === "number" ? quantity : 1,
     messenger_psid: typeof messenger_psid === "string" ? messenger_psid : null,
+    priority_token_hash: priorityTokenHash,
   });
 
   if (!outcome.ok) {

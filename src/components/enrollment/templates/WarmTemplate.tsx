@@ -83,7 +83,7 @@ function ClassCard({
 
         {cls.image_url && (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={cls.image_url} alt={cls.level} className="mb-4 w-full rounded-xl object-cover h-32" />
+          <img src={cls.image_url} alt={`${cls.level} ticket`} className="mb-4 block w-full h-auto max-h-[420px] rounded-xl object-contain" loading="lazy" decoding="async" />
         )}
 
         <p className="text-2xl font-bold text-gray-900">{cls.fee_formatted}</p>
@@ -118,7 +118,7 @@ export default function WarmTemplate({ appearance, intake, classes, labels, slug
       {heroSrc ? (
         <div className="relative overflow-hidden rounded-b-3xl">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={heroSrc} alt={intake.name} className="w-full object-cover" style={{ maxHeight: "45vh" }} />
+          <img src={heroSrc} alt={intake.name} className="mx-auto block w-full h-auto object-contain" style={{ maxHeight: "45vh" }} />
           <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
           <div className="absolute bottom-0 left-0 right-0 px-6 pb-10 text-white">
             {logo_url && (

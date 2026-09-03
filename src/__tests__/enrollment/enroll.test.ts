@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
+import { hashPriorityToken } from "@/lib/interest/token";
 
 // ─── Mock dependencies ────────────────────────────────────────────────────────
 
@@ -168,5 +169,83 @@ describe("POST /api/public/enroll", () => {
     expect(res.status).toBe(201);
     const rpcCalls = mockRpc.mock.calls.filter((c) => c[0] === "submit_cart_enrollment");
     expect(rpcCalls).toHaveLength(1);
+  });
+
+  // ─── priority_token wiring ──────────────────────────────────────────────
+
+  it("hashes a supplied priority_token and passes the hash — never the raw value — to submit_enrollment", async () => {
+    mockRpcSuccess();
+    const rawToken = "super-secret-raw-priority-token";
+    const expectedHash = hashPriorityToken(rawToken);
+
+    await POST(makeRequest({
+      class_id: "00000000-0000-0000-0000-000000000001",
+      priority_token: rawToken,
+    }));
+
+    const rpcCall = mockRpc.mock.calls.find((c) => c[0] === "submit_enrollment");
+    expect(rpcCall).toBeDefined();
+    const rpcArgs = rpcCall![1] as Record<string, unknown>;
+    expect(rpcArgs.p_priority_token_hash).toBe(expectedHash);
+    expect(JSON.stringify(rpcArgs)).not.toContain(rawToken);
+  });
+
+  it("passes null for submit_enrollment when priority_token is absent, empty, or non-string", async () => {
+    mockRpcSuccess();
+
+    await POST(makeRequest({ class_id: "00000000-0000-0000-0000-000000000001" }));
+    let rpcCall = mockRpc.mock.calls.find((c) => c[0] === "submit_enrollment");
+    expect((rpcCall![1] as Record<string, unknown>).p_priority_token_hash).toBeNull();
+
+    mockRpc.mockClear();
+    mockRpcSuccess();
+    await POST(makeRequest({ class_id: "00000000-0000-0000-0000-000000000001", priority_token: "" }));
+    rpcCall = mockRpc.mock.calls.find((c) => c[0] === "submit_enrollment");
+    expect((rpcCall![1] as Record<string, unknown>).p_priority_token_hash).toBeNull();
+
+    mockRpc.mockClear();
+    mockRpcSuccess();
+    await POST(makeRequest({ class_id: "00000000-0000-0000-0000-000000000001", priority_token: 12345 }));
+    rpcCall = mockRpc.mock.calls.find((c) => c[0] === "submit_enrollment");
+    expect((rpcCall![1] as Record<string, unknown>).p_priority_token_hash).toBeNull();
+  });
+
+  it("hashes a supplied priority_token and passes the hash — never the raw value — to submit_cart_enrollment", async () => {
+    mockRpc.mockResolvedValue({
+      data: {
+        success: true,
+        enrollment_id: "enroll-2",
+        enrollment_ref: "NM-2026-0002",
+        quantity: 2,
+        total_fee: 100000,
+        tenant_id: "tenant-abc",
+        items: [{ class_id: "00000000-0000-0000-0000-000000000001", class_level: "N5", quantity: 2, fee_amount: 50000 }],
+      },
+      error: null,
+    });
+    const rawToken = "super-secret-raw-priority-token";
+    const expectedHash = hashPriorityToken(rawToken);
+
+    await POST(makeRequest({
+      items: [{ class_id: "00000000-0000-0000-0000-000000000001", quantity: 2 }],
+      priority_token: rawToken,
+    }));
+
+    const rpcCall = mockRpc.mock.calls.find((c) => c[0] === "submit_cart_enrollment");
+    expect(rpcCall).toBeDefined();
+    const rpcArgs = rpcCall![1] as Record<string, unknown>;
+    expect(rpcArgs.p_priority_token_hash).toBe(expectedHash);
+    expect(JSON.stringify(rpcArgs)).not.toContain(rawToken);
+  });
+
+  it("never includes the raw priority_token in the JSON response body", async () => {
+    mockRpcSuccess();
+    const rawToken = "super-secret-raw-priority-token";
+    const res = await POST(makeRequest({
+      class_id: "00000000-0000-0000-0000-000000000001",
+      priority_token: rawToken,
+    }));
+    const bodyText = JSON.stringify(await res.json());
+    expect(bodyText).not.toContain(rawToken);
   });
 });

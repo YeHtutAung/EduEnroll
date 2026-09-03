@@ -75,12 +75,18 @@ describe("GET /api/events", () => {
   it("returns only the tenant's open intakes shaped {id, name, date, location}", async () => {
     mockResolveScannerTenant.mockResolvedValue("tenant-1");
 
-    const futureDate = "2026-07-12";
+    // Computed relative to today, never hardcoded: the previous fixture used
+    // a literal date named "futureDate" that stopped being in the future on
+    // 2026-07-13, after which the route correctly filtered the intake out and
+    // this test failed on every run.
+    const inDays = (n: number) =>
+      new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+    const futureDate = inDays(30);
     setupTables(
       [{ id: "intake-1", name: "July Event", status: "open" }],
       [
         { intake_id: "intake-1", event_date: futureDate, venue: "Main Hall" },
-        { intake_id: "intake-1", event_date: "2026-07-20", venue: "Overflow Room" },
+        { intake_id: "intake-1", event_date: inDays(38), venue: "Overflow Room" },
       ],
     );
 

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { formatCurrency, formatAmount } from "@/lib/utils";
+import { getCardState } from "./types";
 import type { EventTemplateProps, TemplateClass } from "./types";
 
 // ─── Seat badge ───────────────────────────────────────────────────────────────
@@ -55,15 +56,14 @@ function TicketCard({
   const maxTix = cls.max_tickets_per_person ?? 1;
   const [qty, setQty] = useState(1);
   const effectiveQty = cartMode ? (cartQty ?? 0) : qty;
-  const isFull = cls.status === "full" || cls.seat_remaining === 0;
-  const now = new Date();
-  const notYetOpen = cls.enrollment_open_at ? now < new Date(cls.enrollment_open_at) : false;
-  const alreadyClosed = cls.enrollment_close_at ? now > new Date(cls.enrollment_close_at) : false;
-  const isDisabled = isFull || notYetOpen || alreadyClosed;
+  // Card state comes from the shared helper rather than being recomputed here.
+  // This template used to inline the same four booleans, and that is exactly
+  // how it drifted: the priority window shipped, getCardState learned to honour
+  // priority_unlocked, and this copy went on locking token holders out.
+  const { isDisabled, overlayState } = getCardState(cls);
   const fmtOpts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "numeric" };
   const closeDate = cls.enrollment_close_at ? new Date(cls.enrollment_close_at).toLocaleDateString("en-GB", fmtOpts) : null;
   const openDate = cls.enrollment_open_at ? new Date(cls.enrollment_open_at).toLocaleDateString("en-GB", { ...fmtOpts, hour: "2-digit", minute: "2-digit" }) : null;
-  const overlayState = isFull ? "full" : notYetOpen ? "not_open" : alreadyClosed ? "closed" : null;
 
   return (
     <div
@@ -108,7 +108,7 @@ function TicketCard({
       {cls.image_url && (
         <div className="relative z-10 overflow-hidden">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={cls.image_url} alt={cls.level} className="w-full h-auto object-cover max-h-52 sm:max-h-64" />
+          <img src={cls.image_url} alt={`${cls.level} ticket`} className="block w-full h-auto max-h-[420px] object-contain" loading="lazy" decoding="async" />
           <div className="absolute inset-0 bg-gradient-to-t from-[#111] via-transparent to-transparent" />
         </div>
       )}
@@ -305,7 +305,7 @@ export default function EvLuxuryTemplate({ appearance, intake, classes, slug, cu
               <img src={logoUrl} alt="" className="absolute top-6 left-6 h-10 w-auto object-contain z-10 opacity-80" />
             )}
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={heroUrl} alt={intake.name} className="w-full object-cover" style={{ maxHeight: "55vh" }} />
+            <img src={heroUrl} alt={intake.name} className="mx-auto block w-full h-auto object-contain" style={{ maxHeight: "55vh" }} />
           </section>
           {(eventDateStr || closeDateStr || venue) && (
             <section className="px-6 py-8 sm:px-12" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>

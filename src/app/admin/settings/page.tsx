@@ -526,7 +526,11 @@ function SettingsContent() {
   // ── Currency & Payment mode ──────────────────────────────────────────────
   const [currency, setCurrency] = useState("MMK");
   const [paymentMode, setPaymentMode] = useState<"bank_transfer" | "mmqr" | "stripe" | "paypay" | "hitpay">("bank_transfer");
-  const [mmqrProvider, setMmqrProvider] = useState<"abank" | "mmpay">("abank");
+  const [mmqrProvider, setMmqrProvider] = useState<"abank" | "mmpay" | "kbzpay">("abank");
+  const [platformFeeMode, setPlatformFeeMode] = useState<"none" | "per_transaction" | "per_ticket">("none");
+  // Held as a string so the field can be cleared while typing without
+  // snapping back to 0.
+  const [platformFeeAmount, setPlatformFeeAmount] = useState("0");
   const [savingPaymentMode, setSavingPaymentMode] = useState(false);
 
   const fetchProfile = useCallback(async () => {
@@ -551,7 +555,7 @@ function SettingsContent() {
       // Fetch tenant name + logo + org labels
       const { data: tenant } = await supabase
         .from("tenants")
-        .select("name, logo_url, org_type, currency, label_intake, label_class, label_student, label_seat, label_fee, auto_cancel_hours, email_on_enroll, sms_on_payment, payment_mode, mmqr_provider")
+        .select("name, logo_url, org_type, currency, label_intake, label_class, label_student, label_seat, label_fee, auto_cancel_hours, email_on_enroll, sms_on_payment, payment_mode, mmqr_provider, platform_fee_mode, platform_fee_amount")
         .eq("id", profile.tenant_id)
         .single() as {
         data: {
@@ -569,6 +573,8 @@ function SettingsContent() {
           sms_on_payment: boolean;
           payment_mode: string;
           mmqr_provider: string;
+          platform_fee_mode: string | null;
+          platform_fee_amount: number | null;
         } | null;
         error: unknown;
       };
@@ -588,7 +594,11 @@ function SettingsContent() {
         setSmsOnPayment(tenant.sms_on_payment ?? true);
         setCurrency(tenant.currency || "MMK");
         setPaymentMode((tenant.payment_mode as "bank_transfer" | "mmqr" | "stripe" | "paypay" | "hitpay") ?? "bank_transfer");
-        setMmqrProvider((tenant.mmqr_provider as "abank" | "mmpay") ?? "abank");
+        setMmqrProvider((tenant.mmqr_provider as "abank" | "mmpay" | "kbzpay") ?? "abank");
+        setPlatformFeeMode(
+          (tenant.platform_fee_mode as "none" | "per_transaction" | "per_ticket") ?? "none",
+        );
+        setPlatformFeeAmount(String(tenant.platform_fee_amount ?? 0));
       }
     } catch {
       // non-critical; keep defaults
@@ -812,7 +822,18 @@ function SettingsContent() {
     try {
       const { error } = await supabase
         .from("tenants")
-        .update({ currency, payment_mode: paymentMode, mmqr_provider: mmqrProvider } as never)
+        .update({
+          currency,
+          payment_mode: paymentMode,
+          mmqr_provider: mmqrProvider,
+          platform_fee_mode: platformFeeMode,
+          // A blank or malformed field must not become a charge. Whole units
+          // only: the column is an integer and MMK has no minor unit.
+          platform_fee_amount:
+            platformFeeMode === "none"
+              ? 0
+              : Math.max(0, Math.trunc(Number(platformFeeAmount) || 0)),
+        } as never)
         .eq("id", tenantId);
       if (error) throw new Error((error as Error).message);
       toast.success("Payment mode saved.");
@@ -1365,12 +1386,62 @@ function SettingsContent() {
               <label className="block text-sm font-medium text-gray-700 mb-1.5">MMQR Provider</label>
               <select
                 value={mmqrProvider}
-                onChange={(e) => setMmqrProvider(e.target.value as "abank" | "mmpay")}
+                onChange={(e) => setMmqrProvider(e.target.value as "abank" | "mmpay" | "kbzpay")}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
               >
                 <option value="abank">ABank (A+ Wallet)</option>
                 <option value="mmpay">MyanMyanPay</option>
+                <option value="kbzpay">KBZPay (MMQR &mdash; any Myanmar bank app)</option>
               </select>
+            </div>
+          )}
+
+          {/* Online platform fee. Hidden for bank transfer: the fee pays for a
+              gateway, and a manual transfer uses none — offering the control
+              there would let an organiser configure a charge that silently
+              never applies. */}
+          {paymentMode !== "bank_transfer" && (
+            <div className="rounded-lg border border-gray-200 p-3 space-y-3">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Online Platform Fee
+                </label>
+                <select
+                  value={platformFeeMode}
+                  onChange={(e) =>
+                    setPlatformFeeMode(e.target.value as "none" | "per_transaction" | "per_ticket")
+                  }
+                  className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
+                >
+                  <option value="none">No fee</option>
+                  <option value="per_transaction">Per transaction &mdash; charged once per order</option>
+                  <option value="per_ticket">Per ticket &mdash; multiplied by ticket count</option>
+                </select>
+              </div>
+
+              {platformFeeMode !== "none" && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    Fee amount ({currency})
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    inputMode="numeric"
+                    value={platformFeeAmount}
+                    onChange={(e) => setPlatformFeeAmount(e.target.value)}
+                    className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
+                  />
+                  <p className="mt-1.5 text-xs text-gray-500">
+                    Whole {currency} only.{" "}
+                    {platformFeeMode === "per_transaction"
+                      ? "Added once to each order, whatever the ticket count."
+                      : "Multiplied by the number of tickets in the order."}{" "}
+                    Buyers pay one combined amount &mdash; the fee is never a separate charge.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 

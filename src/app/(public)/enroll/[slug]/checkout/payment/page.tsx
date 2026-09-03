@@ -646,7 +646,7 @@ function PaymentContent() {
   const [brandColor, setBrandColor] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [paymentMode, setPaymentMode] = useState<string | null>(null);
-  const [mmqrProvider, setMmqrProvider] = useState<"abank" | "mmpay">("mmpay");
+  const [mmqrProvider, setMmqrProvider] = useState<"abank" | "mmpay" | "kbzpay">("mmpay");
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [studentName, setStudentName] = useState("");
   const [showQRModal, setShowQRModal] = useState(false);
@@ -695,7 +695,11 @@ function PaymentContent() {
         setStudentName(d.student_name_en ?? "");
         const mode = d.payment_mode ?? "bank_transfer";
         setPaymentMode(mode);
-        setMmqrProvider(d.mmqr_provider === "abank" ? "abank" : "mmpay");
+        setMmqrProvider(
+          d.mmqr_provider === "abank" || d.mmqr_provider === "kbzpay"
+            ? d.mmqr_provider
+            : "mmpay",
+        );
         setBankAccounts(d.bank_accounts ?? []);
         if (mode === "stripe") {
           if (!stored && d.stripe_client_secret) setClientSecret(d.stripe_client_secret);
@@ -806,7 +810,8 @@ function PaymentContent() {
               enrollmentRef={ref}
               amount={totalAmount}
               studentName={studentName}
-              provider={qrProvider as "abank" | "mmpay" | "paypay"}
+              receiverName={orgName}
+              provider={qrProvider as "abank" | "mmpay" | "paypay" | "kbzpay"}
               onSuccess={() => router.push(`/enroll/${params.slug}/checkout/success/?ref=${ref}`)}
               onClose={() => setShowQRModal(false)}
             />

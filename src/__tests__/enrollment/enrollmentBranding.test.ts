@@ -72,21 +72,37 @@ describe("sample sponsor placements", () => {
 // ─── Both e-ticket renderers bound sponsor wordmarks ────────────────────────
 
 describe("e-ticket sponsor wordmarks", () => {
-  const ticketSrc = readFileSync(
-    path.join(process.cwd(), "src/app/(public)/enroll/[slug]/checkout/success/page.tsx"),
-    "utf8",
-  );
+  // Both renderers moved out of the checkout-success page into
+  // src/lib/tickets/render/ so the payment page could draw the same ticket.
+  // This guard is asserted PER FILE rather than over a combined count: a single
+  // total could be satisfied by one renderer carrying every budget while its
+  // twin carried none, which is the exact defect it exists to catch.
+  const renderers = {
+    canvas: "src/lib/tickets/render/primitives.ts",
+    pdf: "src/lib/tickets/render/ticketPdf.ts",
+  } as const;
 
-  it("bounds the wordmark in both the canvas and PDF renderers", () => {
+  it.each(Object.entries(renderers))("bounds the wordmark in the %s renderer", (_name, file) => {
     // `maxLogoWidth` constrained the LOGO branch only. A text-only sponsor, or
     // one whose logo failed to load and fell through to the wordmark, could
     // still overrun its slot and collide with the next name in the strip.
     // The canvas twin was fixed first; the PDF one was missed.
-    const budgets = ticketSrc.match(/wordBudget/g) ?? [];
-    expect(budgets.length, "expected a width budget in BOTH renderers").toBeGreaterThanOrEqual(4);
+    const src = readFileSync(path.join(process.cwd(), file), "utf8");
+    const budgets = src.match(/wordBudget/g) ?? [];
+    expect(budgets.length, `${file} has no wordmark width budget`).toBeGreaterThanOrEqual(2);
 
     // Neither renderer may draw the raw, unmeasured name.
-    expect(ticketSrc).not.toMatch(/fillText\(\s*sponsor\.name\s*,/);
-    expect(ticketSrc).not.toMatch(/pdf\.text\(\s*sponsor\.name\s*,/);
+    expect(src).not.toMatch(/fillText\(\s*sponsor\.name\s*,/);
+    expect(src).not.toMatch(/pdf\.text\(\s*sponsor\.name\s*,/);
+  });
+
+  // The guard above is only meaningful while it points at the files that hold
+  // the drawing code. If a renderer moves again, this fails rather than letting
+  // the per-file assertions pass against an empty or unrelated file.
+  it("scans the files that actually draw sponsors", () => {
+    for (const file of Object.values(renderers)) {
+      const src = readFileSync(path.join(process.cwd(), file), "utf8");
+      expect(src, `${file} no longer draws sponsors`).toMatch(/sponsor/i);
+    }
   });
 });

@@ -246,6 +246,7 @@ export interface Intake {
   slug: string; // stable URL slug, set once on creation (e.g. "april-2026")
   hero_image_url: string | null; // hero banner for public enrollment page
   status: IntakeStatus;
+  priority_open_at: string | null; // start of the interest head-start window, before public sale
   created_at: string;
 }
 
@@ -301,6 +302,12 @@ export interface Payment {
   enrollment_id: string;
   tenant_id: string;
   amount: number;
+  /**
+   * The online platform fee included in `amount` (20260903090000). Tickets are
+   * `amount - platform_fee`; 0 for bank transfers, free orders, partial-payment
+   * top-ups, and every row predating the column.
+   */
+  platform_fee: number;
   proof_image_url: string | null;
   proof_image_urls: string[];
   bank_reference: string | null;

@@ -17,6 +17,21 @@ export interface TemplateClass {
   venue?: string | null;
   image_url?: string | null;
   max_tickets_per_person?: number;
+  /**
+   * This visitor holds a priority-access token and the event's priority window
+   * has opened, so the tier's "not open yet" shutter does not apply to them.
+   *
+   * Stamped by applyPriorityUnlock() in @/lib/interest/priorityUnlock, never by
+   * the API — it is a property of the VISITOR, not of the tier, and two people
+   * loading the same event at the same instant will disagree about it. It rides
+   * on the class object rather than being threaded as a prop because every
+   * template already receives classes and reads their state through
+   * getCardState below; a parallel prop would have to be plumbed through eleven
+   * components that otherwise need no changes.
+   *
+   * Absent or false means "no opinion" — the ordinary public rules apply.
+   */
+  priority_unlocked?: boolean;
 }
 
 export interface TemplateIntake {
@@ -59,10 +74,21 @@ export interface EventTemplateProps {
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
+/**
+ * Card state for one tier.
+ *
+ * `priority_unlocked` lifts the "not open yet" shutter and nothing else. A
+ * sold-out or already-closed tier stays disabled for a token holder, because a
+ * head start is permission to buy EARLY, not permission to buy what is gone —
+ * and the server would refuse both anyway. Keeping the bypass to exactly one of
+ * the three conditions is what stops a UI convenience from turning into a way
+ * to oversell.
+ */
 export function getCardState(cls: TemplateClass) {
   const isFull = cls.status === "full" || cls.seat_remaining === 0;
   const now = new Date();
-  const notYetOpen = cls.enrollment_open_at ? now < new Date(cls.enrollment_open_at) : false;
+  const scheduledLater = cls.enrollment_open_at ? now < new Date(cls.enrollment_open_at) : false;
+  const notYetOpen = scheduledLater && !cls.priority_unlocked;
   const alreadyClosed = cls.enrollment_close_at ? now > new Date(cls.enrollment_close_at) : false;
   const isDisabled = isFull || notYetOpen || alreadyClosed;
   const overlayState = isFull ? "full" : notYetOpen ? "not_open" : alreadyClosed ? "closed" : null;

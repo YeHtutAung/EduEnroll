@@ -3,16 +3,55 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import QRCode from "qrcode";
 import { formatCurrencySimple } from "@/lib/utils";
+import MmqrCard from "@/components/payments/MmqrCard";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type QRProvider = "mmpay" | "abank" | "paypay";
+type QRProvider = "mmpay" | "abank" | "paypay" | "kbzpay";
+
+// ─── Creation-response interpretation ───────────────────────────────────────
+// Exported and pure so the decision can be tested without a DOM (this project
+// has no jsdom; component tests use renderToStaticMarkup and cannot run
+// effects).
+//
+// KBZPay's creation route has TWO success shapes, discriminated by `status`
+// (spec §5.1a). The already_paid one carries no qr and no orderId, and it MUST
+// be recognised before anything reads data.qr: treating it as a QR response
+// sets qrData/orderId to undefined, renders an empty QR panel, and then polls
+// /status?ref=undefined every 5s for 10 minutes before declaring the code
+// expired — showing a blank code, then an expiry error, to a student who has
+// already paid.
+//
+// ABank, MMPay and PayPay never send `status`, so they fall through unchanged.
+export type CreateResponse =
+  | { kind: "already_paid" }
+  | { kind: "qr"; qrSource: string; orderId: string };
+
+export function interpretCreateResponse(data: {
+  status?: string;
+  qr?: string;
+  url?: string;
+  orderId?: string;
+}): CreateResponse | null {
+  if (data?.status === "already_paid") return { kind: "already_paid" };
+
+  const qrSource = data?.qr ?? data?.url;
+  if (!qrSource || !data?.orderId) return null;
+
+  return { kind: "qr", qrSource, orderId: data.orderId };
+}
 
 interface QRPaymentModalProps {
   enrollmentRef: string;
   amount: number;
   currency?: string;
   studentName: string;
+  /**
+   * Who receives the money — the merchant, never the payer. Required because
+   * MyanmarPay's brand guideline puts the receiver on the card, and defaulting
+   * it would risk quietly printing the student's name in that slot.
+   */
+  receiverName: string;
   onSuccess: () => void;
   onClose: () => void;
   provider?: QRProvider;
@@ -27,6 +66,7 @@ export default function QRPaymentModal({
   amount,
   currency = "MMK",
   studentName,
+  receiverName,
   onSuccess,
   onClose,
   provider = "mmpay",
@@ -34,7 +74,12 @@ export default function QRPaymentModal({
   const apiBase =
     provider === "abank" ? "/api/public/payments/abank"
     : provider === "paypay" ? "/api/public/payments/paypay"
+    : provider === "kbzpay" ? "/api/public/payments/kbzpay"
     : "/api/public/payments/mmpay";
+  // The wallet mark that belongs at the centre of the QR, if any. Provider
+  // specific on purpose: an ABank or MMPay tenant must not display KBZPay's.
+  const providerLogoUrl = provider === "kbzpay" ? "/kbzpay-logo.png" : null;
+
   const [state, setState] = useState<ModalState>("loading");
   const [qrData, setQrData] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
@@ -43,6 +88,23 @@ export default function QRPaymentModal({
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const slowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The parent passes an inline arrow at both call sites, so `onSuccess` is a
+  // new function on every parent render — and the payment page re-renders on
+  // every status poll. Holding it in a ref keeps the effects below from
+  // depending on an identity that churns, which was minting a fresh KBZPay
+  // order each time and superseding the one on screen.
+  const onSuccessRef = useRef(onSuccess);
+  useEffect(() => {
+    onSuccessRef.current = onSuccess;
+  }, [onSuccess]);
+
+  // Creation must happen once per enrollment, not once per effect run. React
+  // StrictMode double-invokes effects in development, which produced two
+  // orders seconds apart with the first left SUPERSEDED or FAILED — and the
+  // modal then polled the dead one and showed "Payment Failed / Retry" over a
+  // perfectly good QR.
+  const createdForRef = useRef<string | null>(null);
+
   const [paypayUrl, setPaypayUrl] = useState<string | null>(null);
   const [paypayDeeplink, setPaypayDeeplink] = useState<string | null>(null);
 
@@ -84,7 +146,7 @@ export default function QRPaymentModal({
             if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
             if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
             setState("success");
-            onSuccess();
+            onSuccessRef.current();
           } else if (status === "FAILED" || status === "CANCELED" || status === "EXPIRED") {
             if (pollRef.current) clearInterval(pollRef.current);
             if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
@@ -118,11 +180,14 @@ export default function QRPaymentModal({
         setErrorMsg("QR code has expired. Please try again.");
       }, 10 * 60 * 1000);
     },
-    [onSuccess, apiBase],
+    [apiBase],
   );
 
   // ── Create payment on mount ────────────────────────────────
   useEffect(() => {
+    if (createdForRef.current === enrollmentRef) return;
+    createdForRef.current = enrollmentRef;
+
     async function createPayment() {
       setState("loading");
       try {
@@ -142,15 +207,36 @@ export default function QRPaymentModal({
         const data = await res.json();
         console.log("[QRPaymentModal] API response:", data);
 
+        const interpreted = interpretCreateResponse(data);
+
+        // The previous order turned out to be paid (spec §5.1a). Show success
+        // and start NO poller — there is no order to poll for.
+        if (interpreted?.kind === "already_paid") {
+          setState("success");
+          onSuccessRef.current();
+          return;
+        }
+
+        if (!interpreted) {
+          setErrorMsg("Failed to generate QR code.");
+          setState("error");
+          return;
+        }
+
         // PayPay returns a URL, MMQR returns a QR string
-        const qrSource = data.qr ?? data.url;
+        const qrSource = interpreted.qrSource;
         setQrData(qrSource);
-        setOrderId(data.orderId);
+        setOrderId(interpreted.orderId);
 
         // Generate QR image from either EMVCo string or PayPay URL
         if (qrSource) {
           try {
-            const dataUrl = await QRCode.toDataURL(qrSource, { width: 280, margin: 2 });
+            const dataUrl = await QRCode.toDataURL(qrSource, {
+              width: 280,
+              margin: 2,
+              // A centre mark destroys modules; H recovers ~30% of them.
+              errorCorrectionLevel: providerLogoUrl ? "H" : "M",
+            });
             setQrImageUrl(dataUrl);
           } catch {
             console.error("[QRPaymentModal] QR render failed");
@@ -162,7 +248,7 @@ export default function QRPaymentModal({
         if (data.deeplink) setPaypayDeeplink(data.deeplink);
 
         setState("qr");
-        startPolling(data.orderId);
+        startPolling(interpreted.orderId);
       } catch {
         setErrorMsg("Network error. Please check your connection.");
         setState("error");
@@ -170,7 +256,11 @@ export default function QRPaymentModal({
     }
 
     createPayment();
-  }, [enrollmentRef, startPolling, apiBase]);
+    // onSuccess is listed because the already_paid branch calls it directly.
+    // This does not change when the effect re-runs: startPolling is already a
+    // dependency and is itself a useCallback over [onSuccess, apiBase], so an
+    // unstable onSuccess already re-triggered this effect through it.
+  }, [enrollmentRef, startPolling, apiBase, providerLogoUrl]);
 
   function handleRetry() {
     if (pollRef.current) clearInterval(pollRef.current);
@@ -197,12 +287,35 @@ export default function QRPaymentModal({
         }
 
         const data = await res.json();
-        const qrSource = data.qr ?? data.url;
+        const interpreted = interpretCreateResponse(data);
+
+        // Same already-paid branch as the mount effect. Retry is a second
+        // entry point into the identical decision, and omitting it here would
+        // leave the blank-QR-then-expiry path alive for anyone who pressed
+        // "Try again" (spec §5.1a).
+        if (interpreted?.kind === "already_paid") {
+          setState("success");
+          onSuccess();
+          return;
+        }
+
+        if (!interpreted) {
+          setErrorMsg("Failed to generate QR code.");
+          setState("error");
+          return;
+        }
+
+        const qrSource = interpreted.qrSource;
         setQrData(qrSource);
-        setOrderId(data.orderId);
+        setOrderId(interpreted.orderId);
         if (qrSource) {
           try {
-            const dataUrl = await QRCode.toDataURL(qrSource, { width: 280, margin: 2 });
+            const dataUrl = await QRCode.toDataURL(qrSource, {
+              width: 280,
+              margin: 2,
+              // A centre mark destroys modules; H recovers ~30% of them.
+              errorCorrectionLevel: providerLogoUrl ? "H" : "M",
+            });
             setQrImageUrl(dataUrl);
           } catch {
             console.error("[QRPaymentModal] QR render failed");
@@ -211,7 +324,7 @@ export default function QRPaymentModal({
         if (data.url) setPaypayUrl(data.url);
         if (data.deeplink) setPaypayDeeplink(data.deeplink);
         setState("qr");
-        startPolling(data.orderId);
+        startPolling(interpreted.orderId);
       } catch {
         setErrorMsg("Network error. Please check your connection.");
         setState("error");
@@ -233,7 +346,13 @@ export default function QRPaymentModal({
       />
 
       {/* Panel */}
-      <div className="relative w-full max-w-sm rounded-2xl bg-white p-6 shadow-xl">
+      {/* max-h + scroll: the panel is vertically centred in a fixed shell, so
+          without them a panel taller than the viewport is clipped at BOTH ends
+          and the close button, Save QR and the reference all become
+          unreachable. The MMQR card is roughly twice the height of the bare QR
+          it replaced, which turns that latent bug into a routine one on short
+          phones. */}
+      <div className="relative max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
         {/* Close button */}
         <button
           onClick={onClose}
@@ -260,48 +379,62 @@ export default function QRPaymentModal({
         {/* ── QR state ──────────────────────────────────────── */}
         {state === "qr" && (
           <div className="flex flex-col items-center">
-            {/* Header — provider-specific branding */}
+            {/* PayPay is not an MMQR scheme, so it keeps its own presentation.
+                Everything else is an MMQR code and must be shown in the card
+                layout MyanmarPay's Digital & POS brand guideline specifies —
+                see MmqrCard, which carries the figures. */}
             {provider === "paypay" ? (
               <>
                 <div className="mb-2 flex h-14 items-center justify-center">
                   <span className="text-3xl font-bold text-[#ff0033]">PayPay</span>
                 </div>
                 <h3 className="text-lg font-semibold text-gray-900">Pay with PayPay</h3>
+
+                {/* Amount */}
+                <div className="mt-3 rounded-lg bg-gray-50 px-4 py-2 text-center">
+                  <p className="text-xs text-gray-500">Amount / <span className="font-myanmar">ပမာဏ</span></p>
+                  <p className="text-xl font-bold text-gray-900">{formatCurrencySimple(amount, currency)}</p>
+                </div>
+
+                {/* Student name */}
+                <p className="mt-2 text-xs text-gray-500">{studentName}</p>
+
+                {/* QR Image */}
+                {qrImageUrl ? (
+                  <div className="mt-4 rounded-xl border border-gray-200 bg-white p-3">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={qrImageUrl}
+                      alt="PayPay Payment Code"
+                      className="h-56 w-56 object-contain"
+                    />
+                  </div>
+                ) : qrData ? (
+                  <div className="mt-4 rounded-xl border border-gray-200 bg-white p-3">
+                    <p className="text-xs text-gray-500 text-center">Rendering QR...</p>
+                  </div>
+                ) : (
+                  <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-6 text-center">
+                    <p className="text-sm text-amber-800">QR code not available from payment gateway.</p>
+                    <p className="font-myanmar mt-1 text-xs text-amber-700">QR ကုဒ် မရရှိနိုင်သေးပါ။</p>
+                  </div>
+                )}
               </>
-            ) : (
+            ) : qrImageUrl || qrData ? (
               <>
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/mmqr-logo.png" alt="MyanmarPay MMQR" className="mb-2 h-14 w-auto" />
-                <h3 className="text-lg font-semibold text-gray-900">Pay with MMQR</h3>
-                <p className="font-myanmar mt-0.5 text-sm text-gray-500">MMQR ဖြင့် ငွေပေးချေပါ</p>
-              </>
-            )}
-
-            {/* Amount */}
-            <div className="mt-3 rounded-lg bg-gray-50 px-4 py-2 text-center">
-              <p className="text-xs text-gray-500">Amount / <span className="font-myanmar">ပမာဏ</span></p>
-              <p className="text-xl font-bold text-gray-900">{formatCurrencySimple(amount, currency)}</p>
-            </div>
-
-            {/* Student name */}
-            <p className="mt-2 text-xs text-gray-500">
-              {studentName}
-            </p>
-
-            {/* QR Image */}
-            {qrImageUrl ? (
-              <div className="mt-4 rounded-xl border border-gray-200 bg-white p-3">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={qrImageUrl}
-                  alt="MMQR Payment Code"
-                  className="h-56 w-56 object-contain"
+                <MmqrCard
+                  qrImageUrl={qrImageUrl}
+                  receiverName={receiverName}
+                  amount={amount}
+                  currency={currency}
+                  providerLogoUrl={providerLogoUrl}
                 />
-              </div>
-            ) : qrData ? (
-              <div className="mt-4 rounded-xl border border-gray-200 bg-white p-3">
-                <p className="text-xs text-gray-500 text-center">Rendering QR...</p>
-              </div>
+
+                {/* The payer, kept outside the card: the guideline's card shows
+                    the RECEIVER, and adding a second name inside it would
+                    misrepresent who is being paid. */}
+                <p className="mt-2 text-xs text-gray-500">{studentName}</p>
+              </>
             ) : (
               <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-6 text-center">
                 <p className="text-sm text-amber-800">QR code not available from payment gateway.</p>

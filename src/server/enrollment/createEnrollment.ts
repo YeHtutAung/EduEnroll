@@ -10,6 +10,8 @@ export interface SingleEnrollmentInput {
   idempotency_key?: string | null;
   quantity?: number;
   messenger_psid?: string | null;
+  /** SHA-256 hash of the raw priority-access token, or null if none was presented. */
+  priority_token_hash?: string | null;
 }
 
 // Use Extract to narrow to the success branch
@@ -42,7 +44,7 @@ export type SingleEnrollmentOutcome = SingleEnrollmentSuccess | SingleEnrollment
 export async function createEnrollment(
   input: SingleEnrollmentInput,
 ): Promise<SingleEnrollmentOutcome> {
-  const { class_id, form_data, idempotency_key, quantity, messenger_psid } = input;
+  const { class_id, form_data, idempotency_key, quantity, messenger_psid, priority_token_hash } = input;
 
   if (!class_id || !UUID_RE.test(class_id)) {
     return { ok: false, status: 400, error: "Validation Error", message: "class_id must be a valid UUID." };
@@ -51,10 +53,17 @@ export async function createEnrollment(
   const supabase = createAdminClient();
   const idemKey = typeof idempotency_key === "string" ? idempotency_key : null;
   const qty = typeof quantity === "number" && quantity >= 1 ? Math.floor(quantity) : 1;
+  const priorityTokenHash =
+    typeof priority_token_hash === "string" && priority_token_hash.length > 0 ? priority_token_hash : null;
 
   const { data: result, error: rpcError } = await supabase.rpc(
     "submit_enrollment",
-    { p_class_id: class_id, p_idempotency_key: idemKey, p_quantity: qty } as never,
+    {
+      p_class_id: class_id,
+      p_idempotency_key: idemKey,
+      p_quantity: qty,
+      p_priority_token_hash: priorityTokenHash,
+    } as never,
   );
 
   if (rpcError) {

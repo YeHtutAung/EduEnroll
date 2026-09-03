@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { EvTrustedOfficialTemplate } from "@/components/enrollment/templates";
 import type { ClassStatus } from "@/types/database";
+import { applyPriorityUnlock, capturePriorityToken } from "@/lib/interest/priorityUnlock";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,7 @@ interface IntakeData {
   name: string;
   year: number;
   status: string;
+  priority_open_at?: string | null;
 }
 
 interface PageData {
@@ -32,6 +34,8 @@ interface PageData {
   classes: ClassData[];
   appearance: Record<string, unknown>;
   labels: { currency: string; orgType: string; intake: string; class: string; student: string; seat: string; fee: string };
+  /** Tiers still behind a future enrollment_open_at — see the API route. */
+  priority_covered_class_ids?: string[];
 }
 
 interface ApiError {
@@ -104,6 +108,17 @@ export default function TicketsPage() {
   const [data, setData] = useState<PageData | null>(null);
   const [apiError, setApiError] = useState<ApiError | null>(null);
 
+  // This page is reached two ways: directly, and by the redirect on
+  // /enroll/<slug> for the ev-trusted-official template. The priority link
+  // points at /enroll/<slug>, so on the redirect path the fragment is captured
+  // there and only read back here — but capturePriorityToken also handles a
+  // fragment arriving on this URL, so a link that ever points straight here
+  // keeps working without a second code path.
+  const [priorityToken, setPriorityToken] = useState<string | null>(null);
+  useEffect(() => {
+    setPriorityToken(capturePriorityToken(params.slug));
+  }, [params.slug]);
+
   useEffect(() => {
     fetch(`/api/public/enroll/${params.slug}`)
       .then(async (r) => {
@@ -136,7 +151,11 @@ export default function TicketsPage() {
     <EvTrustedOfficialTemplate
       appearance={data.appearance as never}
       intake={data.intake}
-      classes={data.classes}
+      classes={applyPriorityUnlock(data.classes, {
+        priorityOpenAt: data.intake.priority_open_at,
+        coveredClassIds: data.priority_covered_class_ids ?? [],
+        token: priorityToken,
+      })}
       labels={data.labels}
       slug={params.slug}
       currency={data.labels.currency}

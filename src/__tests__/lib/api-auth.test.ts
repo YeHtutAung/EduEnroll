@@ -147,7 +147,7 @@ describe("requireAuth agent path — lookup outcomes", () => {
 // otherwise it can never clear.
 describe("requireAuth agent path — root-host telemetry", () => {
   const rootHostEvents = () =>
-    warnSpy.mock.calls.filter((c) => String(c[0]).includes("[agent-auth] platform-root"));
+    warnSpy.mock.calls.filter((c: unknown[]) => String(c[0]).includes("[agent-auth] platform-root"));
 
   it("T11 emits the event for a valid signature on a platform root", async () => {
     mockHeaders.mockReturnValue(agentHeaders({ host: "kuunyi.com", slug: "flashtic" }));

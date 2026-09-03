@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import { platformOrigin } from "@/lib/origin";
 import mmpay from "@/lib/mmpay";
+import { resolveOrderTotal, reconcileLineItems } from "@/server/payments/platformFee";
 
 // ─── POST /api/public/payments/mmqr ─────────────────────────────────────────
 // Creates an MMQR payment via MyanMyanPay and returns a QR code.
@@ -108,6 +109,19 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Online platform fee, from the shared calculator. MMPay is sent line items
+  // as well as a total, so the fee needs its own line — otherwise the items do
+  // not sum to the amount and the gateway rejects the order.
+  const { platformFee } = await resolveOrderTotal(supabase, enrollment);
+  if (platformFee > 0) {
+    totalFee += platformFee;
+    items.push({ name: "Online platform fee", amount: platformFee, quantity: 1 });
+  }
+  // What THIS ROW records. The partial-payment branch below charges a
+  // remainder rather than the order total, and a remainder is not the row that
+  // quoted the fee — the row that did keeps it, and this one records none.
+  let recordedFee = platformFee;
+
   // ── 5. Check for partial payment — reduce amount by received ──
   if (enrollment.status === "partial_payment") {
     const { data: existingPayment } = (await supabase
@@ -120,6 +134,14 @@ export async function POST(request: NextRequest) {
 
     if (existingPayment?.received_amount) {
       totalFee = totalFee - existingPayment.received_amount;
+      recordedFee = 0;
+
+      // MMPay rejects an order whose line items do not sum to the amount. The
+      // lines describe the WHOLE order, so a remainder no longer matches them.
+      // This mismatch predates the platform fee — items were already built
+      // from the full order while the amount was reduced — but the fee adds
+      // another line to an already-inconsistent payload.
+      items = reconcileLineItems(items, totalFee);
     }
   }
 
@@ -151,6 +173,7 @@ export async function POST(request: NextRequest) {
       enrollment_id: enrollment.id,
       tenant_id: enrollment.tenant_id,
       amount: totalFee,
+      platform_fee: recordedFee,
       payment_ref: orderId,
       payment_method: "mmqr",
       mmqr_status: "PENDING",
