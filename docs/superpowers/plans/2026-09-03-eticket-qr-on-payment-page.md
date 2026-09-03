@@ -235,10 +235,21 @@ So the check is a normalised byte-compare, not a pixel diff with a tolerance: it
 is exact, has no threshold to tune, and cannot pass a genuinely changed layout.
 Canvas PNG output is already deterministic and needs no normalisation.
 
-**A physical scan is required before this is called done.** Extraction should not
-alter a pixel — the QR payload is the same signed JWT — but a scanner cannot be
-verified by reading code, and #196 was already blocked on exactly this. One
-ticket downloaded from the payment page, scanned with kuunyi-scanner.
+### Physical scan — PASSED 2026-09-03
+
+The gate that no amount of hashing could substitute for. A ticket from the
+payment page was scanned and the decoded token verified end to end:
+
+| Check | Result |
+|---|---|
+| Ed25519 signature against the dev signing key | **valid** |
+| `kid` vs `TICKET_KID` | matches (`kuunyi-ed25519-1`) |
+| Expiry | 2026-10-30 17:29:59 UTC, not expired |
+| `jti` / `eid` / `tier` / `admits` / `exp` vs the `tickets` row | **all match** |
+| Ticket status | `valid`, on confirmed order `LM-0902-3SJQ` |
+
+So the QR is not merely present and readable — it decodes to a cryptographically
+valid ticket for the right order. #196 was blocked on exactly this check.
 
 ---
 
