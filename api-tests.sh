@@ -255,12 +255,24 @@ login() {
     local candidate
     for candidate in $(echo "$TENANT_RESP" | jq -r '.[].subdomain // empty'); do
       local probe_origin; probe_origin=$(tenant_origin "$candidate")
-      local probe_code
-      probe_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${probe_origin}/api/public/status" 2>/dev/null) || probe_code="000"
-      # Any HTTP response — even 400 for a missing ref — means DNS, TLS and
-      # the app all resolved this tenant. Only a genuine connection failure
-      # (curl's own "000") disqualifies a candidate.
-      if [[ "$probe_code" != "000" ]]; then
+      local probe_body
+      probe_body=$(curl -s --max-time 10 "${BYPASS_H[@]}" "${probe_origin}/api/public/status" 2>/dev/null) || probe_body=""
+
+      # Match the BODY, not the status code. /api/public/status resolves the
+      # tenant BEFORE it validates ref (src/app/api/public/status/route.ts),
+      # so this exact message is returned only when the host reached this app
+      # AND a tenant resolved from its subdomain. Everything that merely
+      # "responds over HTTP" is excluded by construction:
+      #
+      #   tenant host, tenant resolved  -> 400 "Query parameter 'ref' is required."
+      #   bare staging.kuunyi.com       -> 400 "Tenant could not be determined."
+      #   unassigned/misrouted domain   -> Vercel's own 404 page
+      #   deployment protection         -> HTML challenge
+      #
+      # The first two are BOTH HTTP 400, which is why an earlier version of
+      # this probe — "any status but curl's 000" — would have accepted a host
+      # with no tenant at all and failed the public tests exactly as before.
+      if [[ "$probe_body" == *"Query parameter 'ref' is required."* ]]; then
         TENANT_SUBDOMAIN="$candidate"
         break
       fi
