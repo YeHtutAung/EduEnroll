@@ -24,7 +24,7 @@ interface StatusResponse {
   status_label_en: string;
   status_label_mm: string;
   items?: CartItem[] | null;
-  org_type?: string;
+  org_type?: string | null;
   payment: {
     id: string;
     status: string;

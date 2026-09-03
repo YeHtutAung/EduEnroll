@@ -32,7 +32,7 @@ interface EnrollmentInfo {
    * later intake fetch — reading the late copy would reintroduce exactly the
    * kind of unknown-state race the ticket gating exists to close.
    */
-  org_type?: string;
+  org_type?: string | null;
   student_name_en: string;
   student_name_mm: string | null;
   class_id: string | null;
