@@ -139,7 +139,12 @@ export async function notifyEnrollmentConfirmed(enrollmentId: string): Promise<v
         .select("amount, platform_fee")
         .eq("enrollment_id", enrollmentId)
         .eq("status", "verified")
-        .order("amount", { ascending: false })
+        // attempt_seq is only unique per enrollment attempt, so more than one
+        // verified row can exist. Describe the settlement that happened last;
+        // legacy verified rows without paid_at sort last, then created_at
+        // provides a deterministic tie-break for identical paid_at values.
+        .order("paid_at", { ascending: false, nullsFirst: false })
+        .order("created_at", { ascending: false, nullsFirst: false })
         .limit(1)
         .maybeSingle()) as {
         data: { amount: number | null; platform_fee: number | null } | null;

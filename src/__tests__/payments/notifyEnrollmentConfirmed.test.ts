@@ -30,7 +30,14 @@ const enrollment = {
   form_data: null,
 };
 
-function setup(payment: { amount: number | null; platform_fee: number | null } | null) {
+type Payment = {
+  amount: number | null;
+  platform_fee: number | null;
+  paid_at: string | null;
+  created_at: string;
+};
+
+function setup(payments: Payment[]) {
   mockFrom.mockImplementation((table: string) => {
     if (table === "enrollments") {
       return { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: vi.fn().mockResolvedValue({ data: enrollment, error: null }) };
@@ -41,13 +48,32 @@ function setup(payment: { amount: number | null; platform_fee: number | null } |
     if (table === "tenants") {
       return { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: vi.fn().mockResolvedValue({ data: { name: "Louder Myanmar", org_type: "event", logo_url: null, currency: "MMK", sms_on_payment: false, subdomain: "brave" }, error: null }) };
     }
-    return {
+    const orderColumns: (keyof Payment)[] = [];
+    const paymentQuery = {
       select: vi.fn().mockReturnThis(),
       eq: vi.fn().mockReturnThis(),
-      order: vi.fn().mockReturnThis(),
+      order: vi.fn((column: keyof Payment) => {
+        orderColumns.push(column);
+        return paymentQuery;
+      }),
       limit: vi.fn().mockReturnThis(),
-      maybeSingle: vi.fn().mockResolvedValue({ data: payment, error: null }),
+      maybeSingle: vi.fn().mockImplementation(() => {
+        const selected = [...payments].sort((a, b) => {
+          for (const column of orderColumns) {
+            const aValue = a[column];
+            const bValue = b[column];
+            if (aValue == null && bValue == null) continue;
+            if (aValue == null) return 1;
+            if (bValue == null) return -1;
+            const difference = bValue.toString().localeCompare(aValue.toString());
+            if (difference !== 0) return difference;
+          }
+          return 0;
+        })[0] ?? null;
+        return Promise.resolve({ data: selected, error: null });
+      }),
     };
+    return paymentQuery;
   });
 }
 
@@ -59,7 +85,7 @@ describe("notifyEnrollmentConfirmed email totals", () => {
   });
 
   it("passes the settled payment breakdown to the confirmation email", async () => {
-    setup({ amount: 4_000, platform_fee: 2_000 });
+    setup([{ amount: 4_000, platform_fee: 2_000, paid_at: "2026-09-04T10:00:00Z", created_at: "2026-09-04T09:00:00Z" }]);
 
     await notifyEnrollmentConfirmed("enrollment-1");
 
@@ -76,7 +102,7 @@ describe("notifyEnrollmentConfirmed email totals", () => {
   });
 
   it("still sends the existing subtotal-only email when no settled payment row exists", async () => {
-    setup(null);
+    setup([]);
 
     await notifyEnrollmentConfirmed("enrollment-1");
 
@@ -89,5 +115,21 @@ describe("notifyEnrollmentConfirmed email totals", () => {
       }),
     );
     expect(mockSendEmail).toHaveBeenCalledOnce();
+  });
+
+  it("uses the most recently settled payment instead of the largest verified amount", async () => {
+    setup([
+      { amount: 6_000, platform_fee: 4_000, paid_at: "2026-09-04T09:00:00Z", created_at: "2026-09-04T08:00:00Z" },
+      { amount: 4_000, platform_fee: 2_000, paid_at: "2026-09-04T10:00:00Z", created_at: "2026-09-04T09:00:00Z" },
+    ]);
+
+    await notifyEnrollmentConfirmed("enrollment-1");
+
+    expect(mockEnrollmentApprovedEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platformFeeFormatted: "2,000 MMK",
+        totalPaidFormatted: "4,000 MMK",
+      }),
+    );
   });
 });
