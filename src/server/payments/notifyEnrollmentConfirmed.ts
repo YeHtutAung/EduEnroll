@@ -5,6 +5,7 @@ import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
 import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils";
 import { sendSms } from "@/lib/sms";
+import { buildEticketEmailAttachment } from "@/server/tickets/eticketEmailAttachment";
 
 /**
  * Best-effort customer notifications for the single settlement-transition
@@ -135,8 +136,16 @@ export async function notifyEnrollmentConfirmed(enrollmentId: string): Promise<v
       tenantName: tenantInfo?.name,
       logoUrl: tenantInfo?.logo_url ?? undefined,
     });
+    const attachment = await buildEticketEmailAttachment(enrollmentId).catch((error) => {
+      console.error("[payment-notify] e-ticket attachment failed:", error);
+      return null;
+    });
     tasks.push(
-      sendEmail({ to: enrollEmail, ...email }).catch((error) =>
+      sendEmail({
+        to: enrollEmail,
+        ...email,
+        ...(attachment ? { attachments: [attachment] } : {}),
+      }).catch((error) =>
         console.error("[payment-notify] email failed:", error),
       ),
     );

@@ -11,6 +11,7 @@ import {
 } from "@/lib/email";
 import { resolveEmailFromFormData } from "@/lib/utils";
 import type { Enrollment, Payment } from "@/types/database";
+import { buildEticketEmailAttachment } from "@/server/tickets/eticketEmailAttachment";
 
 type EnrollmentResult = { data: Enrollment | null; error: unknown };
 type PaymentResult = { data: Payment | null; error: unknown };
@@ -187,10 +188,18 @@ export async function POST(
   }
 
   // ── Send ───────────────────────────────────────────────────────────────────
+  const attachment =
+    status === "confirmed"
+      ? await buildEticketEmailAttachment(enrollment.id).catch((error) => {
+          console.error("[resend-email] e-ticket attachment failed:", error);
+          return null;
+        })
+      : null;
   const sent = await sendEmail({
     to: enrollEmail,
     subject: emailContent.subject,
     html: emailContent.html,
+    ...(attachment ? { attachments: [attachment] } : {}),
   });
 
   if (!sent) {
