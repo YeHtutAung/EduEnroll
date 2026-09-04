@@ -1590,26 +1590,26 @@ export default function PaymentInstructionsPage() {
       {isConfirmed ? (
         <>
           {/* ── Success hero ────────────────────────────────────────── */}
-          <div className="relative mb-8 overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700 px-6 py-10 text-center text-white shadow-lg">
+          <div className="relative mb-6 overflow-hidden rounded-2xl bg-gradient-to-br from-emerald-500 via-emerald-600 to-teal-700 px-5 py-5 text-center text-white shadow-lg">
             {/* Decorative circles */}
-            <div className="pointer-events-none absolute -left-8 -top-8 h-32 w-32 rounded-full bg-white/10" />
-            <div className="pointer-events-none absolute -bottom-6 -right-6 h-24 w-24 rounded-full bg-white/10" />
+            <div className="pointer-events-none absolute -left-8 -top-8 h-24 w-24 rounded-full bg-white/10" />
+            <div className="pointer-events-none absolute -bottom-6 -right-6 h-20 w-20 rounded-full bg-white/10" />
 
             <div className="relative">
-              <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-white/20 ring-4 ring-white/30">
-                <svg className="h-10 w-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-white/20 ring-4 ring-white/30">
+                <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
                 </svg>
               </div>
-              <h1 className="text-2xl font-bold tracking-tight">
+              <h1 className="text-xl font-bold tracking-tight">
                 {orgType === "event" ? "Payment Confirmed!" : "Payment Confirmed!"}
               </h1>
               {orgType !== "event" && (
-                <p className="font-myanmar mt-1 text-base text-emerald-100">
+                <p className="font-myanmar mt-1 text-sm text-emerald-100">
                   ငွေပေးချေမှု အတည်ပြုပြီး
                 </p>
               )}
-              <p className="mt-3 text-sm text-emerald-100">
+              <p className="mt-2 text-sm text-emerald-100">
                 {orgType === "event"
                   ? "Your tickets are confirmed. See you at the event!"
                   : "Your enrollment is confirmed. We look forward to seeing you!"}
@@ -1632,9 +1632,9 @@ export default function PaymentInstructionsPage() {
               if (images.length === 0) return null;
               if (images.length === 1) {
                 return (
-                  <div className="relative h-44 w-full overflow-hidden">
+                  <div className="relative h-44 w-full bg-gray-950">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={images[0].url} alt={images[0].label} className="h-full w-full object-cover" />
+                    <img src={images[0].url} alt={images[0].label} className="h-full w-full object-contain object-center" />
                     <div className="absolute inset-0 bg-gradient-to-t from-black/40 to-transparent" />
                     <span className="absolute bottom-3 left-4 rounded-full bg-black/50 px-3 py-1 text-xs font-medium text-white backdrop-blur-sm">
                       {images[0].label}
@@ -1646,9 +1646,9 @@ export default function PaymentInstructionsPage() {
               return (
                 <div className={`grid ${images.length === 2 ? "grid-cols-2" : "grid-cols-3"} gap-px bg-gray-200`}>
                   {images.map((img, i) => (
-                    <div key={i} className="relative h-36 overflow-hidden">
+                    <div key={i} className="relative h-36 bg-gray-950">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={img.url} alt={img.label} className="h-full w-full object-cover" />
+                      <img src={img.url} alt={img.label} className="h-full w-full object-contain object-center" />
                       <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
                       <span className="absolute bottom-2 left-2 right-2 truncate rounded-full bg-black/50 px-2 py-0.5 text-center text-[10px] font-medium text-white backdrop-blur-sm">
                         {img.label}
@@ -1699,9 +1699,14 @@ export default function PaymentInstructionsPage() {
                           )}
                         </div>
                       </div>
-                      <span className="text-sm font-semibold text-gray-900">
-                        {formatCurrencySimple(item.subtotal, currency)}
-                      </span>
+                      <div className="text-right">
+                        <span className="block text-sm font-semibold text-gray-900">
+                          {formatCurrencySimple(item.subtotal, currency)}
+                        </span>
+                        <span className="text-xs text-gray-400">
+                          {formatCurrencySimple(item.subtotal / item.quantity, currency)} × {item.quantity}
+                        </span>
+                      </div>
                     </div>
                   ))
                 ) : (
@@ -1722,9 +1727,14 @@ export default function PaymentInstructionsPage() {
                         )}
                       </div>
                     </div>
-                    <span className="text-sm font-semibold text-gray-900">
-                      {formatCurrencySimple(grandTotal, currency)}
-                    </span>
+                    <div className="text-right">
+                      <span className="block text-sm font-semibold text-gray-900">
+                        {formatCurrencySimple(totalFee, currency)}
+                      </span>
+                      <span className="text-xs text-gray-400">
+                        {formatCurrencySimple(enrollment.fee_amount ?? 0, currency)} × {qty}
+                      </span>
+                    </div>
                   </div>
                 )}
               </div>
@@ -1732,6 +1742,14 @@ export default function PaymentInstructionsPage() {
 
             {/* Total */}
             <div className="border-t border-gray-100 bg-gray-50/50 px-6 py-4">
+              <div className="mb-2 flex items-center justify-between text-xs text-gray-500">
+                <span>Tickets ({ticketCount})</span>
+                <span>{formatCurrencySimple(totalFee, currency)}</span>
+              </div>
+              <div className="mb-3 flex items-center justify-between text-xs text-gray-500">
+                <span>Online platform fee</span>
+                <span>{platformFee > 0 ? formatCurrencySimple(platformFee, currency) : "No fee"}</span>
+              </div>
               <div className="flex items-center justify-between">
                 <span className="text-sm font-semibold text-gray-600">Total Paid</span>
                 <span className="text-lg font-bold text-[#1a6b3c]">{formatCurrencySimple(grandTotal, currency)}</span>
