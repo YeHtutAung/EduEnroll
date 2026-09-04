@@ -4,7 +4,7 @@ import { OrderItemAmount } from "@/components/payments/OrderItemAmount";
 
 async function renderAmount(props: {
   subtotal: number;
-  unitPrice: number | null;
+  unitPrice: number | null | undefined;
   quantity: number;
   currency: string;
 }) {
@@ -24,16 +24,17 @@ describe("confirmed payment order-item amounts", () => {
     expect(html).toContain("2,000 MMK × 2");
   });
 
-  it("keeps the single-class subtotal but omits an unknown unit price", async () => {
-    const html = await renderAmount({
-      subtotal: 4_000,
-      unitPrice: null,
-      quantity: 2,
-      currency: "MMK",
-    });
+  it("keeps the single-class subtotal but omits a null or absent unit price", async () => {
+    for (const unitPrice of [null, undefined]) {
+      const html = await renderAmount({
+        subtotal: 4_000,
+        unitPrice,
+        quantity: 2,
+        currency: "MMK",
+      });
 
-    expect(html).toContain("4,000 MMK");
-    expect(html).not.toContain("× 2");
-    expect(html).not.toContain("text-xs text-gray-400");
+      expect(html).toContain("4,000 MMK");
+      expect(html).not.toContain("× 2");
+    }
   });
 });

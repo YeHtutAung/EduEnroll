@@ -7,7 +7,7 @@ export function OrderItemAmount({
   currency,
 }: {
   subtotal: number;
-  unitPrice: number | null;
+  unitPrice: number | null | undefined;
   quantity: number;
   currency: string;
 }) {
@@ -16,7 +16,7 @@ export function OrderItemAmount({
       <span className="block text-sm font-semibold text-gray-900">
         {formatCurrencySimple(subtotal, currency)}
       </span>
-      {unitPrice !== null && (
+      {unitPrice == null ? null : (
         <span className="text-xs text-gray-400">
           {formatCurrencySimple(unitPrice, currency)} × {quantity}
         </span>
