@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { tenantOrigin } from "@/lib/origin";
 import { sendEmail, enrollmentApprovedEmail } from "@/lib/email";
 import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
@@ -35,14 +36,14 @@ export async function notifyEnrollmentConfirmed(enrollmentId: string): Promise<v
     error: { message?: string } | null;
   };
   if (enrollmentError || !enrollment) {
-    console.error("[payment-notify] enrollment lookup failed:", enrollmentError?.message ?? "not found");
+    console.error(
+      "[payment-notify] enrollment lookup failed:",
+      enrollmentError?.message ?? "not found",
+    );
     return;
   }
 
-  const enrollEmail =
-    enrollment.email || resolveEmailFromFormData(enrollment.form_data);
-  const appOrigin = process.env.NEXT_PUBLIC_APP_URL ?? "https://kuunyi.com";
-  const statusUrl = `${appOrigin}/status?ref=${enrollment.enrollment_ref}`;
+  const enrollEmail = enrollment.email || resolveEmailFromFormData(enrollment.form_data);
 
   let classLevel = "Class";
   let feeFormatted: string | undefined;
@@ -85,7 +86,7 @@ export async function notifyEnrollmentConfirmed(enrollmentId: string): Promise<v
 
   const { data: tenantInfo, error: tenantError } = (await supabase
     .from("tenants")
-    .select("name, org_type, logo_url, currency, sms_on_payment")
+    .select("name, org_type, logo_url, currency, sms_on_payment, subdomain")
     .eq("id", enrollment.tenant_id)
     .single()) as {
     data: {
@@ -94,11 +95,17 @@ export async function notifyEnrollmentConfirmed(enrollmentId: string): Promise<v
       logo_url: string | null;
       currency: string;
       sms_on_payment: boolean;
+      subdomain: string | null;
     } | null;
     error: { message?: string } | null;
   };
   if (tenantError) console.error("[payment-notify] tenant lookup failed:", tenantError.message);
   if (feeFormatted && tenantInfo?.currency) feeFormatted = `${feeFormatted} ${tenantInfo.currency}`;
+
+  // Student links must be on the tenant's host so the public status API can
+  // resolve the school. The platform root (including www.kuunyi.com) has no
+  // tenant context and returns "Tenant could not be determined."
+  const statusUrl = `${tenantOrigin(tenantInfo?.subdomain)}/status?ref=${enrollment.enrollment_ref}`;
 
   const tasks: Promise<unknown>[] = [];
   if (enrollment.telegram_chat_id) {

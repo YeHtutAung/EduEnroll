@@ -20,12 +20,15 @@ export function tenantOrigin(subdomain: string | null | undefined): string {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://kuunyi.com";
   const url = new URL(appUrl);
   // Local dev / bare-IP hosts don't use tenant subdomains — return origin as-is.
-  if (
-    !subdomain ||
-    url.hostname === "localhost" ||
-    /^\d+\.\d+\.\d+\.\d+$/.test(url.hostname)
-  ) {
+  if (!subdomain || url.hostname === "localhost" || /^\d+\.\d+\.\d+\.\d+$/.test(url.hostname)) {
     return url.origin;
   }
-  return `${url.protocol}//${subdomain}.${url.host}`;
+
+  // `www` is an alias of the platform root, never part of a tenant hostname.
+  // Using it as the base would generate `school.www.kuunyi.com`, which is not
+  // a configured tenant domain. Keep platformOrigin() unchanged for callers
+  // that intentionally need the configured public host.
+  const hostname = url.hostname.replace(/^www\./i, "");
+  const host = url.port ? `${hostname}:${url.port}` : hostname;
+  return `${url.protocol}//${subdomain}.${host}`;
 }
