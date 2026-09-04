@@ -40,6 +40,7 @@ interface EnrollmentInfo {
   class_id: string | null;
   class_level: string | null;
   fee_amount: number | null;
+  unit_fee_amount?: number | null;
   fee_formatted: string | null;
   currency?: string;
   quantity: number;
@@ -1533,7 +1534,7 @@ export default function PaymentInstructionsPage() {
   const isCart = enrollment.items != null && enrollment.items.length > 0;
   const totalFee = isCart
     ? enrollment.items!.reduce((sum, i) => sum + i.subtotal, 0)
-    : (enrollment.fee_amount ?? 0) * qty;
+    : enrollment.fee_amount ?? 0;
   // Ticket subtotal above; the fee is added here from the same calculator the
   // payment routes use, so the figure shown matches what the gateway charged.
   const ticketCount = isCart
@@ -1728,7 +1729,7 @@ export default function PaymentInstructionsPage() {
                     </div>
                     <OrderItemAmount
                       subtotal={totalFee}
-                      unitPrice={enrollment.fee_amount}
+                      unitPrice={enrollment.unit_fee_amount}
                       quantity={qty}
                       currency={currency}
                     />
