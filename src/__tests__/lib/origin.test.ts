@@ -17,6 +17,11 @@ describe("tenantOrigin", () => {
     expect(tenantOrigin("nihonmoment")).toBe("https://nihonmoment.kuunyi.com");
   });
 
+  it("does not include the platform www alias in tenant URLs", () => {
+    process.env.NEXT_PUBLIC_APP_URL = "https://www.kuunyi.com";
+    expect(tenantOrigin("brave")).toBe("https://brave.kuunyi.com");
+  });
+
   it("ignores the inbound host entirely (only subdomain + configured host matter)", () => {
     process.env.NEXT_PUBLIC_APP_URL = "https://kuunyi.com";
     // No matter what an attacker sends as Host, the origin is derived from config.
