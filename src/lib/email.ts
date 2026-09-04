@@ -319,8 +319,8 @@ export function enrollmentApprovedEmail(params: {
     subject: `${l.subjectPrefix} Approved — ${enrollmentRef}`,
     html: baseLayout(`
       <div class="header">
-        <div style="width: 56px; height: 56px; border-radius: 50%; background: #dcfce7; margin: 0 auto 12px; display: flex; align-items: center; justify-content: center;">
-          <span style="font-size: 28px;">🎉</span>
+        <div style="width: 56px; height: 56px; border-radius: 50%; background: #dcfce7; margin: 0 auto 12px; text-align: center; line-height: 56px;">
+          <span style="font-size: 28px; line-height: 56px;">🎉</span>
         </div>
         <h1 style="margin: 0; font-size: 22px; color: #1a6b3c;">${l.approvedTitle}</h1>
         <p class="myanmar" style="margin: 4px 0 0; color: #6b7280;">${l.approvedTitleMm}</p>
