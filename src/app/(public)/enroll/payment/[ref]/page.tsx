@@ -8,6 +8,7 @@ import { formatCurrencySimple, formatAmount } from "@/lib/utils";
 import QRPaymentModal from "@/components/payments/QRPaymentModal";
 import PayNowQrSaveButton from "@/components/payments/PayNowQrSaveButton";
 import BrandHeader from "@/components/enrollment/BrandHeader";
+import { OrderItemAmount } from "@/components/payments/OrderItemAmount";
 import html2canvas from "html2canvas";
 import { buildTicketPdf } from "@/lib/tickets/render/ticketPdf";
 import { buildQrMap } from "@/lib/tickets/render/ticketPng";
@@ -1699,14 +1700,12 @@ export default function PaymentInstructionsPage() {
                           )}
                         </div>
                       </div>
-                      <div className="text-right">
-                        <span className="block text-sm font-semibold text-gray-900">
-                          {formatCurrencySimple(item.subtotal, currency)}
-                        </span>
-                        <span className="text-xs text-gray-400">
-                          {formatCurrencySimple(item.subtotal / item.quantity, currency)} × {item.quantity}
-                        </span>
-                      </div>
+                      <OrderItemAmount
+                        subtotal={item.subtotal}
+                        unitPrice={item.fee_amount}
+                        quantity={item.quantity}
+                        currency={currency}
+                      />
                     </div>
                   ))
                 ) : (
@@ -1727,14 +1726,12 @@ export default function PaymentInstructionsPage() {
                         )}
                       </div>
                     </div>
-                    <div className="text-right">
-                      <span className="block text-sm font-semibold text-gray-900">
-                        {formatCurrencySimple(totalFee, currency)}
-                      </span>
-                      <span className="text-xs text-gray-400">
-                        {formatCurrencySimple(enrollment.fee_amount ?? 0, currency)} × {qty}
-                      </span>
-                    </div>
+                    <OrderItemAmount
+                      subtotal={totalFee}
+                      unitPrice={enrollment.fee_amount}
+                      quantity={qty}
+                      currency={currency}
+                    />
                   </div>
                 )}
               </div>
