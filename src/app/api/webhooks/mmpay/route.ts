@@ -7,6 +7,7 @@ import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
 import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils";
 import { sendSms } from "@/lib/sms";
+import { buildEticketEmailAttachment } from "@/server/tickets/eticketEmailAttachment";
 
 // ─── POST /api/webhooks/mmpay ─────────────────────────────────
 // MyanMyanPay webhook callback handler.
@@ -198,8 +199,16 @@ export async function POST(request: NextRequest) {
           tenantName: tenantInfo?.name,
           logoUrl: tenantInfo?.logo_url ?? undefined,
         });
+        const attachment = await buildEticketEmailAttachment(payment.enrollment_id).catch((err) => {
+          console.error("[mmqr-webhook] e-ticket attachment failed:", err);
+          return null;
+        });
         notifyTasks.push(
-          sendEmail({ to: enrollEmail, ...emailData }).catch((err) => {
+          sendEmail({
+            to: enrollEmail,
+            ...emailData,
+            ...(attachment ? { attachments: [attachment] } : {}),
+          }).catch((err) => {
             console.error("[mmqr-webhook] Approval email failed:", err);
           }),
         );

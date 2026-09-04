@@ -11,13 +11,20 @@ function getResend() {
 
 // ─── Send email helper ──────────────────────────────────────────────────────
 
+export type EmailAttachment = {
+  filename: string;
+  /** Base64-encoded content accepted by Resend's attachment API. */
+  content: string;
+};
+
 interface SendEmailParams {
   to: string;
   subject: string;
   html: string;
+  attachments?: EmailAttachment[];
 }
 
-export async function sendEmail({ to, subject, html }: SendEmailParams): Promise<boolean> {
+export async function sendEmail({ to, subject, html, attachments }: SendEmailParams): Promise<boolean> {
   if (!process.env.RESEND_API_KEY) {
     console.warn("[email] RESEND_API_KEY not set — skipping email send.");
     return false;
@@ -29,6 +36,7 @@ export async function sendEmail({ to, subject, html }: SendEmailParams): Promise
       to,
       subject,
       html,
+      attachments,
     });
 
     if (error) {
