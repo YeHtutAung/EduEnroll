@@ -59,6 +59,12 @@ interface OrgLabels {
   itemLabelMm: string;
   feeLabel: string;
   feeLabelMm: string;
+  ticketSubtotalLabel: string;
+  ticketSubtotalLabelMm: string;
+  platformFeeLabel: string;
+  platformFeeLabelMm: string;
+  totalPaidLabel: string;
+  totalPaidLabelMm: string;
   enrollLabel: string;
   enrollLabelMm: string;
   confirmedTitle: string;
@@ -79,6 +85,12 @@ const ORG_LABELS: Record<OrgType, OrgLabels> = {
     itemLabelMm: "အဆင့်",
     feeLabel: "Fee",
     feeLabelMm: "ကျောင်းလခ",
+    ticketSubtotalLabel: "Classes",
+    ticketSubtotalLabelMm: "အတန်းများ",
+    platformFeeLabel: "Online platform fee",
+    platformFeeLabelMm: "အွန်လိုင်း ဝန်ဆောင်ခ",
+    totalPaidLabel: "Total paid",
+    totalPaidLabelMm: "စုစုပေါင်း ပေးချေငွေ",
     enrollLabel: "Enrollment",
     enrollLabelMm: "စာရင်းသွင်းမှု",
     confirmedTitle: "Enrollment Successful!",
@@ -97,6 +109,12 @@ const ORG_LABELS: Record<OrgType, OrgLabels> = {
     itemLabelMm: "လက်မှတ်",
     feeLabel: "Price",
     feeLabelMm: "စျေးနှုန်း",
+    ticketSubtotalLabel: "Tickets",
+    ticketSubtotalLabelMm: "လက်မှတ်များ",
+    platformFeeLabel: "Online platform fee",
+    platformFeeLabelMm: "အွန်လိုင်း ဝန်ဆောင်ခ",
+    totalPaidLabel: "Total paid",
+    totalPaidLabelMm: "စုစုပေါင်း ပေးချေငွေ",
     enrollLabel: "Order",
     enrollLabelMm: "အော်ဒါ",
     confirmedTitle: "Purchase Successful!",
@@ -115,6 +133,12 @@ const ORG_LABELS: Record<OrgType, OrgLabels> = {
     itemLabelMm: "သင်တန်း",
     feeLabel: "Fee",
     feeLabelMm: "သင်တန်းကြေး",
+    ticketSubtotalLabel: "Courses",
+    ticketSubtotalLabelMm: "သင်တန်းများ",
+    platformFeeLabel: "Online platform fee",
+    platformFeeLabelMm: "အွန်လိုင်း ဝန်ဆောင်ခ",
+    totalPaidLabel: "Total paid",
+    totalPaidLabelMm: "စုစုပေါင်း ပေးချေငွေ",
     enrollLabel: "Enrollment",
     enrollLabelMm: "စာရင်းသွင်းမှု",
     confirmedTitle: "Enrollment Successful!",
@@ -288,11 +312,28 @@ export function enrollmentApprovedEmail(params: {
   classLevel: string;
   statusUrl: string;
   feeFormatted?: string;
+  ticketSubtotalFormatted?: string;
+  platformFeeFormatted?: string;
+  totalPaidFormatted?: string;
+  ticketCount?: number;
   orgType?: string;
   tenantName?: string;
   logoUrl?: string;
 }): { subject: string; html: string } {
-  const { studentName, enrollmentRef, classLevel, statusUrl, feeFormatted, orgType, tenantName, logoUrl } = params;
+  const {
+    studentName,
+    enrollmentRef,
+    classLevel,
+    statusUrl,
+    feeFormatted,
+    ticketSubtotalFormatted,
+    platformFeeFormatted,
+    totalPaidFormatted,
+    ticketCount,
+    orgType,
+    tenantName,
+    logoUrl,
+  } = params;
   const l = getLabels(orgType);
 
   // Build ticket items as numbered list for alert box + individual rows for info section
@@ -323,6 +364,22 @@ export function enrollmentApprovedEmail(params: {
       </div>`
     : "";
 
+  const paymentRows = ticketSubtotalFormatted && platformFeeFormatted && totalPaidFormatted
+    ? `
+        <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f3f4f6; font-size: 14px;">
+          <span style="color: #6b7280; min-width: 100px;">${l.ticketSubtotalLabel}${ticketCount != null ? ` (${ticketCount})` : ""}<br /><span style="font-family: 'Noto Sans Myanmar', sans-serif; font-size: 12px; color: #9ca3af;">${l.ticketSubtotalLabelMm}</span></span>
+          <span style="font-weight: 600; color: #1f2937; text-align: right;">${ticketSubtotalFormatted}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #f3f4f6; font-size: 14px;">
+          <span style="color: #6b7280; min-width: 100px;">${l.platformFeeLabel}<br /><span style="font-family: 'Noto Sans Myanmar', sans-serif; font-size: 12px; color: #9ca3af;">${l.platformFeeLabelMm}</span></span>
+          <span style="font-weight: 600; color: #1f2937; text-align: right;">${platformFeeFormatted}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 14px;">
+          <span style="font-weight: 600; color: #374151; min-width: 100px;">${l.totalPaidLabel}<br /><span style="font-family: 'Noto Sans Myanmar', sans-serif; font-size: 12px; color: #6b7280;">${l.totalPaidLabelMm}</span></span>
+          <span style="font-weight: 700; color: #1a6b3c; text-align: right;">${totalPaidFormatted}</span>
+        </div>`
+    : feeRow;
+
   return {
     subject: `${l.subjectPrefix} Approved — ${enrollmentRef}`,
     html: baseLayout(`
@@ -350,7 +407,7 @@ export function enrollmentApprovedEmail(params: {
           <span style="font-weight: 600; color: #1f2937; text-align: right; font-family: monospace;">${enrollmentRef}</span>
         </div>
         ${ticketRows}
-        ${feeRow}
+        ${paymentRows}
       </div>
 
       <div style="text-align: center; margin: 24px 0;">
