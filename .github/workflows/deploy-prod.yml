@@ -1,7 +1,26 @@
 # ─── KuuNyi Production Deploy Gate ─────────────────────────────────
 # Runs when main is updated (merge from staging).
-# Vercel auto-deploys main to production — this workflow runs a
-# post-deploy health check to verify the deploy succeeded.
+# Vercel auto-deploys main to production — this workflow verifies that the
+# deploy actually reached the production DOMAIN, not merely that something
+# is answering there.
+#
+# Why the version comparison exists:
+#
+# On 2026-09-03 the staging->main promotion merged, Vercel built a production
+# deployment successfully, and this workflow reported "✅ Production deploy
+# successful" — while www.kuunyi.com went on serving a build from 2026-08-02.
+# The new deployment was never aliased to the custom domain, so the release
+# silently did not take effect and nothing flagged it.
+#
+# The old check could not have caught that. It asserted only that the URL
+# returned 200-399. Two separate reasons that always passes:
+#   - the previous (stale) deployment answers 200 perfectly well; and
+#   - the apex 307s to www, and without -L curl reports the 307 itself, so
+#     the check passed without ever reaching the application at all.
+#
+# So this compares the SHA the app reports against the SHA being deployed.
+# /api/health returns VERCEL_GIT_COMMIT_SHA.slice(0, 7), which is exactly
+# GITHUB_SHA's first 7 characters for a push build.
 
 name: Production Deploy
 
@@ -14,24 +33,49 @@ jobs:
     name: Post-Deploy Health Check
     runs-on: ubuntu-latest
     steps:
-      - name: Wait for Vercel production deploy
-        run: sleep 60
-
-      - name: Check production is reachable
+      - name: Verify production is serving THIS commit
+        env:
+          PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
         run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.PRODUCTION_URL }}")
-          echo "Production returned HTTP ${STATUS}"
-          if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 400 ]; then
-            echo "Production is healthy."
-          else
-            echo "ERROR: Production returned ${STATUS}"
-            exit 1
-          fi
+          EXPECTED="${GITHUB_SHA:0:7}"
+          echo "Expecting production to serve version ${EXPECTED}"
 
-      - name: Check public enrollment API
+          # -L is required: the apex 307s to www, and without it curl reports
+          # the redirect rather than the application's response.
+          BODY=""
+          for i in $(seq 1 30); do
+            BODY=$(curl -sL --max-time 20 "${PRODUCTION_URL}/api/health" 2>/dev/null || echo "")
+            ACTUAL=$(printf '%s' "$BODY" | jq -r '.version // empty' 2>/dev/null || echo "")
+            echo "  attempt ${i}/30: serving '${ACTUAL:-<no version>}'"
+
+            if [ -n "$ACTUAL" ] && [ "$ACTUAL" = "$EXPECTED" ]; then
+              echo ""
+              echo "Production is serving ${EXPECTED}."
+              exit 0
+            fi
+            sleep 10
+          done
+
+          echo ""
+          echo "ERROR: production never served ${EXPECTED} (waited ~5 minutes)."
+          echo "Last /api/health response: ${BODY:-<empty>}"
+          echo ""
+          echo "The merge landed and Vercel may well have built successfully."
+          echo "The usual cause is that the production DOMAIN is still aliased"
+          echo "to an older deployment, so customers remain on the old build."
+          echo "Check: vercel ls edu-enroll --environment production"
+          echo "       vercel inspect <deployment-url>   # look at its Aliases"
+          exit 1
+
+      - name: Check public enrollment API responds
+        env:
+          PRODUCTION_URL: ${{ secrets.PRODUCTION_URL }}
         run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${{ secrets.PRODUCTION_URL }}/api/public/enroll/april-2026")
+          STATUS=$(curl -sL -o /dev/null -w "%{http_code}" --max-time 20 \
+            "${PRODUCTION_URL}/api/public/enroll/april-2026")
           echo "Public enrollment API returned HTTP ${STATUS}"
+          # A 404 is fine — the intake need not exist. A 5xx is not: it means
+          # the deployment is serving but the application is erroring.
           if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 500 ]; then
             echo "API is responding."
           else
@@ -48,8 +92,8 @@ jobs:
       - name: Report result
         run: |
           if [ "${{ needs.health-check.result }}" == "success" ]; then
-            echo "✅ Production deploy successful"
+            echo "✅ Production deploy verified — the domain is serving this commit"
           else
-            echo "❌ Production deploy may have issues — check manually"
+            echo "❌ Production deploy NOT verified — customers may still be on the old build"
             exit 1
           fi
