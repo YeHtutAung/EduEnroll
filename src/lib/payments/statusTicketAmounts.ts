@@ -1,5 +1,23 @@
 type CartItem = { subtotal: number };
 
+export type StatusTicketSubtotalInput = {
+  items: CartItem[] | null | undefined;
+  fee_amount: number | null;
+  quantity: number | null | undefined;
+};
+
+/**
+ * Ticket subtotal displayed for a public status response.
+ *
+ * A single-class response's `fee_amount` is already its line total, so
+ * `quantity` deliberately does not participate in that branch.
+ */
+export function ticketSubtotal({ items, fee_amount }: StatusTicketSubtotalInput): number {
+  return items && items.length > 0
+    ? items.reduce((sum, item) => sum + item.subtotal, 0)
+    : fee_amount ?? 0;
+}
+
 /**
  * Values exposed by the public status endpoint.
  *
@@ -13,7 +31,7 @@ export function statusTicketAmounts(
 ): { feeAmount: number | null; unitFeeAmount: number | null } {
   if (cartItems && cartItems.length > 0) {
     return {
-      feeAmount: cartItems.reduce((sum, item) => sum + item.subtotal, 0),
+      feeAmount: ticketSubtotal({ items: cartItems, fee_amount: null, quantity: null }),
       unitFeeAmount: null,
     };
   }

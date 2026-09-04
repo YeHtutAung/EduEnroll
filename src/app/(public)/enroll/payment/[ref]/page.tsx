@@ -17,6 +17,7 @@ import type { QrMap, TicketData, TicketRenderContext } from "@/lib/tickets/rende
 import type { SponsorPlacements } from "@/types/database";
 import { jsPDF } from "jspdf";
 import { computePlatformFee, displayTotals } from "@/server/payments/platformFee";
+import { ticketSubtotal } from "@/lib/payments/statusTicketAmounts";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CartItem {
@@ -1532,9 +1533,11 @@ export default function PaymentInstructionsPage() {
   const qty = enrollment.quantity ?? 1;
   const currency = enrollment.currency ?? "MMK";
   const isCart = enrollment.items != null && enrollment.items.length > 0;
-  const totalFee = isCart
-    ? enrollment.items!.reduce((sum, i) => sum + i.subtotal, 0)
-    : enrollment.fee_amount ?? 0;
+  const totalFee = ticketSubtotal({
+    items: enrollment.items,
+    fee_amount: enrollment.fee_amount,
+    quantity: qty,
+  });
   // Ticket subtotal above; the fee is added here from the same calculator the
   // payment routes use, so the figure shown matches what the gateway charged.
   const ticketCount = isCart
