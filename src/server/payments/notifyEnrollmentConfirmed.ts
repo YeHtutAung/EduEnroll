@@ -5,6 +5,7 @@ import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
 import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils";
 import { sendSms } from "@/lib/sms";
+import { buildEticketEmailAttachment } from "@/server/tickets/eticketEmailAttachment";
 
 /**
  * Best-effort customer notifications for the single settlement-transition
@@ -47,6 +48,7 @@ export async function notifyEnrollmentConfirmed(enrollmentId: string): Promise<v
 
   let classLevel = "Class";
   let feeFormatted: string | undefined;
+  let ticketCount: number | undefined;
   const isCart = enrollment.class_id === null;
 
   if (isCart) {
@@ -66,6 +68,7 @@ export async function notifyEnrollmentConfirmed(enrollmentId: string): Promise<v
         .join(", ");
       const total = items.reduce((sum, item) => sum + item.fee_amount * item.quantity, 0);
       feeFormatted = String(total).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      ticketCount = items.reduce((sum, item) => sum + item.quantity, 0);
     }
   } else {
     const { data: cls, error: classError } = (await supabase
@@ -81,6 +84,7 @@ export async function notifyEnrollmentConfirmed(enrollmentId: string): Promise<v
       classLevel = cls.level;
       const total = cls.fee_amount * (enrollment.quantity ?? 1);
       feeFormatted = String(total).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+      ticketCount = enrollment.quantity ?? 1;
     }
   }
 
@@ -125,18 +129,66 @@ export async function notifyEnrollmentConfirmed(enrollmentId: string): Promise<v
   }
 
   if (enrollEmail) {
+    let ticketSubtotalFormatted: string | undefined;
+    let platformFeeFormatted: string | undefined;
+    let totalPaidFormatted: string | undefined;
+
+    try {
+      const { data: payment, error: paymentError } = (await supabase
+        .from("payments")
+        .select("amount, platform_fee")
+        .eq("enrollment_id", enrollmentId)
+        .eq("status", "verified")
+        // attempt_seq is only unique per enrollment attempt, so more than one
+        // verified row can exist. Describe the settlement that happened last;
+        // legacy verified rows without paid_at sort last, then created_at
+        // provides a deterministic tie-break for identical paid_at values.
+        .order("paid_at", { ascending: false, nullsFirst: false })
+        .order("created_at", { ascending: false, nullsFirst: false })
+        .limit(1)
+        .maybeSingle()) as {
+        data: { amount: number | null; platform_fee: number | null } | null;
+        error: { message?: string } | null;
+      };
+
+      if (paymentError) {
+        console.error("[payment-notify] settled payment lookup failed:", paymentError.message);
+      } else if (payment && payment.amount != null && payment.platform_fee != null && feeFormatted) {
+        const currency = tenantInfo?.currency ?? "MMK";
+        ticketSubtotalFormatted = feeFormatted;
+        platformFeeFormatted = payment.platform_fee > 0
+          ? `${String(payment.platform_fee).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} ${currency}`
+          : "No fee";
+        totalPaidFormatted = `${String(payment.amount).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} ${currency}`;
+      }
+    } catch (error) {
+      console.error("[payment-notify] settled payment lookup failed:", error);
+    }
+
     const email = enrollmentApprovedEmail({
       studentName: enrollment.student_name_en || "Student",
       enrollmentRef: enrollment.enrollment_ref,
       classLevel,
       statusUrl,
       feeFormatted,
+      ticketSubtotalFormatted,
+      platformFeeFormatted,
+      totalPaidFormatted,
+      ticketCount,
       orgType: tenantInfo?.org_type,
       tenantName: tenantInfo?.name,
       logoUrl: tenantInfo?.logo_url ?? undefined,
     });
+    const attachment = await buildEticketEmailAttachment(enrollmentId).catch((error) => {
+      console.error("[payment-notify] e-ticket attachment failed:", error);
+      return null;
+    });
     tasks.push(
-      sendEmail({ to: enrollEmail, ...email }).catch((error) =>
+      sendEmail({
+        to: enrollEmail,
+        ...email,
+        ...(attachment ? { attachments: [attachment] } : {}),
+      }).catch((error) =>
         console.error("[payment-notify] email failed:", error),
       ),
     );

@@ -13,6 +13,12 @@ vi.mock("@/lib/email", () => ({
   enrollmentApprovedEmail: (...args: unknown[]) => mockEnrollmentApprovedEmail(...args),
 }));
 
+const mockBuildEticketEmailAttachment = vi.fn().mockResolvedValue(null);
+
+vi.mock("@/server/tickets/eticketEmailAttachment", () => ({
+  buildEticketEmailAttachment: (...args: unknown[]) => mockBuildEticketEmailAttachment(...args),
+}));
+
 const mockSendSms = vi.fn().mockResolvedValue(true);
 
 vi.mock("@/lib/sms", () => ({
@@ -73,6 +79,7 @@ describe("dispatchPaymentApproved", () => {
     vi.clearAllMocks();
     mockSendEmail.mockResolvedValue(true);
     mockEnrollmentApprovedEmail.mockReturnValue({ subject: "Approved", html: "<p>ok</p>" });
+    mockBuildEticketEmailAttachment.mockResolvedValue(null);
     mockSendSms.mockResolvedValue(true);
     mockSendStatusNotification.mockResolvedValue(true);
     mockSendTelegramStatusNotification.mockResolvedValue(true);
@@ -119,6 +126,22 @@ describe("dispatchPaymentApproved", () => {
       subject: "Enrollment Approved — NM-2026-0001",
       html: "<p>Approved</p>",
     });
+  });
+
+  it("attaches the issued e-ticket PDF when one is available", async () => {
+    mockBuildEticketEmailAttachment.mockResolvedValue({
+      filename: "eticket-NM-2026-0001.pdf",
+      content: "cGRm",
+    });
+
+    await dispatchPaymentApproved(BASE_INPUT);
+
+    expect(mockBuildEticketEmailAttachment).toHaveBeenCalledWith("enroll-1");
+    expect(mockSendEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        attachments: [{ filename: "eticket-NM-2026-0001.pdf", content: "cGRm" }],
+      }),
+    );
   });
 
   it("calls sendSms with correct params", async () => {

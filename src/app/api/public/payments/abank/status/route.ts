@@ -6,6 +6,8 @@ import { sendEmail, enrollmentApprovedEmail } from "@/lib/email";
 import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
 import { resolveEmailFromFormData } from "@/lib/utils";
+import { issueTicketsForEnrollment } from "@/server/tickets/issueTickets";
+import { buildEticketEmailAttachment } from "@/server/tickets/eticketEmailAttachment";
 
 // ─── GET /api/public/payments/abank/status?ref=AB-xxx ───────────────────────
 // Polls ABank enquiry API and updates local payment record.
@@ -75,6 +77,12 @@ export async function GET(request: NextRequest) {
         .from("enrollments")
         .update({ status: "confirmed" } as never)
         .eq("id", payment.enrollment_id);
+
+      try {
+        await issueTicketsForEnrollment(payment.enrollment_id);
+      } catch (err) {
+        console.error("[abank-status] issueTicketsForEnrollment failed:", err);
+      }
 
       // Send notifications (best-effort)
       const { data: enrollment } = (await supabase
@@ -189,8 +197,16 @@ export async function GET(request: NextRequest) {
             tenantName: tenantInfo?.name,
             logoUrl: tenantInfo?.logo_url ?? undefined,
           });
+          const attachment = await buildEticketEmailAttachment(payment.enrollment_id).catch((err) => {
+            console.error("[abank-status] e-ticket attachment failed:", err);
+            return null;
+          });
           notifyTasks.push(
-            sendEmail({ to: enrollEmail, ...emailData }).catch((err) => {
+            sendEmail({
+              to: enrollEmail,
+              ...emailData,
+              ...(attachment ? { attachments: [attachment] } : {}),
+            }).catch((err) => {
               console.error("[abank-status] Approval email failed:", err);
             }),
           );
