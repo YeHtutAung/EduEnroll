@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, badRequest, notFound } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { tenantOrigin } from "@/lib/origin";
+import { tenantLinkOrigin } from "@/lib/origin";
 import {
   sendEmail,
   enrollmentApprovedEmail,
@@ -106,7 +106,7 @@ export async function POST(
     totalFee = (cls?.fee_amount ?? 0) * (enrollment.quantity ?? 1);
   }
 
-  const base = tenantOrigin(tenantInfo?.subdomain);
+  const base = tenantLinkOrigin(tenantInfo?.subdomain);
   const statusUrl = `${base}/status?ref=${enrollment.enrollment_ref}`;
   const paymentUrl = `${base}/enroll/payment/${enrollment.enrollment_ref}`;
   const feeFormatted =

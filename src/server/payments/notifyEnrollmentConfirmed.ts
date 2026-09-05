@@ -1,5 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import { tenantOrigin } from "@/lib/origin";
+import { tenantLinkOrigin } from "@/lib/origin";
 import { sendEmail, enrollmentApprovedEmail } from "@/lib/email";
 import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
@@ -109,7 +109,7 @@ export async function notifyEnrollmentConfirmed(enrollmentId: string): Promise<v
   // Student links must be on the tenant's host so the public status API can
   // resolve the school. The platform root (including www.kuunyi.com) has no
   // tenant context and returns "Tenant could not be determined."
-  const statusUrl = `${tenantOrigin(tenantInfo?.subdomain)}/status?ref=${enrollment.enrollment_ref}`;
+  const statusUrl = `${tenantLinkOrigin(tenantInfo?.subdomain)}/status?ref=${enrollment.enrollment_ref}`;
 
   const tasks: Promise<unknown>[] = [];
   if (enrollment.telegram_chat_id) {

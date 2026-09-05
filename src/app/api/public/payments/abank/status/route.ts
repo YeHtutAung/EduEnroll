@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { tenantOrigin } from "@/lib/origin";
+import { tenantLinkOrigin } from "@/lib/origin";
 import abank from "@/lib/abank";
 import { sendEmail, enrollmentApprovedEmail } from "@/lib/email";
 import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
@@ -112,7 +112,7 @@ export async function GET(request: NextRequest) {
           .select("subdomain")
           .eq("id", enrollment.tenant_id)
           .single()) as { data: { subdomain: string | null } | null; error: unknown };
-        const statusUrl = `${tenantOrigin(originRow?.subdomain)}/status?ref=${enrollment.enrollment_ref}`;
+        const statusUrl = `${tenantLinkOrigin(originRow?.subdomain)}/status?ref=${enrollment.enrollment_ref}`;
 
         // Resolve class level
         let classLevel = "Ticket";

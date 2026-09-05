@@ -64,6 +64,7 @@ vi.mock("@/lib/hitpay", () => ({
 vi.mock("@/lib/api", () => ({ resolveTenantId: async () => "tenant-1" }));
 vi.mock("@/lib/origin", () => ({
   tenantOrigin: () => "https://t.example",
+  tenantLinkOrigin: () => "https://t.example",
   platformOrigin: () => "https://example",
 }));
 

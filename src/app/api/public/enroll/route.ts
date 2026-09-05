@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
-import { tenantOrigin } from "@/lib/origin";
+import { tenantLinkOrigin } from "@/lib/origin";
 import { createEnrollment } from "@/server/enrollment/createEnrollment";
 import { createCartEnrollment } from "@/server/enrollment/createCartEnrollment";
 import { hashPriorityToken } from "@/lib/interest/token";
@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
         )
         .join(", "),
       feeAmount: result.total_fee,
-      baseUrl: tenantOrigin(tenantInfo?.subdomain),
+      baseUrl: tenantLinkOrigin(tenantInfo?.subdomain),
       tenant: tenantInfo ?? { name: "", org_type: "", logo_url: null, email_on_enroll: false, currency },
     });
 
@@ -133,7 +133,7 @@ export async function POST(request: NextRequest) {
     enrollmentRef: result.enrollment_ref,
     classLevel: result.class_level,
     feeAmount: result.fee_amount * (result.quantity ?? 1),
-    baseUrl: tenantOrigin(tenantInfo?.subdomain),
+    baseUrl: tenantLinkOrigin(tenantInfo?.subdomain),
     tenant: tenantInfo ?? { name: "", org_type: "", logo_url: null, email_on_enroll: false, currency },
   });
 
