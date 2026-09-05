@@ -3,6 +3,7 @@ import { sendSms } from "@/lib/sms";
 import { sendStatusNotification } from "@/lib/messenger/notify";
 import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
+import { buildEticketEmailAttachment } from "@/server/tickets/eticketEmailAttachment";
 
 export interface ApprovalNotificationInput {
   tenantId: string;
@@ -46,8 +47,16 @@ export async function dispatchPaymentApproved(input: ApprovalNotificationInput):
       tenantName: input.tenantName,
       logoUrl: input.logoUrl,
     });
+    const attachment = await buildEticketEmailAttachment(input.enrollmentId).catch((err) => {
+      console.error("[dispatchPaymentApproved] e-ticket attachment failed:", err);
+      return null;
+    });
     tasks.push(
-      sendEmail({ to: input.email, ...emailData }).catch((err) => {
+      sendEmail({
+        to: input.email,
+        ...emailData,
+        ...(attachment ? { attachments: [attachment] } : {}),
+      }).catch((err) => {
         console.error("[dispatchPaymentApproved] Email failed:", err);
       }),
     );

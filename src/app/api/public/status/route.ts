@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
+import { statusTicketAmounts } from "@/lib/payments/statusTicketAmounts";
 import type { Enrollment, Class, Intake, Payment } from "@/types/database";
 import type { EnrollmentStatus, PaymentStatus } from "@/types/database";
 
@@ -72,7 +73,8 @@ type PaymentResult    = { data: Pick<Payment, "id" | "status" | "created_at" | "
 //   student_name_en:    "Mg Mg"
 //   student_name_mm:    "မောင်မောင်" | null
 //   class_level:        "N5"
-//   fee_amount:            300000
+//   fee_amount:         300000 // ticket line total
+//   unit_fee_amount:    150000 // single-class unit price, otherwise null
 //   fee_formatted:      "၃၀၀,၀၀၀ MMK"
 //   status:             "payment_submitted"
 //   status_label_en:    "Payment Under Review"
@@ -127,7 +129,6 @@ export async function GET(request: NextRequest) {
 
   // ── Fetch enrollment items for cart enrollments ──────────────────
   let cartItems: { class_level: string; quantity: number; fee_amount: number; subtotal: number; image_url: string | null }[] | null = null;
-  let cartTotalFee: number | null = null;
   let cartIntakeInfo: Pick<Intake, "name" | "year" | "slug"> | null = null;
 
   if (enrollment.class_id === null) {
@@ -147,8 +148,6 @@ export async function GET(request: NextRequest) {
         subtotal: i.fee_amount * i.quantity,
         image_url: i.classes?.image_url ?? null,
       }));
-      cartTotalFee = cartItems.reduce((sum, i) => sum + i.subtotal, 0);
-
       // Get intake info from first cart item (all items share the same intake)
       const firstIntake = items[0]?.classes?.intakes;
       if (firstIntake && !enrollment.classes?.intakes) {
@@ -184,10 +183,14 @@ export async function GET(request: NextRequest) {
     ? (intakeInfo.slug ?? `${intakeInfo.name.toLowerCase().replace(/\s+/g, "-")}-${intakeInfo.year}`)
     : null;
 
-  // For cart enrollments, use cart total; for single, use class fee * qty
-  const displayFee = cartTotalFee ?? (enrollment.classes?.fee_amount != null
-    ? enrollment.classes.fee_amount * (enrollment.quantity ?? 1)
-    : null);
+  // `feeAmount` is the ticket line total in either shape. Single-class
+  // responses also carry their unit price explicitly, rather than making a
+  // client recover it by dividing the total by quantity.
+  const { feeAmount: displayFee, unitFeeAmount } = statusTicketAmounts(
+    cartItems,
+    enrollment.classes?.fee_amount ?? null,
+    enrollment.quantity,
+  );
 
   // ── Fetch tenant org_type ─────────────────────────────────────
   const { data: tenantInfo, error: tenantError } = await supabase
@@ -216,6 +219,7 @@ export async function GET(request: NextRequest) {
                         ? cartItems.map((i) => i.class_level).join(", ")
                         : (enrollment.classes?.level ?? null),
     fee_amount:          displayFee,
+    unit_fee_amount:     unitFeeAmount,
     fee_formatted:    displayFee != null ? formatCurrency(displayFee, tenantInfo?.currency || "MMK") : null,
     currency:         tenantInfo?.currency || "MMK",
     quantity:          enrollment.quantity ?? 1,
