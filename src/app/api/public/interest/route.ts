@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
-import { tenantOrigin } from "@/lib/origin";
+import { tenantLinkOrigin } from "@/lib/origin";
 import { hashIp } from "@/lib/interest/ipHash";
 import { registerInterest } from "@/server/interest/registerInterest";
 import type { Intake } from "@/types/database";
@@ -255,7 +255,7 @@ export async function POST(request: NextRequest) {
   // the inbound Host header — see @/lib/origin. The token is appended by
   // registerInterest as `#pa=<token>`; a fragment never reaches the server, so
   // it stays out of request logs and Referer headers.
-  const linkBase = `${tenantOrigin(tenantRow?.subdomain)}/enroll/${intakeRow.slug}`;
+  const linkBase = `${tenantLinkOrigin(tenantRow?.subdomain)}/enroll/${intakeRow.slug}`;
 
   const result = await registerInterest({
     intakeId: intakeRow.id,

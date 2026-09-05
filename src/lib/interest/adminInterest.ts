@@ -26,7 +26,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { mintPriorityToken } from "@/lib/interest/token";
-import { tenantOrigin } from "@/lib/origin";
+import { tenantLinkOrigin } from "@/lib/origin";
 import {
   interestConfirmationEmail,
   priorityWindowReminderEmail,
@@ -146,7 +146,7 @@ export async function loadInterestEmailContext(
     intake,
     // Built from the tenant's own subdomain plus the configured app host, never
     // the inbound Host header — see @/lib/origin.
-    linkBase: `${tenantOrigin(tenant?.subdomain)}/enroll/${intake.slug}`,
+    linkBase: `${tenantLinkOrigin(tenant?.subdomain)}/enroll/${intake.slug}`,
     windowOpensAt: intake.priority_open_at
       ? formatWindowOpensAt(intake.priority_open_at)
       : "a date that has not been scheduled yet",

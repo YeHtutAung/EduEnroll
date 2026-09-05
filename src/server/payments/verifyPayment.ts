@@ -1,5 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import { tenantOrigin } from "@/lib/origin";
+import { tenantLinkOrigin } from "@/lib/origin";
 import { issueTicketsForEnrollment } from "@/server/tickets/issueTickets";
 import type { Enrollment, Payment, PaymentStatus, EnrollmentStatus } from "@/types/database";
 
@@ -48,7 +48,7 @@ export async function verifyPayment(input: VerifyPaymentInput): Promise<VerifyPa
 
   const admin = createAdminClient();
   const now = new Date().toISOString();
-  const base = tenantOrigin(tenantInfo.subdomain);
+  const base = tenantLinkOrigin(tenantInfo.subdomain);
   const statusUrl = `${base}/status?ref=${enrollment.enrollment_ref}`;
   const paymentUrl = `${base}/enroll/payment/${enrollment.enrollment_ref}`;
 
