@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { tenantOrigin, platformOrigin } from "@/lib/origin";
+import { tenantOrigin, tenantLinkOrigin, platformOrigin } from "@/lib/origin";
 
 const original = process.env.NEXT_PUBLIC_APP_URL;
 
@@ -68,5 +68,41 @@ describe("platformOrigin", () => {
   // onto tenant-controlled DNS. platformOrigin takes no tenant, so it can't.
   it("takes no tenant argument", () => {
     expect(platformOrigin.length).toBe(0);
+  });
+});
+
+describe("tenantLinkOrigin — branded links for students", () => {
+  const saved = process.env.TENANT_CUSTOM_DOMAINS;
+  afterEach(() => {
+    if (saved === undefined) delete process.env.TENANT_CUSTOM_DOMAINS;
+    else process.env.TENANT_CUSTOM_DOMAINS = saved;
+  });
+
+  it("uses the tenant's custom domain when one is configured", () => {
+    process.env.TENANT_CUSTOM_DOMAINS = '{"loudermyanmar.com":"brave"}';
+    expect(tenantLinkOrigin("brave")).toBe("https://loudermyanmar.com");
+  });
+
+  it("falls back to the canonical subdomain for a tenant with no custom domain", () => {
+    process.env.TENANT_CUSTOM_DOMAINS = '{"loudermyanmar.com":"brave"}';
+    expect(tenantLinkOrigin("nihonmoment")).toBe("https://nihonmoment.kuunyi.com");
+  });
+
+  it("falls back when no custom domains are configured at all", () => {
+    delete process.env.TENANT_CUSTOM_DOMAINS;
+    expect(tenantLinkOrigin("brave")).toBe("https://brave.kuunyi.com");
+  });
+
+  it("never returns another tenant's domain", () => {
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"flashtic"}';
+    expect(tenantLinkOrigin("brave")).toBe("https://brave.kuunyi.com");
+  });
+
+  it("leaves tenantOrigin canonical — the allowlist must not lose the kuunyi origin", () => {
+    process.env.TENANT_CUSTOM_DOMAINS = '{"loudermyanmar.com":"brave"}';
+    // If these two everreturn  the same value, a student who arrived on
+    // brave.kuunyi.com would be dropped from the payment return-URL allowlist.
+    expect(tenantOrigin("brave")).toBe("https://brave.kuunyi.com");
+    expect(tenantLinkOrigin("brave")).not.toBe(tenantOrigin("brave"));
   });
 });

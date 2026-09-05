@@ -58,6 +58,7 @@ vi.mock("@/lib/utils", () => ({
 }));
 vi.mock("@/lib/origin", () => ({
   tenantOrigin: () => "https://t.example",
+  tenantLinkOrigin: () => "https://t.example",
   platformOrigin: () => "https://example",
 }));
 
