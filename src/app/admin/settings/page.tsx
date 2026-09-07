@@ -1,5 +1,7 @@
 "use client";
 
+import { STORAGE_CACHE_CONTROL } from "@/lib/storage/cache";
+
 import { downscaleImage, MAX_EDGE_LOGO } from "@/lib/images/downscale";
 
 import { Suspense, useCallback, useEffect, useState } from "react";
@@ -174,7 +176,7 @@ function AddBankModal({
         const path = `${tenantId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
         const { error: uploadErr } = await supabase.storage
           .from("qr-codes")
-          .upload(path, qrFile);
+          .upload(path, qrFile, { cacheControl: STORAGE_CACHE_CONTROL });
         if (uploadErr) throw new Error(uploadErr.message);
         const { data: urlData } = supabase.storage
           .from("qr-codes")
@@ -446,7 +448,7 @@ function SettingsContent() {
 
       const { error: uploadErr } = await supabase.storage
         .from("school-logos")
-        .upload(path, logoUpload, { upsert: true });
+        .upload(path, logoUpload, { upsert: true, cacheControl: STORAGE_CACHE_CONTROL });
       if (uploadErr) throw new Error(uploadErr.message);
 
       const { data: urlData } = supabase.storage

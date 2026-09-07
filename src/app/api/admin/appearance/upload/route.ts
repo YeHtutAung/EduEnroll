@@ -1,3 +1,4 @@
+import { STORAGE_CACHE_CONTROL } from "@/lib/storage/cache";
 import { NextRequest, NextResponse } from "next/server";
 import { requireOwner } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -37,7 +38,11 @@ export async function POST(request: NextRequest) {
   const supabase = createAdminClient();
   const { error } = await supabase.storage
     .from("tenant-assets")
-    .upload(path, buffer, { contentType: file.type, upsert: true });
+    .upload(path, buffer, {
+      contentType: file.type,
+      upsert: true,
+      cacheControl: STORAGE_CACHE_CONTROL,
+    });
 
   if (error)
     return NextResponse.json({ error: "Upload failed. Please try again." }, { status: 500 });
