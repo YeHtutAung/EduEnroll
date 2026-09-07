@@ -427,12 +427,18 @@ function ImageUploader({
   async function handleFile(file: File) {
     setUploading(true);
     setError(null);
-    // Sponsors already have their own preparation step; logos and heroes were
-    // going up at full camera resolution and reaching buyers on mobile data.
-    const uploadFile =
-      type === "sponsor"
-        ? await prepareSponsorLogo(file)
-        : await downscaleImage(file, type === "logo" ? MAX_EDGE_LOGO : MAX_EDGE);
+    // Every type gets size-optimised; they just differ in preparation.
+    //
+    // prepareSponsorLogo crops to the artwork's bounding box but caps at 2400px
+    // and emits LOSSLESS png, so a 5 MB sponsor logo survived it intact — and
+    // sponsor placements render at most 260x72 (SponsorPlacements.tsx), with
+    // the ticket strip smaller still. Crop first so the downscale measures real
+    // artwork rather than whitespace, then size it like any other logo.
+    const prepared = type === "sponsor" ? await prepareSponsorLogo(file) : file;
+    const uploadFile = await downscaleImage(
+      prepared,
+      type === "hero" ? MAX_EDGE : MAX_EDGE_LOGO,
+    );
     const fd = new FormData();
     fd.append("file", uploadFile);
     fd.append("type", type);
