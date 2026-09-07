@@ -1,5 +1,7 @@
 "use client";
 
+import { downscaleImage } from "@/lib/images/downscale";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import StatusBadge from "@/components/ui/StatusBadge";
@@ -140,11 +142,17 @@ export default function IntakesPage() {
       let heroUrl: string | null | undefined;
       if (heroFile) {
         const supabase = createClient();
-        const ext = heroFile.name.split(".").pop() ?? "jpg";
+        // Downscale before upload. This hero takes precedence over the
+        // appearance hero on the event templates
+        // (intake.hero_image_url || appearance.hero_url), so an unoptimised
+        // banner here would reproduce the slow-connection failure regardless
+        // of what the appearance screen uploads.
+        const heroUpload = await downscaleImage(heroFile);
+        const ext = heroUpload.name.split(".").pop() ?? "jpg";
         const path = `${editingIntake.tenant_id}/${editingIntake.id}/hero-${Date.now()}.${ext}`;
         const { error: uploadError } = await supabase.storage
           .from("intake-images")
-          .upload(path, heroFile, { upsert: true });
+          .upload(path, heroUpload, { upsert: true });
         if (uploadError) throw new Error("Hero image upload failed! " + uploadError.message);
         const { data: publicUrlData } = supabase.storage.from("intake-images").getPublicUrl(path);
         heroUrl = publicUrlData.publicUrl;
