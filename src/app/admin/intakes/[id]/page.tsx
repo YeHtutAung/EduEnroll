@@ -1,5 +1,7 @@
 "use client";
 
+import { downscaleImage } from "@/lib/images/downscale";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -190,12 +192,15 @@ function EditClassModal({
       let image_url: string | null | undefined = undefined;
       if (imageFile) {
         const supabase = createClient();
-        const ext = imageFile.name.split(".").pop() ?? "png";
+        // Downscale before upload: full-resolution originals were reaching
+        // buyers on mobile data. Best-effort — returns the original on failure.
+        const upload = await downscaleImage(imageFile);
+        const ext = upload.name.split(".").pop() ?? "png";
         // Tenant-prefixed path — required by the class-images storage RLS policy.
         const path = `${cls.tenant_id}/${cls.intake_id}/${cls.level.replace(/\s+/g, "-").toLowerCase()}-${Date.now()}.${ext}`;
         const { error: uploadErr } = await supabase.storage
           .from("class-images")
-          .upload(path, imageFile, { upsert: true });
+          .upload(path, upload, { upsert: true });
         if (uploadErr) throw new Error("Image upload failed: " + uploadErr.message);
         const { data: urlData } = supabase.storage
           .from("class-images")
@@ -566,12 +571,15 @@ function AddCustomClassModal({
       let image_url: string | null = null;
       if (imageFile) {
         const supabase = createClient();
-        const ext = imageFile.name.split(".").pop() ?? "png";
+        // Downscale before upload: full-resolution originals were reaching
+        // buyers on mobile data. Best-effort — returns the original on failure.
+        const upload = await downscaleImage(imageFile);
+        const ext = upload.name.split(".").pop() ?? "png";
         // Tenant-prefixed path — required by the class-images storage RLS policy.
         const path = `${tenantId}/${intakeId}/${level.replace(/\s+/g, "-").toLowerCase()}-${Date.now()}.${ext}`;
         const { error: uploadErr } = await supabase.storage
           .from("class-images")
-          .upload(path, imageFile, { upsert: true });
+          .upload(path, upload, { upsert: true });
         if (uploadErr) throw new Error("Image upload failed: " + uploadErr.message);
         const { data: urlData } = supabase.storage
           .from("class-images")

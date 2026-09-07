@@ -1,5 +1,7 @@
 "use client";
 
+import { downscaleImage, MAX_EDGE, MAX_EDGE_LOGO } from "@/lib/images/downscale";
+
 import { useEffect, useRef, useState } from "react";
 import { useToast } from "@/components/ui/Toast";
 import { resolveSponsorPlacements } from "@/lib/sponsors";
@@ -425,7 +427,12 @@ function ImageUploader({
   async function handleFile(file: File) {
     setUploading(true);
     setError(null);
-    const uploadFile = type === "sponsor" ? await prepareSponsorLogo(file) : file;
+    // Sponsors already have their own preparation step; logos and heroes were
+    // going up at full camera resolution and reaching buyers on mobile data.
+    const uploadFile =
+      type === "sponsor"
+        ? await prepareSponsorLogo(file)
+        : await downscaleImage(file, type === "logo" ? MAX_EDGE_LOGO : MAX_EDGE);
     const fd = new FormData();
     fd.append("file", uploadFile);
     fd.append("type", type);
