@@ -21,20 +21,22 @@ const ERRORS: Record<string, { en: string; mm: string }> = {
 
 const ORG_SUBTITLE: Record<string, string> = {
   language_school: "Language School",
-  event: "Thingyan Music Festival 2026",
+  event: "Event",
   training_center: "Training Center",
 };
 
 interface LoginFormProps {
   schoolName: string;
   schoolNameMm: string | null;
+  /** The tenant's own current event, when it has one. */
+  subtitle?: string | null;
   tenantSlug: string | null;
   isSuperadminOnly?: boolean;
   logoUrl?: string | null;
   orgType?: string;
 }
 
-export default function LoginForm({ schoolName, schoolNameMm, tenantSlug, isSuperadminOnly, logoUrl, orgType }: LoginFormProps) {
+export default function LoginForm({ schoolName, schoolNameMm, tenantSlug, isSuperadminOnly, logoUrl, orgType, subtitle }: LoginFormProps) {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -144,7 +146,7 @@ export default function LoginForm({ schoolName, schoolNameMm, tenantSlug, isSupe
           )}
           {!isGeneric && orgType && (
             <p className="text-sm text-slate-500 mt-1">
-              {ORG_SUBTITLE[orgType] ?? ORG_SUBTITLE.language_school}
+              {subtitle ?? ORG_SUBTITLE[orgType] ?? ORG_SUBTITLE.language_school}
             </p>
           )}
         </div>
