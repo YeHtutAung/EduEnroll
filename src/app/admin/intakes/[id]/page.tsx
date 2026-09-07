@@ -1,5 +1,7 @@
 "use client";
 
+import { STORAGE_CACHE_CONTROL } from "@/lib/storage/cache";
+
 import { downscaleImage } from "@/lib/images/downscale";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -200,7 +202,7 @@ function EditClassModal({
         const path = `${cls.tenant_id}/${cls.intake_id}/${cls.level.replace(/\s+/g, "-").toLowerCase()}-${Date.now()}.${ext}`;
         const { error: uploadErr } = await supabase.storage
           .from("class-images")
-          .upload(path, upload, { upsert: true });
+          .upload(path, upload, { upsert: true, cacheControl: STORAGE_CACHE_CONTROL });
         if (uploadErr) throw new Error("Image upload failed: " + uploadErr.message);
         const { data: urlData } = supabase.storage
           .from("class-images")
@@ -579,7 +581,7 @@ function AddCustomClassModal({
         const path = `${tenantId}/${intakeId}/${level.replace(/\s+/g, "-").toLowerCase()}-${Date.now()}.${ext}`;
         const { error: uploadErr } = await supabase.storage
           .from("class-images")
-          .upload(path, upload, { upsert: true });
+          .upload(path, upload, { upsert: true, cacheControl: STORAGE_CACHE_CONTROL });
         if (uploadErr) throw new Error("Image upload failed: " + uploadErr.message);
         const { data: urlData } = supabase.storage
           .from("class-images")
