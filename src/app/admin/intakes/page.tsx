@@ -1,5 +1,7 @@
 "use client";
 
+import { STORAGE_CACHE_CONTROL } from "@/lib/storage/cache";
+
 import { downscaleImage } from "@/lib/images/downscale";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -152,7 +154,7 @@ export default function IntakesPage() {
         const path = `${editingIntake.tenant_id}/${editingIntake.id}/hero-${Date.now()}.${ext}`;
         const { error: uploadError } = await supabase.storage
           .from("intake-images")
-          .upload(path, heroUpload, { upsert: true });
+          .upload(path, heroUpload, { upsert: true, cacheControl: STORAGE_CACHE_CONTROL });
         if (uploadError) throw new Error("Hero image upload failed! " + uploadError.message);
         const { data: publicUrlData } = supabase.storage.from("intake-images").getPublicUrl(path);
         heroUrl = publicUrlData.publicUrl;
