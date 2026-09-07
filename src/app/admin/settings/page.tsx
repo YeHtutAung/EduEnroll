@@ -1,5 +1,7 @@
 "use client";
 
+import { downscaleImage, MAX_EDGE_LOGO } from "@/lib/images/downscale";
+
 import { Suspense, useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import ConfirmModal from "@/components/ui/ConfirmModal";
@@ -164,6 +166,9 @@ function AddBankModal({
 
       // Upload QR code image if provided
       if (qrFile) {
+        // NOT downscaled, deliberately. This is a payment QR: lossy re-encoding
+        // of fine module patterns risks scannability, and a QR a customer
+        // cannot scan is worse than a slow one.
         const ext = qrFile.name.split(".").pop() ?? "png";
         // Tenant-prefixed path — required by the qr-codes storage RLS policy.
         const path = `${tenantId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
@@ -433,12 +438,15 @@ function SettingsContent() {
 
     setUploadingLogo(true);
     try {
-      const ext = file.name.split(".").pop() ?? "png";
+      // Downscale before upload — logos render between 30px and 64px, so a
+      // full-resolution upload is pure payload for buyers on mobile data.
+      const logoUpload = await downscaleImage(file, MAX_EDGE_LOGO);
+      const ext = logoUpload.name.split(".").pop() ?? "png";
       const path = `${tenantId}/logo.${ext}`;
 
       const { error: uploadErr } = await supabase.storage
         .from("school-logos")
-        .upload(path, file, { upsert: true });
+        .upload(path, logoUpload, { upsert: true });
       if (uploadErr) throw new Error(uploadErr.message);
 
       const { data: urlData } = supabase.storage
