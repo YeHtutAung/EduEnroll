@@ -38,6 +38,10 @@
 -- would have broken enrollment creation for long tenant names. Truncating is
 -- safe because uniqueness rests on the random part, not the prefix.
 
+-- To revert: supabase/rollbacks/20260910120000_wider_enrollment_ref.down.sql.
+-- It lives outside supabase/migrations/ deliberately — a later-timestamped file
+-- in there would be applied in sequence and would undo this immediately.
+
 CREATE OR REPLACE FUNCTION public.generate_enrollment_ref()
 RETURNS trigger
 LANGUAGE plpgsql

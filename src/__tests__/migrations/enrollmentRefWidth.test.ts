@@ -18,6 +18,10 @@ import path from "path";
 
 const ROOT = process.cwd();
 const MIGRATIONS = path.join(ROOT, "supabase", "migrations");
+// Rollbacks live outside the applied path on purpose: a later-timestamped
+// file in supabase/migrations would be applied in sequence and would undo
+// the migration it exists to reverse.
+const ROLLBACKS = path.join(ROOT, "supabase", "rollbacks");
 const LIB = path.join(ROOT, "src", "lib");
 
 /** The definition the database actually ends up with: the newest one wins. */
@@ -129,6 +133,27 @@ describe("enrollment_ref width contract", () => {
   it("actually applies the prefix cap it declares", () => {
     const { sql } = activeGeneratorSql();
     expect(sql).toMatch(/left\s*\(\s*v_prefix\s*,\s*v_prefix_max\s*\)/i);
+  });
+
+  it("ships a rollback that is itself within the parsers' bounds", () => {
+    // A rollback nobody can parse is not a rollback. It has to satisfy the
+    // same contract as the migration it reverses.
+    const { file } = activeGeneratorSql();
+    const rollback = path.join(ROLLBACKS, file.replace(/\.sql$/, ".down.sql"));
+    expect(fs.existsSync(rollback), `no rollback at supabase/rollbacks/ for ${file}`).toBe(true);
+
+    const sql = fs.readFileSync(rollback, "utf8");
+    const width = generatedWidth(sql);
+    for (const parser of refParsers()) {
+      expect(width).toBeLessThanOrEqual(parser.max);
+      expect(width).toBeGreaterThanOrEqual(parser.min);
+    }
+  });
+
+  it("ships a rollback that cannot overflow the column either", () => {
+    const { file } = activeGeneratorSql();
+    const sql = fs.readFileSync(path.join(ROLLBACKS, file.replace(/\.sql$/, ".down.sql")), "utf8");
+    expect(prefixCap(sql) + 1 + 4 + 1 + generatedWidth(sql)).toBeLessThanOrEqual(columnWidth());
   });
 
   it("keeps ambiguous characters out of the alphabet", () => {
