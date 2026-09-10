@@ -10,6 +10,25 @@ import {
   selectOrderPayment,
 } from "@/server/payments/platformFee";
 
+// "Not found" and "the query failed" are different answers, and only the first
+// is an enumeration signal.
+//
+// Counting a database fault as a miss would let a transient outage spend the
+// budget of the callers whose references are valid, locking them out for the
+// rest of the window after the database has recovered. A venue behind one NAT
+// address shares that budget, so a brief blip during entry could shut a whole
+// gate out - the exact failure the misses-only design exists to avoid.
+//
+// PGRST116 is what PostgREST returns from .single() when no row matched.
+function recordIfDefinitelyAbsent(clientIp: string, error: unknown, where: string): void {
+  const code = (error as { code?: string } | null)?.code;
+  if (!error || code === "PGRST116") {
+    publicEnrollmentLookupLimiter.recordMiss(clientIp);
+    return;
+  }
+  console.error(`[enrollment] ${where} lookup failed, not counted as a miss:`, code ?? "unknown");
+}
+
 // Shared by both handlers: they spend one budget, because they consume the same
 // reference space.
 function throttled(clientIp: string) {
@@ -64,9 +83,9 @@ export async function GET(
     .single()) as { data: EnrollmentRow | null; error: unknown };
 
   if (error || !enrollment) {
-    // A miss is the enumeration signal — count it, then answer exactly as
-    // before so the response itself reveals nothing new.
-    publicEnrollmentLookupLimiter.recordMiss(clientIp);
+    recordIfDefinitelyAbsent(clientIp, error, "GET");
+    // Answered identically either way, so the response still reveals nothing
+    // about which references exist.
     return NextResponse.json({ error: "Not Found" }, { status: 404 });
   }
 
@@ -281,7 +300,7 @@ export async function PATCH(
 
   const supabase = createAdminClient();
 
-  const { data: enrollment } = (await supabase
+  const { data: enrollment, error: lookupError } = (await supabase
     .from("enrollments")
     .select("id, status")
     .eq("enrollment_ref", params.ref.trim())
@@ -289,7 +308,7 @@ export async function PATCH(
     .single()) as { data: { id: string; status: string } | null; error: unknown };
 
   if (!enrollment) {
-    publicEnrollmentLookupLimiter.recordMiss(clientIp);
+    recordIfDefinitelyAbsent(clientIp, lookupError, "PATCH");
     return NextResponse.json({ error: "Not Found" }, { status: 404 });
   }
   if (enrollment.status !== "pending_payment") {

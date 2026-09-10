@@ -431,6 +431,37 @@ describe("GET /api/public/enrollment/[ref] — miss throttling", () => {
     expect(res.status).toBe(404);
   });
 
+  it("does not spend the budget on database failures", async () => {
+    // "Not found" and "the query failed" are different answers. Counting a
+    // fault as a miss lets a transient outage lock out the callers whose
+    // references are valid — and a venue behind one NAT address shares the
+    // budget, so a brief blip could shut a whole gate out for the window.
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock({
+        enrollment: { data: null, error: { message: "connection terminated unexpectedly" } },
+      }) as never,
+    );
+    for (let i = 0; i < 15; i++) {
+      const res = await GET(requestFrom("9.9.9.9"), routeParams);
+      expect(res.status).toBe(404);
+    }
+
+    // Budget untouched: a genuine miss is still answered rather than throttled.
+    vi.mocked(createAdminClient).mockReturnValue(missMock());
+    expect((await GET(requestFrom("9.9.9.9"), routeParams)).status).toBe(404);
+  });
+
+  it("still spends the budget when the row is definitively absent", async () => {
+    // PGRST116 is what PostgREST returns from .single() for zero rows. Guards
+    // against over-correcting the case above into never counting anything.
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock({ enrollment: { data: null, error: { code: "PGRST116" } } }) as never,
+    );
+    for (let i = 0; i < 10; i++) await GET(requestFrom("9.9.9.7"), routeParams);
+
+    expect((await GET(requestFrom("9.9.9.7"), routeParams)).status).toBe(429);
+  });
+
   it("throttles per address", async () => {
     vi.mocked(createAdminClient).mockReturnValue(missMock());
     for (let i = 0; i < 10; i++) await GET(requestFrom("5.5.5.5"), routeParams);
@@ -466,6 +497,20 @@ describe("PATCH /api/public/enrollment/[ref] — miss throttling", () => {
 
     const res = await PATCH(patchFrom("8.8.8.8"), routeParams);
     expect(res.status).toBe(429);
+  });
+
+  it("does not spend the budget on database failures either", async () => {
+    // PATCH reads `data` only, so a failed query looks exactly like an absent
+    // row unless the error is inspected.
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock({
+        enrollment: { data: null, error: { message: "connection terminated unexpectedly" } },
+      }) as never,
+    );
+    for (let i = 0; i < 15; i++) {
+      const res = await PATCH(patchFrom("9.9.9.6"), routeParams);
+      expect(res.status).toBe(404);
+    }
   });
 
   it("shares one budget with GET, since both spend the same reference space", async () => {
