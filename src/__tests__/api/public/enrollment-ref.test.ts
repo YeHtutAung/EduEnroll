@@ -10,6 +10,7 @@ import { resolveTenantId } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getStripe } from "@/lib/stripe";
 import { GET, PATCH } from "@/app/api/public/enrollment/[ref]/route";
+import { publicEnrollmentLookupLimiter } from "@/lib/rateLimit";
 
 // ─── Supabase query builder factory ──────────────────────────────────────────
 
@@ -72,6 +73,8 @@ const routeParams = { params: { ref: "NM-2026-00001" } };
 describe("GET /api/public/enrollment/[ref]", () => {
   beforeEach(() => {
     vi.mocked(resolveTenantId).mockResolvedValue("tenant-uuid");
+    // Shared module state: reset so miss budgets cannot leak between cases.
+    publicEnrollmentLookupLimiter.reset();
   });
 
   it("returns 404 when enrollment not found", async () => {
@@ -322,6 +325,7 @@ describe("GET /api/public/enrollment/[ref]", () => {
 describe("PATCH /api/public/enrollment/[ref]", () => {
   beforeEach(() => {
     vi.mocked(resolveTenantId).mockResolvedValue("tenant-uuid");
+    publicEnrollmentLookupLimiter.reset();
   });
 
   it("returns 400 when name or email is missing", async () => {
@@ -347,5 +351,132 @@ describe("PATCH /api/public/enrollment/[ref]", () => {
       routeParams,
     );
     expect(res.status).toBe(409);
+  });
+});
+
+// ─── Reference-sweep throttling ───────────────────────────────────────────────
+// `enrollment_ref` is the access token for this route and is short enough to
+// sweep, while a hit returns the buyer's name, email and signed ticket JWTs.
+
+describe("GET /api/public/enrollment/[ref] — miss throttling", () => {
+  function requestFrom(ip: string) {
+    return new Request("http://localhost/api/public/enrollment/NM-2026-00001", {
+      method: "GET",
+      headers: { "Content-Type": "application/json", "x-real-ip": ip },
+    }) as never;
+  }
+
+  const missMock = () => makeSupabaseMock({ enrollment: { data: null, error: null } }) as never;
+  const hitMock = () =>
+    makeSupabaseMock({
+      enrollment: {
+        data: {
+          enrollment_ref: "NM-2026-00001",
+          status: "pending_payment",
+          student_name_en: "Test User",
+          email: "test@example.com",
+          quantity: 1,
+          enrollment_items: [],
+          classes: { level: "GA", fee_amount: 5000, intakes: { id: "i1", name: "Ev" } },
+          payments: [],
+        },
+        error: null,
+      },
+    }) as never;
+
+  beforeEach(() => {
+    vi.mocked(resolveTenantId).mockResolvedValue("tenant-uuid");
+    publicEnrollmentLookupLimiter.reset();
+  });
+
+  it("keeps answering 404 while the miss budget is unspent", async () => {
+    vi.mocked(createAdminClient).mockReturnValue(missMock());
+    for (let i = 0; i < 9; i++) {
+      const res = await GET(requestFrom("5.5.5.5"), routeParams);
+      expect(res.status).toBe(404);
+    }
+  });
+
+  it("refuses further requests once an address has spent its miss budget", async () => {
+    vi.mocked(createAdminClient).mockReturnValue(missMock());
+    for (let i = 0; i < 10; i++) await GET(requestFrom("5.5.5.5"), routeParams);
+
+    const res = await GET(requestFrom("5.5.5.5"), routeParams);
+    expect(res.status).toBe(429);
+    expect(Number(res.headers.get("retry-after"))).toBeGreaterThan(0);
+  });
+
+  it("refuses a valid reference too once the budget is spent, so a sweep learns nothing", async () => {
+    vi.mocked(createAdminClient).mockReturnValue(missMock());
+    for (let i = 0; i < 10; i++) await GET(requestFrom("5.5.5.5"), routeParams);
+
+    // Throttling only the misses would leave the sweep working: a hit would
+    // still answer 200 and confirm the reference.
+    vi.mocked(createAdminClient).mockReturnValue(hitMock());
+    const res = await GET(requestFrom("5.5.5.5"), routeParams);
+    expect(res.status).toBe(429);
+  });
+
+  it("never spends the budget on successful lookups", async () => {
+    // A venue full of attendees behind one NAT address opening valid ticket
+    // links must not throttle itself.
+    vi.mocked(createAdminClient).mockReturnValue(hitMock());
+    for (let i = 0; i < 40; i++) {
+      const res = await GET(requestFrom("6.6.6.6"), routeParams);
+      expect(res.status).toBe(200);
+    }
+
+    vi.mocked(createAdminClient).mockReturnValue(missMock());
+    const res = await GET(requestFrom("6.6.6.6"), routeParams);
+    expect(res.status).toBe(404);
+  });
+
+  it("throttles per address", async () => {
+    vi.mocked(createAdminClient).mockReturnValue(missMock());
+    for (let i = 0; i < 10; i++) await GET(requestFrom("5.5.5.5"), routeParams);
+
+    expect((await GET(requestFrom("5.5.5.5"), routeParams)).status).toBe(429);
+    expect((await GET(requestFrom("7.7.7.7"), routeParams)).status).toBe(404);
+  });
+});
+
+// PATCH takes the same reference as its only credential and *writes* the
+// buyer's name and email — the address the e-ticket is delivered to — so a
+// swept reference is more damaging here than on GET.
+
+describe("PATCH /api/public/enrollment/[ref] — miss throttling", () => {
+  function patchFrom(ip: string) {
+    return new Request("http://localhost/api/public/enrollment/NM-2026-00001", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", "x-real-ip": ip },
+      body: JSON.stringify({ student_name_en: "Test", email: "t@t.com" }),
+    }) as never;
+  }
+
+  beforeEach(() => {
+    vi.mocked(resolveTenantId).mockResolvedValue("tenant-uuid");
+    publicEnrollmentLookupLimiter.reset();
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock({ enrollment: { data: null, error: null } }) as never,
+    );
+  });
+
+  it("refuses further writes once an address has spent its miss budget", async () => {
+    for (let i = 0; i < 10; i++) await PATCH(patchFrom("8.8.8.8"), routeParams);
+
+    const res = await PATCH(patchFrom("8.8.8.8"), routeParams);
+    expect(res.status).toBe(429);
+  });
+
+  it("shares one budget with GET, since both spend the same reference space", async () => {
+    const getFrom = (ip: string) =>
+      new Request("http://localhost/api/public/enrollment/NM-2026-00001", {
+        method: "GET",
+        headers: { "Content-Type": "application/json", "x-real-ip": ip },
+      }) as never;
+
+    for (let i = 0; i < 10; i++) await GET(getFrom("8.8.8.8"), routeParams);
+
+    expect((await PATCH(patchFrom("8.8.8.8"), routeParams)).status).toBe(429);
   });
 });

@@ -3,20 +3,48 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import { getStripe } from "@/lib/stripe";
 import { signTicketJwt } from "@/lib/tickets/sign";
+import { clientIpFrom, publicEnrollmentLookupLimiter } from "@/lib/rateLimit";
 import {
   computePlatformFee,
   displayTotals,
   selectOrderPayment,
 } from "@/server/payments/platformFee";
 
+// Shared by both handlers: they spend one budget, because they consume the same
+// reference space.
+function throttled(clientIp: string) {
+  return NextResponse.json(
+    { error: "Too Many Requests", message: "Too many failed lookups. Try again later." },
+    {
+      status: 429,
+      headers: { "Retry-After": String(publicEnrollmentLookupLimiter.retryAfter(clientIp)) },
+    },
+  );
+}
+
 // ─── GET /api/public/enrollment/[ref] ────────────────────────────────────────
 // Returns enrollment summary for the Trusted Official checkout flow.
 // Public — enrollment_ref acts as the access token.
+//
+// The reference IS the credential here, and a successful response carries
+// order details and ticket credentials, so failed lookups are throttled per
+// client address. Do not remove that without replacing it.
+//
+// Only misses count against the budget. That distinction is what keeps the
+// control safe to deploy: a venue full of attendees behind one NAT address
+// opening valid ticket links produces successes, never misses.
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: { ref: string } },
 ) {
+  // Cheapest possible rejection, so a spent address costs no tenant lookup and
+  // no query.
+  const clientIp = clientIpFrom(request.headers);
+  if (publicEnrollmentLookupLimiter.isBlocked(clientIp)) {
+    return throttled(clientIp);
+  }
+
   const tenantId = await resolveTenantId();
   if (tenantId instanceof NextResponse) return tenantId;
 
@@ -36,6 +64,9 @@ export async function GET(
     .single()) as { data: EnrollmentRow | null; error: unknown };
 
   if (error || !enrollment) {
+    // A miss is the enumeration signal — count it, then answer exactly as
+    // before so the response itself reveals nothing new.
+    publicEnrollmentLookupLimiter.recordMiss(clientIp);
     return NextResponse.json({ error: "Not Found" }, { status: 404 });
   }
 
@@ -218,11 +249,21 @@ export async function GET(
 
 // ─── PATCH /api/public/enrollment/[ref] ──────────────────────────────────────
 // Updates attendee details on a pending enrollment. Idempotent.
+//
+// Throttled on the same budget as GET, and for a stronger reason: this handler
+// WRITES the buyer's name and email from a reference alone, and the email is
+// where the e-ticket is delivered. A swept reference here redirects someone's
+// ticket rather than merely reading it.
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: { ref: string } },
 ) {
+  const clientIp = clientIpFrom(request.headers);
+  if (publicEnrollmentLookupLimiter.isBlocked(clientIp)) {
+    return throttled(clientIp);
+  }
+
   const tenantId = await resolveTenantId();
   if (tenantId instanceof NextResponse) return tenantId;
 
@@ -248,6 +289,7 @@ export async function PATCH(
     .single()) as { data: { id: string; status: string } | null; error: unknown };
 
   if (!enrollment) {
+    publicEnrollmentLookupLimiter.recordMiss(clientIp);
     return NextResponse.json({ error: "Not Found" }, { status: 404 });
   }
   if (enrollment.status !== "pending_payment") {
