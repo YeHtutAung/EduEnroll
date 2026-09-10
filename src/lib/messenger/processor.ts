@@ -26,7 +26,14 @@ interface MessengerMessage {
 
 // ─── Reference number pattern ───────────────────────────────────────────────
 
-const REF_PATTERN = /^[A-Z]{1,4}-\d{4}-[A-Z0-9]{3,6}$/i;
+// Prefix is the tenant's name initials, so its length is a property of the
+// tenant. `enrollment_ref` is varchar(20) and a reference is
+// PREFIX-MMDD-RANDOM, so an existing row can carry a prefix of up to 10
+// characters. This bound previously differed between the three chat
+// processors, which silently refused references from tenants whose names were
+// long enough. All three must stay identical —
+// src/__tests__/lib/refPattern.test.ts asserts that.
+const REF_PATTERN = /^[A-Z]{1,10}-\d{4}-[A-Z0-9]{3,6}$/i;
 
 // ─── Main processor ─────────────────────────────────────────────────────────
 
