@@ -4,14 +4,15 @@ import path from "path";
 
 // ─── The generated reference must stay parseable by the bots ────────────────
 //
-// `enrollment_ref` is produced by a database trigger, but three server-side
-// parsers accept it back from users in chat: the Messenger processor and the
-// two Telegram processors. Each pins the random part to a character range.
+// `enrollment_ref` is produced by a database trigger, and the chat processors
+// accept it back from users via one shared pattern in
+// src/lib/enrollment/refPattern.ts, which pins the random part to a character
+// range.
 //
-// Widening the reference in SQL without widening those patterns would leave
-// the bots silently refusing to recognise newly issued references — a break
-// with no build error and no failing query, visible only when a customer
-// pastes their reference and gets no reply.
+// Widening the reference in SQL without widening that pattern would leave the
+// bots silently refusing to recognise newly issued references — a break with
+// no build error and no failing query, visible only when a customer pastes
+// their reference and gets no reply.
 //
 // These assertions are static, so they run without a database and fail on a
 // change to either side of the contract.
@@ -54,14 +55,25 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-/** Every REF_PATTERN in the app, with the random-part range it accepts. */
+/**
+ * The single shared pattern's random-part range, plus a sweep for stray
+ * copies. The reference shape is declared in one module; a second declaration
+ * anywhere under src/lib is a copy that can drift, which is exactly how the
+ * three chat processors diverged before.
+ */
 function refParsers(): { file: string; min: number; max: number }[] {
   const found: { file: string; min: number; max: number }[] = [];
   for (const file of walk(LIB)) {
     const src = fs.readFileSync(file, "utf8");
-    if (!src.includes("REF_PATTERN")) continue;
     const m = src.match(/\[A-Z0-9\]\{(\d+),(\d+)\}/);
-    if (m) found.push({ file: path.relative(ROOT, file), min: Number(m[1]), max: Number(m[2]) });
+    if (m)
+      found.push({
+        // Normalised: path.relative yields backslashes on Windows, which
+        // would make this assertion pass on CI and fail locally.
+        file: path.relative(ROOT, file).split(path.sep).join("/"),
+        min: Number(m[1]),
+        max: Number(m[2]),
+      });
   }
   return found;
 }
@@ -82,9 +94,11 @@ function columnWidth(): number {
 }
 
 describe("enrollment_ref width contract", () => {
-  it("finds the parsers that must accept a generated reference", () => {
-    // If this drops to zero the rest of the suite would pass vacuously.
-    expect(refParsers().length).toBeGreaterThanOrEqual(3);
+  it("finds exactly one declaration of the reference shape", () => {
+    // Zero would make the rest of this suite pass vacuously; more than one is
+    // a copy that can drift out of step with the generator.
+    const parsers = refParsers();
+    expect(parsers.map((p) => p.file)).toEqual(["src/lib/enrollment/refPattern.ts"]);
   });
 
   it("emits a random part every parser accepts", () => {

@@ -8,8 +8,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendMessage, requestContact, removeKeyboard } from "./send";
 import { sendChannelInviteIfEligible } from "./channel-invite";
-
-const REF_PATTERN = /^[A-Z]{1,5}-\d{4}-[A-Z0-9]{3,6}$/;
+import { isEnrollmentRef } from "@/lib/enrollment/refPattern";
 
 // ─── Contact message handler ────────────────────────────────────────────────
 
@@ -122,7 +121,7 @@ export async function processLanguageSchoolMessage(
   // /status <ref>
   if (trimmed.startsWith("/status")) {
     const ref = trimmed.substring(7).trim().toUpperCase();
-    if (ref && REF_PATTERN.test(ref)) {
+    if (ref && isEnrollmentRef(ref)) {
       await handleStatus(tenantId, chatId, ref, botToken);
     } else {
       await sendMessage(botToken, chatId, "Usage: /status T-2026-00123");
@@ -132,7 +131,7 @@ export async function processLanguageSchoolMessage(
 
   // Free text matching enrollment ref pattern
   const upper = trimmed.toUpperCase();
-  if (REF_PATTERN.test(upper)) {
+  if (isEnrollmentRef(upper)) {
     await handleStatus(tenantId, chatId, upper, botToken);
     return;
   }
