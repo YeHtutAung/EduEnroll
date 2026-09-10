@@ -1,6 +1,7 @@
 // ─── Messenger message processor ────────────────────────────────────────────
 
 import { sendTextMessage } from "./send";
+import { isEnrollmentRef } from "@/lib/enrollment/refPattern";
 import {
   sendWelcome,
   sendOpenIntakes,
@@ -23,17 +24,6 @@ interface MessengerMessage {
   text?: string;
   quick_reply?: { payload: string };
 }
-
-// ─── Reference number pattern ───────────────────────────────────────────────
-
-// Prefix is the tenant's name initials, so its length is a property of the
-// tenant. `enrollment_ref` is varchar(20) and a reference is
-// PREFIX-MMDD-RANDOM, so an existing row can carry a prefix of up to 10
-// characters. This bound previously differed between the three chat
-// processors, which silently refused references from tenants whose names were
-// long enough. All three must stay identical —
-// src/__tests__/lib/refPattern.test.ts asserts that.
-const REF_PATTERN = /^[A-Z]{1,10}-\d{4}-[A-Z0-9]{3,6}$/i;
 
 // ─── Main processor ─────────────────────────────────────────────────────────
 
@@ -71,7 +61,7 @@ export async function processMessage(
   if (!text) return;
 
   // Check if it looks like a reference number
-  if (REF_PATTERN.test(text)) {
+  if (isEnrollmentRef(text)) {
     await sendStatusCheck(tenantId, senderPsid, text.toUpperCase(), pageToken);
     return;
   }

@@ -1,58 +1,43 @@
 import { describe, it, expect } from "vitest";
 import fs from "fs";
 import path from "path";
+import { ENROLLMENT_REF_PATTERN, isEnrollmentRef } from "@/lib/enrollment/refPattern";
 
-// ─── The chat bots must all recognise the same references ───────────────────
+// ─── One definition of what an enrollment reference looks like ──────────────
 //
-// Three processors accept an enrollment reference typed or pasted by a
-// customer. Each carries its own copy of the pattern, and the copies had
-// drifted: the Messenger one accepted a 1-4 character prefix while both
-// Telegram ones accepted 1-5.
+// Three chat processors accept a reference typed or pasted by a customer. They
+// used to carry three copies of the pattern, and the copies drifted: two
+// accepted a 1-5 character prefix and one only 1-4. The prefix is the tenant's
+// name initials, so its length is a property of the tenant — a tenant whose
+// name was long enough had references its own Messenger bot silently refused,
+// with no error and no log.
 //
-// The prefix is built from the tenant's name initials, so its length is a
-// property of the tenant. A tenant whose name is five words long therefore had
-// references its own Messenger bot silently refused to recognise — no error,
-// no log, just a customer pasting a reference and getting the fallback help
-// text instead of their status.
-//
-// `enrollments.enrollment_ref` is varchar(20) and a reference is
-// PREFIX-MMDD-RANDOM. The shortest random part the generator has ever emitted
-// is four characters, so an existing row can carry a prefix of up to
-// 20 - 1 - 4 - 1 - 4 = 10 characters. Every parser has to accept that much.
-//
-// These assertions read the patterns out of the source and exercise them
-// directly, so they need no mocks and fail if any copy drifts again.
+// The pattern now lives in one module. These tests exercise it directly, and
+// separately assert that no other file has grown its own copy.
 
 const ROOT = process.cwd();
+const LIB = path.join(ROOT, "src", "lib");
+const SHARED = path.join(LIB, "enrollment", "refPattern.ts");
 
-const PARSER_FILES = [
+const CONSUMERS = [
   "src/lib/messenger/processor.ts",
   "src/lib/telegram/processor.ts",
   "src/lib/telegram/language-school-processor.ts",
 ];
 
-interface Parser {
-  file: string;
-  pattern: RegExp;
+function walk(dir: string, out: string[] = []): string[] {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) walk(full, out);
+    else if (/\.tsx?$/.test(entry.name)) out.push(full);
+  }
+  return out;
 }
 
-/** Rebuilds each processor's REF_PATTERN from source, without eval. */
-function parsers(): Parser[] {
-  return PARSER_FILES.map((rel) => {
-    const src = fs.readFileSync(path.join(ROOT, rel), "utf8");
-    const m = src.match(/const REF_PATTERN\s*=\s*\/(.+?)\/([gimsuy]*);/);
-    expect(m, `${rel} must declare a REF_PATTERN regex literal`).not.toBeNull();
-    return { file: rel, pattern: new RegExp(m![1], m![2]) };
-  });
-}
-
-/** References that every parser must recognise. */
-const MUST_ACCEPT = [
+/** References every channel must recognise. */
+const MUST_ACCEPT: [string, string][] = [
   ["LM-0902-3SJQ", "current format, 2-char prefix"],
   ["EN-0910-66VV8K", "6-char random part"],
-  // The exact divergence: a five-word tenant name. The Telegram parsers took
-  // a 5-char prefix and the Messenger one did not, so without this input the
-  // agreement check below passes without ever meeting the disagreement.
   ["ABCDE-0910-3SJQ", "5-char prefix, a five-word tenant name"],
   ["ABCDEFGH-0910-R6ZJX2", "8-char prefix, the widest with a 6-char random part"],
   ["ABCDEFGHIJ-0910-3SJQ", "10-char prefix, the widest an existing row can carry"],
@@ -62,7 +47,7 @@ const MUST_ACCEPT = [
 ];
 
 /** Text that must not be mistaken for a reference. */
-const MUST_REJECT = [
+const MUST_REJECT: [string, string][] = [
   ["hello", "a greeting"],
   ["/status", "a bare command"],
   ["LM-0902", "no random part"],
@@ -72,43 +57,56 @@ const MUST_REJECT = [
   ["", "empty"],
 ];
 
-describe("enrollment reference patterns", () => {
-  it("finds all three chat parsers", () => {
-    // Without this the rest of the suite could pass vacuously.
-    expect(parsers()).toHaveLength(3);
+describe("enrollment reference pattern", () => {
+  it.each(MUST_ACCEPT)("accepts %s (%s)", (ref) => {
+    expect(isEnrollmentRef(ref)).toBe(true);
   });
 
-  it.each(MUST_ACCEPT)("every parser accepts %s (%s)", (ref) => {
-    for (const { file, pattern } of parsers()) {
-      // Two of the three uppercase before testing, so mirror that here: the
-      // question is whether the pattern's shape accepts the reference.
-      const candidate = pattern.flags.includes("i") ? ref : ref.toUpperCase();
-      expect(pattern.test(candidate), `${file} rejects ${ref}`).toBe(true);
+  it.each(MUST_REJECT)("rejects %j (%s)", (text) => {
+    expect(isEnrollmentRef(text)).toBe(false);
+  });
+
+  it("carries no g or y flag, which would make the shared regex stateful", () => {
+    // One RegExp object is shared across every call site. With `g` or `y`,
+    // RegExp.test() advances lastIndex, so a match in one processor would
+    // change the result of the next call somewhere else.
+    expect(ENROLLMENT_REF_PATTERN.flags).not.toContain("g");
+    expect(ENROLLMENT_REF_PATTERN.flags).not.toContain("y");
+  });
+
+  it("is case-insensitive, since the Messenger processor tests raw customer text", () => {
+    expect(ENROLLMENT_REF_PATTERN.flags).toContain("i");
+  });
+
+  it("gives a stable verdict when called repeatedly", () => {
+    // Guards the statefulness failure above by behaviour, not just by flags.
+    for (let i = 0; i < 5; i++) {
+      expect(isEnrollmentRef("LM-0902-3SJQ")).toBe(true);
+      expect(isEnrollmentRef("hello")).toBe(false);
+    }
+  });
+});
+
+describe("no channel keeps its own copy of the pattern", () => {
+  it("has every chat processor import the shared module", () => {
+    for (const rel of CONSUMERS) {
+      const src = fs.readFileSync(path.join(ROOT, rel), "utf8");
+      expect(src, `${rel} does not import the shared pattern`).toMatch(
+        /from "@\/lib\/enrollment\/refPattern"/,
+      );
     }
   });
 
-  it.each(MUST_REJECT)("every parser rejects %j (%s)", (text) => {
-    for (const { file, pattern } of parsers()) {
-      const candidate = pattern.flags.includes("i") ? text : text.toUpperCase();
-      expect(pattern.test(candidate), `${file} accepts ${JSON.stringify(text)}`).toBe(false);
-    }
-  });
+  it("declares the reference shape in exactly one file", () => {
+    // A second copy is how the three drifted in the first place. Any file that
+    // spells out a reference-shaped character class is a new copy.
+    const offenders = walk(LIB)
+      .filter((f) => f !== SHARED)
+      .filter((f) => /\[A-Z0-9\]\{\d+,\d+\}/.test(fs.readFileSync(f, "utf8")))
+      .map((f) => path.relative(ROOT, f));
 
-  it("agrees across every parser, so no bot recognises a reference another refuses", () => {
-    const all = parsers();
-    const inputs = [...MUST_ACCEPT, ...MUST_REJECT].map(([text]) => text);
-
-    for (const input of inputs) {
-      const verdicts = all.map(({ file, pattern }) => {
-        const candidate = pattern.flags.includes("i") ? input : input.toUpperCase();
-        return { file, accepted: pattern.test(candidate) };
-      });
-      const distinct = new Set(verdicts.map((v) => v.accepted));
-      expect(
-        distinct.size,
-        `parsers disagree on ${JSON.stringify(input)}: ` +
-          verdicts.map((v) => `${v.file}=${v.accepted}`).join(", "),
-      ).toBe(1);
-    }
+    expect(offenders, `these files re-declare the reference shape: ${offenders.join(", ")}`).toEqual(
+      [],
+    );
   });
 });
