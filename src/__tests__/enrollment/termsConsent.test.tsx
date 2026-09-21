@@ -9,10 +9,18 @@ function render(props: Partial<Parameters<typeof TermsConsent>[0]> = {}) {
 }
 
 describe("TermsConsent", () => {
-  it("links the Terms of Sale and Privacy Policy in a new tab, so the form is not lost", () => {
+  // Pop-ups, not new tabs: the buyer reads the document without leaving the
+  // form they are filling in.
+  it("opens the Terms of Sale and Privacy Policy as pop-ups, not links away", () => {
     const html = render();
-    expect(html).toMatch(/<a[^>]+href="\/terms"[^>]+target="_blank"/);
-    expect(html).toMatch(/<a[^>]+href="\/privacy"[^>]+target="_blank"/);
+    expect(html).toMatch(/<button[^>]+type="button"[^>]*>Terms of Sale<\/button>/);
+    expect(html).toMatch(/<button[^>]+type="button"[^>]*>Privacy Policy<\/button>/);
+    expect(html).not.toContain('href="/terms"');
+    expect(html).not.toContain('href="/privacy"');
+  });
+
+  it("renders no pop-up until one is opened", () => {
+    expect(render()).not.toContain('role="dialog"');
   });
 
   it("states the agreement in English and Myanmar", () => {

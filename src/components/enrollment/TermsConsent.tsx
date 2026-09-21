@@ -6,6 +6,13 @@
 // and — when the event has any — the organiser's own rules, shown above it.
 // Used on every surface that creates an order; the order API refuses one that
 // does not carry this acceptance, so this box is a convenience, not the control.
+//
+// The two documents open as pop-ups over the form rather than in a new tab, so
+// a buyer part-way through the form never leaves it to read them.
+
+import { useCallback, useState } from "react";
+import LegalDocumentModal from "@/components/legal/LegalDocumentModal";
+import { PRIVACY_POLICY, TERMS_OF_SALE } from "@/components/legal/content";
 
 interface TermsConsentProps {
   checked: boolean;
@@ -18,6 +25,8 @@ interface TermsConsentProps {
   compact?: boolean;
 }
 
+type OpenDocument = "terms" | "privacy" | null;
+
 export default function TermsConsent({
   checked,
   onChange,
@@ -25,8 +34,20 @@ export default function TermsConsent({
   showError = false,
   compact = false,
 }: TermsConsentProps) {
+  const [open, setOpen] = useState<OpenDocument>(null);
+  const close = useCallback(() => setOpen(null), []);
+
   const link = "font-medium underline underline-offset-2";
   const text = compact ? "text-[11.5px]" : "text-sm";
+
+  // Inside the <label>: preventDefault so opening a document never toggles
+  // the checkbox the label controls.
+  function opener(which: Exclude<OpenDocument, null>) {
+    return (e: React.MouseEvent) => {
+      e.preventDefault();
+      setOpen(which);
+    };
+  }
 
   return (
     <div className={compact ? "mb-3" : "mb-5"}>
@@ -53,13 +74,9 @@ export default function TermsConsent({
         />
         <span className={`${text} leading-snug text-gray-700`}>
           I agree to the{" "}
-          <a href="/terms" target="_blank" rel="noopener noreferrer" className={link}>
-            Terms of Sale
-          </a>{" "}
+          <button type="button" onClick={opener("terms")} className={link}>Terms of Sale</button>{" "}
           and{" "}
-          <a href="/privacy" target="_blank" rel="noopener noreferrer" className={link}>
-            Privacy Policy
-          </a>
+          <button type="button" onClick={opener("privacy")} className={link}>Privacy Policy</button>
           {organiserTerms ? ", and the event rules above." : "."}
           <span className="font-myanmar mt-0.5 block text-gray-500">
             ရောင်းချမှုစည်းကမ်းချက်များနှင့် ကိုယ်ရေးအချက်အလက်မူဝါဒ
@@ -74,6 +91,9 @@ export default function TermsConsent({
           <span className="font-myanmar">ဆက်လက်ဆောင်ရွက်ရန် အမှတ်ခြစ်ပါ။</span>
         </p>
       )}
+
+      {open === "terms" && <LegalDocumentModal doc={TERMS_OF_SALE} fullPageHref="/terms" onClose={close} />}
+      {open === "privacy" && <LegalDocumentModal doc={PRIVACY_POLICY} fullPageHref="/privacy" onClose={close} />}
     </div>
   );
 }

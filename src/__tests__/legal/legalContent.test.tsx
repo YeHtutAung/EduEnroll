@@ -1,0 +1,90 @@
+import { describe, expect, it } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
+import {
+  PRIVACY_POLICY,
+  TERMS_OF_SALE,
+  type Bi,
+  type LegalDocumentData,
+} from "@/components/legal/content";
+import LegalDocument from "@/components/legal/LegalDocument";
+import { TERMS_VERSION } from "@/lib/legal/terms";
+
+const MYANMAR = /[က-႟]/;
+
+/** Every bilingual string in a document, labelled for the failure message. */
+function allPairs(doc: LegalDocumentData): [string, Bi][] {
+  const pairs: [string, Bi][] = [
+    ["title", doc.title],
+    ["subtitle", doc.subtitle],
+    ["intro", doc.intro],
+  ];
+  for (const s of doc.sections) {
+    pairs.push([`${s.title.en} / title`, s.title]);
+    if (s.intro) pairs.push([`${s.title.en} / intro`, s.intro]);
+    s.items?.forEach((item, i) => pairs.push([`${s.title.en} / item ${i + 1}`, item]));
+    if (s.outro) pairs.push([`${s.title.en} / outro`, s.outro]);
+  }
+  return pairs;
+}
+
+describe.each([
+  ["Terms of Sale", TERMS_OF_SALE],
+  ["Privacy Policy", PRIVACY_POLICY],
+])("%s content", (_name, doc) => {
+  // The request was: every part of both documents in Myanmar as well.
+  it("has a Myanmar translation for every English string", () => {
+    const missing = allPairs(doc)
+      .filter(([, pair]) => pair.en.trim() === "" || !MYANMAR.test(pair.mm))
+      .map(([label]) => label);
+    expect(missing).toEqual([]);
+  });
+
+  it("numbers its sections 1..n in order, in both languages", () => {
+    doc.sections.forEach((s, i) => {
+      expect(s.title.en.startsWith(`${i + 1}. `)).toBe(true);
+    });
+    const mmDigits = "၀၁၂၃၄၅၆၇၈၉";
+    doc.sections.forEach((s, i) => {
+      const n = String(i + 1).replace(/\d/g, (d) => mmDigits[Number(d)]);
+      expect(s.title.mm.startsWith(`${n}။`)).toBe(true);
+    });
+  });
+});
+
+describe("Terms of Sale", () => {
+  it("shows the same version that orders record", () => {
+    expect(TERMS_OF_SALE.subtitle.en).toContain(TERMS_VERSION);
+  });
+});
+
+describe("Privacy Policy", () => {
+  it("keeps all twelve sections of the English policy", () => {
+    expect(PRIVACY_POLICY.sections).toHaveLength(12);
+  });
+
+  it("tells buyers the scanning provider gets the ticket reference and ID only", () => {
+    const sharing = PRIVACY_POLICY.sections.find((s) => s.title.en.startsWith("4."))!;
+    const scanning = sharing.items!.find((i) => i.en.includes("entry-scanning"))!;
+    expect(scanning.en).toMatch(/order reference and ticket ID only/);
+    expect(scanning.mm).toMatch(MYANMAR);
+  });
+});
+
+describe("LegalDocument", () => {
+  it("renders both languages of every section", () => {
+    const html = renderToStaticMarkup(<LegalDocument doc={PRIVACY_POLICY} />);
+    for (const s of PRIVACY_POLICY.sections) {
+      expect(html).toContain(s.title.en.replace(/'/g, "&#x27;"));
+      expect(html).toContain(s.title.mm);
+    }
+  });
+
+  it("renders the contact card only where the section asks for it", () => {
+    expect(renderToStaticMarkup(<LegalDocument doc={PRIVACY_POLICY} />)).toContain(
+      'href="mailto:support@kuunyi.com"',
+    );
+    expect(renderToStaticMarkup(<LegalDocument doc={TERMS_OF_SALE} />)).not.toContain(
+      'href="mailto:support@kuunyi.com"',
+    );
+  });
+});
