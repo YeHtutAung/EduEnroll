@@ -10,6 +10,8 @@ import {
   SponsorLogoWall,
 } from "@/components/enrollment/SponsorPlacements";
 import { resolveSponsorPlacements } from "@/lib/sponsors";
+import TermsConsent from "@/components/enrollment/TermsConsent";
+import { TERMS_VERSION } from "@/lib/legal/terms";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -20,6 +22,10 @@ export interface EvTrustedOfficialTemplateProps {
   labels: TemplateLabels;
   slug: string;
   currency: string;
+  /** Organiser's event rules shown before ordering; null when none. */
+  organiserTerms?: string | null;
+  /** Fingerprint of those rules, sent back with the order. */
+  organiserTermsSha256?: string | null;
 }
 
 // ─── TicketCard ───────────────────────────────────────────────────────────────
@@ -196,6 +202,8 @@ export default function EvTrustedOfficialTemplate({
   intake,
   classes,
   slug,
+  organiserTerms = null,
+  organiserTermsSha256 = null,
 }: EvTrustedOfficialTemplateProps) {
   const router = useRouter();
   const logoUrl = appearance.logo_url;
@@ -208,6 +216,10 @@ export default function EvTrustedOfficialTemplate({
   const [cart, setCart] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // This template creates the order (and holds seats) on "Buy Ticket", before
+  // personal details are collected, so consent is taken here.
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [termsError, setTermsError] = useState(false);
 
   const cartCount = Object.values(cart).reduce((s, q) => s + q, 0);
   const cartTotal = classes.reduce((s, cls) => s + (cart[cls.id] ?? 0) * cls.fee_amount, 0);
@@ -229,6 +241,10 @@ export default function EvTrustedOfficialTemplate({
 
   async function handleCheckout() {
     if (cartCount === 0 || loading) return;
+    if (!termsAccepted) {
+      setTermsError(true);
+      return;
+    }
     setLoading(true);
     setError(null);
 
@@ -247,6 +263,9 @@ export default function EvTrustedOfficialTemplate({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           items,
+          terms_accepted: termsAccepted,
+          terms_version: TERMS_VERSION,
+          organiser_terms_sha256: organiserTermsSha256,
           ...(priorityToken ? { priority_token: priorityToken } : {}),
         }),
       });
@@ -359,6 +378,16 @@ export default function EvTrustedOfficialTemplate({
                 {cartTotal.toLocaleString()}
               </span>
             </div>
+            <TermsConsent
+              compact
+              checked={termsAccepted}
+              onChange={(value) => {
+                setTermsAccepted(value);
+                if (value) setTermsError(false);
+              }}
+              organiserTerms={organiserTerms}
+              showError={termsError}
+            />
             <button
               className="w-full py-2.5 rounded-[7px] text-[12px] font-bold text-white transition-opacity hover:opacity-90 disabled:opacity-60"
               style={{ background: brand }}
