@@ -21,7 +21,7 @@ export default function PrivacyPolicyPage() {
 
       {/* Last updated */}
       <p className="text-xs font-mono text-gray-500 mb-12 pb-8 border-b border-gray-200">
-        Last updated: March 2026 &nbsp;&middot;&nbsp; Effective: March 2026
+        Last updated: September 2026 &nbsp;&middot;&nbsp; Effective: September 2026
       </p>
 
       {/* Intro */}
@@ -42,6 +42,8 @@ export default function PrivacyPolicyPage() {
               "Organization information — school or business name, subdomain, and organization type",
               "Enrollment data — student names, contact information, NRC numbers, and form responses submitted through enrollment forms",
               "Payment records — payment proof images and payment status information",
+              "Ticket data — ticket IDs, and the time and gate at which a ticket was scanned for entry",
+              "Consent records — when you accepted the Terms of Sale, Privacy Policy and event rules, and which version",
               "Messenger data — Facebook Page IDs and access tokens for organizations using the Messenger bot integration",
               "Usage data — pages visited, actions taken, and timestamps within the platform",
             ]}
@@ -90,6 +92,9 @@ export default function PrivacyPolicyPage() {
           </p>
           <PolicyList
             items={[
+              "With the organiser of the event or course you order from, who receives your order details and contact information so they can run it and contact you",
+              "With an organiser's entry-scanning provider, if they use one — your order reference and ticket ID only, never your name or contact details",
+              "With the payment provider you choose to pay with, to process your payment",
               "With service providers who assist in operating our platform (Supabase, Vercel, Resend) under strict data processing agreements",
               "With Facebook/Meta when you use the Messenger bot integration — governed by Meta's own Privacy Policy",
               "When required by law, court order, or governmental authority",

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, requireOwner, badRequest, notFound } from "@/lib/api";
 import type { Intake, IntakeStatus } from "@/types/database";
+import { normaliseOrganiserTerms, ORGANISER_TERMS_MAX } from "@/lib/legal/terms";
 
 const VALID_STATUSES: IntakeStatus[] = ["draft", "open", "closed"];
 
@@ -34,7 +35,7 @@ export async function GET(
 // ─── PATCH /api/intakes/[id] ──────────────────────────────────────────────────
 // Partially update an intake. All body fields are optional.
 //
-// Allowed fields: name, year, status, hero_image_url, priority_open_at
+// Allowed fields: name, year, status, hero_image_url, priority_open_at, organiser_terms
 
 export async function PATCH(
   request: NextRequest,
@@ -53,7 +54,7 @@ export async function PATCH(
     return badRequest("Request body must be valid JSON.");
   }
 
-  const { name, year, status, hero_image_url, priority_open_at } = body as Record<
+  const { name, year, status, hero_image_url, priority_open_at, organiser_terms } = body as Record<
     string,
     unknown
   >;
@@ -106,6 +107,21 @@ export async function PATCH(
       return badRequest("priority_open_at must be a valid ISO 8601 date and time.");
     }
     update.priority_open_at = (priority_open_at as string | null) ?? null;
+  }
+
+  // organiser_terms — the organiser's event rules shown to buyers. Explicit
+  // null (or blank text) clears them, so the same `in` test as above.
+  // Length checked here as well as by the DB constraint, so an organiser gets
+  // the limit named instead of a generic write failure.
+  if ("organiser_terms" in (body as object)) {
+    if (organiser_terms !== null && typeof organiser_terms !== "string") {
+      return badRequest("organiser_terms must be a string or null.");
+    }
+    const normalised = normaliseOrganiserTerms(organiser_terms as string | null);
+    if (normalised !== null && normalised.length > ORGANISER_TERMS_MAX) {
+      return badRequest(`Event rules must be at most ${ORGANISER_TERMS_MAX} characters.`);
+    }
+    update.organiser_terms = normalised;
   }
 
   if (Object.keys(update).length === 0) {

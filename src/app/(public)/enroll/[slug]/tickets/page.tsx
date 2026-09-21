@@ -36,6 +36,9 @@ interface PageData {
   labels: { currency: string; orgType: string; intake: string; class: string; student: string; seat: string; fee: string };
   /** Tiers still behind a future enrollment_open_at — see the API route. */
   priority_covered_class_ids?: string[];
+  /** Organiser's event rules and the fingerprint the order echoes back. */
+  organiser_terms?: string | null;
+  organiser_terms_sha256?: string | null;
 }
 
 interface ApiError {
@@ -159,6 +162,8 @@ export default function TicketsPage() {
       labels={data.labels}
       slug={params.slug}
       currency={data.labels.currency}
+      organiserTerms={data.organiser_terms ?? null}
+      organiserTermsSha256={data.organiser_terms_sha256 ?? null}
     />
   );
 }
