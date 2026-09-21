@@ -3,18 +3,16 @@
 // ─── Terms of Sale consent ──────────────────────────────────────────────────
 //
 // One required checkbox covering the KuuNyi Terms of Sale and — when the event
-// has any — the organiser's own rules, shown above it. The Privacy Policy is
-// linked beneath as information only: a privacy notice informs, it is not
-// something the buyer agrees to. Used on every surface that creates an order;
-// the order API refuses one without this acceptance, so this box is a
-// convenience, not the control.
+// has any — the organiser's own rules, shown above it. Used on every surface
+// that creates an order; the order API refuses one without this acceptance,
+// so this box is a convenience, not the control.
 //
-// Both documents open as pop-ups over the form rather than in a new tab, so a
-// buyer part-way through the form never leaves it to read them.
+// The Terms of Sale open as a pop-up over the form rather than in a new tab,
+// so a buyer part-way through the form never leaves it to read them.
 
 import { useCallback, useState } from "react";
 import LegalDocumentModal from "@/components/legal/LegalDocumentModal";
-import { PRIVACY_POLICY, TERMS_OF_SALE } from "@/components/legal/content";
+import { TERMS_OF_SALE } from "@/components/legal/content";
 
 interface TermsConsentProps {
   checked: boolean;
@@ -27,8 +25,6 @@ interface TermsConsentProps {
   compact?: boolean;
 }
 
-type OpenDocument = "terms" | "privacy" | null;
-
 export default function TermsConsent({
   checked,
   onChange,
@@ -36,20 +32,10 @@ export default function TermsConsent({
   showError = false,
   compact = false,
 }: TermsConsentProps) {
-  const [open, setOpen] = useState<OpenDocument>(null);
-  const close = useCallback(() => setOpen(null), []);
+  const [termsOpen, setTermsOpen] = useState(false);
+  const closeTerms = useCallback(() => setTermsOpen(false), []);
 
-  const link = "font-medium underline underline-offset-2";
   const text = compact ? "text-[11.5px]" : "text-sm";
-
-  // Inside the <label>: preventDefault so opening a document never toggles
-  // the checkbox the label controls.
-  function opener(which: Exclude<OpenDocument, null>) {
-    return (e: React.MouseEvent) => {
-      e.preventDefault();
-      setOpen(which);
-    };
-  }
 
   return (
     <div className={compact ? "mb-3" : "mb-5"}>
@@ -76,7 +62,18 @@ export default function TermsConsent({
         />
         <span className={`${text} leading-snug text-gray-700`}>
           I agree to the{" "}
-          <button type="button" onClick={opener("terms")} className={link}>Terms of Sale</button>
+          <button
+            type="button"
+            // Inside the <label>: preventDefault so opening the terms never
+            // toggles the checkbox the label controls.
+            onClick={(e) => {
+              e.preventDefault();
+              setTermsOpen(true);
+            }}
+            className="font-medium underline underline-offset-2"
+          >
+            Terms of Sale
+          </button>
           {organiserTerms ? " and the event rules above." : "."}
           <span className="font-myanmar mt-0.5 block text-gray-500">
             ရောင်းချမှုစည်းကမ်းချက်များ
@@ -85,16 +82,6 @@ export default function TermsConsent({
         </span>
       </label>
 
-      {/* Information, not agreement: outside the label, so it is not part of
-          what the checkbox accepts. */}
-      <p className={`${compact ? "text-[10.5px] mt-1" : "text-xs mt-1.5"} pl-[26px] text-gray-500`}>
-        How we handle your information:{" "}
-        <button type="button" onClick={opener("privacy")} className={link}>Privacy Policy</button>
-        <span className="font-myanmar">
-          {" "}· သင့်အချက်အလက်များကို ကိုင်တွယ်ပုံ - ကိုယ်ရေးအချက်အလက်မူဝါဒ
-        </span>
-      </p>
-
       {showError && (
         <p id="terms-consent-error" role="alert" className={`${text} mt-1.5 text-red-600`}>
           Please tick the box to continue.{" "}
@@ -102,8 +89,7 @@ export default function TermsConsent({
         </p>
       )}
 
-      {open === "terms" && <LegalDocumentModal doc={TERMS_OF_SALE} fullPageHref="/terms" onClose={close} />}
-      {open === "privacy" && <LegalDocumentModal doc={PRIVACY_POLICY} fullPageHref="/privacy" onClose={close} />}
+      {termsOpen && <LegalDocumentModal doc={TERMS_OF_SALE} fullPageHref="/terms" onClose={closeTerms} />}
     </div>
   );
 }

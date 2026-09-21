@@ -1,7 +1,7 @@
 -- ─── Terms of Sale consent ──────────────────────────────────────────────────
 --
 -- Buyers now accept the KuuNyi Terms of Sale and the organiser's event rules
--- before an order is created (the Privacy Policy is linked as information),
+-- before an order is created (the Privacy Policy is not part of the forms),
 -- and the order records what was accepted and when.
 --
 --   intakes.organiser_terms       — the organiser's own rules for the event,

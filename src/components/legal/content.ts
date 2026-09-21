@@ -1,14 +1,14 @@
 // ─── Legal documents: the words, in English and Myanmar ─────────────────────
 //
-// Single source for /terms, /privacy and the pop-ups on the order forms, so
-// the page and the pop-up can never say different things.
+// Single source for /terms, /privacy and the Terms of Sale pop-up on the
+// order forms, so the page and the pop-up can never say different things.
 //
 // Every string is a pair. src/__tests__/legal/legalContent.test.ts fails if a
 // Myanmar half is missing or contains no Myanmar script.
 //
 // Changing the TERMS OF SALE here changes what buyers agree to: bump
-// TERMS_VERSION in src/lib/legal/terms.ts. The Privacy Policy is shown to
-// buyers as information only, so its wording is not part of the acceptance.
+// TERMS_VERSION in src/lib/legal/terms.ts. The Privacy Policy is not part of
+// the order forms, so its wording is not part of the acceptance.
 
 import { TERMS_VERSION } from "@/lib/legal/terms";
 

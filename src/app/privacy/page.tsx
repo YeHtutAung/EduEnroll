@@ -8,8 +8,8 @@ export const metadata: Metadata = {
     "Learn how KuuNyi collects, uses, and protects your information when using our enrollment management platform.",
 };
 
-// The words live in src/components/legal/content.ts, shared with the pop-up on
-// the order forms, where this policy is linked as information for buyers.
+// The words live in src/components/legal/content.ts. Kept on the site (Meta's
+// Messenger platform needs a privacy URL) but not linked from the order forms.
 
 export default function PrivacyPolicyPage() {
   return (

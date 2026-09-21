@@ -9,25 +9,23 @@ function render(props: Partial<Parameters<typeof TermsConsent>[0]> = {}) {
 }
 
 describe("TermsConsent", () => {
-  // Pop-ups, not new tabs: the buyer reads the document without leaving the
+  // A pop-up, not a new tab: the buyer reads the terms without leaving the
   // form they are filling in.
-  it("opens the Terms of Sale and Privacy Policy as pop-ups, not links away", () => {
+  it("opens the Terms of Sale as a pop-up, not a link away", () => {
     const html = render();
     expect(html).toMatch(/<button[^>]+type="button"[^>]*>Terms of Sale<\/button>/);
-    expect(html).toMatch(/<button[^>]+type="button"[^>]*>Privacy Policy<\/button>/);
     expect(html).not.toContain('href="/terms"');
-    expect(html).not.toContain('href="/privacy"');
   });
 
-  // Buyers agree to the Terms of Sale (and event rules) only. The Privacy
-  // Policy is information, linked beneath — not part of what the box accepts.
-  it("asks agreement to the Terms of Sale only, with the Privacy Policy outside the checkbox label", () => {
-    const html = render();
-    const label = html.match(/<label[\s\S]*?<\/label>/)![0];
-    expect(label).toContain("Terms of Sale");
-    expect(label).not.toContain("Privacy Policy");
-    expect(label).not.toContain("ကိုယ်ရေးအချက်အလက်မူဝါဒ");
-    expect(html.slice(html.indexOf("</label>"))).toContain("Privacy Policy");
+  // Buyers agree to the Terms of Sale (and event rules) only, and the form
+  // shows nothing about the Privacy Policy (removed at the owner's request;
+  // /privacy stays on the site).
+  it("asks agreement to the Terms of Sale only and does not mention the Privacy Policy", () => {
+    const html = render({ organiserTerms: "Bags are searched." });
+    expect(html).toContain("Terms of Sale");
+    expect(html).not.toContain("Privacy Policy");
+    expect(html).not.toContain("ကိုယ်ရေးအချက်အလက်မူဝါဒ");
+    expect(html).not.toContain("How we handle your information");
   });
 
   it("renders no pop-up until one is opened", () => {

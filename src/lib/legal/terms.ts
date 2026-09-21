@@ -7,8 +7,8 @@
 /**
  * Version of the KuuNyi Terms of Sale a buyer accepts.
  *
- * Bump it whenever the wording of /terms changes. (The Privacy Policy is
- * linked on the order forms as information, not accepted.) Orders placed
+ * Bump it whenever the wording of /terms changes. (The Privacy Policy is not
+ * part of the order forms and is not accepted.) Orders placed
  * from a page loaded before the bump then come back 409 TERMS_CHANGED and the
  * buyer reloads, so nobody is recorded as accepting wording they never saw.
  */
