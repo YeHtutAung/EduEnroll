@@ -2,6 +2,7 @@ import { jsPDF } from "jspdf";
 import QRCode from "qrcode";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { signTicketJwt } from "@/lib/tickets/sign";
+import { isTicketQrFormat, ticketQrPayload, type TicketQrFormat } from "@/lib/tickets/qrPayload";
 import type { EmailAttachment } from "@/lib/email";
 import { TICKET_CARD, TICKET_FONT, TICKET_ROWS, qrTop } from "@/lib/tickets/ticketLayout";
 
@@ -13,7 +14,7 @@ type TicketRow = {
   exp: string;
 };
 
-type EmailTicket = TicketRow & { eventName: string };
+type EmailTicket = TicketRow & { eventName: string; qrFormat: TicketQrFormat };
 
 /**
  * Builds the PDF attached to a paid event's confirmation email. The browser
@@ -48,18 +49,31 @@ export async function buildEticketEmailAttachment(
 
   const ticketRows = rows as TicketRow[];
   const intakeIds = [...new Set(ticketRows.map((ticket) => ticket.intake_id))];
-  const intakeResult = await supabase.from("intakes").select("id, name").in("id", intakeIds);
+  const intakeResult = await supabase
+    .from("intakes")
+    .select("id, name, ticket_qr_format")
+    .in("id", intakeIds);
   const { data: intakes, error: intakeError } = intakeResult as unknown as {
-    data: { id: string; name: string }[] | null;
+    data: { id: string; name: string; ticket_qr_format: unknown }[] | null;
     error: unknown;
   };
 
   if (intakeError) throw new Error("could not load event details for e-ticket attachment");
   const names = new Map((intakes ?? []).map((intake) => [intake.id, intake.name]));
-  const tickets = ticketRows.map((ticket) => ({
-    ...ticket,
-    eventName: names.get(ticket.intake_id) ?? "Event",
-  }));
+  const formats = new Map((intakes ?? []).map((intake) => [intake.id, intake.ticket_qr_format]));
+
+  // Checked for every ticket before any is drawn: an event whose format cannot
+  // be read gets no attachment rather than a QR its gate may not accept. The
+  // callers already treat a thrown error as "send the email without it".
+  const tickets = ticketRows.map((ticket) => {
+    const qrFormat = formats.get(ticket.intake_id);
+    if (!isTicketQrFormat(qrFormat)) throw new Error("unknown ticket QR format");
+    return {
+      ...ticket,
+      eventName: names.get(ticket.intake_id) ?? "Event",
+      qrFormat,
+    };
+  });
 
   const content = await renderEticketPdf(enrollment.enrollment_ref, tickets);
   return {
@@ -83,14 +97,16 @@ export async function renderEticketPdf(
   for (const [index, ticket] of tickets.entries()) {
     if (index > 0) pdf.addPage([width, height]);
 
-    const jwt = signTicketJwt({
-      jti: ticket.id,
-      eid: ticket.intake_id,
-      tier: ticket.tier,
-      admits: ticket.admits,
-      exp: Math.floor(Date.parse(ticket.exp) / 1000),
-    });
-    const qr = await QRCode.toDataURL(jwt, { width: 240, margin: 1 });
+    const payload = ticketQrPayload(ticket.qrFormat, ticket.id, () =>
+      signTicketJwt({
+        jti: ticket.id,
+        eid: ticket.intake_id,
+        tier: ticket.tier,
+        admits: ticket.admits,
+        exp: Math.floor(Date.parse(ticket.exp) / 1000),
+      }),
+    );
+    const qr = await QRCode.toDataURL(payload, { width: 240, margin: 1 });
 
     pdf.setFillColor(15, 31, 66);
     pdf.roundedRect(margin, margin, cardWidth, cardHeight, 4, 4, "F");
