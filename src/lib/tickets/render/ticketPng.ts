@@ -245,7 +245,7 @@ export async function buildQrMap(tickets: TicketData[], existing: QrMap = {}): P
   const map: QrMap = { ...existing };
   await Promise.all(
     tickets.map(async (t) => {
-      if (!map[t.jti]) map[t.jti] = await QRCode.toDataURL(t.jwt, { width: 240, margin: 1 });
+      if (!map[t.jti]) map[t.jti] = await QRCode.toDataURL(t.qr, { width: 240, margin: 1 });
     }),
   );
   return map;

@@ -3,8 +3,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendMessage } from "./send";
-
-const REF_PATTERN = /^[A-Z]{1,5}-\d{4}-[A-Z0-9]{3,6}$/;
+import { isEnrollmentRef } from "@/lib/enrollment/refPattern";
 
 export async function processMessage(
   tenantId: string,
@@ -18,7 +17,7 @@ export async function processMessage(
   // Telegram deep links only allow A-Z a-z 0-9 _ so hyphens are sent as underscores
   if (trimmed.startsWith("/start")) {
     const ref = trimmed.substring(6).trim().toUpperCase().replace(/_/g, "-");
-    if (ref && REF_PATTERN.test(ref)) {
+    if (ref && isEnrollmentRef(ref)) {
       await handleLink(tenantId, chatId, ref, botToken);
     } else {
       await sendMessage(
@@ -36,7 +35,7 @@ export async function processMessage(
   // /status <ref> — check status
   if (trimmed.startsWith("/status")) {
     const ref = trimmed.substring(7).trim().toUpperCase();
-    if (ref && REF_PATTERN.test(ref)) {
+    if (ref && isEnrollmentRef(ref)) {
       await handleStatus(tenantId, chatId, ref, botToken);
     } else {
       await sendMessage(botToken, chatId, "Usage: /status T-2026-00123");
@@ -46,7 +45,7 @@ export async function processMessage(
 
   // Free text matching enrollment ref pattern
   const upper = trimmed.toUpperCase();
-  if (REF_PATTERN.test(upper)) {
+  if (isEnrollmentRef(upper)) {
     await handleStatus(tenantId, chatId, upper, botToken);
     return;
   }

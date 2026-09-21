@@ -60,10 +60,25 @@ const TICKETS = [
   },
 ];
 
-function setupMocks(enrollmentStatus: string, opts: { withTickets?: boolean } = {}) {
-  const { withTickets = false } = opts;
+type IntakeFormats = { data: { id: string; ticket_qr_format: string }[] | null; error: unknown };
+
+function setupMocks(
+  enrollmentStatus: string,
+  opts: { withTickets?: boolean; intakes?: IntakeFormats } = {},
+) {
+  const {
+    withTickets = false,
+    intakes = { data: [{ id: "intake-1", ticket_qr_format: "jwt" }], error: null },
+  } = opts;
 
   mockAdminFrom.mockImplementation((table: string) => {
+    if (table === "intakes") {
+      return {
+        select: vi.fn().mockReturnThis(),
+        in: vi.fn().mockResolvedValue(intakes),
+      };
+    }
+
     if (table === "enrollments") {
       return {
         select: vi.fn().mockReturnThis(),
@@ -161,6 +176,63 @@ describe("GET /api/public/enrollment/[ref] tickets", () => {
 
     const jtis = body.tickets.map((t: { jti: string }) => t.jti).sort();
     expect(jtis).toEqual(["ticket-1", "ticket-2"]);
+  });
+
+  it("puts the signed token in the QR for an event on the jwt format", async () => {
+    setupMocks("confirmed", { withTickets: true });
+
+    const body = await (await GET(makeRequest(), { params: { ref: "NM-2026-0001" } })).json();
+
+    for (const t of body.tickets) expect(t.qr).toBe(t.jwt);
+  });
+
+  it("puts the bare ticket UUID in the QR for an event on the uuid format, and still returns the jwt", async () => {
+    setupMocks("confirmed", {
+      withTickets: true,
+      intakes: { data: [{ id: "intake-1", ticket_qr_format: "uuid" }], error: null },
+    });
+
+    const res = await GET(makeRequest(), { params: { ref: "NM-2026-0001" } });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    expect(body.tickets).toHaveLength(2);
+    for (const t of body.tickets) {
+      expect(t.qr).toBe(t.jti);
+      expect(verifyTicketJwt(t.jwt).jti).toBe(t.jti);
+    }
+  });
+
+  // Not knowing the format is not the same as the default format: a jwt QR on
+  // a uuid event is a ticket the gate cannot read. So no ticket at all.
+  it("fails closed with 503 and no tickets when the event format lookup fails", async () => {
+    setupMocks("confirmed", {
+      withTickets: true,
+      intakes: { data: null, error: { code: "57014", message: "timeout" } },
+    });
+
+    const res = await GET(makeRequest(), { params: { ref: "NM-2026-0001" } });
+    expect(res.status).toBe(503);
+    expect((await res.json()).tickets).toBeUndefined();
+  });
+
+  it("fails closed with 503 when a ticket's event has no readable format", async () => {
+    setupMocks("confirmed", {
+      withTickets: true,
+      intakes: { data: [{ id: "intake-1", ticket_qr_format: "barcode" }], error: null },
+    });
+
+    const res = await GET(makeRequest(), { params: { ref: "NM-2026-0001" } });
+    expect(res.status).toBe(503);
+  });
+
+  it("does not look up event formats when there are no valid tickets", async () => {
+    setupMocks("confirmed", { withTickets: false });
+
+    const res = await GET(makeRequest(), { params: { ref: "NM-2026-0001" } });
+    expect(res.status).toBe(200);
+    expect((await res.json()).tickets).toEqual([]);
+    expect(mockAdminFrom).not.toHaveBeenCalledWith("intakes");
   });
 
   it("returns an empty tickets array and never queries tickets for an unconfirmed enrollment", async () => {
