@@ -7,7 +7,8 @@
 //     scripts/export-scanner-tickets.ts <tenant-subdomain> <intake-slug> --out <file.csv>
 //
 // Read-only. Columns: ticket_ref, ticket_uuid, tier, seat_no, event.
-// ticket_uuid is exactly what a 'uuid'-format event's QR encodes.
+// ticket_uuid is exactly what a 'uuid'-format event's QR encodes; any other
+// event is refused, because its QRs do not encode these values.
 //
 // Included: status 'valid' tickets on 'confirmed' enrollments that are not
 // internal tests. Anything voided or rejected AFTER the export stays in the
@@ -71,11 +72,15 @@ async function main() {
     console.error(`Event "${intakeSlug}" not found for tenant "${tenantSlug}".`);
     process.exit(1);
   }
+  // The CSV tells the scanner to match scanned values against these UUIDs. On
+  // any other format the tickets' QRs encode something else, so a list from a
+  // non-uuid event would make every gate scan fail. Same guard as the re-send.
   if (intake.ticket_qr_format !== "uuid") {
-    console.warn(
-      `WARNING: "${intakeSlug}" is on the '${intake.ticket_qr_format}' QR format — its tickets do NOT ` +
-        `encode these UUIDs. Exporting anyway.`,
+    console.error(
+      `"${intakeSlug}" is on the '${intake.ticket_qr_format}' QR format — its tickets do not encode ` +
+        "these UUIDs, so this list would fail every scan. Switch the event to 'uuid' first. Nothing written.",
     );
+    process.exit(1);
   }
 
   const rows: TicketRow[] = [];
