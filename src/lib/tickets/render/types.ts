@@ -15,6 +15,8 @@ export type TicketData = {
   tier: string;
   admits: number;
   jwt: string;
+  /** What the QR encodes, decided by the server from the event's format. */
+  qr: string;
 };
 
 export type TicketRenderContext = {

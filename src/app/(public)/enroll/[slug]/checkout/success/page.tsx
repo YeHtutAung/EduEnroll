@@ -21,6 +21,8 @@ interface TicketData {
   tier: string;
   admits: number;
   jwt: string;
+  /** What the QR encodes — the signed token or the bare ticket UUID, per event. */
+  qr: string;
 }
 
 interface EnrollmentData {
@@ -197,7 +199,7 @@ function SuccessContent() {
     (async () => {
       const entries = await Promise.all(
         tickets.map(async (t) => {
-          const dataUrl = await QRCode.toDataURL(t.jwt, { width: 240, margin: 1 });
+          const dataUrl = await QRCode.toDataURL(t.qr, { width: 240, margin: 1 });
           return [t.jti, dataUrl] as const;
         }),
       );
