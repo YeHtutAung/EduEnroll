@@ -43,9 +43,9 @@ export async function POST(request: NextRequest) {
     ? (form_data as Record<string, string>)
     : null;
 
-  // Terms of Sale, Privacy Policy and the organiser's event rules must be
-  // accepted — checked here, before any seat is reserved, so a refused order
-  // leaves nothing behind.
+  // The Terms of Sale and the organiser's event rules must be accepted —
+  // checked here, before any seat is reserved, so a refused order leaves
+  // nothing behind. (The Privacy Policy is information, not accepted.)
   const classIds = Array.isArray(items)
     ? (items as { class_id?: unknown }[]).map((i) => i?.class_id)
     : [class_id];

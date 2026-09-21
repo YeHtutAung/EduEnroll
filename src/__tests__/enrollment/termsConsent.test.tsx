@@ -19,6 +19,17 @@ describe("TermsConsent", () => {
     expect(html).not.toContain('href="/privacy"');
   });
 
+  // Buyers agree to the Terms of Sale (and event rules) only. The Privacy
+  // Policy is information, linked beneath — not part of what the box accepts.
+  it("asks agreement to the Terms of Sale only, with the Privacy Policy outside the checkbox label", () => {
+    const html = render();
+    const label = html.match(/<label[\s\S]*?<\/label>/)![0];
+    expect(label).toContain("Terms of Sale");
+    expect(label).not.toContain("Privacy Policy");
+    expect(label).not.toContain("ကိုယ်ရေးအချက်အလက်မူဝါဒ");
+    expect(html.slice(html.indexOf("</label>"))).toContain("Privacy Policy");
+  });
+
   it("renders no pop-up until one is opened", () => {
     expect(render()).not.toContain('role="dialog"');
   });

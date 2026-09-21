@@ -66,8 +66,8 @@ export async function checkTermsAcceptance(
       body: {
         code: "TERMS_REQUIRED",
         error: "Terms Required",
-        message: "Please agree to the Terms of Sale, Privacy Policy and event rules to continue.",
-        message_mm: "ဆက်လက်ဆောင်ရွက်ရန် ရောင်းချမှုစည်းကမ်းချက်များ၊ ကိုယ်ရေးအချက်အလက်မူဝါဒနှင့် ပွဲစည်းကမ်းများကို သဘောတူကြောင်း အမှတ်ခြစ်ပါ။",
+        message: "Please agree to the Terms of Sale and event rules to continue.",
+        message_mm: "ဆက်လက်ဆောင်ရွက်ရန် ရောင်းချမှုစည်းကမ်းချက်များနှင့် ပွဲစည်းကမ်းများကို သဘောတူကြောင်း အမှတ်ခြစ်ပါ။",
       },
     };
   }

@@ -6,8 +6,9 @@
 // Every string is a pair. src/__tests__/legal/legalContent.test.ts fails if a
 // Myanmar half is missing or contains no Myanmar script.
 //
-// Changing the wording here changes what buyers agree to: bump TERMS_VERSION
-// in src/lib/legal/terms.ts.
+// Changing the TERMS OF SALE here changes what buyers agree to: bump
+// TERMS_VERSION in src/lib/legal/terms.ts. The Privacy Policy is shown to
+// buyers as information only, so its wording is not part of the acceptance.
 
 import { TERMS_VERSION } from "@/lib/legal/terms";
 
@@ -39,9 +40,9 @@ export const TERMS_OF_SALE: LegalDocumentData = {
   subtitle: { en: `Version ${TERMS_VERSION}`, mm: `ဗားရှင်း ${TERMS_VERSION}` },
   intro: {
     en:
-      "KuuNyi (“we”, “us”) runs the ordering and ticketing platform used by the organiser named on your order (the “organiser”). The organiser runs the event or course. By placing an order you agree to these terms, our Privacy Policy, and any event rules the organiser showed you before you ordered.",
+      "KuuNyi (“we”, “us”) runs the ordering and ticketing platform used by the organiser named on your order (the “organiser”). The organiser runs the event or course. By placing an order you agree to these terms and to any event rules the organiser showed you before you ordered. How we handle your information is described in our Privacy Policy.",
     mm:
-      "KuuNyi သည် သင့်အော်ဒါတွင် ဖော်ပြထားသော စီစဉ်သူ (“စီစဉ်သူ”) အသုံးပြုသည့် အော်ဒါမှာယူခြင်းနှင့် လက်မှတ်ရောင်းချခြင်း ပလက်ဖောင်းကို လည်ပတ်ပါသည်။ ပွဲ သို့မဟုတ် သင်တန်းကို စီစဉ်သူက ကျင်းပပါသည်။ အော်ဒါမှာယူခြင်းဖြင့် ဤစည်းကမ်းချက်များ၊ ကျွန်ုပ်တို့၏ ကိုယ်ရေးအချက်အလက်မူဝါဒနှင့် မှာယူမီ စီစဉ်သူ ပြသခဲ့သော ပွဲစည်းကမ်းများကို သဘောတူပါသည်။",
+      "KuuNyi သည် သင့်အော်ဒါတွင် ဖော်ပြထားသော စီစဉ်သူ (“စီစဉ်သူ”) အသုံးပြုသည့် အော်ဒါမှာယူခြင်းနှင့် လက်မှတ်ရောင်းချခြင်း ပလက်ဖောင်းကို လည်ပတ်ပါသည်။ ပွဲ သို့မဟုတ် သင်တန်းကို စီစဉ်သူက ကျင်းပပါသည်။ အော်ဒါမှာယူခြင်းဖြင့် ဤစည်းကမ်းချက်များနှင့် မှာယူမီ စီစဉ်သူ ပြသခဲ့သော ပွဲစည်းကမ်းများကို သဘောတူပါသည်။ သင့်အချက်အလက်များကို ကိုင်တွယ်ပုံကို ကျွန်ုပ်တို့၏ ကိုယ်ရေးအချက်အလက်မူဝါဒတွင် ဖော်ပြထားပါသည်။",
   },
   sections: [
     {
@@ -198,8 +199,8 @@ export const PRIVACY_POLICY: LegalDocumentData = {
           mm: "လက်မှတ် အချက်အလက် — လက်မှတ် ID နှင့် ဝင်ပေါက်တွင် လက်မှတ်ကို စကင်ဖတ်ခဲ့သည့် အချိန်နှင့် ဝင်ပေါက်",
         },
         {
-          en: "Consent records — when you accepted the Terms of Sale, Privacy Policy and event rules, and which version",
-          mm: "သဘောတူညီချက် မှတ်တမ်း — ရောင်းချမှုစည်းကမ်းချက်များ၊ ကိုယ်ရေးအချက်အလက်မူဝါဒနှင့် ပွဲစည်းကမ်းများကို သဘောတူခဲ့သည့် အချိန်နှင့် ဗားရှင်း",
+          en: "Consent records — when you accepted the Terms of Sale and event rules, and which version",
+          mm: "သဘောတူညီချက် မှတ်တမ်း — ရောင်းချမှုစည်းကမ်းချက်များနှင့် ပွဲစည်းကမ်းများကို သဘောတူခဲ့သည့် အချိန်နှင့် ဗားရှင်း",
         },
         {
           en: "Messenger data — Facebook Page IDs and access tokens for organizations using the Messenger bot integration",

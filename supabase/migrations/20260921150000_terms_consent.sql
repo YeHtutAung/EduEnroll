@@ -1,8 +1,8 @@
 -- ─── Terms of Sale consent ──────────────────────────────────────────────────
 --
--- Buyers now accept the KuuNyi Terms of Sale, the Privacy Policy and the
--- organiser's event rules before an order is created, and the order records
--- what was accepted and when.
+-- Buyers now accept the KuuNyi Terms of Sale and the organiser's event rules
+-- before an order is created (the Privacy Policy is linked as information),
+-- and the order records what was accepted and when.
 --
 --   intakes.organiser_terms       — the organiser's own rules for the event,
 --                                    shown to buyers; null = none.
@@ -34,8 +34,8 @@ alter table public.enrollments
 comment on column public.intakes.organiser_terms is
   'Organiser''s event rules shown to buyers before ordering; null = none. Max 5000 chars.';
 comment on column public.enrollments.terms_accepted_at is
-  'When the buyer accepted the Terms of Sale, Privacy Policy and event rules. Null for orders placed before consent existed.';
+  'When the buyer accepted the Terms of Sale and event rules. Null for orders placed before consent existed.';
 comment on column public.enrollments.terms_version is
-  'KuuNyi Terms of Sale / Privacy Policy version accepted (TERMS_VERSION in src/lib/legal/terms.ts).';
+  'KuuNyi Terms of Sale version accepted (TERMS_VERSION in src/lib/legal/terms.ts).';
 comment on column public.enrollments.organiser_terms_sha256 is
   'sha256 fingerprint of the organiser rules the buyer was shown; null when the event had none.';

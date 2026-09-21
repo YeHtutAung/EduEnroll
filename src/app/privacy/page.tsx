@@ -9,8 +9,7 @@ export const metadata: Metadata = {
 };
 
 // The words live in src/components/legal/content.ts, shared with the pop-up on
-// the order forms. Buyers accept this policy when ordering, so changing it
-// must bump TERMS_VERSION in src/lib/legal/terms.ts.
+// the order forms, where this policy is linked as information for buyers.
 
 export default function PrivacyPolicyPage() {
   return (

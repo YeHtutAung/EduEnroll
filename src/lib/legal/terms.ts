@@ -5,9 +5,10 @@
 // src/server/legal/organiserRules.ts because it needs node:crypto.
 
 /**
- * Version of the KuuNyi Terms of Sale and Privacy Policy a buyer accepts.
+ * Version of the KuuNyi Terms of Sale a buyer accepts.
  *
- * Bump it whenever the wording of /terms or /privacy changes. Orders placed
+ * Bump it whenever the wording of /terms changes. (The Privacy Policy is
+ * linked on the order forms as information, not accepted.) Orders placed
  * from a page loaded before the bump then come back 409 TERMS_CHANGED and the
  * buyer reloads, so nobody is recorded as accepting wording they never saw.
  */
