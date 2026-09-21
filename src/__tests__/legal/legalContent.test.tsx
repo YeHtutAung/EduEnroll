@@ -88,3 +88,26 @@ describe("LegalDocument", () => {
     );
   });
 });
+
+describe("Terms of Sale wording (owner review, 2026-09-21)", () => {
+  it("uses the owner's Myanmar intro, word for word", () => {
+    expect(TERMS_OF_SALE.intro.mm).toBe(
+      "KuuNyi သည် သင့်အော်ဒါတွင် ဖော်ပြထားသော စီစဉ်သူ (“စီစဉ်သူ”) အသုံးပြုသည့် အော်ဒါမှာယူခြင်းနှင့် လက်မှတ်ရောင်းချခြင်း ပလက်ဖောင်းကို လည်ပတ်ပါသည်။ ပွဲကို စီစဉ်သူက ကျင်းပပါသည်။ အော်ဒါမှာယူခြင်းဖြင့် ဤစည်းကမ်းချက်များနှင့် မမှာယူမီ စီစဉ်သူ ပြသခဲ့သော ပွဲစည်းကမ်းများကို သဘောတူပါသည်။ သင့်အချက်အလက်များကို ကိုင်တွယ်ပုံကို ကျွန်ုပ်တို့၏ ကိုယ်ရေးအချက်အလက်မူဝါဒတွင် ဖော်ပြထားပါသည်။",
+    );
+  });
+
+  it("says 'Scan ဖတ်', never 'စကင်ဖတ်', anywhere in either document", () => {
+    for (const doc of [TERMS_OF_SALE, PRIVACY_POLICY]) {
+      const leftovers = allPairs(doc).filter(([, p]) => p.mm.includes("စကင်")).map(([l]) => l);
+      expect(leftovers).toEqual([]);
+    }
+  });
+
+  it("points buyers to the organiser only in the Contact section — nothing about KuuNyi", () => {
+    const contact = TERMS_OF_SALE.sections.find((s) => s.title.en.endsWith("Contact"))!;
+    const text = JSON.stringify(contact);
+    expect(text).not.toMatch(/kuunyi/i);
+    expect(text).toContain("organiser");
+    expect(contact.contact).toBeFalsy();
+  });
+});
