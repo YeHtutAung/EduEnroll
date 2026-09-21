@@ -247,6 +247,7 @@ export interface Intake {
   hero_image_url: string | null; // hero banner for public enrollment page
   status: IntakeStatus;
   priority_open_at: string | null; // start of the interest head-start window, before public sale
+  ticket_qr_format: "jwt" | "uuid"; // what the e-ticket QR encodes; see src/lib/tickets/qrPayload.ts
   created_at: string;
 }
 

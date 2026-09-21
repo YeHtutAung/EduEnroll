@@ -1,15 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveScannerTenant } from "@/lib/scanner/apiKey";
+import { verifyTicketJwt } from "@/lib/tickets/sign";
 
 // ─── POST /api/scans ────────────────────────────────────────────────────────
-// Called by the kuunyi-scanner app after it verifies a ticket JWT offline.
+// Called by the kuunyi-scanner app when a ticket QR is scanned.
 // Enforces single-use entry via a race-safe conditional update: only the
 // scan that wins the `.is("first_scan_at", null)` UPDATE gets a 200; any
 // concurrent/subsequent scan of the same ticket gets a 409 with the details
 // of the original (winning) scan.
 //
-// Body: { jti: string, eid: string, gate: string }
+// Body: { token: string, gate?: string, jti?: string, eid?: string }
+//
+// `token` is the compact JWT encoded in the QR and is REQUIRED: its signature
+// is the admission credential. Identifying a ticket by `jti` alone — as this
+// route used to — meant anyone who obtained or guessed a ticket id could burn
+// an admission by calling this endpoint directly, since the client's offline
+// check was the only signature verification anywhere in the system.
+//
+// `jti`/`eid` are optional and advisory. The verified claims are the source of
+// truth; a body that contradicts them is a client bug and is rejected loudly
+// rather than silently ignored.
 
 interface TicketRow {
   id: string;
@@ -21,10 +32,17 @@ interface TicketRow {
 }
 
 interface ScanBody {
+  token?: string;
   jti?: string;
   eid?: string;
   gate?: string;
 }
+
+// Every rejection that means "this is not an admission" returns exactly this,
+// so a caller cannot tell a forged signature from an unknown, voided, expired
+// or wrong-event ticket. Operators see one "NOT VALID" state either way.
+const notFound = () =>
+  NextResponse.json({ error: "Not Found", message: "Ticket not found." }, { status: 404 });
 
 export async function POST(request: NextRequest) {
   // ── 1. Parse body ──────────────────────────────────────────────────────────
@@ -48,17 +66,60 @@ export async function POST(request: NextRequest) {
   }
 
   // ── 3. Validate body ────────────────────────────────────────────────────────
-  const { jti, eid, gate } = body;
-  if (!jti || typeof jti !== "string" || !eid || typeof eid !== "string") {
+  const { token, gate } = body;
+  if (!token || typeof token !== "string") {
     return NextResponse.json(
-      { error: "Bad Request", message: "jti and eid are required." },
+      { error: "Bad Request", message: "token is required." },
+      { status: 400 },
+    );
+  }
+
+  // ── 4. Verify the token's signature ─────────────────────────────────────────
+  // Checked before the configuration is trusted and before any query runs, so
+  // a forged token cannot probe for ticket existence.
+  //
+  // A missing signing key is a 500, never a 404: reporting "not a valid ticket"
+  // for a server that cannot verify anything would turn one misconfiguration
+  // into every attendee being turned away at the gate, with nothing in the
+  // response to say why.
+  if (!process.env.TICKET_SIGNING_KEY || !process.env.TICKET_KID) {
+    console.error("[scans] TICKET_SIGNING_KEY / TICKET_KID not configured — cannot verify tickets");
+    return NextResponse.json(
+      { error: "Internal Server Error", message: "Ticket verification is unavailable." },
+      { status: 500 },
+    );
+  }
+
+  let claims: ReturnType<typeof verifyTicketJwt>;
+  try {
+    claims = verifyTicketJwt(token);
+  } catch {
+    // Bad signature, wrong key, or not a ticket token at all (an operator
+    // scanning some other QR). Indistinguishable to the caller by design.
+    return notFound();
+  }
+
+  const jti = claims.jti;
+  const eid = claims.eid;
+  if (!jti || typeof jti !== "string" || !eid || typeof eid !== "string") {
+    return notFound();
+  }
+
+  // A body that disagrees with the signed claims is a client bug worth
+  // surfacing, not something to resolve silently in either direction.
+  if (
+    (body.jti !== undefined && body.jti !== jti) ||
+    (body.eid !== undefined && body.eid !== eid)
+  ) {
+    return NextResponse.json(
+      { error: "Bad Request", message: "Body does not match the token's claims." },
       { status: 400 },
     );
   }
 
   const supabase = createAdminClient();
 
-  // ── 4. Load and validate ticket ─────────────────────────────────────────────
+  // ── 5. Load and validate ticket ─────────────────────────────────────────────
   const { data: ticket } = (await supabase
     .from("tickets")
     .select("id, intake_id, status, exp, first_scan_at, first_scan_gate")
@@ -72,12 +133,12 @@ export async function POST(request: NextRequest) {
     ticket.status !== "valid" ||
     Date.parse(ticket.exp) < Date.now()
   ) {
-    return NextResponse.json({ error: "Not Found", message: "Ticket not found." }, { status: 404 });
+    return notFound();
   }
 
-  // ── 5. Race-safe single-use claim ───────────────────────────────────────────
+  // ── 6. Race-safe single-use claim ───────────────────────────────────────────
   // Re-check status='valid' inside the conditional update so a ticket voided
-  // between step 4 and here cannot still be claimed (validity + first-scan claim
+  // between step 5 and here cannot still be claimed (validity + first-scan claim
   // happen in one atomic statement).
   const { data: claimed } = (await supabase
     .from("tickets")

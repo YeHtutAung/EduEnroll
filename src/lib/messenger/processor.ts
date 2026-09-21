@@ -1,6 +1,7 @@
 // ─── Messenger message processor ────────────────────────────────────────────
 
 import { sendTextMessage } from "./send";
+import { isEnrollmentRef } from "@/lib/enrollment/refPattern";
 import {
   sendWelcome,
   sendOpenIntakes,
@@ -23,10 +24,6 @@ interface MessengerMessage {
   text?: string;
   quick_reply?: { payload: string };
 }
-
-// ─── Reference number pattern ───────────────────────────────────────────────
-
-const REF_PATTERN = /^[A-Z]{1,4}-\d{4}-[A-Z0-9]{3,6}$/i;
 
 // ─── Main processor ─────────────────────────────────────────────────────────
 
@@ -64,7 +61,7 @@ export async function processMessage(
   if (!text) return;
 
   // Check if it looks like a reference number
-  if (REF_PATTERN.test(text)) {
+  if (isEnrollmentRef(text)) {
     await sendStatusCheck(tenantId, senderPsid, text.toUpperCase(), pageToken);
     return;
   }

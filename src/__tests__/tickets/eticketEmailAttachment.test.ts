@@ -1,23 +1,37 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { mockAdmin } = vi.hoisted(() => ({ mockAdmin: { from: vi.fn() } }));
+const { mockAdmin, toDataURLSpy } = vi.hoisted(() => ({
+  mockAdmin: { from: vi.fn() },
+  toDataURLSpy: vi.fn(),
+}));
 
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => mockAdmin }));
 vi.mock("@/lib/tickets/sign", () => ({
   signTicketJwt: ({ jti }: { jti: string }) => `signed-ticket-token-${jti}`,
 }));
+// Real QR rendering, observed: the PDFs below must still be real PDFs.
+vi.mock("qrcode", async (importOriginal) => {
+  const actual = (await importOriginal()) as {
+    default: { toDataURL: (...args: unknown[]) => Promise<string> };
+  };
+  toDataURLSpy.mockImplementation((...args: unknown[]) => actual.default.toDataURL(...args));
+  return { default: { ...actual.default, toDataURL: toDataURLSpy } };
+});
 
 const { buildEticketEmailAttachment, renderEticketPdf } =
   await import("@/server/tickets/eticketEmailAttachment");
 
-const ticket = (number: number) => ({
+const ticket = (number: number, qrFormat: "jwt" | "uuid" = "jwt") => ({
   id: `e063be0c-1234-4000-8000-${String(number).padStart(12, "0")}`,
   intake_id: "intake-1",
   tier: "General Access - GA",
   admits: 1,
   exp: "2026-10-01T00:00:00.000Z",
   eventName: "October 2026 Event",
+  qrFormat,
 });
+
+const encodedTexts = () => toDataURLSpy.mock.calls.map((call) => call[0]);
 
 function pageCount(pdf: Buffer): number {
   return (pdf.toString("latin1").match(/\/Type \/Page\b/g) ?? []).length;
@@ -35,6 +49,82 @@ function query(result: unknown) {
 
 beforeEach(() => {
   mockAdmin.from.mockReset();
+  toDataURLSpy.mockClear();
+});
+
+function mockAttachmentQueries(intakes: unknown) {
+  const enrollmentQuery = query({ data: { enrollment_ref: "LM-0904-FY6A" }, error: null });
+  const ticketsQuery = query({
+    data: [
+      {
+        id: "e063be0c-1234-4000-8000-000000000001",
+        intake_id: "intake-1",
+        tier: "General Access - GA",
+        admits: 1,
+        exp: "2026-10-01T00:00:00.000Z",
+      },
+    ],
+    error: null,
+  });
+  const intakesQuery = query(intakes);
+  mockAdmin.from.mockImplementation((table: string) => {
+    if (table === "enrollments") return enrollmentQuery;
+    if (table === "tickets") return ticketsQuery;
+    return intakesQuery;
+  });
+  return { ticketsQuery, intakesQuery };
+}
+
+describe("e-ticket QR payload", () => {
+  it("encodes the signed token for a jwt event and the bare UUID for a uuid event", async () => {
+    await renderEticketPdf("LM-0904-FY6A", [ticket(1, "jwt"), ticket(2, "uuid")]);
+
+    expect(encodedTexts()).toEqual([
+      "signed-ticket-token-e063be0c-1234-4000-8000-000000000001",
+      "e063be0c-1234-4000-8000-000000000002",
+    ]);
+  });
+
+  it("keeps the QR at 240px with a 1-module margin in both formats", async () => {
+    await renderEticketPdf("LM-0904-FY6A", [ticket(1, "uuid")]);
+    // objectContaining: qrcode writes defaults (e.g. `color`) into the options
+    // object it is handed, and the spy records that same object.
+    expect(toDataURLSpy).toHaveBeenCalledWith(
+      "e063be0c-1234-4000-8000-000000000001",
+      expect.objectContaining({ width: 240, margin: 1 }),
+    );
+  });
+
+  it("reads each event's format when building the attachment", async () => {
+    mockAttachmentQueries({
+      data: [{ id: "intake-1", name: "October 2026 Event", ticket_qr_format: "uuid" }],
+      error: null,
+    });
+
+    await buildEticketEmailAttachment("enrollment-1");
+
+    expect(encodedTexts()).toEqual(["e063be0c-1234-4000-8000-000000000001"]);
+  });
+
+  it("refuses to build an attachment when an event's format is unknown", async () => {
+    mockAttachmentQueries({
+      data: [{ id: "intake-1", name: "October 2026 Event", ticket_qr_format: null }],
+      error: null,
+    });
+
+    await expect(buildEticketEmailAttachment("enrollment-1")).rejects.toThrow(
+      /unknown ticket QR format/,
+    );
+    expect(toDataURLSpy).not.toHaveBeenCalled();
+  });
+
+  it("refuses to build an attachment when a ticket's event is missing from the lookup", async () => {
+    mockAttachmentQueries({ data: [], error: null });
+
+    await expect(buildEticketEmailAttachment("enrollment-1")).rejects.toThrow(
+      /unknown ticket QR format/,
+    );
+  });
 });
 
 describe("renderEticketPdf", () => {
@@ -82,7 +172,7 @@ describe("renderEticketPdf", () => {
       error: null,
     });
     const intakesQuery = query({
-      data: [{ id: "intake-1", name: "October 2026 Event" }],
+      data: [{ id: "intake-1", name: "October 2026 Event", ticket_qr_format: "jwt" }],
       error: null,
     });
     mockAdmin.from.mockImplementation((table: string) => {

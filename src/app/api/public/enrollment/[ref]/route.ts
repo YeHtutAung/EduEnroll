@@ -3,20 +3,68 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import { getStripe } from "@/lib/stripe";
 import { signTicketJwt } from "@/lib/tickets/sign";
+import { isTicketQrFormat, ticketQrPayload, type TicketQrFormat } from "@/lib/tickets/qrPayload";
+import { clientIpFrom, publicEnrollmentLookupLimiter } from "@/lib/rateLimit";
 import {
   computePlatformFee,
   displayTotals,
   selectOrderPayment,
 } from "@/server/payments/platformFee";
 
+// "Not found" and "the query failed" are different answers, and only the first
+// is an enumeration signal.
+//
+// Counting a database fault as a miss would let a transient outage spend the
+// budget of the callers whose references are valid, locking them out for the
+// rest of the window after the database has recovered. A venue behind one NAT
+// address shares that budget, so a brief blip during entry could shut a whole
+// gate out - the exact failure the misses-only design exists to avoid.
+//
+// PGRST116 is what PostgREST returns from .single() when no row matched.
+function recordIfDefinitelyAbsent(clientIp: string, error: unknown, where: string): void {
+  const code = (error as { code?: string } | null)?.code;
+  if (!error || code === "PGRST116") {
+    publicEnrollmentLookupLimiter.recordMiss(clientIp);
+    return;
+  }
+  console.error(`[enrollment] ${where} lookup failed, not counted as a miss:`, code ?? "unknown");
+}
+
+// Shared by both handlers: they spend one budget, because they consume the same
+// reference space.
+function throttled(clientIp: string) {
+  return NextResponse.json(
+    { error: "Too Many Requests", message: "Too many failed lookups. Try again later." },
+    {
+      status: 429,
+      headers: { "Retry-After": String(publicEnrollmentLookupLimiter.retryAfter(clientIp)) },
+    },
+  );
+}
+
 // ─── GET /api/public/enrollment/[ref] ────────────────────────────────────────
 // Returns enrollment summary for the Trusted Official checkout flow.
 // Public — enrollment_ref acts as the access token.
+//
+// The reference IS the credential here, and a successful response carries
+// order details and ticket credentials, so failed lookups are throttled per
+// client address. Do not remove that without replacing it.
+//
+// Only misses count against the budget. That distinction is what keeps the
+// control safe to deploy: a venue full of attendees behind one NAT address
+// opening valid ticket links produces successes, never misses.
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: { ref: string } },
 ) {
+  // Cheapest possible rejection, so a spent address costs no tenant lookup and
+  // no query.
+  const clientIp = clientIpFrom(request.headers);
+  if (publicEnrollmentLookupLimiter.isBlocked(clientIp)) {
+    return throttled(clientIp);
+  }
+
   const tenantId = await resolveTenantId();
   if (tenantId instanceof NextResponse) return tenantId;
 
@@ -36,6 +84,9 @@ export async function GET(
     .single()) as { data: EnrollmentRow | null; error: unknown };
 
   if (error || !enrollment) {
+    recordIfDefinitelyAbsent(clientIp, error, "GET");
+    // Answered identically either way, so the response still reveals nothing
+    // about which references exist.
     return NextResponse.json({ error: "Not Found" }, { status: 404 });
   }
 
@@ -133,7 +184,7 @@ export async function GET(
   const bankAccounts = bankResult.data ?? [];
 
   // Build signed ticket JWTs for confirmed enrollments only.
-  let tickets: { jti: string; tier: string; admits: number; jwt: string }[] = [];
+  let tickets: { jti: string; tier: string; admits: number; jwt: string; qr: string }[] = [];
   if (enrollment.status === "confirmed") {
     const { data: ticketRows } = (await supabase
       .from("tickets")
@@ -143,20 +194,37 @@ export async function GET(
       error: unknown;
     };
 
-    tickets = (ticketRows ?? [])
-      .filter((t) => t.status === "valid")
-      .map((t) => ({
+    const validRows = (ticketRows ?? []).filter((t) => t.status === "valid");
+
+    // What each QR encodes is chosen per event. A separate query, not a column
+    // on the enrollment select above, so that if this code ever runs ahead of
+    // its migration only ticket display fails — not every order lookup.
+    const formats = await loadQrFormats(supabase, validRows);
+    if (!formats) {
+      // Unknown is not "the default": a jwt QR on a uuid event is a ticket the
+      // gate cannot read. The page treats 503 as an error and blocks download.
+      return NextResponse.json(
+        { error: "Service Unavailable", message: "Tickets are temporarily unavailable. Please try again." },
+        { status: 503 },
+      );
+    }
+
+    tickets = validRows.map((t) => {
+      const jwt = signTicketJwt({
+        jti: t.id,
+        eid: t.intake_id,
+        tier: t.tier,
+        admits: t.admits,
+        exp: Math.floor(Date.parse(t.exp) / 1000),
+      });
+      return {
         jti: t.id,
         tier: t.tier,
         admits: t.admits,
-        jwt: signTicketJwt({
-          jti: t.id,
-          eid: t.intake_id,
-          tier: t.tier,
-          admits: t.admits,
-          exp: Math.floor(Date.parse(t.exp) / 1000),
-        }),
-      }));
+        jwt,
+        qr: ticketQrPayload(formats.get(t.intake_id)!, t.id, () => jwt),
+      };
+    });
   }
 
   // Once money has moved, the payment row is the truth and the tenant's current
@@ -218,11 +286,21 @@ export async function GET(
 
 // ─── PATCH /api/public/enrollment/[ref] ──────────────────────────────────────
 // Updates attendee details on a pending enrollment. Idempotent.
+//
+// Throttled on the same budget as GET, and for a stronger reason: this handler
+// WRITES the buyer's name and email from a reference alone, and the email is
+// where the e-ticket is delivered. A swept reference here redirects someone's
+// ticket rather than merely reading it.
 
 export async function PATCH(
   request: NextRequest,
   { params }: { params: { ref: string } },
 ) {
+  const clientIp = clientIpFrom(request.headers);
+  if (publicEnrollmentLookupLimiter.isBlocked(clientIp)) {
+    return throttled(clientIp);
+  }
+
   const tenantId = await resolveTenantId();
   if (tenantId instanceof NextResponse) return tenantId;
 
@@ -240,7 +318,7 @@ export async function PATCH(
 
   const supabase = createAdminClient();
 
-  const { data: enrollment } = (await supabase
+  const { data: enrollment, error: lookupError } = (await supabase
     .from("enrollments")
     .select("id, status")
     .eq("enrollment_ref", params.ref.trim())
@@ -248,6 +326,7 @@ export async function PATCH(
     .single()) as { data: { id: string; status: string } | null; error: unknown };
 
   if (!enrollment) {
+    recordIfDefinitelyAbsent(clientIp, lookupError, "PATCH");
     return NextResponse.json({ error: "Not Found" }, { status: 404 });
   }
   if (enrollment.status !== "pending_payment") {
@@ -264,6 +343,45 @@ export async function PATCH(
     .eq("id", enrollment.id);
 
   return NextResponse.json({ enrollment_ref: params.ref, status: enrollment.status });
+}
+
+/**
+ * The QR format of every event the given tickets belong to, or null when any
+ * of them cannot be read with certainty — a failed query, a missing event, or a
+ * value this code does not recognise all come back as null, never as a guess.
+ */
+async function loadQrFormats(
+  supabase: ReturnType<typeof createAdminClient>,
+  rows: TicketRow[],
+): Promise<Map<string, TicketQrFormat> | null> {
+  const formats = new Map<string, TicketQrFormat>();
+  if (rows.length === 0) return formats;
+
+  const intakeIds = [...new Set(rows.map((t) => t.intake_id))];
+  const { data, error } = (await supabase
+    .from("intakes")
+    .select("id, ticket_qr_format")
+    .in("id", intakeIds)) as unknown as {
+    data: { id: string; ticket_qr_format: unknown }[] | null;
+    error: unknown;
+  };
+
+  if (error || !data) {
+    const code = (error as { code?: string } | null)?.code;
+    console.error("[enrollment] ticket QR format lookup failed:", code ?? "no data");
+    return null;
+  }
+
+  for (const intake of data) {
+    if (isTicketQrFormat(intake.ticket_qr_format)) formats.set(intake.id, intake.ticket_qr_format);
+  }
+
+  const unknown = intakeIds.filter((id) => !formats.has(id));
+  if (unknown.length > 0) {
+    console.error(`[enrollment] no readable ticket QR format for ${unknown.length} event(s)`);
+    return null;
+  }
+  return formats;
 }
 
 // ─── Internal types ───────────────────────────────────────────────────────────
