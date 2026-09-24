@@ -172,6 +172,10 @@ tenant_url() {
 
 pub_get()    { _curl_check "${BYPASS_H[@]}" "$(tenant_url "$1")"; }
 pub_post()   { _curl_check "${BYPASS_H[@]}" -X POST  -H "Content-Type: application/json" -d "$2" "$(tenant_url "$1")"; }
+# Body of a public POST whatever the status. pub_post() returns nothing on a
+# non-2xx, which is right for calls that must succeed but useless for asserting
+# on a refusal's body (its error code).
+pub_post_body() { curl -sL "${BYPASS_H[@]}" -X POST -H "Content-Type: application/json" -d "$2" "$(tenant_url "$1")"; }
 admin_get()  { _curl_check "${BYPASS_H[@]}" "${AUTH_H[@]}" "$BASE_URL$1"; }
 admin_post() { _curl_check "${BYPASS_H[@]}" "${AUTH_H[@]}" -X POST  -H "Content-Type: application/json" -d "$2" "$BASE_URL$1"; }
 admin_patch(){ _curl_check "${BYPASS_H[@]}" "${AUTH_H[@]}" -X PATCH -H "Content-Type: application/json" -d "$2" "$BASE_URL$1"; }
@@ -547,8 +551,10 @@ test_terms_consent() {
     return
   fi
 
+  # pub_post_body, not pub_post: both calls must be refused, and the refusal's
+  # body is what carries the code being asserted.
   local RESP
-  RESP=$(pub_post "/api/public/enroll" "{\"class_id\":\"${CLASS_N3_ID}\"}" ) || RESP=""
+  RESP=$(pub_post_body "/api/public/enroll" "{\"class_id\":\"${CLASS_N3_ID}\"}")
   if echo "$RESP" | jq -e '.code == "TERMS_REQUIRED"' &>/dev/null; then
     pass "POST /api/public/enroll — refused without a terms acceptance"
   else
@@ -556,8 +562,8 @@ test_terms_consent() {
   fi
 
   # An acceptance of wording the buyer never saw: stale version.
-  RESP=$(pub_post "/api/public/enroll" \
-    "{\"class_id\":\"${CLASS_N3_ID}\",\"terms_accepted\":true,\"terms_version\":\"1970-01-01\",\"organiser_terms_sha256\":null}" ) || RESP=""
+  RESP=$(pub_post_body "/api/public/enroll" \
+    "{\"class_id\":\"${CLASS_N3_ID}\",\"terms_accepted\":true,\"terms_version\":\"1970-01-01\",\"organiser_terms_sha256\":null}")
   if echo "$RESP" | jq -e '.code == "TERMS_CHANGED"' &>/dev/null; then
     pass "POST /api/public/enroll — refused on an outdated terms version"
   else
@@ -646,10 +652,16 @@ test_submit_cart_enrollment() {
     return
   fi
 
+  # As in the single-enrollment validation cases: carry an acceptance so each
+  # case fails for the reason it is testing, not for a missing one. The
+  # fingerprint is null — none of these class ids belongs to a real event.
+  local ACCEPT
+  ACCEPT="\"terms_accepted\":true,\"terms_version\":\"${TERMS_VERSION}\",\"organiser_terms_sha256\":null"
+
   # Validation: empty items array should 400
   local CODE
   CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
-    -d '{"items":[], "form_data":{"name_en":"Test"}}' \
+    -d "{${ACCEPT},\"items\":[], \"form_data\":{\"name_en\":\"Test\"}}" \
     "$(tenant_url "/api/public/enroll")")
   if [[ "$CODE" == "400" ]]; then
     pass "POST /api/public/enroll (cart) — 400 on empty items array"
@@ -659,7 +671,7 @@ test_submit_cart_enrollment() {
 
   # Validation: items with invalid class_id should 400
   CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
-    -d '{"items":[{"class_id":"not-a-uuid","quantity":1}]}' \
+    -d "{${ACCEPT},\"items\":[{\"class_id\":\"not-a-uuid\",\"quantity\":1}]}" \
     "$(tenant_url "/api/public/enroll")")
   if [[ "$CODE" == "400" ]]; then
     pass "POST /api/public/enroll (cart) — 400 on invalid item class_id"
@@ -669,7 +681,7 @@ test_submit_cart_enrollment() {
 
   # Non-existent class in cart should 404
   CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
-    -d '{"items":[{"class_id":"00000000-0000-0000-0000-000000000000","quantity":1}]}' \
+    -d "{${ACCEPT},\"items\":[{\"class_id\":\"00000000-0000-0000-0000-000000000000\",\"quantity\":1}]}" \
     "$(tenant_url "/api/public/enroll")")
   if [[ "$CODE" == "404" ]]; then
     pass "POST /api/public/enroll (cart) — 404 on non-existent class in cart"
