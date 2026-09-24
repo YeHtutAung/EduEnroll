@@ -7,6 +7,8 @@ import type { JlptLevel, ClassStatus } from "@/types/database";
 import BrandHeader from "@/components/enrollment/BrandHeader";
 import { randomId } from "@/lib/randomId";
 import { computePlatformFee } from "@/server/payments/platformFee";
+import TermsConsent from "@/components/enrollment/TermsConsent";
+import { TERMS_VERSION } from "@/lib/legal/terms";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -424,6 +426,14 @@ function EnrollmentFormPage() {
   const idempotencyKeyRef = useRef(randomId());
   const [submitError, setSubmitError] = useState<{ en: string; mm: string } | null>(null);
 
+  // Terms of Sale consent. The organiser's rules and their fingerprint come
+  // from the intake response; the fingerprint goes back with the order so the
+  // server can refuse it if the rules changed while this page was open.
+  const [termsAccepted, setTermsAccepted] = useState(false);
+  const [termsError, setTermsError] = useState(false);
+  const [organiserTerms, setOrganiserTerms] = useState<string | null>(null);
+  const [organiserTermsSha256, setOrganiserTermsSha256] = useState<string | null>(null);
+
   // ── Read cart from sessionStorage ──────────────────────────────
   useEffect(() => {
     if (cartKey) {
@@ -483,6 +493,8 @@ function EnrollmentFormPage() {
         if (json.appearance?.primary_color) setPrimaryColor(json.appearance.primary_color);
         if (json.appearance?.logo_url) setLogoUrl(json.appearance.logo_url);
         if (json.school_name) setSchoolName(json.school_name);
+        setOrganiserTerms(json.organiser_terms ?? null);
+        setOrganiserTermsSha256(json.organiser_terms_sha256 ?? null);
 
         // For single-class mode, find the selected class
         if (classId && !cartKey) {
@@ -543,7 +555,10 @@ function EnrollmentFormPage() {
   }
 
   function handleNext() {
-    if (validateStep1()) {
+    // Both checks run so every problem shows at once, not one per click.
+    const fieldsOk = validateStep1();
+    setTermsError(!termsAccepted);
+    if (fieldsOk && termsAccepted) {
       setStep(2);
       setSubmitError(null);
     }
@@ -576,9 +591,17 @@ function EnrollmentFormPage() {
     // only in this POST body — never as a query param or link href.
     const priorityToken = slug ? sessionStorage.getItem(`pa_${slug}`) : null;
 
+    // What the buyer agreed to on step 1. Verified again by the server.
+    const termsAcceptance = {
+      terms_accepted: termsAccepted,
+      terms_version: TERMS_VERSION,
+      organiser_terms_sha256: organiserTermsSha256,
+    };
+
     // Build payload based on mode
     const payload = isCartMode
       ? {
+          ...termsAcceptance,
           items: cartItems.map((item) => ({ class_id: item.class_id, quantity: item.quantity })),
           form_data: dynamicData,
           idempotency_key: idempotencyKeyRef.current,
@@ -587,6 +610,7 @@ function EnrollmentFormPage() {
           ...(priorityToken ? { priority_token: priorityToken } : {}),
         }
       : {
+          ...termsAcceptance,
           class_id: classInfo!.id,
           form_data: dynamicData,
           idempotency_key: idempotencyKeyRef.current,
@@ -617,9 +641,11 @@ function EnrollmentFormPage() {
             mm: body.message_mm || "ဤသင်တန်းအတွက် စာရင်းသွင်းမှု ပိတ်သိမ်းပြီးဖြစ်သည်။",
           });
         } else {
+          // Includes TERMS_CHANGED / TERMS_REQUIRED, whose messages already
+          // tell the buyer what to do, in both languages.
           setSubmitError({
             en: body.message || "Enrollment failed. Please try again.",
-            mm: "စာရင်းသွင်းမှု မအောင်မြင်ပါ။ ထပ်မံကြိုးစားပါ။",
+            mm: body.message_mm || "စာရင်းသွင်းမှု မအောင်မြင်ပါ။ ထပ်မံကြိုးစားပါ။",
           });
         }
         return;
@@ -774,6 +800,16 @@ function EnrollmentFormPage() {
             onChange={(val) => updateField(field.field_key, val)}
           />
         ))}
+
+        <TermsConsent
+          checked={termsAccepted}
+          onChange={(value) => {
+            setTermsAccepted(value);
+            if (value) setTermsError(false);
+          }}
+          organiserTerms={organiserTerms}
+          showError={termsError}
+        />
 
         <button
           onClick={handleNext}

@@ -8,6 +8,7 @@ vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn() }));
 import { resolveTenantId } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { GET } from "@/app/api/public/enroll/[slug]/route";
+import { organiserRulesFingerprint } from "@/server/legal/organiserRules";
 
 // ─── Supabase query builder factory ──────────────────────────────────────────
 //
@@ -180,5 +181,41 @@ describe("GET /api/public/enroll/[slug] — priority window fields", () => {
     const body = await res.json();
 
     expect(body.priority_covered_class_ids).toEqual(["class-vip"]);
+  });
+});
+
+describe("GET /api/public/enroll/[slug] — organiser rules", () => {
+  beforeEach(() => {
+    vi.mocked(resolveTenantId).mockResolvedValue("tenant-uuid");
+  });
+
+  it("returns the event's rules and the fingerprint an order must echo back", async () => {
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock({
+        intakes: { data: [{ ...BASE_INTAKE, organiser_terms: "Bags are searched." }], error: null },
+      }) as never,
+    );
+
+    const body = await (await GET(makeRequest() as never, routeParams)).json();
+
+    expect(body.organiser_terms).toBe("Bags are searched.");
+    expect(body.organiser_terms_sha256).toBe(
+      organiserRulesFingerprint([{ id: BASE_INTAKE.id, organiser_terms: "Bags are searched." }]),
+    );
+    // Returned once, at the top level — not duplicated inside `intake`.
+    expect(body.intake).not.toHaveProperty("organiser_terms");
+  });
+
+  it("returns nulls when the event has no rules", async () => {
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeSupabaseMock({
+        intakes: { data: [{ ...BASE_INTAKE, organiser_terms: null }], error: null },
+      }) as never,
+    );
+
+    const body = await (await GET(makeRequest() as never, routeParams)).json();
+
+    expect(body.organiser_terms).toBeNull();
+    expect(body.organiser_terms_sha256).toBeNull();
   });
 });

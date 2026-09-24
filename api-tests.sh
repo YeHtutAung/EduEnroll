@@ -49,6 +49,14 @@ TENANT_SUBDOMAIN=""
 CLASS_N5_ID=""; CLASS_N4_ID=""; CLASS_N3_ID=""; CLASS_N2_ID=""; CLASS_N1_ID=""
 ENROLLMENT_REF=""
 CART_ENROLLMENT_REF=""
+
+# Terms of Sale consent — every order must carry it (see src/server/legal/).
+# Read from source rather than hard-coded, so bumping TERMS_VERSION does not
+# silently turn every enrollment test into a 409.
+TERMS_VERSION="$(sed -n 's/.*TERMS_VERSION = "\([^"]*\)".*/\1/p' src/lib/legal/terms.ts 2>/dev/null | head -1)"
+# Fingerprint of the intake's organiser rules; captured from the public intake
+# response in test_public_intake. Empty means the event has no rules.
+ORGANISER_TERMS_SHA=""
 MMQR_ENROLLMENT_REF=""
 MMQR_ORDER_ID=""
 
@@ -430,6 +438,10 @@ test_public_intake() {
       fail "GET /api/public/enroll/${INTAKE_SLUG} — missing labels object"
     fi
 
+    # The organiser-rules fingerprint an order has to echo back; an order
+    # sending the wrong one is refused with 409 TERMS_CHANGED.
+    ORGANISER_TERMS_SHA=$(echo "$RESP" | jq -r '.organiser_terms_sha256 // empty')
+
     # Use the class_id from the public response
     local PUB_N3_ID; PUB_N3_ID=$(echo "$RESP" | jq -r '.classes[] | select(.level=="N3") | .id // empty')
     if [[ -n "$PUB_N3_ID" && -z "$CLASS_N3_ID" ]]; then
@@ -457,11 +469,14 @@ test_submit_enrollment() {
     return
   fi
 
-  # New body format: class_id + form_data object
+  # New body format: class_id + form_data object, plus the terms acceptance
+  # every order must carry.
   local BODY
   BODY=$(jq -n \
     --arg class_id "$CLASS_N3_ID" \
-    '{class_id: $class_id, form_data: {name_en: "Ko Aung", name_mm: "ကိုအောင်", nrc: "12/OuKaMa(N)123456", phone: "09123456789", email: "ko.aung@example.com"}}')
+    --arg tv "$TERMS_VERSION" \
+    --arg sha "$ORGANISER_TERMS_SHA" \
+    '{class_id: $class_id, terms_accepted: true, terms_version: $tv, organiser_terms_sha256: (if $sha == "" then null else $sha end), form_data: {name_en: "Ko Aung", name_mm: "ကိုအောင်", nrc: "12/OuKaMa(N)123456", phone: "09123456789", email: "ko.aung@example.com"}}')
 
   local RESP
   RESP=$(pub_post "/api/public/enroll" "$BODY" ) || RESP=""
@@ -483,10 +498,16 @@ test_submit_enrollment() {
     return
   fi
 
+  # The terms acceptance these validation cases carry, so each one fails for
+  # the reason it is testing rather than for a missing acceptance. The
+  # fingerprint is null: none of these class ids belongs to a real event.
+  local ACCEPT
+  ACCEPT="\"terms_accepted\":true,\"terms_version\":\"${TERMS_VERSION}\",\"organiser_terms_sha256\":null"
+
   # Validation: missing class_id should 400
   local CODE
   CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
-    -d '{"form_data":{"name_en":"Test"}}' \
+    -d "{${ACCEPT},\"form_data\":{\"name_en\":\"Test\"}}" \
     "$(tenant_url "/api/public/enroll")")
   if [[ "$CODE" == "400" ]]; then
     pass "POST /api/public/enroll — 400 when class_id is missing"
@@ -496,7 +517,7 @@ test_submit_enrollment() {
 
   # Validation: invalid class_id UUID should 400
   CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
-    -d '{"class_id":"not-a-uuid"}' \
+    -d "{${ACCEPT},\"class_id\":\"not-a-uuid\"}" \
     "$(tenant_url "/api/public/enroll")")
   if [[ "$CODE" == "400" ]]; then
     pass "POST /api/public/enroll — 400 on invalid class_id UUID"
@@ -506,12 +527,41 @@ test_submit_enrollment() {
 
   # Non-existent class_id should 404
   CODE=$(http_code_pub -X POST -H "Content-Type: application/json" \
-    -d '{"class_id":"00000000-0000-0000-0000-000000000000"}' \
+    -d "{${ACCEPT},\"class_id\":\"00000000-0000-0000-0000-000000000000\"}" \
     "$(tenant_url "/api/public/enroll")")
   if [[ "$CODE" == "404" ]]; then
     pass "POST /api/public/enroll — 404 on non-existent class"
   else
     fail "POST /api/public/enroll — expected 404 for non-existent class, got ${CODE}"
+  fi
+}
+
+# ── 4a. Terms of Sale consent ───────────────────────────────────
+# Refusals only: both cases must leave no order behind, so nothing here
+# reserves a seat.
+test_terms_consent() {
+  header "Terms of Sale Consent"
+
+  if [[ -z "$CLASS_N3_ID" ]]; then
+    skip "POST /api/public/enroll — no N3 class_id available"
+    return
+  fi
+
+  local RESP
+  RESP=$(pub_post "/api/public/enroll" "{\"class_id\":\"${CLASS_N3_ID}\"}" ) || RESP=""
+  if echo "$RESP" | jq -e '.code == "TERMS_REQUIRED"' &>/dev/null; then
+    pass "POST /api/public/enroll — refused without a terms acceptance"
+  else
+    fail "POST /api/public/enroll — expected TERMS_REQUIRED without acceptance" "$RESP"
+  fi
+
+  # An acceptance of wording the buyer never saw: stale version.
+  RESP=$(pub_post "/api/public/enroll" \
+    "{\"class_id\":\"${CLASS_N3_ID}\",\"terms_accepted\":true,\"terms_version\":\"1970-01-01\",\"organiser_terms_sha256\":null}" ) || RESP=""
+  if echo "$RESP" | jq -e '.code == "TERMS_CHANGED"' &>/dev/null; then
+    pass "POST /api/public/enroll — refused on an outdated terms version"
+  else
+    fail "POST /api/public/enroll — expected TERMS_CHANGED on an old version" "$RESP"
   fi
 }
 
@@ -550,7 +600,9 @@ test_submit_cart_enrollment() {
   BODY=$(jq -n \
     --arg n5_id "$CLASS_N5_ID" \
     --arg n4_id "$CLASS_N4_ID" \
-    '{items: [{class_id: $n5_id, quantity: 2}, {class_id: $n4_id, quantity: 1}], form_data: {name_en: "Ma Aye", phone: "09987654321", email: "ma.aye@example.com"}}')
+    --arg tv "$TERMS_VERSION" \
+    --arg sha "$ORGANISER_TERMS_SHA" \
+    '{items: [{class_id: $n5_id, quantity: 2}, {class_id: $n4_id, quantity: 1}], terms_accepted: true, terms_version: $tv, organiser_terms_sha256: (if $sha == "" then null else $sha end), form_data: {name_en: "Ma Aye", phone: "09987654321", email: "ma.aye@example.com"}}')
 
   local RESP
   RESP=$(pub_post "/api/public/enroll" "$BODY" ) || RESP=""
@@ -1276,6 +1328,7 @@ main() {
   test_classes
   test_public_intake
   test_submit_enrollment
+  test_terms_consent
   test_submit_cart_enrollment
   test_enrollment_status
   test_cart_enrollment_status

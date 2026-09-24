@@ -7,6 +7,7 @@ import { createEnrollment } from "@/server/enrollment/createEnrollment";
 import { createCartEnrollment } from "@/server/enrollment/createCartEnrollment";
 import { hashPriorityToken } from "@/lib/interest/token";
 import { sendEnrollmentConfirmationEmail } from "@/server/enrollment/enrollmentEmails";
+import { checkTermsAcceptance, type TermsEvidence } from "@/server/legal/organiserRules";
 import type { BankAccount } from "@/types/database";
 
 export async function POST(request: NextRequest) {
@@ -42,6 +43,17 @@ export async function POST(request: NextRequest) {
     ? (form_data as Record<string, string>)
     : null;
 
+  // The Terms of Sale and the organiser's event rules must be accepted —
+  // checked here, before any seat is reserved, so a refused order leaves
+  // nothing behind. (The Privacy Policy is not accepted.)
+  const classIds = Array.isArray(items)
+    ? (items as { class_id?: unknown }[]).map((i) => i?.class_id)
+    : [class_id];
+  const terms = await checkTermsAcceptance(body as Record<string, unknown>, classIds);
+  if (!terms.ok) {
+    return NextResponse.json(terms.body, { status: terms.status });
+  }
+
   const supabase = createAdminClient();
 
   // Cart checkout
@@ -67,6 +79,7 @@ export async function POST(request: NextRequest) {
     }
 
     const { result } = outcome;
+    await recordTermsEvidence(supabase, result.enrollment_id, terms.evidence);
     const tenantInfo = await fetchTenantInfo(supabase, result.tenant_id);
     const currency = tenantInfo?.currency ?? "MMK";
 
@@ -125,6 +138,7 @@ export async function POST(request: NextRequest) {
   }
 
   const { result } = outcome;
+  await recordTermsEvidence(supabase, result.enrollment_id, terms.evidence);
   const tenantInfo = await fetchTenantInfo(supabase, result.tenant_id);
   const currency = tenantInfo?.currency ?? "MMK";
 
@@ -160,6 +174,29 @@ export async function POST(request: NextRequest) {
 }
 
 // ─── Private helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Stamps the order with what the buyer accepted. The order already exists and
+ * holds its seats, so a failure here is logged loudly rather than undoing a
+ * successful purchase — the acceptance itself was verified before the RPC.
+ */
+async function recordTermsEvidence(
+  supabase: ReturnType<typeof createAdminClient>,
+  enrollmentId: string,
+  evidence: Omit<TermsEvidence, "terms_accepted_at">,
+) {
+  const { error } = (await supabase
+    .from("enrollments")
+    .update({ ...evidence, terms_accepted_at: new Date().toISOString() } as never)
+    .eq("id", enrollmentId)) as { error: { code?: string; message?: string } | null };
+
+  if (error) {
+    console.error(
+      `[enroll] terms evidence NOT recorded for enrollment ${enrollmentId}:`,
+      error.code ?? error.message ?? "unknown",
+    );
+  }
+}
 
 async function fetchTenantInfo(supabase: ReturnType<typeof createAdminClient>, tenantId: string) {
   const { data } = await supabase
