@@ -103,11 +103,25 @@ describe("Terms of Sale wording (owner review, 2026-09-21)", () => {
     }
   });
 
-  it("points buyers to the organiser only in the Contact section — nothing about KuuNyi", () => {
-    const contact = TERMS_OF_SALE.sections.find((s) => s.title.en.endsWith("Contact"))!;
-    const text = JSON.stringify(contact);
-    expect(text).not.toMatch(/kuunyi/i);
-    expect(text).toContain("organiser");
-    expect(contact.contact).toBeFalsy();
+  // Trimmed to three sections at the owner's request (2026-09-28): the
+  // refunds, lost-tickets, event-changes, your-information, your-order and
+  // contact sections were dropped.
+  it("has exactly the three sections the owner kept", () => {
+    expect(TERMS_OF_SALE.sections.map((s) => s.title.en)).toEqual([
+      "1. Tickets and entry",
+      "2. Resale and transfer",
+      "3. Verification",
+    ]);
+  });
+
+  it("requires the e-ticket from the confirmation email at the gate", () => {
+    const verification = TERMS_OF_SALE.sections.find((s) => s.title.en.endsWith("Verification"))!;
+    const text = JSON.stringify(verification);
+    expect(text).toMatch(/e-ticket/i);
+    expect(text).toMatch(/email/i);
+  });
+
+  it("carries no KuuNyi contact details", () => {
+    expect(JSON.stringify(TERMS_OF_SALE)).not.toMatch(/support@kuunyi\.com/i);
   });
 });

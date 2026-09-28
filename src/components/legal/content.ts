@@ -46,110 +46,41 @@ export const TERMS_OF_SALE: LegalDocumentData = {
   },
   sections: [
     {
-      title: { en: "1. Your order", mm: "၁။ သင့်အော်ဒါ" },
-      items: [
-        {
-          en: "Placing an order reserves your tickets or seats for a limited time. The order is confirmed only once your payment has been received and verified.",
-          mm: "အော်ဒါမှာယူလိုက်သည်နှင့် လက်မှတ် သို့မဟုတ် နေရာကို အချိန်အကန့်အသတ်ဖြင့် ထိန်းသိမ်းပေးထားပါသည်။ ငွေပေးချေမှုကို လက်ခံရရှိပြီး အတည်ပြုမှသာ အော်ဒါ အတည်ဖြစ်ပါသည်။",
-        },
-        {
-          en: "Unpaid orders expire automatically after the time shown on the payment page, and the tickets or seats are released.",
-          mm: "ငွေမပေးချေရသေးသော အော်ဒါများသည် ငွေပေးချေရမည့် စာမျက်နှာတွင် ပြထားသော အချိန်ကျော်လွန်ပါက အလိုအလျောက် ပျက်ပြယ်ပြီး လက်မှတ် သို့မဟုတ် နေရာများကို ပြန်လည်ရောင်းချပါမည်။",
-        },
-        {
-          en: "The price you pay, including any platform fee, is shown before you pay.",
-          mm: "ပလက်ဖောင်းဝန်ဆောင်ခ အပါအဝင် ပေးချေရမည့် စုစုပေါင်းငွေပမာဏကို ငွေမပေးချေမီ ပြသပါသည်။",
-        },
-      ],
-    },
-    {
-      title: { en: "2. Tickets and entry", mm: "၂။ လက်မှတ်နှင့် ဝင်ခွင့်" },
+      title: { en: "1. Tickets and entry", mm: "၁။ လက်မှတ်နှင့် ဝင်ခွင့်" },
       items: [
         {
           en: "Each ticket admits one person, once. Its QR code can be scanned for entry only one time; the first scan is the one that counts.",
-          mm: "လက်မှတ်တစ်စောင်လျှင် လူတစ်ဦး၊ တစ်ကြိမ်သာ ဝင်ခွင့်ရှိပါသည်။ QR ကုဒ်ကို ဝင်ပေါက်တွင် တစ်ကြိမ်သာ Scan ဖတ်နိုင်ပြီး ပထမဆုံး Scan ဖတ်ခြင်းကိုသာ အတည်ပြုပါသည်။",
+          mm: "လက်မှတ်တစ်စောင်လျှင် လူတစ်ဦး၊ တစ်ကြိမ်သာ ဝင်ခွင့်ရှိပါသည်။ QR ကုဒ်ကို ဝင်ပေါက်တွင် တစ်ကြိမ်သာ Scan ဖတ်နိုင်ပြီး ပထမဆုံး Scan ဖတ်ခြင်းကိုသာ အတည်ပြုပါသည်။",
         },
         {
           en: "Keep your QR code private. Anyone holding a copy — a screenshot, a forwarded email, a printout — can use it before you, and we cannot admit the same ticket twice.",
-          mm: "သင့် QR ကုဒ်ကို လျှို့ဝှက်စွာ ထိန်းသိမ်းပါ။ ဓာတ်ပုံရိုက်ကူးထားခြင်း၊ ထပ်ဆင့်ပို့ထားသော အီးမေးလ်၊ ပုံနှိပ်ထားခြင်း စသည့် မိတ္တူရှိသူ မည်သူမဆို သင့်ထက်အရင် အသုံးပြုနိုင်ပြီး လက်မှတ်တစ်စောင်တည်းကို နှစ်ကြိမ် ဝင်ခွင့်မပြုနိုင်ပါ။",
+          mm: "သင့် QR ကုဒ်ကို လျှို့ᄁွှက်စွာ ထိန်းသိမ်းပါ။ ဓာတ်ပုံရိုက်ကူးထားခြင်း၊ ထပ်ဆင့်ပို့ထားသော အီးမေးလ်၊ ပုံနှိပ်ထားခြင်း စသည့် မိတ္တူရှိသူ မည်သူမဆို သင့်ထက်အရင် အသုံးပြုနိုင်ပြီး လက်မှတ်တစ်စောင်တည်းကို နှစ်ကြိမ် ဝင်ခွင့်မပြုနိုင်ပါ။",
         },
         {
           en: "If you are sent an updated e-ticket, use the latest one. Earlier copies may no longer be accepted at the gate.",
-          mm: "ပြင်ဆင်ထားသော E-Ticket အသစ် ပို့ပေးခံရပါက နောက်ဆုံးရရှိသည့် လက်မှတ်ကို အသုံးပြုပါ။ ယခင်မိတ္တူများကို ဝင်ပေါက်တွင် လက်မခံတော့နိုင်ပါ။",
+          mm: "ပြင်ဆင်ထားသော E-Ticket အသစ် ပို့ပေးခံရပါက နောက်ဆုံးရရှိသည့် လက်မှတ်ကို အသုံးပြုပါ။ ယခင်မိတ္တူများကို ဝင်ပေါက်တွင် လက်မခံတော့နိုင်ပါ။",
         },
       ],
     },
     {
-      title: { en: "3. Refunds", mm: "၃။ ငွေပြန်အမ်းခြင်း" },
-      items: [
-        {
-          en: "Refunds are decided by the organiser. Unless the organiser's event rules say otherwise, tickets are non-refundable, including if you cannot attend.",
-          mm: "ငွေပြန်အမ်းခြင်းကို စီစဉ်သူက ဆုံးဖြတ်ပါသည်။ စီစဉ်သူ၏ ပွဲစည်းကမ်းများတွင် အခြားနည်း ဖော်ပြထားခြင်းမရှိပါက သင်တက်ရောက်နိုင်ခြင်း မရှိသည့်အခါ အပါအဝင် လက်မှတ်ခကို ပြန်မအမ်းပါ။",
-        },
-        {
-          en: "If the organiser cancels the event, the organiser is responsible for contacting you about refunds.",
-          mm: "စီစဉ်သူက ပွဲကို ပယ်ဖျက်ပါက ငွေပြန်အမ်းခြင်းနှင့်ပတ်သက်၍ သင့်ထံ ဆက်သွယ်ရန် စီစဉ်သူတွင် တာဝန်ရှိပါသည်။",
-        },
-        {
-          en: "The platform fee pays for the ordering and ticketing service and is refunded only when the organiser's refund includes it.",
-          mm: "ပလက်ဖောင်းဝန်ဆောင်ခသည် အော်ဒါနှင့် လက်မှတ်ဝန်ဆောင်မှုအတွက် ဖြစ်ပြီး စီစဉ်သူ၏ ငွေပြန်အမ်းမှုတွင် ပါဝင်မှသာ ပြန်အမ်းပါသည်။",
-        },
-      ],
-    },
-    {
-      title: { en: "4. Resale and transfer", mm: "၄။ ပြန်လည်ရောင်းချခြင်းနှင့် လွှဲပြောင်းခြင်း" },
+      title: { en: "2. Resale and transfer", mm: "၂။ ပြန်လည်ရောင်းချခြင်းနှင့် လွှဲပြောင်းခြင်း" },
       items: [
         {
           en: "Tickets are for personal use. Reselling tickets for profit is not allowed, and the organiser may refuse entry to tickets obtained through unauthorised resale.",
-          mm: "လက်မှတ်များသည် ကိုယ်တိုင်အသုံးပြုရန်ဖြစ်ပါသည်။ အမြတ်အစွန်းအတွက် ပြန်လည်ရောင်းချခြင်းကို ခွင့်မပြုပါ။ ခွင့်ပြုချက်မရှိဘဲ ပြန်လည်ရောင်းချထားသော လက်မှတ်များကို စီစဉ်သူက ဝင်ခွင့်ငြင်းပယ်နိုင်ပါသည်။",
+          mm: "လက်မှတ်များသည် ကိုယ်တိုင်အသုံးပြုရန်ဖြစ်ပါသည်။ အမြတ်အစွန်းအတွက် ပြန်လည်ရောင်းချခြင်းကို ခွင့်မပြုပါ။ ခွင့်ပြုချက်မရှိဘဲ ပြန်လည်ရောင်းချထားသော လက်မှတ်များကို စီစဉ်သူက ဝင်ခွင့်ငြင်းပယ်နိုင်ပါသည်။",
         },
         {
           en: "Whoever presents a valid, unused QR code is admitted. If you give a ticket to someone else, you are responsible for how it is used.",
-          mm: "မှန်ကန်ပြီး မသုံးရသေးသော QR ကုဒ်ကို ပြသသူ မည်သူမဆို ဝင်ခွင့်ရပါသည်။ လက်မှတ်ကို အခြားသူထံ ပေးပါက ၎င်းအသုံးပြုပုံအတွက် သင်တာဝန်ရှိပါသည်။",
+          mm: "မှန်ကန်ပြီး မသုံးရသေးသော QR ကုဒ်ကို ပြသသူ မည်သူမဆို ဝင်ခွင့်ရပါသည်။ လက်မှတ်ကို အခြားသူထံ ပေးပါက ၎င်းအသုံးပြုပုံအတွက် သင်တာဝန်ရှိပါသည်။",
         },
       ],
     },
     {
-      title: { en: "5. Lost tickets", mm: "၅။ လက်မှတ်ပျောက်ဆုံးခြင်း" },
+      title: { en: "3. Verification", mm: "၃။ စစ်ဆေးအတည်ပြုခြင်း" },
       items: [
         {
-          en: "You can open your ticket again at any time from the link in your confirmation email or on your payment page.",
-          mm: "အတည်ပြုအီးမေးလ်ရှိ လင့်ခ် သို့မဟုတ် ငွေပေးချေသည့် စာမျက်နှာမှ သင့်လက်မှတ်ကို အချိန်မရွေး ပြန်ဖွင့်ကြည့်နိုင်ပါသည်။",
-        },
-        {
-          en: "A ticket that has already been scanned cannot be reissued or used again.",
-          mm: "Scan ဖတ်ပြီးသော လက်မှတ်ကို ထပ်မံထုတ်ပေးခြင်း သို့မဟုတ် ထပ်မံအသုံးပြုခြင်း မပြုနိုင်ပါ။",
-        },
-      ],
-    },
-    {
-      title: { en: "6. Changes to the event", mm: "၆။ ပွဲအစီအစဉ် ပြောင်းလဲခြင်း" },
-      items: [
-        {
-          en: "The organiser may change the date, time, venue or programme of the event. The organiser, not KuuNyi, is responsible for the event itself and for telling you about changes.",
-          mm: "စီစဉ်သူသည် ပွဲ၏ ရက်စွဲ၊ အချိန်၊ နေရာ သို့မဟုတ် အစီအစဉ်ကို ပြောင်းလဲနိုင်ပါသည်။ ပွဲကိုယ်တိုင်နှင့် ပြောင်းလဲမှုများကို အသိပေးခြင်းအတွက် KuuNyi မဟုတ်ဘဲ စီစဉ်သူတွင် တာဝန်ရှိပါသည်။",
-        },
-      ],
-    },
-    {
-      title: { en: "7. Your information", mm: "၇။ သင့်အချက်အလက်များ" },
-      items: [
-        {
-          en: "We share your order details and contact information with the organiser so they can run the event and contact you.",
-          mm: "ပွဲကျင်းပရန်နှင့် သင့်ထံ ဆက်သွယ်နိုင်ရန် သင့်အော်ဒါအသေးစိတ်နှင့် ဆက်သွယ်ရန် အချက်အလက်များကို စီစဉ်သူထံ မျှဝေပါသည်။",
-        },
-        {
-          en: "If the organiser uses a separate entry-scanning service, we give that service your order reference and ticket ID only — not your name or contact details. See our Privacy Policy for more.",
-          mm: "စီစဉ်သူက သီးခြား ဝင်ပေါက် Scan ဖတ်ခြင်း ဝန်ဆောင်မှုကို အသုံးပြုပါက ထိုဝန်ဆောင်မှုထံ သင့်အော်ဒါနံပါတ်နှင့် လက်မှတ် ID ကိုသာ ပေးပါသည်၊ သင့်အမည် သို့မဟုတ် ဆက်သွယ်ရန် အချက်အလက်များ မပါဝင်ပါ။ အသေးစိတ်ကို ကိုယ်ရေးအချက်အလက်မူဝါဒတွင် ကြည့်ပါ။",
-        },
-      ],
-    },
-    {
-      title: { en: "8. Contact", mm: "၈။ ဆက်သွယ်ရန်" },
-      items: [
-        {
-          en: "For questions about the event, your order or your ticket, contact the organiser.",
-          mm: "ပွဲ၊ သင့်အော်ဒါ သို့မဟုတ် လက်မှတ်နှင့်ပတ်သက်သော မေးခွန်းများအတွက် စီစဉ်သူထံ ဆက်သွယ်ပါ။",
+          en: "At the gate you must show the e-ticket from your confirmation email.",
+          mm: "ဝင်ပေါက်တွင် သင့်အတည်ပြုအီးမေးလ်ထဲမှ E-Ticket ကို ပြရပါမည်။",
         },
       ],
     },
