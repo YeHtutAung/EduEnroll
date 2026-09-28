@@ -12,7 +12,7 @@
  * from a page loaded before the bump then come back 409 TERMS_CHANGED and the
  * buyer reloads, so nobody is recorded as accepting wording they never saw.
  */
-export const TERMS_VERSION = "2026-09-21";
+export const TERMS_VERSION = "2026-09-28";
 
 /** Longest organiser rules text an event may carry. Mirrored by a DB check. */
 export const ORGANISER_TERMS_MAX = 5000;
