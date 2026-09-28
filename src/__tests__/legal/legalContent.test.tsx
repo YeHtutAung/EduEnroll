@@ -121,6 +121,14 @@ describe("Terms of Sale wording (owner review, 2026-09-21)", () => {
     expect(text).toMatch(/email/i);
   });
 
+  // Owner's wording: "keep it safe", not "keep it secret".
+  it("tells buyers to keep the QR safe, not secret", () => {
+    const entry = TERMS_OF_SALE.sections.find((s) => s.title.en.endsWith("Tickets and entry"))!;
+    const qrItem = entry.items!.find((i) => i.en.startsWith("Keep your QR code private"))!;
+    expect(qrItem.mm).toContain("လုံခြုံစွာ");
+    expect(qrItem.mm).not.toContain("လျှို့ဝှက်");
+  });
+
   it("carries no KuuNyi contact details", () => {
     expect(JSON.stringify(TERMS_OF_SALE)).not.toMatch(/support@kuunyi\.com/i);
   });

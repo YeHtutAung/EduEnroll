@@ -54,7 +54,7 @@ export const TERMS_OF_SALE: LegalDocumentData = {
         },
         {
           en: "Keep your QR code private. Anyone holding a copy — a screenshot, a forwarded email, a printout — can use it before you, and we cannot admit the same ticket twice.",
-          mm: "သင့် QR ကုဒ်ကို လျှို့ᄁွှက်စွာ ထိန်းသိမ်းပါ။ ဓာတ်ပုံရိုက်ကူးထားခြင်း၊ ထပ်ဆင့်ပို့ထားသော အီးမေးလ်၊ ပုံနှိပ်ထားခြင်း စသည့် မိတ္တူရှိသူ မည်သူမဆို သင့်ထက်အရင် အသုံးပြုနိုင်ပြီး လက်မှတ်တစ်စောင်တည်းကို နှစ်ကြိမ် ဝင်ခွင့်မပြုနိုင်ပါ။",
+          mm: "သင့် QR ကုဒ်ကို လုံခြုံစွာ ထိန်းသိမ်းပါ။ ဓာတ်ပုံရိုက်ကူးထားခြင်း၊ ထပ်ဆင့်ပို့ထားသော အီးမေးလ်၊ ပုံနှိပ်ထားခြင်း စသည့် မိတ္တူရှိသူ မည်သူမဆို သင့်ထက်အရင် အသုံးပြုနိုင်ပြီး လက်မှတ်တစ်စောင်တည်းကို နှစ်ကြိမ် ဝင်ခွင့်မပြုနိုင်ပါ။",
         },
         {
           en: "If you are sent an updated e-ticket, use the latest one. Earlier copies may no longer be accepted at the gate.",
