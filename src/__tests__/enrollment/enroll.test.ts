@@ -23,13 +23,27 @@ vi.mock("@/lib/email", () => ({
 // ─── Import AFTER mocks are set up ───────────────────────────────────────────
 
 const { POST } = await import("@/app/api/public/enroll/route");
+const { TERMS_VERSION } = await import("@/lib/legal/terms");
+const { organiserRulesFingerprint } = await import("@/server/legal/organiserRules");
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function makeRequest(body: object) {
+/** A valid acceptance of the current terms, for an event with no organiser rules. */
+const TERMS_OK = {
+  terms_accepted: true,
+  terms_version: TERMS_VERSION,
+  organiser_terms_sha256: null,
+};
+
+/**
+ * Every order must carry an acceptance of the terms, so the helper adds a
+ * valid one by default. Tests about acceptance itself pass `{ terms: false }`
+ * and put exactly the fields they want in `body`.
+ */
+function makeRequest(body: object, { terms = true }: { terms?: boolean } = {}) {
   return new NextRequest("http://localhost/api/public/enroll", {
     method: "POST",
-    body: JSON.stringify(body),
+    body: JSON.stringify(terms ? { ...TERMS_OK, ...body } : body),
     headers: { "content-type": "application/json" },
   });
 }
@@ -40,7 +54,7 @@ function makeRequest(body: object) {
  */
 function makeChain(result: unknown) {
   const chain: Record<string, unknown> = {};
-  const methods = ["select", "eq", "neq", "update", "order", "limit", "single", "maybeSingle", "insert", "delete", "upsert"];
+  const methods = ["select", "eq", "neq", "in", "update", "order", "limit", "single", "maybeSingle", "insert", "delete", "upsert"];
   for (const m of methods) {
     chain[m] = vi.fn().mockReturnValue(chain);
   }
@@ -58,14 +72,41 @@ const TENANT_ROW = {
 /** Empty bank accounts list. */
 const BANK_ACCOUNTS_ROW = { data: [], error: null };
 
+const CLASS_ID = "00000000-0000-0000-0000-000000000001";
+
+type TermsLookup = {
+  classes?: { data: unknown; error: unknown };
+  intakes?: { data: unknown; error: unknown };
+};
+
+/** Every payload written to `enrollments` via update(), in order. */
+let enrollmentUpdates: Record<string, unknown>[] = [];
+
 /**
- * Sets up mockFrom to handle all table queries that happen after a successful RPC.
- * Tables queried (in the no-form_data path): tenants, bank_accounts.
+ * Sets up mockFrom for every table the route touches: the organiser-rules
+ * check before the RPC (classes, intakes), the evidence write after it
+ * (enrollments), and the response (tenants, bank_accounts).
  */
-function setupFromSuccess() {
+function setupFromSuccess(lookup: TermsLookup = {}) {
+  enrollmentUpdates = [];
   mockFrom.mockImplementation((table: string) => {
     if (table === "tenants") return makeChain(TENANT_ROW);
     if (table === "bank_accounts") return makeChain(BANK_ACCOUNTS_ROW);
+    // The organiser-rules check: class -> event -> rules.
+    if (table === "classes") {
+      return makeChain(lookup.classes ?? { data: [{ id: CLASS_ID, intake_id: "intake-1" }], error: null });
+    }
+    if (table === "intakes") {
+      return makeChain(lookup.intakes ?? { data: [{ id: "intake-1", organiser_terms: null }], error: null });
+    }
+    if (table === "enrollments") {
+      const chain = makeChain({ data: null, error: null });
+      chain.update = vi.fn((payload: Record<string, unknown>) => {
+        enrollmentUpdates.push(payload);
+        return chain;
+      });
+      return chain;
+    }
     // Fallback for any other table
     return makeChain({ data: null, error: null });
   });
@@ -247,5 +288,106 @@ describe("POST /api/public/enroll", () => {
     }));
     const bodyText = JSON.stringify(await res.json());
     expect(bodyText).not.toContain(rawToken);
+  });
+});
+
+// ─── Terms of Sale acceptance ───────────────────────────────────────────────
+//
+// Checked before any seat is reserved: a refused order must not have called
+// the reservation RPC at all.
+
+describe("POST /api/public/enroll — terms acceptance", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    setupFromSuccess();
+  });
+
+  it("refuses an order that does not accept the terms, before reserving anything", async () => {
+    mockRpcSuccess();
+    const res = await POST(makeRequest({ class_id: CLASS_ID }, { terms: false }));
+
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.code).toBe("TERMS_REQUIRED");
+    expect(body.message_mm).toBeTruthy();
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it.each([["the string 'true'", "true"], ["1", 1], ["false", false]])(
+    "treats terms_accepted = %s as not accepted",
+    async (_label, value) => {
+      const res = await POST(
+        makeRequest({ ...TERMS_OK, terms_accepted: value, class_id: CLASS_ID }, { terms: false }),
+      );
+      expect(res.status).toBe(400);
+      expect(mockRpc).not.toHaveBeenCalled();
+    },
+  );
+
+  it("refuses the cart path without acceptance too", async () => {
+    const res = await POST(
+      makeRequest({ items: [{ class_id: CLASS_ID, quantity: 1 }] }, { terms: false }),
+    );
+    expect(res.status).toBe(400);
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it("refuses an acceptance of an older terms version with 409, asking for a reload", async () => {
+    const res = await POST(
+      makeRequest({ ...TERMS_OK, terms_version: "2000-01-01", class_id: CLASS_ID }, { terms: false }),
+    );
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("TERMS_CHANGED");
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it("refuses when the organiser's rules differ from the ones the buyer saw", async () => {
+    setupFromSuccess({
+      intakes: { data: [{ id: "intake-1", organiser_terms: "No outside food." }], error: null },
+    });
+    const res = await POST(makeRequest({ class_id: CLASS_ID })); // sent null: saw no rules
+    expect(res.status).toBe(409);
+    expect((await res.json()).code).toBe("TERMS_CHANGED");
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it("accepts when the fingerprint matches the organiser's current rules", async () => {
+    const rules = [{ id: "intake-1", organiser_terms: "No outside food." }];
+    setupFromSuccess({ intakes: { data: rules, error: null } });
+    mockRpcSuccess();
+
+    const res = await POST(
+      makeRequest({ class_id: CLASS_ID, organiser_terms_sha256: organiserRulesFingerprint(rules) }),
+    );
+    expect(res.status).toBe(201);
+  });
+
+  it("fails closed with 503 when the organiser rules cannot be read", async () => {
+    setupFromSuccess({ intakes: { data: null, error: { code: "57014" } } });
+    const res = await POST(makeRequest({ class_id: CLASS_ID }));
+    expect(res.status).toBe(503);
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it("records what was accepted, and when, on the created order", async () => {
+    const rules = [{ id: "intake-1", organiser_terms: "Bags are searched." }];
+    setupFromSuccess({ intakes: { data: rules, error: null } });
+    mockRpcSuccess();
+    const before = Date.now();
+
+    await POST(makeRequest({ class_id: CLASS_ID, organiser_terms_sha256: organiserRulesFingerprint(rules) }));
+
+    const evidence = enrollmentUpdates.find((u) => "terms_accepted_at" in u);
+    expect(evidence).toMatchObject({
+      terms_version: TERMS_VERSION,
+      organiser_terms_sha256: organiserRulesFingerprint(rules),
+    });
+    expect(Date.parse(evidence!.terms_accepted_at as string)).toBeGreaterThanOrEqual(before - 1000);
+  });
+
+  it("still answers a filled honeypot with the fake success, with or without terms", async () => {
+    const res = await POST(makeRequest({ class_id: CLASS_ID, __hp: "bot" }, { terms: false }));
+    expect(res.status).toBe(200);
+    expect(mockRpc).not.toHaveBeenCalled();
   });
 });

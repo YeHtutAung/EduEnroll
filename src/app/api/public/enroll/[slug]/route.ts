@@ -4,6 +4,8 @@ import { resolveTenantId } from "@/lib/api";
 import { formatCurrencySimple } from "@/lib/utils";
 import type { Intake, Class, TenantAppearance } from "@/types/database";
 import { DEFAULT_APPEARANCE } from "@/types/database";
+import { normaliseOrganiserTerms } from "@/lib/legal/terms";
+import { organiserRulesFingerprint } from "@/server/legal/organiserRules";
 
 // Always fetch live data — intake/class availability changes in real time
 export const dynamic = "force-dynamic";
@@ -54,6 +56,10 @@ interface PublicIntakeResponse {
   // `enrollment_open_at`. A class already on public sale is exempt from the
   // gate, so a token is irrelevant to it and it is left out of this list.
   priority_covered_class_ids: string[];
+  // The organiser's event rules shown before ordering, and the fingerprint the
+  // order must carry back. Both null when the event has no rules.
+  organiser_terms: string | null;
+  organiser_terms_sha256: string | null;
 }
 
 // ─── Slug validation ─────────────────────────────────────────────────────────
@@ -116,7 +122,7 @@ export async function GET(
   // ── Find the matching intake by slug column ────────────────────
   const { data: intakes, error: intakeError } = await supabase
     .from("intakes")
-    .select("id, name, year, status, hero_image_url, priority_open_at")
+    .select("id, name, year, status, hero_image_url, priority_open_at, organiser_terms")
     .eq("tenant_id", tenantId)
     .eq("slug", params.slug.toLowerCase())
     .limit(1);
@@ -131,7 +137,13 @@ export async function GET(
     );
   }
 
-  const intake = intakes[0] as Pick<Intake, "id" | "name" | "year" | "status" | "hero_image_url" | "priority_open_at">;
+  // The organiser's rules travel once, at the top level with their
+  // fingerprint, rather than inside `intake`.
+  const { organiser_terms: rawOrganiserTerms, ...intake } = intakes[0] as Pick<
+    Intake,
+    "id" | "name" | "year" | "status" | "hero_image_url" | "priority_open_at" | "organiser_terms"
+  >;
+  const organiserTerms = normaliseOrganiserTerms(rawOrganiserTerms);
 
   if (intake.status === "closed") {
     // Still fetch classes so payment page can show promotions
@@ -228,6 +240,9 @@ export async function GET(
     appearance,
     school_name: tenantRow?.name ?? "",
     priority_covered_class_ids: priorityCoveredClassIds,
+    organiser_terms: organiserTerms,
+    // Echoed back with the order, which is refused if the rules have changed.
+    organiser_terms_sha256: organiserRulesFingerprint([{ id: intake.id, organiser_terms: organiserTerms }]),
   };
 
   return NextResponse.json(response);

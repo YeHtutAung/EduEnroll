@@ -248,6 +248,7 @@ export interface Intake {
   status: IntakeStatus;
   priority_open_at: string | null; // start of the interest head-start window, before public sale
   ticket_qr_format: "jwt" | "uuid"; // what the e-ticket QR encodes; see src/lib/tickets/qrPayload.ts
+  organiser_terms: string | null; // organiser's event rules shown to buyers before ordering; null = none
   created_at: string;
 }
 
@@ -290,6 +291,10 @@ export interface Enrollment {
   enrolled_at: string;
   internal_test_at: string | null;
   internal_test_reason: string | null;
+  // Terms of Sale consent — null on orders placed before consent existed.
+  terms_accepted_at: string | null;
+  terms_version: string | null;
+  organiser_terms_sha256: string | null;
   messenger_psid: string | null;
   telegram_chat_id: string | null;
   telegram_link_pending_chat_id: string | null;

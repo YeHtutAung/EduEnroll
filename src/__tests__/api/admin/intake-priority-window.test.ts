@@ -158,3 +158,41 @@ describe("PATCH /api/intakes/[id] — priority_open_at", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("PATCH /api/intakes/[id] — organiser_terms", () => {
+  async function patch(body: unknown) {
+    const capture: UpdateCapture = { payload: null, eqs: {} };
+    authWith(makeSupabase({ data: { id: "intake-1" } }, capture));
+    const res = await PATCH(request(body) as never, { params: { id: "intake-1" } });
+    return { res, capture };
+  }
+
+  it("trims and stores the organiser's rules", async () => {
+    const { res, capture } = await patch({ organiser_terms: "  Bags are searched.\n" });
+    expect(res.status).toBe(200);
+    expect(capture.payload).toMatchObject({ organiser_terms: "Bags are searched." });
+  });
+
+  it("stores empty or whitespace-only rules as null, so the box disappears", async () => {
+    const { capture } = await patch({ organiser_terms: "   " });
+    expect(capture.payload).toHaveProperty("organiser_terms", null);
+  });
+
+  it("accepts null to clear the rules", async () => {
+    const { res, capture } = await patch({ organiser_terms: null });
+    expect(res.status).toBe(200);
+    expect(capture.payload).toHaveProperty("organiser_terms", null);
+  });
+
+  it("rejects rules longer than 5000 characters with 400 naming the limit", async () => {
+    const { res, capture } = await patch({ organiser_terms: "x".repeat(5001) });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(await res.json())).toMatch(/5000/);
+    expect(capture.payload).toBeNull();
+  });
+
+  it("rejects a non-string, non-null value", async () => {
+    const { res } = await patch({ organiser_terms: 42 });
+    expect(res.status).toBe(400);
+  });
+});
