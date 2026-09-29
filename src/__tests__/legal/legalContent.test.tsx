@@ -92,7 +92,7 @@ describe("LegalDocument", () => {
 describe("Terms of Sale wording (owner review, 2026-09-21)", () => {
   it("uses the owner's Myanmar intro, word for word", () => {
     expect(TERMS_OF_SALE.intro.mm).toBe(
-      "KuuNyi သည် သင့်အော်ဒါတွင် ဖော်ပြထားသော စီစဉ်သူ (“စီစဉ်သူ”) အသုံးပြုသည့် အော်ဒါမှာယူခြင်းနှင့် လက်မှတ်ရောင်းချခြင်း ပလက်ဖောင်းကို လည်ပတ်ပါသည်။ ပွဲကို စီစဉ်သူက ကျင်းပပါသည်။ အော်ဒါမှာယူခြင်းဖြင့် ဤစည်းကမ်းချက်များနှင့် မမှာယူမီ စီစဉ်သူ ပြသခဲ့သော ပွဲစည်းကမ်းများကို သဘောတူပါသည်။ သင့်အချက်အလက်များကို ကိုင်တွယ်ပုံကို ကျွန်ုပ်တို့၏ ကိုယ်ရေးအချက်အလက်မူဝါဒတွင် ဖော်ပြထားပါသည်။",
+      "KuuNyi သည် သင့်အော်ဒါတွင် ဖော်ပြထားသော စီစဉ်သူ (“စီစဉ်သူ”) အသုံးပြုသည့် အော်ဒါမှာယူခြင်းနှင့် လက်မှတ်ရောင်းချခြင်း ပလက်ဖောင်းကို လည်ပတ်ပါသည်။ ပွဲကို စီစဉ်သူက ကျင်းပပါသည်။ အော်ဒါမှာယူခြင်းဖြင့် ဤစည်းကမ်းချက်များနှင့် မမှာယူမီ စီစဉ်သူ ပြသခဲ့သော ပွဲစည်းကမ်းများကို သဘောတူပါသည်။",
     );
   });
 
@@ -108,9 +108,9 @@ describe("Terms of Sale wording (owner review, 2026-09-21)", () => {
   // contact sections were dropped.
   it("has exactly the three sections the owner kept", () => {
     expect(TERMS_OF_SALE.sections.map((s) => s.title.en)).toEqual([
-      "1. Tickets and entry",
-      "2. Resale and transfer",
-      "3. Verification",
+      "1. Verification",
+      "2. Tickets and entry",
+      "3. Resale and transfer",
     ]);
   });
 
@@ -119,6 +119,14 @@ describe("Terms of Sale wording (owner review, 2026-09-21)", () => {
     const text = JSON.stringify(verification);
     expect(text).toMatch(/e-ticket/i);
     expect(text).toMatch(/email/i);
+  });
+
+  // Owner's wording: "keep it safe", not "keep it secret".
+  it("tells buyers to keep the QR safe, not secret", () => {
+    const entry = TERMS_OF_SALE.sections.find((s) => s.title.en.endsWith("Tickets and entry"))!;
+    const qrItem = entry.items!.find((i) => i.en.startsWith("Keep your QR code private"))!;
+    expect(qrItem.mm).toContain("လုံခြုံစွာ");
+    expect(qrItem.mm).not.toContain("လျှို့ဝှက်");
   });
 
   it("carries no KuuNyi contact details", () => {

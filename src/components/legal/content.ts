@@ -40,21 +40,30 @@ export const TERMS_OF_SALE: LegalDocumentData = {
   subtitle: { en: `Version ${TERMS_VERSION}`, mm: `ဗားရှင်း ${TERMS_VERSION}` },
   intro: {
     en:
-      "KuuNyi (“we”, “us”) runs the ordering and ticketing platform used by the organiser named on your order (the “organiser”). The organiser runs the event or course. By placing an order you agree to these terms and to any event rules the organiser showed you before you ordered. How we handle your information is described in our Privacy Policy.",
+      "KuuNyi (“we”, “us”) runs the ordering and ticketing platform used by the organiser named on your order (the “organiser”). The organiser runs the event or course. By placing an order you agree to these terms and to any event rules the organiser showed you before you ordered.",
     mm:
-      "KuuNyi သည် သင့်အော်ဒါတွင် ဖော်ပြထားသော စီစဉ်သူ (“စီစဉ်သူ”) အသုံးပြုသည့် အော်ဒါမှာယူခြင်းနှင့် လက်မှတ်ရောင်းချခြင်း ပလက်ဖောင်းကို လည်ပတ်ပါသည်။ ပွဲကို စီစဉ်သူက ကျင်းပပါသည်။ အော်ဒါမှာယူခြင်းဖြင့် ဤစည်းကမ်းချက်များနှင့် မမှာယူမီ စီစဉ်သူ ပြသခဲ့သော ပွဲစည်းကမ်းများကို သဘောတူပါသည်။ သင့်အချက်အလက်များကို ကိုင်တွယ်ပုံကို ကျွန်ုပ်တို့၏ ကိုယ်ရေးအချက်အလက်မူဝါဒတွင် ဖော်ပြထားပါသည်။",
+      "KuuNyi သည် သင့်အော်ဒါတွင် ဖော်ပြထားသော စီစဉ်သူ (“စီစဉ်သူ”) အသုံးပြုသည့် အော်ဒါမှာယူခြင်းနှင့် လက်မှတ်ရောင်းချခြင်း ပလက်ဖောင်းကို လည်ပတ်ပါသည်။ ပွဲကို စီစဉ်သူက ကျင်းပပါသည်။ အော်ဒါမှာယူခြင်းဖြင့် ဤစည်းကမ်းချက်များနှင့် မမှာယူမီ စီစဉ်သူ ပြသခဲ့သော ပွဲစည်းကမ်းများကို သဘောတူပါသည်။",
   },
   sections: [
     {
-      title: { en: "1. Tickets and entry", mm: "၁။ လက်မှတ်နှင့် ဝင်ခွင့်" },
+      title: { en: "1. Verification", mm: "၁။ စစ်ဆေးအတည်ပြုခြင်း" },
+      items: [
+        {
+          en: "At the gate you must show the e-ticket from your confirmation email.",
+          mm: "ဝင်ပေါက်တွင် သင့်အတည်ပြုအီးမေးလ်ထဲမှ E-Ticket ကို ပြသရပါမည်။",
+        },
+      ],
+    },
+    {
+      title: { en: "2. Tickets and entry", mm: "၂။ လက်မှတ်နှင့် ဝင်ခွင့်" },
       items: [
         {
           en: "Each ticket admits one person, once. Its QR code can be scanned for entry only one time; the first scan is the one that counts.",
-          mm: "လက်မှတ်တစ်စောင်လျှင် လူတစ်ဦး၊ တစ်ကြိမ်သာ ဝင်ခွင့်ရှိပါသည်။ QR ကုဒ်ကို ဝင်ပေါက်တွင် တစ်ကြိမ်သာ Scan ဖတ်နိုင်ပြီး ပထမဆုံး Scan ဖတ်ခြင်းကိုသာ အတည်ပြုပါသည်။",
+          mm: "လက်မှတ်တစ်စောင်လျှင် လူတစ်ဦးကို တစ်ကြိမ်သာ ဝင်ခွင့်ရှိပါသည်။ QR ကုဒ်ကို ဝင်ပေါက်တွင် တစ်ကြိမ်သာ Scan ဖတ်နိုင်ပြီး ပထမဆုံး Scan ဖတ်ခြင်းကိုသာ အတည်ပြုပါသည်။",
         },
         {
           en: "Keep your QR code private. Anyone holding a copy — a screenshot, a forwarded email, a printout — can use it before you, and we cannot admit the same ticket twice.",
-          mm: "သင့် QR ကုဒ်ကို လျှို့ᄁွှက်စွာ ထိန်းသိမ်းပါ။ ဓာတ်ပုံရိုက်ကူးထားခြင်း၊ ထပ်ဆင့်ပို့ထားသော အီးမေးလ်၊ ပုံနှိပ်ထားခြင်း စသည့် မိတ္တူရှိသူ မည်သူမဆို သင့်ထက်အရင် အသုံးပြုနိုင်ပြီး လက်မှတ်တစ်စောင်တည်းကို နှစ်ကြိမ် ဝင်ခွင့်မပြုနိုင်ပါ။",
+          mm: "သင့် QR ကုဒ်ကို လုံခြုံစွာ ထိန်းသိမ်းထားပါ။ ဓာတ်ပုံရိုက်ကူးထားခြင်း၊ ထပ်ဆင့်ပို့ထားသော အီးမေးလ်၊ ပုံနှိပ်ထားခြင်း စသည့် မိတ္တူရှိသူ မည်သူမဆို သင့်ထက်အရင် အသုံးပြုနိုင်ပြီး လက်မှတ်တစ်စောင်တည်းကို နှစ်ကြိမ် ဝင်ခွင့်မပြုနိုင်ပါ။",
         },
         {
           en: "If you are sent an updated e-ticket, use the latest one. Earlier copies may no longer be accepted at the gate.",
@@ -63,24 +72,11 @@ export const TERMS_OF_SALE: LegalDocumentData = {
       ],
     },
     {
-      title: { en: "2. Resale and transfer", mm: "၂။ ပြန်လည်ရောင်းချခြင်းနှင့် လွှဲပြောင်းခြင်း" },
+      title: { en: "3. Resale and transfer", mm: "၃။ ပြန်လည်ရောင်းချခြင်းနှင့် လွှဲပြောင်းခြင်း" },
       items: [
         {
           en: "Tickets are for personal use. Reselling tickets for profit is not allowed, and the organiser may refuse entry to tickets obtained through unauthorised resale.",
-          mm: "လက်မှတ်များသည် ကိုယ်တိုင်အသုံးပြုရန်ဖြစ်ပါသည်။ အမြတ်အစွန်းအတွက် ပြန်လည်ရောင်းချခြင်းကို ခွင့်မပြုပါ။ ခွင့်ပြုချက်မရှိဘဲ ပြန်လည်ရောင်းချထားသော လက်မှတ်များကို စီစဉ်သူက ဝင်ခွင့်ငြင်းပယ်နိုင်ပါသည်။",
-        },
-        {
-          en: "Whoever presents a valid, unused QR code is admitted. If you give a ticket to someone else, you are responsible for how it is used.",
-          mm: "မှန်ကန်ပြီး မသုံးရသေးသော QR ကုဒ်ကို ပြသသူ မည်သူမဆို ဝင်ခွင့်ရပါသည်။ လက်မှတ်ကို အခြားသူထံ ပေးပါက ၎င်းအသုံးပြုပုံအတွက် သင်တာဝန်ရှိပါသည်။",
-        },
-      ],
-    },
-    {
-      title: { en: "3. Verification", mm: "၃။ စစ်ဆေးအတည်ပြုခြင်း" },
-      items: [
-        {
-          en: "At the gate you must show the e-ticket from your confirmation email.",
-          mm: "ဝင်ပေါက်တွင် သင့်အတည်ပြုအီးမေးလ်ထဲမှ E-Ticket ကို ပြရပါမည်။",
+          mm: "လက်မှတ်များသည် ကိုယ်တိုင်အသုံးပြုရန်အတွက်သာဖြစ်ပါသည်။ အမြတ်အစွန်းအတွက် ပြန်လည်ရောင်းချခြင်းကို ခွင့်မပြုပါ။ ခွင့်ပြုချက်မရှိဘဲ ပြန်လည်ရောင်းချထားသော လက်မှတ်များကို စီစဉ်သူက ဝင်ခွင့်ငြင်းပယ်နိုင်ပါသည်။",
         },
       ],
     },
