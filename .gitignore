@@ -46,3 +46,9 @@ eduenroll/
 # Playwright
 /playwright-report/
 /test-results/
+
+# Local build/run artefacts
+/output/
+
+# Claude Code local launch config (machine-specific; settings*.json stay tracked)
+.claude/launch.json
