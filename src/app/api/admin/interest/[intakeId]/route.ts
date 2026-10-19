@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireOwner } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadInterestEmailContext } from "@/lib/interest/adminInterest";
+import { interestCustomFields, type InterestFieldDef } from "@/lib/interest/interestFields";
 
 // ─── GET /api/admin/interest/[intakeId] ──────────────────────────────────────
 //
@@ -57,6 +58,7 @@ const SAFE_COLUMNS = [
   "first_converted_enrollment_id",
   "revoked_at",
   "superseded_expires_at",
+  "form_data",
 ].join(", ");
 
 interface InterestListRow {
@@ -73,6 +75,15 @@ interface InterestListRow {
   first_converted_enrollment_id: string | null;
   revoked_at: string | null;
   superseded_expires_at: string | null;
+  /** Answers to the event's custom fields, keyed by field_key. */
+  form_data: Record<string, string> | null;
+}
+
+/** A custom field as the organiser's list and the CSV label it. */
+interface InterestFieldColumn {
+  field_key: string;
+  field_label: string;
+  field_type: string;
 }
 
 export async function GET(
@@ -112,11 +123,33 @@ export async function GET(
 
   const rows = data ?? [];
 
+  // The event's custom fields, for labelling answers. Read after the ownership
+  // check above, which is what scopes this tenant-less table.
+  const { data: fieldRows, error: fieldError } = (await supabase
+    .from("intake_form_fields")
+    .select("field_key, field_label, field_type, is_required, options, is_default")
+    .eq("intake_id", params.intakeId)
+    .order("sort_order", { ascending: true })) as {
+    data: InterestFieldDef[] | null;
+    error: { message: string } | null;
+  };
+
+  if (fieldError) {
+    console.error("[admin/interest] form field lookup failed:", fieldError.message);
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+  }
+
+  const fields: InterestFieldColumn[] = interestCustomFields(fieldRows ?? []).map((f) => ({
+    field_key: f.field_key,
+    field_label: f.field_label,
+    field_type: f.field_type,
+  }));
+
   // new URL(request.url) rather than request.nextUrl: the standard property is
   // present on a plain Request too, so the route is exercisable without
   // constructing a NextRequest. Same value either way.
   if (new URL(request.url).searchParams.get("format") === "csv") {
-    return csvResponse(rows, ctx.intake.slug);
+    return csvResponse(rows, fields, ctx.intake.slug);
   }
 
   return NextResponse.json(
@@ -128,6 +161,7 @@ export async function GET(
         priority_open_at: ctx.intake.priority_open_at,
       },
       count: rows.length,
+      fields,
       entries: rows,
     },
     { headers: { "Cache-Control": "no-store" } },
@@ -154,10 +188,29 @@ const CSV_COLUMNS: { header: string; value: (r: InterestListRow) => string }[] =
   { header: "Revoked", value: (r) => r.revoked_at ?? "" },
 ];
 
-function csvResponse(rows: InterestListRow[], slug: string): NextResponse {
+function csvResponse(
+  rows: InterestListRow[],
+  fields: InterestFieldColumn[],
+  slug: string,
+): NextResponse {
+  // One column per custom field, after the fixed ones. Each reads a single
+  // named key out of form_data, so the export still carries only what a
+  // column asks for — never the whole row.
+  const columns = [
+    ...CSV_COLUMNS,
+    ...fields.map((f) => ({
+      header: f.field_label,
+      value: (r: InterestListRow) => {
+        const answer = r.form_data?.[f.field_key] ?? "";
+        // A ticked checkbox is stored as "true".
+        return f.field_type === "checkbox" && answer === "true" ? "Yes" : answer;
+      },
+    })),
+  ];
+
   const lines = [
-    CSV_COLUMNS.map((c) => csvCell(c.header)).join(","),
-    ...rows.map((r) => CSV_COLUMNS.map((c) => csvCell(c.value(r))).join(",")),
+    columns.map((c) => csvCell(c.header)).join(","),
+    ...rows.map((r) => columns.map((c) => csvCell(c.value(r))).join(",")),
   ];
 
   // Leading BOM: Excel reads a BOM-less UTF-8 CSV as the system codepage, which
@@ -177,7 +230,8 @@ function csvResponse(rows: InterestListRow[], slug: string): NextResponse {
 /**
  * Quotes a cell, and neutralises spreadsheet formula injection.
  *
- * Name and email are attacker-supplied through a public form. A cell beginning
+ * Name, email and custom-field answers are attacker-supplied through a public
+ * form, and field labels are organiser-authored. A cell beginning
  * `=`, `+`, `-`, `@`, or a control character is executed as a formula by Excel
  * and Sheets on open — the classic path from "someone typed a name" to "the
  * organiser's machine ran something". Prefixing with an apostrophe forces the
