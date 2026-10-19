@@ -3,6 +3,7 @@ import {
   FORM_DATA_MAX_BYTES,
   INTEREST_ANSWER_MAX,
   interestCustomFields,
+  jsonbTextBytes,
   validateInterestFormData,
   type InterestFieldDef,
 } from "@/lib/interest/interestFields";
@@ -128,5 +129,62 @@ describe("validateInterestFormData", () => {
       ok: false,
       message: "Your answers are too long.",
     });
+  });
+
+  it("rejects a NUL character, which PostgreSQL cannot store", () => {
+    const text = field({ field_key: "note", field_label: "Note", field_type: "text", options: null });
+    expect(validateInterestFormData([text], { note: "a\u0000b" }).ok).toBe(false);
+  });
+});
+
+/**
+ * How PostgreSQL renders jsonb as text: a space after every ':' and ','.
+ * Key order differs in real jsonb (shorter keys first), which does not change
+ * the size.
+ */
+function pgJsonbText(data: Record<string, string>): string {
+  return `{${Object.entries(data)
+    .map(([k, v]) => `${JSON.stringify(k)}: ${JSON.stringify(v)}`)
+    .join(", ")}}`;
+}
+
+const bytes = (s: string) => new TextEncoder().encode(s).length;
+
+describe("jsonbTextBytes", () => {
+  it("measures what the database CHECK measures", () => {
+    const cases: Record<string, string>[] = [
+      {},
+      { a: "x" },
+      { tshirt: "M", note: 'say "hi"\n\tbye \\ \u0001', mm: "မင်္ဂလာပါ" },
+    ];
+    for (const data of cases) expect(jsonbTextBytes(data)).toBe(bytes(pgJsonbText(data)));
+  });
+
+  it("rejects answers that fit compact JSON but not the database's jsonb text", () => {
+    // The reviewer's case: 33 answers of 486 characters are 16,326 bytes as
+    // JSON.stringify writes them, but 16,391 as jsonb text — over the cap.
+    const fields = Array.from({ length: 33 }, (_, i) =>
+      field({ field_key: `f${i}`, field_label: `F${i}`, field_type: "text", options: null }),
+    );
+    const answers = Object.fromEntries(fields.map((f) => [f.field_key, "a".repeat(486)]));
+
+    expect(bytes(JSON.stringify(answers))).toBeLessThanOrEqual(FORM_DATA_MAX_BYTES);
+    expect(bytes(pgJsonbText(answers))).toBeGreaterThan(FORM_DATA_MAX_BYTES);
+    expect(validateInterestFormData(fields, answers)).toEqual({
+      ok: false,
+      message: "Your answers are too long.",
+    });
+  });
+
+  it("accepts answers exactly at the cap", () => {
+    // One answer whose jsonb text is exactly FORM_DATA_MAX_BYTES:
+    // {"k": "<v>"} is 9 bytes of framing around the value.
+    const k = field({ field_key: "k", field_label: "K", field_type: "text", options: null });
+    const atCap = { k: "a".repeat(FORM_DATA_MAX_BYTES - 9) };
+    expect(bytes(pgJsonbText(atCap))).toBe(FORM_DATA_MAX_BYTES);
+    expect(jsonbTextBytes(atCap)).toBe(FORM_DATA_MAX_BYTES);
+    expect(jsonbTextBytes({ k: "a".repeat(FORM_DATA_MAX_BYTES - 8) })).toBe(FORM_DATA_MAX_BYTES + 1);
+    // The per-answer cap is what stops a single answer this long in practice.
+    expect(validateInterestFormData([k], atCap).ok).toBe(false);
   });
 });

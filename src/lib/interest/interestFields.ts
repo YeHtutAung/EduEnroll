@@ -35,11 +35,27 @@ export const INTEREST_ANSWER_MAX = 500;
 
 /**
  * Mirrors CHECK event_interest_form_data_size in
- * 20261019120000_interest_form_data.sql, measured the same way (UTF-8 bytes of
- * the JSON text), so an oversized submission is a 400 here rather than an
+ * 20261019120000_interest_form_data.sql, measured the same way — see
+ * jsonbTextBytes() — so an oversized submission is a 400 here rather than an
  * opaque write failure there.
  */
 export const FORM_DATA_MAX_BYTES = 16384;
+
+/**
+ * UTF-8 bytes of `data` as PostgreSQL renders `jsonb::text`, which is what the
+ * CHECK measures.
+ *
+ * Not JSON.stringify's length: jsonb text puts a space after every `:` and
+ * every `,` (`{"a": "x", "b": "y"}`), one byte per entry plus one per
+ * separator more than the compact form. String escaping is the same in both
+ * (`\"`, `\\`, `\n` and friends, `\u00XX` for other control characters, raw
+ * UTF-8 otherwise), and key order, which jsonb changes, does not affect size.
+ */
+export function jsonbTextBytes(data: Record<string, string>): number {
+  const n = Object.keys(data).length;
+  const compact = new TextEncoder().encode(JSON.stringify(data)).length;
+  return n === 0 ? compact : compact + n + (n - 1);
+}
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -94,6 +110,12 @@ export function validateInterestFormData(
     }
     const answer = typeof value === "string" ? value.trim() : "";
 
+    // PostgreSQL text and jsonb cannot hold U+0000; letting one through would
+    // fail the insert instead of returning a 400.
+    if (answer.includes("\u0000")) {
+      return { ok: false, message: `${field.field_label} has an invalid value.` };
+    }
+
     if (!answer) {
       if (field.is_required) return { ok: false, message: `${field.field_label} is required.` };
       continue;
@@ -132,7 +154,7 @@ export function validateInterestFormData(
     data[field.field_key] = answer;
   }
 
-  if (new TextEncoder().encode(JSON.stringify(data)).length > FORM_DATA_MAX_BYTES) {
+  if (jsonbTextBytes(data) > FORM_DATA_MAX_BYTES) {
     return { ok: false, message: "Your answers are too long." };
   }
 

@@ -23,9 +23,10 @@ alter table public.event_interest
   add constraint event_interest_form_data_object
   check (jsonb_typeof(form_data) = 'object');
 
--- Mirrors FORM_DATA_MAX_BYTES in src/lib/interest/interestFields.ts, measured
--- the same way (bytes of the JSON text). The route enforces it first with a
--- 400; this is the backstop.
+-- Mirrors FORM_DATA_MAX_BYTES in src/lib/interest/interestFields.ts, whose
+-- jsonbTextBytes() reproduces this exact measure (jsonb text has a space after
+-- every ':' and ','). The route enforces it first with a 400; this is the
+-- backstop.
 alter table public.event_interest
   drop constraint if exists event_interest_form_data_size;
 alter table public.event_interest

@@ -139,11 +139,7 @@ export async function GET(
     return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 
-  const fields: InterestFieldColumn[] = interestCustomFields(fieldRows ?? []).map((f) => ({
-    field_key: f.field_key,
-    field_label: f.field_label,
-    field_type: f.field_type,
-  }));
+  const fields = answerColumns(fieldRows ?? [], rows);
 
   // new URL(request.url) rather than request.nextUrl: the standard property is
   // present on a plain Request too, so the route is exercisable without
@@ -166,6 +162,46 @@ export async function GET(
     },
     { headers: { "Cache-Control": "no-store" } },
   );
+}
+
+/**
+ * The columns that label answers: the form's current custom fields, then any
+ * key that stored answers carry but the form no longer shows.
+ *
+ * The second group is what keeps answers visible after an organiser deletes a
+ * field (or turns it into a file or default field) once people have signed up.
+ * The answers are still in form_data; building columns from the current form
+ * alone would silently hide them from both the list and the export. Such a
+ * column takes the field's label if a row for it still exists, else its key
+ * marked "(removed field)".
+ */
+function answerColumns(
+  fieldRows: InterestFieldDef[],
+  rows: InterestListRow[],
+): InterestFieldColumn[] {
+  const columns: InterestFieldColumn[] = interestCustomFields(fieldRows).map((f) => ({
+    field_key: f.field_key,
+    field_label: f.field_label,
+    field_type: f.field_type,
+  }));
+
+  const shown = new Set(columns.map((c) => c.field_key));
+  const byKey = new Map(fieldRows.map((f) => [f.field_key, f]));
+
+  for (const row of rows) {
+    for (const key of Object.keys(row.form_data ?? {})) {
+      if (shown.has(key)) continue;
+      shown.add(key);
+      const def = byKey.get(key);
+      columns.push({
+        field_key: key,
+        field_label: def ? def.field_label : `${key} (removed field)`,
+        field_type: def ? def.field_type : "text",
+      });
+    }
+  }
+
+  return columns;
 }
 
 // ─── CSV ──────────────────────────────────────────────────────────────────────
