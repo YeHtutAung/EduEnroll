@@ -37,7 +37,15 @@ const ROW_WITH_SECRETS = {
   first_converted_enrollment_id: null,
   revoked_at: null,
   superseded_expires_at: null,
+  form_data: { tshirt: "M", agree: "true" },
 };
+
+/** The event's form fields: one default (not on the interest form) and two custom. */
+const FORM_FIELDS = [
+  { field_key: "nrc", field_label: "NRC Number", field_type: "text", is_required: true, options: null, is_default: true },
+  { field_key: "tshirt", field_label: "T-shirt size", field_type: "select", is_required: true, options: ["S", "M"], is_default: false },
+  { field_key: "agree", field_label: "Joins newsletter", field_type: "checkbox", is_required: false, options: null, is_default: false },
+];
 
 function request(query = "") {
   return new Request(`http://acme.localhost/api/admin/interest/intake-1${query}`);
@@ -137,5 +145,105 @@ describe("GET /api/admin/interest/[intakeId]", () => {
 
     // Quoted AND apostrophe-prefixed, so neither Excel nor Sheets evaluates it.
     expect(csv).toContain(`"'=cmd`);
+  });
+
+  it("returns the custom fields so the list can label answers", async () => {
+    const mock = makeInterestMock({
+      intake: { data: scheduledIntake() },
+      entries: { data: [ROW_WITH_SECRETS] },
+      formFields: { data: FORM_FIELDS },
+    });
+    vi.mocked(createAdminClient).mockReturnValue(mock.client as never);
+
+    const res = await GET(request() as never, { params: { intakeId: "intake-1" } });
+    const body = await res.json();
+
+    expect(body.fields).toEqual([
+      { field_key: "tshirt", field_label: "T-shirt size", field_type: "select" },
+      { field_key: "agree", field_label: "Joins newsletter", field_type: "checkbox" },
+    ]);
+    expect(body.entries[0].form_data).toEqual({ tshirt: "M", agree: "true" });
+  });
+
+  it("exports one CSV column per custom field", async () => {
+    const mock = makeInterestMock({
+      intake: { data: scheduledIntake() },
+      entries: { data: [ROW_WITH_SECRETS] },
+      formFields: { data: FORM_FIELDS },
+    });
+    vi.mocked(createAdminClient).mockReturnValue(mock.client as never);
+
+    const res = await GET(request("?format=csv") as never, { params: { intakeId: "intake-1" } });
+    const [header, row] = (await res.text()).replace(/^\ufeff/, "").split("\r\n");
+
+    expect(header.endsWith(`"T-shirt size","Joins newsletter"`)).toBe(true);
+    expect(header).not.toContain("NRC");
+    expect(row.endsWith(`"M","Yes"`)).toBe(true);
+  });
+
+  it("neutralises formula injection in a custom-field answer", async () => {
+    const mock = makeInterestMock({
+      intake: { data: scheduledIntake() },
+      entries: { data: [{ ...ROW_WITH_SECRETS, form_data: { tshirt: "=HYPERLINK(\"x\")" } }] },
+      formFields: { data: FORM_FIELDS },
+    });
+    vi.mocked(createAdminClient).mockReturnValue(mock.client as never);
+
+    const res = await GET(request("?format=csv") as never, { params: { intakeId: "intake-1" } });
+
+    expect(await res.text()).toContain(`"'=HYPERLINK`);
+  });
+
+  it("500s when the form fields cannot be read", async () => {
+    const mock = makeInterestMock({
+      intake: { data: scheduledIntake() },
+      entries: { data: [ROW_WITH_SECRETS] },
+      formFields: { data: null, error: { message: "boom" } },
+    });
+    vi.mocked(createAdminClient).mockReturnValue(mock.client as never);
+
+    const res = await GET(request() as never, { params: { intakeId: "intake-1" } });
+
+    expect(res.status).toBe(500);
+  });
+
+  it("keeps answers visible after their field is deleted from the form", async () => {
+    // The organiser removed "T-shirt size" after people signed up. The answers
+    // are still stored, so they must still be listed and exported.
+    const mock = makeInterestMock({
+      intake: { data: scheduledIntake() },
+      entries: { data: [ROW_WITH_SECRETS] },
+      formFields: { data: FORM_FIELDS.filter((f) => f.field_key !== "tshirt") },
+    });
+    vi.mocked(createAdminClient).mockReturnValue(mock.client as never);
+
+    const json = await (await GET(request() as never, { params: { intakeId: "intake-1" } })).json();
+    expect(json.fields).toEqual([
+      { field_key: "agree", field_label: "Joins newsletter", field_type: "checkbox" },
+      { field_key: "tshirt", field_label: "tshirt (removed field)", field_type: "text" },
+    ]);
+
+    const csv = await (
+      await GET(request("?format=csv") as never, { params: { intakeId: "intake-1" } })
+    ).text();
+    const [header, row] = csv.replace(/^\ufeff/, "").split("\r\n");
+    expect(header.endsWith(`"Joins newsletter","tshirt (removed field)"`)).toBe(true);
+    expect(row.endsWith(`"Yes","M"`)).toBe(true);
+  });
+
+  it("labels a hidden answer with its field's label when the field still exists", async () => {
+    // Changed to a file upload, so it is no longer an interest field — but the
+    // earlier answers keep their label.
+    const mock = makeInterestMock({
+      intake: { data: scheduledIntake() },
+      entries: { data: [ROW_WITH_SECRETS] },
+      formFields: {
+        data: FORM_FIELDS.map((f) => (f.field_key === "tshirt" ? { ...f, field_type: "file" } : f)),
+      },
+    });
+    vi.mocked(createAdminClient).mockReturnValue(mock.client as never);
+
+    const json = await (await GET(request() as never, { params: { intakeId: "intake-1" } })).json();
+    expect(json.fields).toContainEqual({ field_key: "tshirt", field_label: "T-shirt size", field_type: "file" });
   });
 });
