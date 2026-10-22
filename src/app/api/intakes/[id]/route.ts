@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, requireOwner, badRequest, notFound } from "@/lib/api";
 import type { Intake, IntakeStatus } from "@/types/database";
 import { normaliseOrganiserTerms, ORGANISER_TERMS_MAX } from "@/lib/legal/terms";
+import { validateEventFont } from "@/lib/eventFont";
 
 const VALID_STATUSES: IntakeStatus[] = ["draft", "open", "closed"];
 
@@ -35,7 +36,8 @@ export async function GET(
 // ─── PATCH /api/intakes/[id] ──────────────────────────────────────────────────
 // Partially update an intake. All body fields are optional.
 //
-// Allowed fields: name, year, status, hero_image_url, priority_open_at, organiser_terms
+// Allowed fields: name, year, status, hero_image_url, priority_open_at, organiser_terms,
+// font_css_url + font_family (together)
 
 export async function PATCH(
   request: NextRequest,
@@ -54,7 +56,7 @@ export async function PATCH(
     return badRequest("Request body must be valid JSON.");
   }
 
-  const { name, year, status, hero_image_url, priority_open_at, organiser_terms } = body as Record<
+  const { name, year, status, hero_image_url, priority_open_at, organiser_terms, font_css_url, font_family } = body as Record<
     string,
     unknown
   >;
@@ -122,6 +124,15 @@ export async function PATCH(
       return badRequest(`Event rules must be at most ${ORGANISER_TERMS_MAX} characters.`);
     }
     update.organiser_terms = normalised;
+  }
+
+  // font_css_url + font_family — the event's Adobe Fonts web font. Validated
+  // as a pair (see @/lib/eventFont); blank or null in both clears it.
+  if ("font_css_url" in (body as object) || "font_family" in (body as object)) {
+    const font = validateEventFont(font_css_url, font_family);
+    if (!font.ok) return badRequest(font.message);
+    update.font_css_url = font.value.font_css_url;
+    update.font_family = font.value.font_family;
   }
 
   if (Object.keys(update).length === 0) {
