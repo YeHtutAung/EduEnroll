@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import type { TenantAppearance } from "@/types/database";
 import { DEFAULT_APPEARANCE } from "@/types/database";
 import BrandHeader from "@/components/enrollment/BrandHeader";
+import { readableTextColor } from "@/lib/readableText";
 import {
   INTEREST_ANSWER_MAX,
   fieldOptions,
@@ -363,8 +364,8 @@ function SuccessPanel({
           />
           <button
             onClick={copyLink}
-            className="shrink-0 rounded-lg px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-            style={{ backgroundColor: primaryColor }}
+            className="shrink-0 rounded-lg px-4 py-2 text-sm font-semibold transition-opacity hover:opacity-90"
+            style={{ backgroundColor: primaryColor, color: readableTextColor(primaryColor) }}
           >
             {copied ? "Copied!" : "Copy link"}
           </button>
@@ -692,8 +693,8 @@ export default function InterestSignupPage() {
             <button
               type="submit"
               disabled={submit.kind === "submitting"}
-              className="w-full rounded-lg py-3 text-sm font-semibold text-white transition-colors disabled:opacity-50"
-              style={{ backgroundColor: state.primaryColor }}
+              className="w-full rounded-lg py-3 text-sm font-semibold transition-colors disabled:opacity-50"
+              style={{ backgroundColor: state.primaryColor, color: readableTextColor(state.primaryColor) }}
             >
               {submit.kind === "submitting" ? (
                 <span className="inline-flex items-center gap-2 justify-center">

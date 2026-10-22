@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { formatCurrency, formatAmount } from "@/lib/utils";
+import { eventFontCssUrl, eventFontStack } from "@/lib/eventFont";
 import { getCardState } from "./types";
 import type { EventTemplateProps, TemplateClass } from "./types";
 
@@ -82,7 +83,7 @@ function TicketCard({
 
       {/* Watermark */}
       <div className="absolute -bottom-5 -right-2 select-none pointer-events-none leading-none"
-        style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: "140px", letterSpacing: "4px", color: isHighestTier ? `${gold}0a` : "rgba(255,255,255,0.02)" }}>
+        style={{ fontFamily: "var(--lux-display)", fontSize: "140px", letterSpacing: "4px", color: isHighestTier ? `${gold}0a` : "rgba(255,255,255,0.02)" }}>
         {cls.level}
       </div>
 
@@ -125,7 +126,7 @@ function TicketCard({
         <div className="mb-8">
           <div className="text-[52px] sm:text-[56px] font-bold leading-none mb-1.5 tracking-wider"
             style={{
-              fontFamily: "'Bebas Neue', sans-serif",
+              fontFamily: "var(--lux-display)",
               ...(isHighestTier
                 ? { background: `linear-gradient(135deg, ${goldLight}, ${gold})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }
                 : { color: "#F8F4EE" }),
@@ -188,7 +189,7 @@ function TicketCard({
               <div className="flex items-center gap-3">
                 <button type="button" onClick={(e) => { e.stopPropagation(); onCartChange?.(cls.id, cls.level, effectiveQty - 1, cls.fee_amount, cls.image_url ?? null); }}
                   className="w-8 h-8 rounded-sm border border-white/15 text-white/70 hover:border-white/30 hover:text-white flex items-center justify-center transition-colors text-lg">−</button>
-                <span className="text-xl font-bold min-w-[2ch] text-center" style={{ fontFamily: "'Bebas Neue', sans-serif", color: isHighestTier ? goldLight : "#F8F4EE" }}>{effectiveQty}</span>
+                <span className="text-xl font-bold min-w-[2ch] text-center" style={{ fontFamily: "var(--lux-display)", color: isHighestTier ? goldLight : "#F8F4EE" }}>{effectiveQty}</span>
                 <button type="button" onClick={(e) => { e.stopPropagation(); const max = Math.min(maxTix, cls.seat_remaining); if (effectiveQty < max) onCartChange?.(cls.id, cls.level, effectiveQty + 1, cls.fee_amount, cls.image_url ?? null); }}
                   className="w-8 h-8 rounded-sm border border-white/15 text-white/70 hover:border-white/30 hover:text-white flex items-center justify-center transition-colors text-lg">+</button>
               </div>
@@ -203,7 +204,7 @@ function TicketCard({
             <div className="flex items-center gap-3">
               <button type="button" onClick={(e) => { e.stopPropagation(); setQty((q) => Math.max(1, q - 1)); }}
                 className="w-8 h-8 rounded-sm border border-white/15 text-white/70 hover:border-white/30 hover:text-white flex items-center justify-center transition-colors text-lg">−</button>
-              <span className="text-xl font-bold min-w-[2ch] text-center" style={{ fontFamily: "'Bebas Neue', sans-serif", color: isHighestTier ? goldLight : "#F8F4EE" }}>{qty}</span>
+              <span className="text-xl font-bold min-w-[2ch] text-center" style={{ fontFamily: "var(--lux-display)", color: isHighestTier ? goldLight : "#F8F4EE" }}>{qty}</span>
               <button type="button" onClick={(e) => { e.stopPropagation(); setQty((q) => Math.min(maxTix, cls.seat_remaining, q + 1)); }}
                 className="w-8 h-8 rounded-sm border border-white/15 text-white/70 hover:border-white/30 hover:text-white flex items-center justify-center transition-colors text-lg">+</button>
             </div>
@@ -248,6 +249,19 @@ export default function EvLuxuryTemplate({ appearance, intake, classes, slug, cu
   const heroUrl = intake.hero_image_url || appearance.hero_url;
   const tagline = appearance.tagline;
 
+  // The template's three faces, as CSS variables so the sub-components above
+  // (rendered inside this root) pick them up too. An event with its own web
+  // font puts it first in all three; the template's face stays as the
+  // fallback, and is what Myanmar text — which a Latin display font lacks —
+  // ends up in.
+  const fontCssUrl = eventFontCssUrl(intake.font_css_url);
+  const customFamily = fontCssUrl ? intake.font_family : null;
+  const fontVars = {
+    "--lux-display": eventFontStack(customFamily, "'Bebas Neue', sans-serif"),
+    "--lux-serif": eventFontStack(customFamily, "'Cormorant Garamond', serif"),
+    "--lux-sans": eventFontStack(customFamily, "'DM Sans', sans-serif"),
+  } as CSSProperties;
+
   const [cart, setCart] = useState<Map<string, { classId: string; level: string; qty: number; fee: number; imageUrl: string | null }>>(new Map());
   const cartTotal = Array.from(cart.values()).reduce((sum, i) => sum + i.fee * i.qty, 0);
   const cartItemCount = Array.from(cart.values()).reduce((sum, i) => sum + i.qty, 0);
@@ -280,9 +294,19 @@ export default function EvLuxuryTemplate({ appearance, intake, classes, slug, cu
   const titleSub = nameParts.length > 1 ? nameParts[nameParts.length - 1] : "";
 
   return (
-    <div className="min-h-screen" style={{ background: "#080808", color: "#F8F4EE" }}>
+    <div
+      className="min-h-screen"
+      style={{
+        ...fontVars,
+        background: "#080808",
+        color: "#F8F4EE",
+        ...(customFamily ? { fontFamily: "var(--lux-sans)" } : {}),
+      }}
+    >
       {/* eslint-disable-next-line @next/next/no-page-custom-font */}
       <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+      {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+      {fontCssUrl && <link href={fontCssUrl} rel="stylesheet" />}
 
       {/* Grain overlay */}
       <div className="fixed inset-0 pointer-events-none z-[9999] opacity-[0.35]"
@@ -310,11 +334,11 @@ export default function EvLuxuryTemplate({ appearance, intake, classes, slug, cu
           {(eventDateStr || closeDateStr || venue) && (
             <section className="px-6 py-8 sm:px-12" style={{ borderBottom: "1px solid rgba(255,255,255,0.06)" }}>
               <div className="flex flex-wrap items-center justify-center gap-8 sm:gap-12">
-                {eventDateStr && <div className="text-center"><div className="text-[10px] tracking-[3px] uppercase mb-1.5" style={{ color: gold }}>Date</div><div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "20px", fontWeight: 600 }}>{eventDateStr}</div></div>}
+                {eventDateStr && <div className="text-center"><div className="text-[10px] tracking-[3px] uppercase mb-1.5" style={{ color: gold }}>Date</div><div style={{ fontFamily: "var(--lux-serif)", fontSize: "20px", fontWeight: 600 }}>{eventDateStr}</div></div>}
                 {eventDateStr && closeDateStr && <div className="w-1 h-1 rounded-full" style={{ background: gold, opacity: 0.4 }} />}
-                {closeDateStr && <div className="text-center"><div className="text-[10px] tracking-[3px] uppercase mb-1.5" style={{ color: gold }}>Registration Closes</div><div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "20px", fontWeight: 600 }}>{closeDateStr}</div></div>}
+                {closeDateStr && <div className="text-center"><div className="text-[10px] tracking-[3px] uppercase mb-1.5" style={{ color: gold }}>Registration Closes</div><div style={{ fontFamily: "var(--lux-serif)", fontSize: "20px", fontWeight: 600 }}>{closeDateStr}</div></div>}
                 {(eventDateStr || closeDateStr) && venue && <div className="w-1 h-1 rounded-full" style={{ background: gold, opacity: 0.4 }} />}
-                {venue && <div className="text-center"><div className="text-[10px] tracking-[3px] uppercase mb-1.5" style={{ color: gold }}>Venue</div><div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "20px", fontWeight: 600 }}>{venue}</div></div>}
+                {venue && <div className="text-center"><div className="text-[10px] tracking-[3px] uppercase mb-1.5" style={{ color: gold }}>Venue</div><div style={{ fontFamily: "var(--lux-serif)", fontSize: "20px", fontWeight: 600 }}>{venue}</div></div>}
               </div>
             </section>
           )}
@@ -348,29 +372,29 @@ export default function EvLuxuryTemplate({ appearance, intake, classes, slug, cu
           )}
 
           <h1 className="relative text-center animate-[fadeUp_0.8s_ease_0.15s_forwards] opacity-0"
-            style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: "clamp(64px, 12vw, 150px)", lineHeight: 0.9, letterSpacing: "4px" }}>
+            style={{ fontFamily: "var(--lux-display)", fontSize: "clamp(64px, 12vw, 150px)", lineHeight: 0.9, letterSpacing: "4px" }}>
             {titleMain}<br />
             <span style={{ WebkitTextStroke: "1px #F8F4EE", color: "transparent" }}>{intake.year}</span>
             {titleSub && (
-              <span className="block mt-2" style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "clamp(22px, 4vw, 44px)", fontWeight: 300, fontStyle: "italic", letterSpacing: "8px", color: goldLight }}>
+              <span className="block mt-2" style={{ fontFamily: "var(--lux-serif)", fontSize: "clamp(22px, 4vw, 44px)", fontWeight: 300, fontStyle: "italic", letterSpacing: "8px", color: goldLight }}>
                 {titleSub}
               </span>
             )}
           </h1>
 
           {tagline && (
-            <p className="relative mt-6 text-center max-w-md" style={{ color: "rgba(248,244,238,0.5)", fontFamily: "'DM Sans', sans-serif", fontWeight: 300, letterSpacing: "1px" }}>
+            <p className="relative mt-6 text-center max-w-md" style={{ color: "rgba(248,244,238,0.5)", fontFamily: "var(--lux-sans)", fontWeight: 300, letterSpacing: "1px" }}>
               {tagline}
             </p>
           )}
 
           {(eventDateStr || closeDateStr || venue) && (
             <div className="relative mt-10 flex flex-wrap items-center justify-center gap-6 sm:gap-8 animate-[fadeUp_0.8s_ease_0.3s_forwards] opacity-0">
-              {eventDateStr && <div className="text-center"><div className="text-[10px] tracking-[3px] uppercase mb-1" style={{ color: "#888880" }}>Date</div><div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "18px", fontWeight: 600 }}>{eventDateStr}</div></div>}
+              {eventDateStr && <div className="text-center"><div className="text-[10px] tracking-[3px] uppercase mb-1" style={{ color: "#888880" }}>Date</div><div style={{ fontFamily: "var(--lux-serif)", fontSize: "18px", fontWeight: 600 }}>{eventDateStr}</div></div>}
               {eventDateStr && closeDateStr && <div className="w-1 h-1 rounded-full opacity-50" style={{ background: gold }} />}
-              {closeDateStr && <div className="text-center"><div className="text-[10px] tracking-[3px] uppercase mb-1" style={{ color: "#888880" }}>Closes</div><div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "18px", fontWeight: 600 }}>{closeDateStr}</div></div>}
+              {closeDateStr && <div className="text-center"><div className="text-[10px] tracking-[3px] uppercase mb-1" style={{ color: "#888880" }}>Closes</div><div style={{ fontFamily: "var(--lux-serif)", fontSize: "18px", fontWeight: 600 }}>{closeDateStr}</div></div>}
               {(eventDateStr || closeDateStr) && venue && <div className="w-1 h-1 rounded-full opacity-50" style={{ background: gold }} />}
-              {venue && <div className="text-center"><div className="text-[10px] tracking-[3px] uppercase mb-1" style={{ color: "#888880" }}>Venue</div><div style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "18px", fontWeight: 600 }}>{venue}</div></div>}
+              {venue && <div className="text-center"><div className="text-[10px] tracking-[3px] uppercase mb-1" style={{ color: "#888880" }}>Venue</div><div style={{ fontFamily: "var(--lux-serif)", fontSize: "18px", fontWeight: 600 }}>{venue}</div></div>}
             </div>
           )}
 
@@ -385,7 +409,7 @@ export default function EvLuxuryTemplate({ appearance, intake, classes, slug, cu
       <section id="tickets" className="px-6 py-16 sm:px-12 sm:py-20 scroll-mt-4">
         <div className="text-center mb-16">
           <div className="text-[10px] tracking-[5px] uppercase mb-3" style={{ color: gold }}>Select Your Experience</div>
-          <h2 style={{ fontFamily: "'Cormorant Garamond', serif", fontSize: "38px", fontWeight: 300, fontStyle: "italic" }}>Choose Your Tier</h2>
+          <h2 style={{ fontFamily: "var(--lux-serif)", fontSize: "38px", fontWeight: 300, fontStyle: "italic" }}>Choose Your Tier</h2>
         </div>
 
         {classes.length === 0 ? (
@@ -408,7 +432,7 @@ export default function EvLuxuryTemplate({ appearance, intake, classes, slug, cu
       {/* ── FOOTER ───────────────────────────────────────────────── */}
       <footer className="px-6 py-12 sm:px-12 border-t border-white/5">
         <div className="max-w-[1200px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: "22px", letterSpacing: "4px", opacity: 0.5 }}>{intake.name}</div>
+          <div style={{ fontFamily: "var(--lux-display)", fontSize: "22px", letterSpacing: "4px", opacity: 0.5 }}>{intake.name}</div>
           <div className="text-[12px] tracking-wider" style={{ color: "#888880" }}>
             Powered by <a href="https://www.kuunyi.com" target="_blank" rel="noopener noreferrer" style={{ color: gold }}>KuuNyi</a>
           </div>
