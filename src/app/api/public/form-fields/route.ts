@@ -32,7 +32,10 @@ export async function GET(request: NextRequest) {
     .from("intake_form_fields")
     .select("id, field_key, field_label, field_type, is_required, options, sort_order, is_default")
     .eq("intake_id", intakeId)
-    .order("sort_order", { ascending: true }) as {
+    .order("sort_order", { ascending: true })
+    // Tie-break on the (intake_id, field_key) unique key so equal sort_orders
+    // still come back in one order — the interest form and its API rely on it.
+    .order("field_key", { ascending: true }) as {
     data: {
       id: string;
       field_key: string;
