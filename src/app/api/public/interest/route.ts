@@ -229,10 +229,15 @@ export async function POST(request: NextRequest) {
   // ── Custom fields ─────────────────────────────────────────────────────────
   // The organiser's custom Enrolment Form fields. intake_form_fields has no
   // tenant_id; the intake it is filtered by was tenant-checked above.
+  // Same order as GET /api/public/form-fields, which the page renders from:
+  // interestContactFields picks the FIRST custom email / phone, so a different
+  // order here could require the very field the page hid.
   const { data: fieldRows, error: fieldError } = (await supabase
     .from("intake_form_fields")
     .select("field_key, field_label, field_type, is_required, options, is_default")
-    .eq("intake_id", intakeRow.id)) as { data: InterestFieldDef[] | null; error: unknown };
+    .eq("intake_id", intakeRow.id)
+    .order("sort_order", { ascending: true })
+    .order("field_key", { ascending: true })) as { data: InterestFieldDef[] | null; error: unknown };
 
   if (fieldError) {
     console.error("[interest] form field lookup failed");

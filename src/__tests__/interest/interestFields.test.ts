@@ -61,6 +61,17 @@ describe("interestCustomFields", () => {
     expect(interestCustomFields(fields).map((f) => f.field_key)).toEqual(["tshirt", "emergency"]);
   });
 
+  it("recognises the default email seeded as a text field", () => {
+    const fields = [
+      // As 020_dynamic_form_fields.sql and POST /api/intakes seed it.
+      field({ field_key: "email", field_label: "Email Address", field_type: "text", is_default: true, options: null }),
+      field({ field_key: "backup", field_label: "Backup email", field_type: "email", options: null }),
+    ];
+    expect(interestContactFields(fields).email?.field_key).toBe("email");
+    expect(interestCustomFields(fields).map((f) => f.field_key)).toEqual(["backup"]);
+    expect(validateInterestFormData(fields, {})).toEqual({ ok: false, message: "Backup email is required." });
+  });
+
   it("shows every custom phone field when the form keeps its default phone", () => {
     const fields = [
       ...DEFAULTS,

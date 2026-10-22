@@ -66,18 +66,26 @@ export function jsonbTextBytes(data: Record<string, string>): number {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-type ContactFieldShape = Pick<InterestFieldDef, "is_default" | "field_type">;
+type ContactFieldShape = Pick<InterestFieldDef, "field_key" | "is_default" | "field_type">;
 
 /**
  * The form's email and phone fields that the built-in inputs stand in for:
  * per type, the default field if the form has one, else the first custom
  * field of that type. Undefined when the form asks no such question.
+ *
+ * A default field is matched by its key as well as its type: the default
+ * `email` field is seeded with type `text` (020_dynamic_form_fields.sql,
+ * POST /api/intakes), so matching on type alone would miss it and wrongly
+ * fold a custom backup email into the built-in input.
+ *
+ * "First" is in the order the caller passes, so every caller must load the
+ * fields in the same order — sort_order, then field_key.
  */
 export function interestContactFields<T extends ContactFieldShape>(
   fields: T[],
 ): { email?: T; phone?: T } {
   const pick = (type: "email" | "phone") =>
-    fields.find((f) => f.is_default && f.field_type === type) ??
+    fields.find((f) => f.is_default && (f.field_type === type || f.field_key === type)) ??
     fields.find((f) => !f.is_default && f.field_type === type);
   return { email: pick("email"), phone: pick("phone") };
 }

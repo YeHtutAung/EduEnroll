@@ -129,7 +129,8 @@ export async function GET(
     .from("intake_form_fields")
     .select("field_key, field_label, field_type, is_required, options, is_default")
     .eq("intake_id", params.intakeId)
-    .order("sort_order", { ascending: true })) as {
+    .order("sort_order", { ascending: true })
+    .order("field_key", { ascending: true })) as {
     data: InterestFieldDef[] | null;
     error: { message: string } | null;
   };
