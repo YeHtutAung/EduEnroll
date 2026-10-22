@@ -30,6 +30,7 @@ export interface CartEnrollmentError {
   status: number;
   error: string;
   message: string;
+  message_mm?: string;
   extra?: Record<string, unknown>;
 }
 
@@ -175,6 +176,24 @@ function mapCartEnrollmentError(payload: Extract<SubmitCartEnrollmentResult, { s
         status: 409,
         error: "Enrollment Closed",
         message: `Ticket sales for ${payload.class_level} have closed.`,
+      };
+    // One purchase per pre-registration link — see
+    // 20261022120000_priority_link_single_purchase.sql.
+    case "PRIORITY_LINK_IN_PROGRESS":
+      return {
+        ok: false,
+        status: 409,
+        error: "Priority Link In Use",
+        message: "Your pre-registration link already has an order waiting for payment. Please complete that order. If it is not paid, it is cancelled automatically and the link works again.",
+        message_mm: "သင့်ကြိုတင်စာရင်းသွင်းလင့်ခ်ဖြင့် ငွေပေးချေရန် စောင့်ဆိုင်းနေသော အော်ဒါတစ်ခု ရှိပြီးဖြစ်သည်။ ထိုအော်ဒါကို ဦးစွာ ပြီးဆုံးအောင် ပြုလုပ်ပါ။",
+      };
+    case "PRIORITY_LINK_USED":
+      return {
+        ok: false,
+        status: 409,
+        error: "Priority Link Used",
+        message: "This pre-registration link has already been used to buy a ticket. Each link can be used for one purchase.",
+        message_mm: "ဤကြိုတင်စာရင်းသွင်းလင့်ခ်ဖြင့် လက်မှတ်ဝယ်ယူပြီးဖြစ်သည်။ လင့်ခ်တစ်ခုလျှင် တစ်ကြိမ်သာ ဝယ်ယူနိုင်ပါသည်။",
       };
     default:
       console.error("[createCartEnrollment] DB error:", payload.detail);

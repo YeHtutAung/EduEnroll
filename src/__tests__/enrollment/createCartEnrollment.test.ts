@@ -201,4 +201,21 @@ describe("createCartEnrollment", () => {
       expect(result.error).toBe("Ticket Unavailable");
     }
   });
+
+  it.each([
+    ["PRIORITY_LINK_IN_PROGRESS", "Priority Link In Use", /waiting for payment/],
+    ["PRIORITY_LINK_USED", "Priority Link Used", /already been used/],
+  ])("maps %s to a 409 the buyer can act on, in both languages", async (code, label, en) => {
+    mockRpc.mockResolvedValue({ data: { success: false, error: code }, error: null });
+    const result = await createCartEnrollment({
+      items: [{ class_id: VALID_UUID, quantity: 1 }],
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(409);
+      expect(result.error).toBe(label);
+      expect(result.message).toMatch(en);
+      expect(result.message_mm).toBeTruthy();
+    }
+  });
 });

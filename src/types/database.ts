@@ -73,6 +73,8 @@ export type SubmitEnrollmentResult =
         | "EXCEEDS_MAX_TICKETS"
         | "ENROLLMENT_NOT_OPEN"
         | "ENROLLMENT_CLOSED"
+        | "PRIORITY_LINK_IN_PROGRESS"
+        | "PRIORITY_LINK_USED"
         | "INTERNAL_ERROR";
       class_status?: ClassStatus;
       opens_at?: string;

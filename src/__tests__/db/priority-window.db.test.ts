@@ -789,6 +789,9 @@ describe("D. redemption transition", () => {
   });
 
   it("D3 (case 10) a second redemption on the same token leaves both stamps at their original values", async () => {
+    // Since 20261022120000_priority_link_single_purchase a link holds while its
+    // order is in progress, so the first order is rejected before the second
+    // redemption — the "link freed again" path. The stamps must still survive.
     const tenantId = await createTenant();
     const intakeId = await createIntake(tenantId, hoursFromNow(-1));
     const classId = await createClass(intakeId, tenantId, {
@@ -809,6 +812,8 @@ describe("D. redemption transition", () => {
     await sql(`UPDATE event_interest SET first_used_at = $2 WHERE intake_id = $1`, [
       intakeId, backdated,
     ]);
+
+    await sql(`UPDATE enrollments SET status = 'rejected' WHERE id = $1`, [first.enrollment_id]);
 
     const second = await submitEnrollment(classId, tokenHash);
     expect(second.success).toBe(true);
@@ -1132,5 +1137,104 @@ describe("F. privilege boundary, as service_role", () => {
     await expect(
       asServiceRole((c) => c.query(`SELECT assert_priority_window_valid($1)`, [intakeId])),
     ).rejects.toThrow(/permission denied for function assert_priority_window_valid/);
+  });
+});
+
+// ════════════════════════════════════════════════════════════════════════════
+// G. One purchase per link — 20261022120000_priority_link_single_purchase.sql
+// ════════════════════════════════════════════════════════════════════════════
+//
+// A link holds while its order is in progress, is used up once that order is
+// confirmed, and is freed again if the order is rejected. Only orders admitted
+// ON the link count; a tier already on public sale never consults it.
+
+describe("G. one purchase per link", () => {
+  async function gatedSetup(seats = 10) {
+    const tenantId = await createTenant();
+    const intakeId = await createIntake(tenantId, hoursFromNow(-1));
+    const classId = await createClass(intakeId, tenantId, {
+      enrollmentOpenAt: hoursFromNow(1), seatTotal: seats, seatRemaining: seats, status: "open",
+    });
+    const token = await createInterest(intakeId, tenantId, `${uniq()}@example.test`);
+    return { tenantId, intakeId, classId, tokenHash: hashPriorityToken(token) };
+  }
+
+  it("G1 a second order on a link whose first order is in progress is refused, seat unchanged", async () => {
+    const { classId, tokenHash } = await gatedSetup();
+    const first = await submitEnrollment(classId, tokenHash);
+    expect(first.success).toBe(true);
+    const seats = await seatRemaining(classId);
+
+    const second = await submitEnrollment(classId, tokenHash);
+    expect(second).toMatchObject({ success: false, error: "PRIORITY_LINK_IN_PROGRESS" });
+    expect(await seatRemaining(classId)).toBe(seats);
+  });
+
+  it("G2 once the link's order is confirmed, the link is used up", async () => {
+    const { classId, tokenHash } = await gatedSetup();
+    const first = await submitEnrollment(classId, tokenHash);
+    await sql(`UPDATE enrollments SET status = 'confirmed' WHERE id = $1`, [first.enrollment_id]);
+
+    const second = await submitEnrollment(classId, tokenHash);
+    expect(second).toMatchObject({ success: false, error: "PRIORITY_LINK_USED" });
+  });
+
+  it("G3 the cart path applies the same rule, and records the link on the order", async () => {
+    const { tenantId, classId, tokenHash } = await gatedSetup();
+    const first = await submitCartEnrollment([{ class_id: classId }], tenantId, tokenHash);
+    expect(first.success).toBe(true);
+
+    const [order] = await sql<{ priority_interest_id: string | null }>(
+      `SELECT priority_interest_id FROM enrollments WHERE id = $1`, [first.enrollment_id],
+    );
+    expect(order.priority_interest_id).not.toBeNull();
+
+    const second = await submitCartEnrollment([{ class_id: classId }], tenantId, tokenHash);
+    expect(second).toMatchObject({ success: false, error: "PRIORITY_LINK_IN_PROGRESS" });
+
+    await sql(`UPDATE enrollments SET status = 'rejected' WHERE id = $1`, [first.enrollment_id]);
+    const third = await submitCartEnrollment([{ class_id: classId }], tenantId, tokenHash);
+    expect(third.success).toBe(true);
+  });
+
+  it("G4 a tier already on public sale ignores the link entirely", async () => {
+    const { tenantId, intakeId, classId, tokenHash } = await gatedSetup();
+    const first = await submitEnrollment(classId, tokenHash);
+    await sql(`UPDATE enrollments SET status = 'confirmed' WHERE id = $1`, [first.enrollment_id]);
+
+    const onSale = await createClass(intakeId, tenantId, {
+      enrollmentOpenAt: hoursFromNow(1), seatTotal: 5, seatRemaining: 5, status: "open",
+    });
+    // Put it on public sale now; priority_open_at (−1h) stays earlier.
+    await sql(`UPDATE classes SET enrollment_open_at = $2 WHERE id = $1`, [onSale, hoursFromNow(-0.5)]);
+
+    const result = await submitEnrollment(onSale, tokenHash);
+    expect(result.success).toBe(true);
+    const [order] = await sql<{ priority_interest_id: string | null }>(
+      `SELECT priority_interest_id FROM enrollments WHERE id = $1`, [result.enrollment_id],
+    );
+    expect(order.priority_interest_id).toBeNull();
+  });
+
+  it("G5 two concurrent checkouts on one link: exactly one order is created", async () => {
+    const { classId, tokenHash } = await gatedSetup();
+    const results = await Promise.all(
+      [0, 1].map(async () => {
+        const client = await pool.connect(); // a SEPARATE connection each
+        try {
+          const { rows } = await client.query(
+            `SELECT public.submit_enrollment($1, $2, $3, $4) AS result`,
+            [classId, null, 1, tokenHash],
+          );
+          return rows[0].result as RpcResult;
+        } finally {
+          client.release();
+        }
+      }),
+    );
+
+    expect(results.filter((r) => r.success)).toHaveLength(1);
+    expect(results.filter((r) => !r.success)[0].error).toBe("PRIORITY_LINK_IN_PROGRESS");
+    expect(await seatRemaining(classId)).toBe(9);
   });
 });
