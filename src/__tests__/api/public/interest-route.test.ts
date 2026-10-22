@@ -372,6 +372,50 @@ describe("POST /api/public/interest", () => {
       expect(registerInterest).not.toHaveBeenCalled();
     });
 
+    // The organiser replaced the default phone with a required custom one: the
+    // built-in phone input stands in for it and inherits "required".
+    const CUSTOM_PHONE = [
+      { field_key: "custom_phone_1", field_label: "Phone", field_type: "phone", is_required: true, options: null, is_default: false },
+    ];
+
+    it("400s a missing phone when the custom phone it replaces is required", async () => {
+      withFields({ data: CUSTOM_PHONE, error: null });
+
+      const res = await POST(makeRequest({ ...VALID_BODY, phone: undefined }) as never);
+      const body = await res.json();
+
+      expect(res.status).toBe(400);
+      expect(body.code).toBe("INVALID_FORM_DATA");
+      expect(body.message).toBe("Phone is required.");
+      expect(registerInterest).not.toHaveBeenCalled();
+    });
+
+    it("accepts the built-in phone in place of the custom one, without a form_data answer", async () => {
+      withFields({ data: CUSTOM_PHONE, error: null });
+
+      const res = await POST(makeRequest({ ...VALID_BODY, phone: "09123456789" }) as never);
+
+      expect(res.status).toBe(200);
+      expect(vi.mocked(registerInterest).mock.calls[0][0].formData).toEqual({});
+    });
+
+    it("loads the fields in the page's order — sort_order, then field_key", async () => {
+      const mock = makeSupabaseMock({
+        intake: { data: eligibleIntake(), error: null },
+        classes: { data: [GATED_TIER], error: null },
+      });
+      vi.mocked(createAdminClient).mockReturnValue(mock as never);
+
+      await POST(makeRequest(VALID_BODY) as never);
+
+      const fieldsIdx = mock.from.mock.calls.findIndex(([t]) => t === "intake_form_fields");
+      const builder = mock.from.mock.results[fieldsIdx].value as { order: ReturnType<typeof vi.fn> };
+      expect(builder.order.mock.calls).toEqual([
+        ["sort_order", { ascending: true }],
+        ["field_key", { ascending: true }],
+      ]);
+    });
+
     it("sends empty answers when the event has no custom fields", async () => {
       const res = await POST(makeRequest(VALID_BODY) as never);
 
