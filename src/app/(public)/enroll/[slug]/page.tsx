@@ -55,6 +55,8 @@ interface PublicIntake {
   status: string;
   hero_image_url?: string | null;
   priority_open_at?: string | null;
+  font_css_url?: string | null;
+  font_family?: string | null;
 }
 
 interface TenantLabels {

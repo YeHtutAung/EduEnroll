@@ -196,3 +196,44 @@ describe("PATCH /api/intakes/[id] — organiser_terms", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("PATCH /api/intakes/[id] — custom font", () => {
+  async function patch(body: unknown) {
+    const capture: UpdateCapture = { payload: null, eqs: {} };
+    authWith(makeSupabase({ data: { id: "intake-1" } }, capture));
+    const res = await PATCH(request(body) as never, { params: { id: "intake-1" } });
+    return { res, capture };
+  }
+
+  it("stores an Adobe Fonts link and font name together, trimmed", async () => {
+    const { res, capture } = await patch({
+      font_css_url: " https://use.typekit.net/abc1234.css ",
+      font_family: " antique-olive-nord ",
+    });
+    expect(res.status).toBe(200);
+    expect(capture.payload).toMatchObject({
+      font_css_url: "https://use.typekit.net/abc1234.css",
+      font_family: "antique-olive-nord",
+    });
+  });
+
+  it("clears both when both are blank", async () => {
+    const { res, capture } = await patch({ font_css_url: "", font_family: "" });
+    expect(res.status).toBe(200);
+    expect(capture.payload).toMatchObject({ font_css_url: null, font_family: null });
+  });
+
+  it("rejects a link that is not Adobe Fonts, and writes nothing", async () => {
+    const { res, capture } = await patch({
+      font_css_url: "https://evil.example/font.css",
+      font_family: "antique-olive-nord",
+    });
+    expect(res.status).toBe(400);
+    expect(capture.payload).toBeNull();
+  });
+
+  it("rejects one without the other", async () => {
+    const { res } = await patch({ font_css_url: "https://use.typekit.net/abc1234.css" });
+    expect(res.status).toBe(400);
+  });
+});
