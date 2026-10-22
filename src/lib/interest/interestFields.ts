@@ -11,6 +11,12 @@
 //     form so a head-start signup is a quick ask, not the full enrolment.
 //   - `file` fields. The interest signup has no upload path, and the purchase
 //     form will still collect the file.
+//   - The form's own email / phone field when it is a CUSTOM one. An organiser
+//     can delete the default email or phone and add a custom field in its
+//     place; shown as well, the visitor would be asked twice. The built-in
+//     input stands in for the first such field (see interestContactFields) and
+//     takes over its "required". Later ones — an emergency contact, say — are
+//     a different question and still shown.
 //
 // The public page and the API route both import this, so the fields a visitor
 // is shown and the fields the server accepts cannot drift apart.
@@ -60,11 +66,40 @@ export function jsonbTextBytes(data: Record<string, string>): number {
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/** The custom fields the interest form shows, in the order given. */
-export function interestCustomFields<T extends Pick<InterestFieldDef, "is_default" | "field_type">>(
+type ContactFieldShape = Pick<InterestFieldDef, "is_default" | "field_type">;
+
+/**
+ * The form's email and phone fields that the built-in inputs stand in for:
+ * per type, the default field if the form has one, else the first custom
+ * field of that type. Undefined when the form asks no such question.
+ */
+export function interestContactFields<T extends ContactFieldShape>(
   fields: T[],
-): T[] {
-  return fields.filter((f) => !f.is_default && f.field_type !== "file");
+): { email?: T; phone?: T } {
+  const pick = (type: "email" | "phone") =>
+    fields.find((f) => f.is_default && f.field_type === type) ??
+    fields.find((f) => !f.is_default && f.field_type === type);
+  return { email: pick("email"), phone: pick("phone") };
+}
+
+/**
+ * Whether the built-in phone input is required: it is when the custom phone
+ * field it replaces is. A default phone field does not count — the interest
+ * signup has always left phone optional there, keeping it a quick ask.
+ */
+export function interestPhoneRequired<T extends ContactFieldShape & Pick<InterestFieldDef, "is_required">>(
+  fields: T[],
+): boolean {
+  const phone = interestContactFields(fields).phone;
+  return !!phone && !phone.is_default && phone.is_required;
+}
+
+/** The custom fields the interest form shows, in the order given. */
+export function interestCustomFields<T extends ContactFieldShape>(fields: T[]): T[] {
+  const { email, phone } = interestContactFields(fields);
+  return fields.filter(
+    (f) => !f.is_default && f.field_type !== "file" && f !== email && f !== phone,
+  );
 }
 
 /** A field's options as strings. `options` is jsonb, so it is not trusted to be an array. */

@@ -2,7 +2,9 @@ import { describe, it, expect } from "vitest";
 import {
   FORM_DATA_MAX_BYTES,
   INTEREST_ANSWER_MAX,
+  interestContactFields,
   interestCustomFields,
+  interestPhoneRequired,
   jsonbTextBytes,
   validateInterestFormData,
   type InterestFieldDef,
@@ -32,6 +34,55 @@ describe("interestCustomFields", () => {
       field({ field_key: "photo", field_label: "Photo", field_type: "file", options: null }),
     ];
     expect(interestCustomFields(fields).map((f) => f.field_key)).toEqual(["tshirt"]);
+  });
+
+  // An organiser who deleted the default phone / email and added custom ones
+  // in their place: the built-in inputs already ask, so showing them too
+  // would ask twice.
+  const CUSTOM_CONTACT: InterestFieldDef[] = [
+    field({ field_key: "name_en", field_label: "Name (English)", field_type: "text", is_default: true, options: null }),
+    field({ field_key: "custom_phone_1", field_label: "Phone", field_type: "phone", options: null }),
+    field({ field_key: "custom_email_1", field_label: "Email", field_type: "email", options: null }),
+    field(),
+  ];
+
+  it("drops a custom email / phone field that stands in for the default one", () => {
+    expect(interestCustomFields(CUSTOM_CONTACT).map((f) => f.field_key)).toEqual(["tshirt"]);
+    const { email, phone } = interestContactFields(CUSTOM_CONTACT);
+    expect(email?.field_key).toBe("custom_email_1");
+    expect(phone?.field_key).toBe("custom_phone_1");
+  });
+
+  it("still shows a second email / phone field", () => {
+    const fields = [
+      ...CUSTOM_CONTACT,
+      field({ field_key: "emergency", field_label: "Emergency phone", field_type: "phone", options: null }),
+    ];
+    expect(interestCustomFields(fields).map((f) => f.field_key)).toEqual(["tshirt", "emergency"]);
+  });
+
+  it("shows every custom phone field when the form keeps its default phone", () => {
+    const fields = [
+      ...DEFAULTS,
+      field({ field_key: "emergency", field_label: "Emergency phone", field_type: "phone", options: null }),
+    ];
+    expect(interestCustomFields(fields).map((f) => f.field_key)).toEqual(["emergency"]);
+  });
+});
+
+describe("interestPhoneRequired", () => {
+  const customPhone = (is_required: boolean) =>
+    field({ field_key: "custom_phone_1", field_label: "Phone", field_type: "phone", is_required, options: null });
+
+  it("follows the custom phone field the built-in input replaces", () => {
+    expect(interestPhoneRequired([customPhone(true)])).toBe(true);
+    expect(interestPhoneRequired([customPhone(false)])).toBe(false);
+  });
+
+  it("stays optional with a default phone field or none at all", () => {
+    expect(interestPhoneRequired(DEFAULTS)).toBe(false);
+    expect(interestPhoneRequired([...DEFAULTS, customPhone(true)])).toBe(false);
+    expect(interestPhoneRequired([field()])).toBe(false);
   });
 });
 
@@ -108,9 +159,11 @@ describe("validateInterestFormData", () => {
     expect(validateInterestFormData([date], { dob: "2000-01-31" }).ok).toBe(true);
     expect(validateInterestFormData([date], { dob: "31/01/2000" }).ok).toBe(false);
 
+    // Alongside a default email, so it is a second question and still asked.
+    const primary = field({ field_key: "email", field_label: "Email", field_type: "email", is_default: true, options: null });
     const email = field({ field_key: "alt", field_label: "Other email", field_type: "email", options: null });
-    expect(validateInterestFormData([email], { alt: "a@b.co" }).ok).toBe(true);
-    expect(validateInterestFormData([email], { alt: "not-an-email" }).ok).toBe(false);
+    expect(validateInterestFormData([primary, email], { alt: "a@b.co" }).ok).toBe(true);
+    expect(validateInterestFormData([primary, email], { alt: "not-an-email" }).ok).toBe(false);
   });
 
   it("caps a single answer and the whole object", () => {

@@ -3,7 +3,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import { tenantLinkOrigin } from "@/lib/origin";
 import { hashIp } from "@/lib/interest/ipHash";
-import { validateInterestFormData, type InterestFieldDef } from "@/lib/interest/interestFields";
+import {
+  interestPhoneRequired,
+  validateInterestFormData,
+  type InterestFieldDef,
+} from "@/lib/interest/interestFields";
 import { registerInterest } from "@/server/interest/registerInterest";
 import type { Intake } from "@/types/database";
 
@@ -233,6 +237,12 @@ export async function POST(request: NextRequest) {
   if (fieldError) {
     console.error("[interest] form field lookup failed");
     return json({ error: "Internal Server Error" }, 500);
+  }
+
+  // The built-in phone stands in for the form's own custom phone field (see
+  // interestContactFields), so it carries that field's "required".
+  if (phoneLen === 0 && interestPhoneRequired(fieldRows ?? [])) {
+    return json({ error: "Bad Request", message: "Phone is required.", code: "INVALID_FORM_DATA" }, 400);
   }
 
   const answers = validateInterestFormData(fieldRows ?? [], form_data);
