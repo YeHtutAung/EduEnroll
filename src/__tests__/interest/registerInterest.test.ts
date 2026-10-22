@@ -181,6 +181,18 @@ describe("registerInterest — first signup", () => {
     expect(Date.parse(stamped as string)).toBeGreaterThan(Date.now() - 60_000);
   });
 
+  it("stores the custom-field answers on the row", async () => {
+    await registerInterest(input({ formData: { tshirt: "M" } }));
+
+    expect(insertPayloads[0]).toMatchObject({ form_data: { tshirt: "M" } });
+  });
+
+  it("stores empty answers when none are given", async () => {
+    await registerInterest(input());
+
+    expect(insertPayloads[0]).toMatchObject({ form_data: {} });
+  });
+
   it("normalises the email for both the lookup and the stored row", async () => {
     await registerInterest(input({ email: "  Foo@Example.COM " }));
 
@@ -206,6 +218,16 @@ describe("registerInterest — first signup", () => {
 describe("registerInterest — repeat signup", () => {
   beforeEach(() => {
     lookupResults = [existingRow()];
+  });
+
+  it("never overwrites the stored answers", async () => {
+    // Anyone can type someone else's address into the public form; a repeat
+    // signup must not let them rewrite that person's answers.
+    await registerInterest(input({ formData: { tshirt: "L" } }));
+
+    expect(insertPayloads).toEqual([]);
+    for (const payload of updatePayloads) expect(payload).not.toHaveProperty("form_data");
+    for (const [, args] of rpcArgs) expect(JSON.stringify(args)).not.toContain("tshirt");
   });
 
   it("returns no raw token", async () => {

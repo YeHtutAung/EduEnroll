@@ -852,6 +852,15 @@ interface InterestEntry {
   first_converted_enrollment_id: string | null;
   revoked_at: string | null;
   superseded_expires_at: string | null;
+  /** Answers to the event's custom fields, keyed by field_key. */
+  form_data: Record<string, string> | null;
+}
+
+/** A custom field the interest form asked — the list route's `fields`. */
+interface InterestField {
+  field_key: string;
+  field_label: string;
+  field_type: string;
 }
 
 /** One row the run could not deliver to — matches FailedRow in the invite route. */
@@ -949,6 +958,7 @@ export default function IntakeDetailPage({
   // that offering the feature to schools later is a UI change, not an API one.
   const showInterest = tl.orgType !== "language_school";
   const [interest, setInterest] = useState<InterestEntry[]>([]);
+  const [interestFields, setInterestFields] = useState<InterestField[]>([]);
   const [interestLoading, setInterestLoading] = useState(true);
   const [interestError, setInterestError] = useState<string | null>(null);
   const [sendingInvites, setSendingInvites] = useState(false);
@@ -1015,6 +1025,7 @@ export default function IntakeDetailPage({
       if (!res.ok) throw new Error(`Failed to fetch interest list (${res.status})`);
       const data = await res.json();
       setInterest((data.entries ?? []) as InterestEntry[]);
+      setInterestFields((data.fields ?? []) as InterestField[]);
     } catch (err) {
       setInterestError(err instanceof Error ? err.message : "Failed to load interest list.");
     } finally {
@@ -1908,7 +1919,26 @@ export default function IntakeDetailPage({
                     const busy = actingEntryId === entry.id;
                     return (
                       <tr key={entry.id} className="hover:bg-[#f0f4ff]/40 transition-colors">
-                        <td className="px-5 py-4 text-gray-700 font-medium">{entry.name}</td>
+                        <td className="px-5 py-4 text-gray-700 font-medium">
+                          {entry.name}
+                          {/* Custom-field answers. A ticked checkbox is stored as "true". */}
+                          {interestFields.some((f) => entry.form_data?.[f.field_key]) && (
+                            <dl className="mt-1 space-y-0.5 text-xs font-normal text-gray-500">
+                              {interestFields.map((f) => {
+                                const answer = entry.form_data?.[f.field_key];
+                                if (!answer) return null;
+                                return (
+                                  <div key={f.field_key}>
+                                    <dt className="inline text-gray-400">{f.field_label}: </dt>
+                                    <dd className="inline">
+                                      {f.field_type === "checkbox" && answer === "true" ? "Yes" : answer}
+                                    </dd>
+                                  </div>
+                                );
+                              })}
+                            </dl>
+                          )}
+                        </td>
                         <td className="px-5 py-4 text-gray-500">{entry.email}</td>
                         <td className="px-5 py-4 text-gray-500 text-xs">{fmtDateTime(entry.created_at)}</td>
                         <td className="px-5 py-4 text-gray-500 text-xs">{fmtDateTime(entry.last_link_sent_at)}</td>

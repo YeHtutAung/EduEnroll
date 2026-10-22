@@ -44,6 +44,7 @@ const SAFE_COLUMNS = [
   "first_converted_enrollment_id",
   "revoked_at",
   "superseded_expires_at",
+  "form_data",
 ].join(", ");
 
 type AdminClient = ReturnType<typeof createAdminClient>;
