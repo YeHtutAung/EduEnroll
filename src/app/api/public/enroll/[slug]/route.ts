@@ -47,7 +47,10 @@ interface TenantLabelsView {
 }
 
 interface PublicIntakeResponse {
-  intake: Pick<Intake, "id" | "name" | "year" | "status" | "hero_image_url" | "priority_open_at">;
+  intake: Pick<
+    Intake,
+    "id" | "name" | "year" | "status" | "hero_image_url" | "priority_open_at" | "font_css_url" | "font_family"
+  >;
   classes: PublicClassView[];
   labels: TenantLabelsView;
   appearance: Omit<TenantAppearance, "id" | "tenant_id" | "updated_at">;
@@ -122,7 +125,7 @@ export async function GET(
   // ── Find the matching intake by slug column ────────────────────
   const { data: intakes, error: intakeError } = await supabase
     .from("intakes")
-    .select("id, name, year, status, hero_image_url, priority_open_at, organiser_terms")
+    .select("id, name, year, status, hero_image_url, priority_open_at, organiser_terms, font_css_url, font_family")
     .eq("tenant_id", tenantId)
     .eq("slug", params.slug.toLowerCase())
     .limit(1);
@@ -141,7 +144,8 @@ export async function GET(
   // fingerprint, rather than inside `intake`.
   const { organiser_terms: rawOrganiserTerms, ...intake } = intakes[0] as Pick<
     Intake,
-    "id" | "name" | "year" | "status" | "hero_image_url" | "priority_open_at" | "organiser_terms"
+    | "id" | "name" | "year" | "status" | "hero_image_url" | "priority_open_at" | "organiser_terms"
+    | "font_css_url" | "font_family"
   >;
   const organiserTerms = normaliseOrganiserTerms(rawOrganiserTerms);
 

@@ -940,6 +940,8 @@ export default function IntakeDetailPage({
   const [editYear, setEditYear] = useState(new Date().getFullYear());
   const [editPriorityOpenAt, setEditPriorityOpenAt] = useState("");
   const [editOrganiserTerms, setEditOrganiserTerms] = useState("");
+  const [editFontCssUrl, setEditFontCssUrl] = useState("");
+  const [editFontFamily, setEditFontFamily] = useState("");
   const [savingIntake, setSavingIntake] = useState(false);
 
   // ── Channel management (language_school only) ─────────────────────────────
@@ -1335,6 +1337,8 @@ export default function IntakeDetailPage({
     setEditYear(intake.year);
     setEditPriorityOpenAt(toDatetimeLocal(intake.priority_open_at));
     setEditOrganiserTerms(intake.organiser_terms ?? "");
+    setEditFontCssUrl(intake.font_css_url ?? "");
+    setEditFontFamily(intake.font_family ?? "");
     setEditingIntake(true);
   }
 
@@ -1356,6 +1360,10 @@ export default function IntakeDetailPage({
       // (including a clearing null) for one.
       if (showInterest) {
         payload.priority_open_at = fromDatetimeLocal(editPriorityOpenAt);
+        // Same gate: only event templates use a custom font. Blank in both
+        // clears it; the server validates the pair (see @/lib/eventFont).
+        payload.font_css_url = editFontCssUrl;
+        payload.font_family = editFontFamily;
       }
       const res = await fetch(`/api/intakes/${params.id}`, {
         method: "PATCH",
@@ -2210,6 +2218,34 @@ export default function IntakeDetailPage({
                   Leave blank for none. {editOrganiserTerms.length}/{ORGANISER_TERMS_MAX}
                 </p>
               </div>
+
+              {/* Custom web font — event templates only, same gate as the priority window */}
+              {showInterest && (
+                <div className="border-t border-gray-100 pt-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    Custom Font (Adobe Fonts)
+                  </label>
+                  <input
+                    type="url"
+                    value={editFontCssUrl}
+                    onChange={(e) => setEditFontCssUrl(e.target.value)}
+                    placeholder="https://use.typekit.net/abc1234.css"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
+                  />
+                  <input
+                    type="text"
+                    value={editFontFamily}
+                    onChange={(e) => setEditFontFamily(e.target.value)}
+                    placeholder="Font name, e.g. antique-olive-nord"
+                    className="mt-2 w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
+                  />
+                  <p className="mt-1.5 text-xs text-gray-400">
+                    Changes the font on this event&rsquo;s public page only. In Adobe Fonts, add the
+                    font to a web project, then copy its link and the CSS font name shown there.
+                    Myanmar text keeps its usual font. Leave both blank to use the template&rsquo;s fonts.
+                  </p>
+                </div>
+              )}
 
               <div className="flex gap-3 pt-2">
                 <button
