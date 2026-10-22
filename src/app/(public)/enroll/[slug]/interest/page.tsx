@@ -9,6 +9,7 @@ import {
   INTEREST_ANSWER_MAX,
   fieldOptions,
   interestCustomFields,
+  interestPhoneRequired,
   type InterestFieldDef,
 } from "@/lib/interest/interestFields";
 
@@ -72,6 +73,7 @@ type LoadState =
       logoUrl: string | null;
       schoolName: string;
       fields: InterestFieldDef[];
+      phoneRequired: boolean;
     };
 
 type SubmitResult =
@@ -477,6 +479,7 @@ export default function InterestSignupPage() {
           logoUrl: appearance.logo_url ?? null,
           schoolName: body.school_name ?? "",
           fields: interestCustomFields(Array.isArray(allFields) ? allFields : []),
+          phoneRequired: interestPhoneRequired(Array.isArray(allFields) ? allFields : []),
         });
       } catch {
         if (!cancelled) setState({ kind: "error", message: "Failed to load event details. Please try again." });
@@ -489,12 +492,22 @@ export default function InterestSignupPage() {
     };
   }, [slug]);
 
-  async function handleSubmit(e: React.FormEvent, intakeId: string, fields: InterestFieldDef[]) {
+  async function handleSubmit(
+    e: React.FormEvent,
+    intakeId: string,
+    fields: InterestFieldDef[],
+    phoneRequired: boolean,
+  ) {
     e.preventDefault();
     if (submit.kind === "submitting") return;
 
     if (!name.trim() || !email.trim()) {
       setSubmit({ kind: "error", message: "Name and email are required." });
+      return;
+    }
+
+    if (phoneRequired && !phone.trim()) {
+      setSubmit({ kind: "error", message: "Phone is required." });
       return;
     }
 
@@ -600,7 +613,7 @@ export default function InterestSignupPage() {
             <SuccessPanel result={submit} primaryColor={state.primaryColor} />
           </div>
         ) : (
-          <form onSubmit={(e) => handleSubmit(e, state.intakeId, state.fields)} className="mt-6">
+          <form onSubmit={(e) => handleSubmit(e, state.intakeId, state.fields, state.phoneRequired)} className="mt-6">
             {/* Honeypot — hidden from real users, filled by bots. Same convention
                 as src/app/(public)/enroll/form/page.tsx. */}
             <div aria-hidden="true" style={{ position: "absolute", left: "-9999px", top: "-9999px" }}>
@@ -648,13 +661,16 @@ export default function InterestSignupPage() {
             </div>
 
             <div className="mb-5">
-              <label className="mb-1.5 block text-sm font-medium text-gray-700">Phone</label>
+              <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                Phone{state.phoneRequired && <span className="ml-1 text-red-500">*</span>}
+              </label>
               <input
                 type="tel"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
+                required={state.phoneRequired}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:border-[#1a6b3c] focus:outline-none focus:ring-1 focus:ring-[#1a6b3c]"
-                placeholder="09xxxxxxxxx (optional)"
+                placeholder={state.phoneRequired ? "09xxxxxxxxx" : "09xxxxxxxxx (optional)"}
               />
             </div>
 
