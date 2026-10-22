@@ -40,6 +40,9 @@ export interface TemplateIntake {
   year: number;
   status: string;
   hero_image_url?: string | null;
+  /** Event's Adobe Fonts web font — see @/lib/eventFont. Event templates only. */
+  font_css_url?: string | null;
+  font_family?: string | null;
 }
 
 export interface TemplateLabels {

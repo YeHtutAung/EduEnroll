@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { EventTemplateProps, TemplateClass } from "./types";
 import { getCardState, fmtDate } from "./types";
+import { eventFontCssUrl, eventFontStyle } from "@/lib/eventFont";
 
 function TicketCard({
   cls,
@@ -178,7 +179,9 @@ export default function EvCorporateTemplate({
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50" style={eventFontStyle(intake)}>
+      {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+      {eventFontCssUrl(intake.font_css_url) && <link href={eventFontCssUrl(intake.font_css_url)!} rel="stylesheet" />}
 
       {/* ── Top bar ─────────────────────────────────────────────── */}
       <div className="w-full py-4 px-6 bg-white border-b border-gray-200 shadow-sm">
