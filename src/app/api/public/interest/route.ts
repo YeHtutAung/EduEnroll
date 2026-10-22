@@ -3,7 +3,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import { tenantLinkOrigin } from "@/lib/origin";
 import { hashIp } from "@/lib/interest/ipHash";
-import { validateInterestFormData, type InterestFieldDef } from "@/lib/interest/interestFields";
+import {
+  interestPhoneRequired,
+  validateInterestFormData,
+  type InterestFieldDef,
+} from "@/lib/interest/interestFields";
 import { registerInterest } from "@/server/interest/registerInterest";
 import type { Intake } from "@/types/database";
 
@@ -225,14 +229,25 @@ export async function POST(request: NextRequest) {
   // ── Custom fields ─────────────────────────────────────────────────────────
   // The organiser's custom Enrolment Form fields. intake_form_fields has no
   // tenant_id; the intake it is filtered by was tenant-checked above.
+  // Same order as GET /api/public/form-fields, which the page renders from:
+  // interestContactFields picks the FIRST custom email / phone, so a different
+  // order here could require the very field the page hid.
   const { data: fieldRows, error: fieldError } = (await supabase
     .from("intake_form_fields")
     .select("field_key, field_label, field_type, is_required, options, is_default")
-    .eq("intake_id", intakeRow.id)) as { data: InterestFieldDef[] | null; error: unknown };
+    .eq("intake_id", intakeRow.id)
+    .order("sort_order", { ascending: true })
+    .order("field_key", { ascending: true })) as { data: InterestFieldDef[] | null; error: unknown };
 
   if (fieldError) {
     console.error("[interest] form field lookup failed");
     return json({ error: "Internal Server Error" }, 500);
+  }
+
+  // The built-in phone stands in for the form's own custom phone field (see
+  // interestContactFields), so it carries that field's "required".
+  if (phoneLen === 0 && interestPhoneRequired(fieldRows ?? [])) {
+    return json({ error: "Bad Request", message: "Phone is required.", code: "INVALID_FORM_DATA" }, 400);
   }
 
   const answers = validateInterestFormData(fieldRows ?? [], form_data);
