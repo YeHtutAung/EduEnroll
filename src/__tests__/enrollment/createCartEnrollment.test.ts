@@ -218,4 +218,17 @@ describe("createCartEnrollment", () => {
       expect(result.message_mm).toBeTruthy();
     }
   });
+
+  it("passes a supplied idempotency_key to the RPC, and omits it when absent", async () => {
+    mockRpc.mockResolvedValue({ data: { success: false, error: "CLASS_NOT_FOUND" }, error: null });
+    await createCartEnrollment({
+      items: [{ class_id: VALID_UUID, quantity: 1 }],
+      idempotency_key: "key-123",
+    });
+    expect(mockRpc.mock.calls[0][1].p_idempotency_key).toBe("key-123");
+
+    mockRpc.mockClear();
+    await createCartEnrollment({ items: [{ class_id: VALID_UUID, quantity: 1 }], idempotency_key: "" });
+    expect(mockRpc.mock.calls[0][1]).not.toHaveProperty("p_idempotency_key");
+  });
 });

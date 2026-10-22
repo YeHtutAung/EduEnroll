@@ -1237,4 +1237,34 @@ describe("G. one purchase per link", () => {
     expect(results.filter((r) => !r.success)[0].error).toBe("PRIORITY_LINK_IN_PROGRESS");
     expect(await seatRemaining(classId)).toBe(9);
   });
+
+  it("G6 a cart retry with the same idempotency key gets its own order back, not PRIORITY_LINK_IN_PROGRESS", async () => {
+    // Covers 20261022130000_cart_idempotency.sql: a lost response must not
+    // strand the buyer behind their own order.
+    const { tenantId, classId, tokenHash } = await gatedSetup();
+    const cart = JSON.stringify([{ class_id: classId }]);
+    const call = async (key: string) =>
+      (await sql<{ result: RpcResult }>(
+        `SELECT public.submit_cart_enrollment($1::jsonb, $2, $3, $4) AS result`,
+        [cart, tenantId, tokenHash, key],
+      ))[0].result;
+
+    const key = uniq();
+    const first = await call(key);
+    expect(first.success).toBe(true);
+
+    const retry = await call(key);
+    expect(retry).toMatchObject({
+      success: true,
+      enrollment_id: first.enrollment_id,
+      enrollment_ref: first.enrollment_ref,
+      total_fee: first.total_fee,
+      quantity: first.quantity,
+    });
+    expect(await seatRemaining(classId)).toBe(9); // one seat, not two
+
+    // A different attempt on the same link is still held.
+    const other = await call(uniq());
+    expect(other).toMatchObject({ success: false, error: "PRIORITY_LINK_IN_PROGRESS" });
+  });
 });

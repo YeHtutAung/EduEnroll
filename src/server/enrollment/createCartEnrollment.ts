@@ -15,6 +15,8 @@ export interface CartEnrollmentInput {
   messenger_psid?: string | null;
   /** SHA-256 hash of the raw priority-access token, or null if none was presented. */
   priority_token_hash?: string | null;
+  /** Client-held key per cart attempt; a retry with the same key returns the original order. */
+  idempotency_key?: string | null;
 }
 
 // Use Extract to narrow to the success branch
@@ -47,7 +49,7 @@ export type CartEnrollmentOutcome = CartEnrollmentSuccess | CartEnrollmentError;
 export async function createCartEnrollment(
   input: CartEnrollmentInput,
 ): Promise<CartEnrollmentOutcome> {
-  const { items, form_data, messenger_psid, priority_token_hash } = input;
+  const { items, form_data, messenger_psid, priority_token_hash, idempotency_key } = input;
 
   // ── Validate items ────────────────────────────────────────────
   if (!Array.isArray(items) || items.length === 0) {
@@ -77,9 +79,16 @@ export async function createCartEnrollment(
   const priorityTokenHash =
     typeof priority_token_hash === "string" && priority_token_hash.length > 0 ? priority_token_hash : null;
 
+  const idemKey =
+    typeof idempotency_key === "string" && idempotency_key.length > 0 ? idempotency_key : null;
+
   const { data: result, error: rpcError } = await supabase.rpc(
     "submit_cart_enrollment",
-    { p_items: validatedItems, p_priority_token_hash: priorityTokenHash } as never,
+    {
+      p_items: validatedItems,
+      p_priority_token_hash: priorityTokenHash,
+      ...(idemKey ? { p_idempotency_key: idemKey } : {}),
+    } as never,
   );
 
   if (rpcError) {
