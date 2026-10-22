@@ -14,6 +14,7 @@ import {
 } from "@/components/enrollment/templates";
 import type { TemplateProps, EventTemplateProps } from "@/components/enrollment/templates";
 import { applyPriorityUnlock, capturePriorityToken } from "@/lib/interest/priorityUnlock";
+import { readableTextColor } from "@/lib/readableText";
 
 // Shell wrapper for non-template states (loading, error, coming-soon, etc.)
 function PageShell({ children }: { children: React.ReactNode }) {
@@ -248,8 +249,8 @@ function InterestBanner({
         </div>
         <a
           href={`/enroll/${slug}/interest`}
-          className="shrink-0 rounded-lg px-5 py-2.5 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-          style={{ backgroundColor: primaryColor }}
+          className="shrink-0 rounded-lg px-5 py-2.5 text-sm font-semibold transition-opacity hover:opacity-90"
+          style={{ backgroundColor: primaryColor, color: readableTextColor(primaryColor) }}
         >
           Register Interest / <span className="font-myanmar">စိတ်ဝင်စားမှု မှတ်ပုံတင်ရန်</span>
         </a>
