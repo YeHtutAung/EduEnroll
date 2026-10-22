@@ -63,6 +63,7 @@ export async function POST(request: NextRequest) {
       form_data: fd,
       messenger_psid: typeof messenger_psid === "string" ? messenger_psid : null,
       priority_token_hash: priorityTokenHash,
+      idempotency_key: typeof idempotency_key === "string" ? idempotency_key : null,
     });
 
     if (!outcome.ok) {

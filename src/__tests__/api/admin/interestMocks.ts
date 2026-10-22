@@ -27,6 +27,8 @@ export interface InterestMockOptions {
   tenant?: { data: unknown; error?: unknown };
   /** Rows returned by the list read and the invite candidate read. */
   entries?: { data: unknown; error?: unknown };
+  /** intake_form_fields rows — the event's form fields. */
+  formFields?: { data: unknown; error?: unknown };
   /** Row returned by the single-entry lookup in the entry route. */
   entry?: { data: unknown; error?: unknown };
   /** Value for the post-rotation `superseded_expires_at` read-back. */
@@ -163,6 +165,7 @@ export function makeInterestMock(opts: InterestMockOptions = {}): InterestMock {
         );
       }
       if (table === "event_interest") return eventInterest();
+      if (table === "intake_form_fields") return fixed(opts.formFields ?? { data: [] });
       return fixed({ data: null });
     }),
     rpc: vi.fn(async (name: string, args: Record<string, unknown>) => {
