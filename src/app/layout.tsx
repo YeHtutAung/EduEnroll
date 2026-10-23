@@ -20,6 +20,9 @@ const notoSansMyanmar = localFont({
   src: "./fonts/NotoSansMyanmar-myanmar.woff2",
   variable: "--font-noto-sans-myanmar",
   weight: "400 700",
+  // The file has no Latin glyphs; without this, Latin text in font-myanmar
+  // would hit the generated Arial fallback before reaching Noto Sans.
+  adjustFontFallback: false,
 });
 
 const jetBrainsMono = localFont({
