@@ -1,34 +1,40 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
-import { Inter, Noto_Sans, Noto_Sans_Myanmar, JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { extractSubdomainFromHost } from "@/lib/tenant";
 import { Analytics } from "@vercel/analytics/next";
 import { MSWProvider } from "@/components/MSWProvider";
 import "./globals.css";
 
-const notoSans = Noto_Sans({
-  subsets: ["latin"],
+// Self-hosted (src/app/fonts, OFL — see fonts/licenses) so the build never
+// fetches from Google Fonts. Files are Google's variable woff2 for the subsets
+// these fonts were previously loaded with.
+const notoSans = localFont({
+  src: "./fonts/NotoSans-latin.woff2",
   variable: "--font-noto-sans",
-  weight: ["400", "500", "600", "700"],
+  weight: "400 700",
 });
 
-const notoSansMyanmar = Noto_Sans_Myanmar({
-  subsets: ["myanmar"],
+const notoSansMyanmar = localFont({
+  src: "./fonts/NotoSansMyanmar-myanmar.woff2",
   variable: "--font-noto-sans-myanmar",
-  weight: ["400", "500", "600", "700"],
+  weight: "400 700",
+  // The file has no Latin glyphs; without this, Latin text in font-myanmar
+  // would hit the generated Arial fallback before reaching Noto Sans.
+  adjustFontFallback: false,
 });
 
-const jetBrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
+const jetBrainsMono = localFont({
+  src: "./fonts/JetBrainsMono-latin.woff2",
   variable: "--font-jetbrains-mono",
-  weight: ["400", "600", "700"],
+  weight: "400 700",
 });
 
-const inter = Inter({
-  subsets: ["latin"],
+const inter = localFont({
+  src: "./fonts/Inter-latin.woff2",
   variable: "--font-inter",
-  weight: ["400", "500", "600", "700", "800"],
+  weight: "400 800",
 });
 
 export async function generateMetadata(): Promise<Metadata> {

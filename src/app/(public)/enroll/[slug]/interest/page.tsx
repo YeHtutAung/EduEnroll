@@ -5,6 +5,14 @@ import { useParams } from "next/navigation";
 import type { TenantAppearance } from "@/types/database";
 import { DEFAULT_APPEARANCE } from "@/types/database";
 import BrandHeader from "@/components/enrollment/BrandHeader";
+import { readableTextColor } from "@/lib/readableText";
+import {
+  INTEREST_ANSWER_MAX,
+  fieldOptions,
+  interestCustomFields,
+  interestPhoneRequired,
+  type InterestFieldDef,
+} from "@/lib/interest/interestFields";
 
 // ─── Register interest in an event's priority window ────────────────────────
 //
@@ -19,6 +27,9 @@ import BrandHeader from "@/components/enrollment/BrandHeader";
 // the exact contract. This page never fabricates a token: the raw value is
 // shown ONLY when the response includes one (first signup), and a repeat
 // signup is told its link was emailed, never shown one.
+//
+// Below name / email / phone the form also shows the organiser's custom
+// Enrolment Form fields (see @/lib/interest/interestFields for which ones).
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -62,6 +73,8 @@ type LoadState =
       primaryColor: string;
       logoUrl: string | null;
       schoolName: string;
+      fields: InterestFieldDef[];
+      phoneRequired: boolean;
     };
 
 type SubmitResult =
@@ -175,6 +188,122 @@ function joinLevels(levels: string[]): string {
   return `${levels.slice(0, -1).join(", ")}, and ${levels[levels.length - 1]}`;
 }
 
+// ─── Custom field ─────────────────────────────────────────────────────────────
+
+const INPUT_CLASS =
+  "w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 " +
+  "focus:border-[#1a6b3c] focus:outline-none focus:ring-1 focus:ring-[#1a6b3c]";
+
+/** One organiser-defined field. Same controls as the enrolment form's. */
+function CustomField({
+  field,
+  value,
+  onChange,
+}: {
+  field: InterestFieldDef;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const options = fieldOptions(field);
+
+  if (field.field_type === "checkbox") {
+    return (
+      <div className="mb-5">
+        <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
+          <input
+            type="checkbox"
+            checked={value === "true"}
+            onChange={(e) => onChange(e.target.checked ? "true" : "")}
+            required={field.is_required}
+            className="h-4 w-4 accent-[#1a6b3c]"
+          />
+          {field.field_label}
+          {field.is_required && <span className="text-red-500">*</span>}
+        </label>
+      </div>
+    );
+  }
+
+  let input: React.ReactNode;
+  switch (field.field_type) {
+    case "select":
+      input = (
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          required={field.is_required}
+          className={`${INPUT_CLASS} bg-white`}
+        >
+          <option value="">Select...</option>
+          {options.map((o) => (
+            <option key={o} value={o}>{o}</option>
+          ))}
+        </select>
+      );
+      break;
+    case "radio":
+      input = (
+        <div className="mt-1 space-y-2">
+          {options.map((o) => (
+            <label key={o} className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
+              <input
+                type="radio"
+                name={field.field_key}
+                checked={value === o}
+                onChange={() => onChange(o)}
+                required={field.is_required}
+                className="h-4 w-4 accent-[#1a6b3c]"
+              />
+              {o}
+            </label>
+          ))}
+        </div>
+      );
+      break;
+    case "address":
+      input = (
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          required={field.is_required}
+          rows={3}
+          maxLength={INTEREST_ANSWER_MAX}
+          className={`${INPUT_CLASS} resize-none`}
+          placeholder={field.field_label}
+        />
+      );
+      break;
+    default: {
+      const type =
+        field.field_type === "date" ? "date"
+        : field.field_type === "email" ? "email"
+        : field.field_type === "phone" ? "tel"
+        : "text";
+      input = (
+        <input
+          type={type}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          required={field.is_required}
+          maxLength={INTEREST_ANSWER_MAX}
+          className={INPUT_CLASS}
+          placeholder={field.field_type === "phone" ? "09xxxxxxxxx" : field.field_label}
+        />
+      );
+    }
+  }
+
+  return (
+    <div className="mb-5">
+      <label className="mb-1.5 block text-sm font-medium text-gray-700">
+        {field.field_label}
+        {field.is_required && <span className="ml-1 text-red-500">*</span>}
+      </label>
+      {input}
+    </div>
+  );
+}
+
 // ─── Success panel ────────────────────────────────────────────────────────────
 
 function SuccessPanel({
@@ -235,8 +364,8 @@ function SuccessPanel({
           />
           <button
             onClick={copyLink}
-            className="shrink-0 rounded-lg px-4 py-2 text-sm font-semibold text-white transition-opacity hover:opacity-90"
-            style={{ backgroundColor: primaryColor }}
+            className="shrink-0 rounded-lg px-4 py-2 text-sm font-semibold transition-opacity hover:opacity-90"
+            style={{ backgroundColor: primaryColor, color: readableTextColor(primaryColor) }}
           >
             {copied ? "Copied!" : "Copy link"}
           </button>
@@ -289,6 +418,7 @@ export default function InterestSignupPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [answers, setAnswers] = useState<Record<string, string>>({});
   const [hp, setHp] = useState("");
   const [submit, setSubmit] = useState<SubmitResult>({ kind: "idle" });
 
@@ -328,6 +458,17 @@ export default function InterestSignupPage() {
         );
         const appearance = body.appearance ?? DEFAULT_APPEARANCE;
 
+        // The organiser's custom fields. A failure here is an error, not "no
+        // fields": submitting without a required field would only be refused.
+        const fieldsRes = await fetch(`/api/public/form-fields?intake_id=${body.intake.id}`);
+        if (cancelled) return;
+        if (!fieldsRes.ok) {
+          setState({ kind: "error", message: "Failed to load event details. Please try again." });
+          return;
+        }
+        const allFields = (await fieldsRes.json()) as InterestFieldDef[];
+        if (cancelled) return;
+
         setState({
           kind: "ready",
           intakeId: body.intake.id,
@@ -338,6 +479,8 @@ export default function InterestSignupPage() {
           primaryColor: appearance.primary_color || "#2563eb",
           logoUrl: appearance.logo_url ?? null,
           schoolName: body.school_name ?? "",
+          fields: interestCustomFields(Array.isArray(allFields) ? allFields : []),
+          phoneRequired: interestPhoneRequired(Array.isArray(allFields) ? allFields : []),
         });
       } catch {
         if (!cancelled) setState({ kind: "error", message: "Failed to load event details. Please try again." });
@@ -350,13 +493,35 @@ export default function InterestSignupPage() {
     };
   }, [slug]);
 
-  async function handleSubmit(e: React.FormEvent, intakeId: string) {
+  async function handleSubmit(
+    e: React.FormEvent,
+    intakeId: string,
+    fields: InterestFieldDef[],
+    phoneRequired: boolean,
+  ) {
     e.preventDefault();
     if (submit.kind === "submitting") return;
 
     if (!name.trim() || !email.trim()) {
       setSubmit({ kind: "error", message: "Name and email are required." });
       return;
+    }
+
+    if (phoneRequired && !phone.trim()) {
+      setSubmit({ kind: "error", message: "Phone is required." });
+      return;
+    }
+
+    const missing = fields.find((f) => f.is_required && !(answers[f.field_key] ?? "").trim());
+    if (missing) {
+      setSubmit({ kind: "error", message: `${missing.field_label} is required.` });
+      return;
+    }
+
+    const formData: Record<string, string> = {};
+    for (const f of fields) {
+      const v = (answers[f.field_key] ?? "").trim();
+      if (v) formData[f.field_key] = v;
     }
 
     setSubmit({ kind: "submitting" });
@@ -370,6 +535,7 @@ export default function InterestSignupPage() {
           name: name.trim(),
           email: email.trim(),
           ...(phone.trim() ? { phone: phone.trim() } : {}),
+          ...(Object.keys(formData).length > 0 ? { form_data: formData } : {}),
           ...(hp ? { __hp: hp } : {}),
         }),
       });
@@ -448,7 +614,7 @@ export default function InterestSignupPage() {
             <SuccessPanel result={submit} primaryColor={state.primaryColor} />
           </div>
         ) : (
-          <form onSubmit={(e) => handleSubmit(e, state.intakeId)} className="mt-6">
+          <form onSubmit={(e) => handleSubmit(e, state.intakeId, state.fields, state.phoneRequired)} className="mt-6">
             {/* Honeypot — hidden from real users, filled by bots. Same convention
                 as src/app/(public)/enroll/form/page.tsx. */}
             <div aria-hidden="true" style={{ position: "absolute", left: "-9999px", top: "-9999px" }}>
@@ -496,15 +662,27 @@ export default function InterestSignupPage() {
             </div>
 
             <div className="mb-5">
-              <label className="mb-1.5 block text-sm font-medium text-gray-700">Phone</label>
+              <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                Phone{state.phoneRequired && <span className="ml-1 text-red-500">*</span>}
+              </label>
               <input
                 type="tel"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
+                required={state.phoneRequired}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:border-[#1a6b3c] focus:outline-none focus:ring-1 focus:ring-[#1a6b3c]"
-                placeholder="09xxxxxxxxx (optional)"
+                placeholder={state.phoneRequired ? "09xxxxxxxxx" : "09xxxxxxxxx (optional)"}
               />
             </div>
+
+            {state.fields.map((field) => (
+              <CustomField
+                key={field.field_key}
+                field={field}
+                value={answers[field.field_key] ?? ""}
+                onChange={(v) => setAnswers((prev) => ({ ...prev, [field.field_key]: v }))}
+              />
+            ))}
 
             {submit.kind === "error" && (
               <div className="mb-5 rounded-lg border border-red-200 bg-red-50 p-4 text-sm">
@@ -515,8 +693,8 @@ export default function InterestSignupPage() {
             <button
               type="submit"
               disabled={submit.kind === "submitting"}
-              className="w-full rounded-lg py-3 text-sm font-semibold text-white transition-colors disabled:opacity-50"
-              style={{ backgroundColor: state.primaryColor }}
+              className="w-full rounded-lg py-3 text-sm font-semibold transition-colors disabled:opacity-50"
+              style={{ backgroundColor: state.primaryColor, color: readableTextColor(state.primaryColor) }}
             >
               {submit.kind === "submitting" ? (
                 <span className="inline-flex items-center gap-2 justify-center">

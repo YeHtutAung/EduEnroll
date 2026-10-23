@@ -15,6 +15,8 @@ export interface CartEnrollmentInput {
   messenger_psid?: string | null;
   /** SHA-256 hash of the raw priority-access token, or null if none was presented. */
   priority_token_hash?: string | null;
+  /** Client-held key per cart attempt; a retry with the same key returns the original order. */
+  idempotency_key?: string | null;
 }
 
 // Use Extract to narrow to the success branch
@@ -30,6 +32,7 @@ export interface CartEnrollmentError {
   status: number;
   error: string;
   message: string;
+  message_mm?: string;
   extra?: Record<string, unknown>;
 }
 
@@ -46,7 +49,7 @@ export type CartEnrollmentOutcome = CartEnrollmentSuccess | CartEnrollmentError;
 export async function createCartEnrollment(
   input: CartEnrollmentInput,
 ): Promise<CartEnrollmentOutcome> {
-  const { items, form_data, messenger_psid, priority_token_hash } = input;
+  const { items, form_data, messenger_psid, priority_token_hash, idempotency_key } = input;
 
   // ── Validate items ────────────────────────────────────────────
   if (!Array.isArray(items) || items.length === 0) {
@@ -76,9 +79,16 @@ export async function createCartEnrollment(
   const priorityTokenHash =
     typeof priority_token_hash === "string" && priority_token_hash.length > 0 ? priority_token_hash : null;
 
+  const idemKey =
+    typeof idempotency_key === "string" && idempotency_key.length > 0 ? idempotency_key : null;
+
   const { data: result, error: rpcError } = await supabase.rpc(
     "submit_cart_enrollment",
-    { p_items: validatedItems, p_priority_token_hash: priorityTokenHash } as never,
+    {
+      p_items: validatedItems,
+      p_priority_token_hash: priorityTokenHash,
+      ...(idemKey ? { p_idempotency_key: idemKey } : {}),
+    } as never,
   );
 
   if (rpcError) {
@@ -175,6 +185,24 @@ function mapCartEnrollmentError(payload: Extract<SubmitCartEnrollmentResult, { s
         status: 409,
         error: "Enrollment Closed",
         message: `Ticket sales for ${payload.class_level} have closed.`,
+      };
+    // One purchase per pre-registration link — see
+    // 20261022120000_priority_link_single_purchase.sql.
+    case "PRIORITY_LINK_IN_PROGRESS":
+      return {
+        ok: false,
+        status: 409,
+        error: "Priority Link In Use",
+        message: "Your pre-registration link already has an order waiting for payment. Please complete that order. If it is not paid, it is cancelled automatically and the link works again.",
+        message_mm: "သင့်ကြိုတင်စာရင်းသွင်းလင့်ခ်ဖြင့် ငွေပေးချေရန် စောင့်ဆိုင်းနေသော အော်ဒါတစ်ခု ရှိပြီးဖြစ်သည်။ ထိုအော်ဒါကို ဦးစွာ ပြီးဆုံးအောင် ပြုလုပ်ပါ။",
+      };
+    case "PRIORITY_LINK_USED":
+      return {
+        ok: false,
+        status: 409,
+        error: "Priority Link Used",
+        message: "This pre-registration link has already been used to buy a ticket. Each link can be used for one purchase.",
+        message_mm: "ဤကြိုတင်စာရင်းသွင်းလင့်ခ်ဖြင့် လက်မှတ်ဝယ်ယူပြီးဖြစ်သည်။ လင့်ခ်တစ်ခုလျှင် တစ်ကြိမ်သာ ဝယ်ယူနိုင်ပါသည်။",
       };
     default:
       console.error("[createCartEnrollment] DB error:", payload.detail);

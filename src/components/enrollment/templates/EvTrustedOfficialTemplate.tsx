@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { TenantAppearance } from "@/types/database";
 import type { TemplateClass, TemplateIntake, TemplateLabels } from "./types";
@@ -12,6 +12,7 @@ import {
 import { resolveSponsorPlacements } from "@/lib/sponsors";
 import TermsConsent from "@/components/enrollment/TermsConsent";
 import { TERMS_VERSION } from "@/lib/legal/terms";
+import { randomId } from "@/lib/randomId";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -216,6 +217,11 @@ export default function EvTrustedOfficialTemplate({
   const [cart, setCart] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // One idempotency key per cart: a retry of the same cart (say, after a lost
+  // response) gets back the order it already created instead of a second one
+  // — or, on a priority link, instead of "link already in use". A different
+  // cart is a different order, so it gets a fresh key.
+  const checkoutKeyRef = useRef<{ cart: string; key: string } | null>(null);
   // This template creates the order (and holds seats) on "Buy Ticket", before
   // personal details are collected, so consent is taken here.
   const [termsAccepted, setTermsAccepted] = useState(false);
@@ -257,6 +263,11 @@ export default function EvTrustedOfficialTemplate({
     // only in this POST body — never as a query param or link href.
     const priorityToken = sessionStorage.getItem(`pa_${slug}`);
 
+    const cartSignature = JSON.stringify(items);
+    if (checkoutKeyRef.current?.cart !== cartSignature) {
+      checkoutKeyRef.current = { cart: cartSignature, key: randomId() };
+    }
+
     try {
       const res = await fetch("/api/public/enroll", {
         method: "POST",
@@ -266,6 +277,7 @@ export default function EvTrustedOfficialTemplate({
           terms_accepted: termsAccepted,
           terms_version: TERMS_VERSION,
           organiser_terms_sha256: organiserTermsSha256,
+          idempotency_key: checkoutKeyRef.current.key,
           ...(priorityToken ? { priority_token: priorityToken } : {}),
         }),
       });

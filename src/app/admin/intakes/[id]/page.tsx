@@ -852,6 +852,15 @@ interface InterestEntry {
   first_converted_enrollment_id: string | null;
   revoked_at: string | null;
   superseded_expires_at: string | null;
+  /** Answers to the event's custom fields, keyed by field_key. */
+  form_data: Record<string, string> | null;
+}
+
+/** A custom field the interest form asked — the list route's `fields`. */
+interface InterestField {
+  field_key: string;
+  field_label: string;
+  field_type: string;
 }
 
 /** One row the run could not deliver to — matches FailedRow in the invite route. */
@@ -931,6 +940,8 @@ export default function IntakeDetailPage({
   const [editYear, setEditYear] = useState(new Date().getFullYear());
   const [editPriorityOpenAt, setEditPriorityOpenAt] = useState("");
   const [editOrganiserTerms, setEditOrganiserTerms] = useState("");
+  const [editFontCssUrl, setEditFontCssUrl] = useState("");
+  const [editFontFamily, setEditFontFamily] = useState("");
   const [savingIntake, setSavingIntake] = useState(false);
 
   // ── Channel management (language_school only) ─────────────────────────────
@@ -949,6 +960,7 @@ export default function IntakeDetailPage({
   // that offering the feature to schools later is a UI change, not an API one.
   const showInterest = tl.orgType !== "language_school";
   const [interest, setInterest] = useState<InterestEntry[]>([]);
+  const [interestFields, setInterestFields] = useState<InterestField[]>([]);
   const [interestLoading, setInterestLoading] = useState(true);
   const [interestError, setInterestError] = useState<string | null>(null);
   const [sendingInvites, setSendingInvites] = useState(false);
@@ -1015,6 +1027,7 @@ export default function IntakeDetailPage({
       if (!res.ok) throw new Error(`Failed to fetch interest list (${res.status})`);
       const data = await res.json();
       setInterest((data.entries ?? []) as InterestEntry[]);
+      setInterestFields((data.fields ?? []) as InterestField[]);
     } catch (err) {
       setInterestError(err instanceof Error ? err.message : "Failed to load interest list.");
     } finally {
@@ -1324,6 +1337,8 @@ export default function IntakeDetailPage({
     setEditYear(intake.year);
     setEditPriorityOpenAt(toDatetimeLocal(intake.priority_open_at));
     setEditOrganiserTerms(intake.organiser_terms ?? "");
+    setEditFontCssUrl(intake.font_css_url ?? "");
+    setEditFontFamily(intake.font_family ?? "");
     setEditingIntake(true);
   }
 
@@ -1345,6 +1360,10 @@ export default function IntakeDetailPage({
       // (including a clearing null) for one.
       if (showInterest) {
         payload.priority_open_at = fromDatetimeLocal(editPriorityOpenAt);
+        // Same gate: only event templates use a custom font. Blank in both
+        // clears it; the server validates the pair (see @/lib/eventFont).
+        payload.font_css_url = editFontCssUrl;
+        payload.font_family = editFontFamily;
       }
       const res = await fetch(`/api/intakes/${params.id}`, {
         method: "PATCH",
@@ -1908,7 +1927,26 @@ export default function IntakeDetailPage({
                     const busy = actingEntryId === entry.id;
                     return (
                       <tr key={entry.id} className="hover:bg-[#f0f4ff]/40 transition-colors">
-                        <td className="px-5 py-4 text-gray-700 font-medium">{entry.name}</td>
+                        <td className="px-5 py-4 text-gray-700 font-medium">
+                          {entry.name}
+                          {/* Custom-field answers. A ticked checkbox is stored as "true". */}
+                          {interestFields.some((f) => entry.form_data?.[f.field_key]) && (
+                            <dl className="mt-1 space-y-0.5 text-xs font-normal text-gray-500">
+                              {interestFields.map((f) => {
+                                const answer = entry.form_data?.[f.field_key];
+                                if (!answer) return null;
+                                return (
+                                  <div key={f.field_key}>
+                                    <dt className="inline text-gray-400">{f.field_label}: </dt>
+                                    <dd className="inline">
+                                      {f.field_type === "checkbox" && answer === "true" ? "Yes" : answer}
+                                    </dd>
+                                  </div>
+                                );
+                              })}
+                            </dl>
+                          )}
+                        </td>
                         <td className="px-5 py-4 text-gray-500">{entry.email}</td>
                         <td className="px-5 py-4 text-gray-500 text-xs">{fmtDateTime(entry.created_at)}</td>
                         <td className="px-5 py-4 text-gray-500 text-xs">{fmtDateTime(entry.last_link_sent_at)}</td>
@@ -2180,6 +2218,34 @@ export default function IntakeDetailPage({
                   Leave blank for none. {editOrganiserTerms.length}/{ORGANISER_TERMS_MAX}
                 </p>
               </div>
+
+              {/* Custom web font — event templates only, same gate as the priority window */}
+              {showInterest && (
+                <div className="border-t border-gray-100 pt-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                    Custom Font (Adobe Fonts)
+                  </label>
+                  <input
+                    type="url"
+                    value={editFontCssUrl}
+                    onChange={(e) => setEditFontCssUrl(e.target.value)}
+                    placeholder="https://use.typekit.net/abc1234.css"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
+                  />
+                  <input
+                    type="text"
+                    value={editFontFamily}
+                    onChange={(e) => setEditFontFamily(e.target.value)}
+                    placeholder="Font name, e.g. antique-olive-nord"
+                    className="mt-2 w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
+                  />
+                  <p className="mt-1.5 text-xs text-gray-400">
+                    Changes the font on this event&rsquo;s public page only. In Adobe Fonts, add the
+                    font to a web project, then copy its link and the CSS font name shown there.
+                    Myanmar text keeps its usual font. Leave both blank to use the template&rsquo;s fonts.
+                  </p>
+                </div>
+              )}
 
               <div className="flex gap-3 pt-2">
                 <button
