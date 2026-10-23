@@ -267,6 +267,12 @@ export default function EvLuxuryTemplate({ appearance, intake, classes, slug, cu
   const cartItemCount = Array.from(cart.values()).reduce((sum, i) => sum + i.qty, 0);
   const hasMultipleTickets = classes.filter((c) => c.seat_remaining > 0 && c.status === "open").length > 1;
   const maxFee = classes.length > 0 ? Math.max(...classes.map((c) => c.fee_amount)) : 0;
+  // Tiers a visitor can buy right now — the same rule the cards use, so not
+  // yet on sale, closed or full rules a tier out, and a pre-registration link
+  // holder's unlocked tiers count. Drives the mobile "Buy Tickets" bar, which
+  // must not advertise tickets during a pre-registration window (it would
+  // also sit on top of the Register Interest bar).
+  const buyableClasses = classes.filter((c) => !getCardState(c).isDisabled);
 
   function handleAddToCart(classId: string, level: string, qty: number, fee: number, imageUrl: string | null) {
     setCart((prev) => {
@@ -453,12 +459,12 @@ export default function EvLuxuryTemplate({ appearance, intake, classes, slug, cu
             </button>
           </div>
         </div>
-      ) : classes.some((c) => c.seat_remaining > 0 && c.status === "open") ? (
+      ) : buyableClasses.length > 0 ? (
         <div className="fixed bottom-0 left-0 right-0 z-50 sm:hidden" style={{ background: "linear-gradient(to top, rgba(8,8,8,0.98), rgba(8,8,8,0.9))", backdropFilter: "blur(12px)" }}>
           <div className="px-4 py-3 flex items-center justify-between">
             <div>
               <div className="text-[11px] tracking-[2px] uppercase" style={{ color: gold }}>Tickets available</div>
-              <div className="text-[13px] text-white/60">From {formatCurrency(Math.min(...classes.filter((c) => c.seat_remaining > 0).map((c) => c.fee_amount)), currency)}</div>
+              <div className="text-[13px] text-white/60">From {formatCurrency(Math.min(...buyableClasses.map((c) => c.fee_amount)), currency)}</div>
             </div>
             <a href="#tickets" className="px-5 py-2.5 rounded-sm text-[12px] font-semibold tracking-[1.5px] uppercase"
               style={{ background: `linear-gradient(135deg, ${gold}, ${goldLight})`, color: "#080808" }}>
