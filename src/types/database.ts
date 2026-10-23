@@ -73,6 +73,8 @@ export type SubmitEnrollmentResult =
         | "EXCEEDS_MAX_TICKETS"
         | "ENROLLMENT_NOT_OPEN"
         | "ENROLLMENT_CLOSED"
+        | "PRIORITY_LINK_IN_PROGRESS"
+        | "PRIORITY_LINK_USED"
         | "INTERNAL_ERROR";
       class_status?: ClassStatus;
       opens_at?: string;
@@ -249,6 +251,8 @@ export interface Intake {
   priority_open_at: string | null; // start of the interest head-start window, before public sale
   ticket_qr_format: "jwt" | "uuid"; // what the e-ticket QR encodes; see src/lib/tickets/qrPayload.ts
   organiser_terms: string | null; // organiser's event rules shown to buyers before ordering; null = none
+  font_css_url: string | null; // Adobe Fonts stylesheet for the landing page; see src/lib/eventFont.ts
+  font_family: string | null; // CSS font-family from that stylesheet; set with font_css_url
   created_at: string;
 }
 

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { EventTemplateProps, TemplateClass } from "./types";
 import { getCardState, fmtDate } from "./types";
+import { eventFontCssUrl, eventFontStyle } from "@/lib/eventFont";
 
 function TicketCard({
   cls,
@@ -175,7 +176,9 @@ export default function EvFestivalTemplate({
   }
 
   return (
-    <div className="min-h-screen" style={{ background: "linear-gradient(160deg, #0d0d14 0%, #1a0a2e 50%, #0d1a2e 100%)" }}>
+    <div className="min-h-screen" style={{ background: "linear-gradient(160deg, #0d0d14 0%, #1a0a2e 50%, #0d1a2e 100%)", ...eventFontStyle(intake) }}>
+      {/* eslint-disable-next-line @next/next/no-page-custom-font */}
+      {eventFontCssUrl(intake.font_css_url) && <link href={eventFontCssUrl(intake.font_css_url)!} rel="stylesheet" />}
 
       {/* ── Hero ────────────────────────────────────────────────── */}
       <div className="relative min-h-[50vh] flex flex-col items-center justify-center text-center px-6 py-20 overflow-hidden">

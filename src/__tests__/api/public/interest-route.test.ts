@@ -33,11 +33,13 @@ interface MockOptions {
   intake?: { data: unknown; error?: unknown };
   classes?: { data: unknown; error?: unknown };
   tenant?: { data: unknown; error?: unknown };
+  formFields?: { data: unknown; error?: unknown };
 }
 
 function makeSupabaseMock(opts: MockOptions = {}) {
   const intakeResult = opts.intake ?? { data: null, error: null };
   const classesResult = opts.classes ?? { data: [], error: null };
+  const formFieldsResult = opts.formFields ?? { data: [], error: null };
   const tenantResult = opts.tenant ?? {
     data: { name: "Test School", subdomain: "acme", logo_url: null },
     error: null,
@@ -48,6 +50,7 @@ function makeSupabaseMock(opts: MockOptions = {}) {
       if (table === "intakes") return chainable(intakeResult);
       if (table === "classes") return chainable(classesResult);
       if (table === "tenants") return chainable(tenantResult);
+      if (table === "intake_form_fields") return chainable(formFieldsResult);
       return chainable({ data: null, error: null });
     }),
   };
@@ -307,6 +310,118 @@ describe("POST /api/public/interest", () => {
 
     expect(res.status).toBe(400);
     expect(registerInterest).not.toHaveBeenCalled();
+  });
+
+  // ── Custom fields ──────────────────────────────────────────────────────────
+
+  describe("custom form fields", () => {
+    const FIELDS = [
+      // A default field — answered by the fixed name/email/phone inputs, never via form_data.
+      { field_key: "nrc", field_label: "NRC Number", field_type: "text", is_required: true, options: null, is_default: true },
+      { field_key: "tshirt", field_label: "T-shirt size", field_type: "select", is_required: true, options: ["S", "M", "L"], is_default: false },
+    ];
+
+    function withFields(fields: { data: unknown; error?: unknown }) {
+      vi.mocked(createAdminClient).mockReturnValue(
+        makeSupabaseMock({
+          intake: { data: eligibleIntake(), error: null },
+          classes: { data: [GATED_TIER], error: null },
+          formFields: fields,
+        }) as never,
+      );
+    }
+
+    it("passes the validated answers to registerInterest, dropping unknown keys", async () => {
+      withFields({ data: FIELDS, error: null });
+
+      const res = await POST(
+        makeRequest({ ...VALID_BODY, form_data: { tshirt: " M ", nrc: "x", injected: "y" } }) as never,
+      );
+
+      expect(res.status).toBe(200);
+      expect(vi.mocked(registerInterest).mock.calls[0][0].formData).toEqual({ tshirt: "M" });
+    });
+
+    it("400s a missing required answer and writes nothing", async () => {
+      withFields({ data: FIELDS, error: null });
+
+      const res = await POST(makeRequest(VALID_BODY) as never);
+      const body = await res.json();
+
+      expect(res.status).toBe(400);
+      expect(body.code).toBe("INVALID_FORM_DATA");
+      expect(body.message).toBe("T-shirt size is required.");
+      expect(registerInterest).not.toHaveBeenCalled();
+    });
+
+    it("400s an answer that is not one of the dropdown's options", async () => {
+      withFields({ data: FIELDS, error: null });
+
+      const res = await POST(makeRequest({ ...VALID_BODY, form_data: { tshirt: "XXL" } }) as never);
+
+      expect(res.status).toBe(400);
+      expect(registerInterest).not.toHaveBeenCalled();
+    });
+
+    it("500s when the fields cannot be read, rather than skipping validation", async () => {
+      withFields({ data: null, error: { message: "boom" } });
+
+      const res = await POST(makeRequest({ ...VALID_BODY, form_data: { tshirt: "M" } }) as never);
+
+      expect(res.status).toBe(500);
+      expect(registerInterest).not.toHaveBeenCalled();
+    });
+
+    // The organiser replaced the default phone with a required custom one: the
+    // built-in phone input stands in for it and inherits "required".
+    const CUSTOM_PHONE = [
+      { field_key: "custom_phone_1", field_label: "Phone", field_type: "phone", is_required: true, options: null, is_default: false },
+    ];
+
+    it("400s a missing phone when the custom phone it replaces is required", async () => {
+      withFields({ data: CUSTOM_PHONE, error: null });
+
+      const res = await POST(makeRequest({ ...VALID_BODY, phone: undefined }) as never);
+      const body = await res.json();
+
+      expect(res.status).toBe(400);
+      expect(body.code).toBe("INVALID_FORM_DATA");
+      expect(body.message).toBe("Phone is required.");
+      expect(registerInterest).not.toHaveBeenCalled();
+    });
+
+    it("accepts the built-in phone in place of the custom one, without a form_data answer", async () => {
+      withFields({ data: CUSTOM_PHONE, error: null });
+
+      const res = await POST(makeRequest({ ...VALID_BODY, phone: "09123456789" }) as never);
+
+      expect(res.status).toBe(200);
+      expect(vi.mocked(registerInterest).mock.calls[0][0].formData).toEqual({});
+    });
+
+    it("loads the fields in the page's order — sort_order, then field_key", async () => {
+      const mock = makeSupabaseMock({
+        intake: { data: eligibleIntake(), error: null },
+        classes: { data: [GATED_TIER], error: null },
+      });
+      vi.mocked(createAdminClient).mockReturnValue(mock as never);
+
+      await POST(makeRequest(VALID_BODY) as never);
+
+      const fieldsIdx = mock.from.mock.calls.findIndex(([t]) => t === "intake_form_fields");
+      const builder = mock.from.mock.results[fieldsIdx].value as { order: ReturnType<typeof vi.fn> };
+      expect(builder.order.mock.calls).toEqual([
+        ["sort_order", { ascending: true }],
+        ["field_key", { ascending: true }],
+      ]);
+    });
+
+    it("sends empty answers when the event has no custom fields", async () => {
+      const res = await POST(makeRequest(VALID_BODY) as never);
+
+      expect(res.status).toBe(200);
+      expect(vi.mocked(registerInterest).mock.calls[0][0].formData).toEqual({});
+    });
   });
 
   // ── Configuration ──────────────────────────────────────────────────────────

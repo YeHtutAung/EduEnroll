@@ -126,4 +126,19 @@ describe("createEnrollment", () => {
     });
     expect(mockRpc.mock.calls[0][1].p_priority_token_hash).toBeNull();
   });
+
+  it.each([
+    ["PRIORITY_LINK_IN_PROGRESS", "Priority Link In Use", /waiting for payment/],
+    ["PRIORITY_LINK_USED", "Priority Link Used", /already been used/],
+  ])("maps %s to a 409 the buyer can act on, in both languages", async (code, label, en) => {
+    mockRpc.mockResolvedValue({ data: { success: false, error: code }, error: null });
+    const result = await createEnrollment({ class_id: "00000000-0000-0000-0000-000000000001" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(409);
+      expect(result.error).toBe(label);
+      expect(result.message).toMatch(en);
+      expect(result.message_mm).toBeTruthy();
+    }
+  });
 });

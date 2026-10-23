@@ -77,6 +77,8 @@ const UNIQUE_VIOLATION = "23505";
  *   is already on sale there is nothing to be early for.
  * - Length bounds on name, email and phone. The CHECKs will reject an
  *   over-long value, again as a write error rather than a 400.
+ * - `formData` has been validated against the event's custom fields
+ *   (validateInterestFormData). It is stored as given.
  */
 export interface RegisterInterestInput {
   intakeId: string;
@@ -84,6 +86,11 @@ export interface RegisterInterestInput {
   name: string;
   email: string;
   phone?: string | null;
+  /**
+   * Validated answers to the event's custom form fields — see
+   * @/lib/interest/interestFields. Stored on the FIRST signup only.
+   */
+  formData?: Record<string, string>;
   /** HMAC of the canonicalised client address — see @/lib/interest/ipHash. */
   ipHash: string;
   /**
@@ -204,6 +211,7 @@ export async function registerInterest(
       name,
       email,
       phone,
+      form_data: input.formData ?? {},
       token_hash: minted.tokenHash,
       token_prefix: minted.tokenPrefix,
       // The first send is an attempt like any other, so the cooldown applies
@@ -256,6 +264,11 @@ async function resendExisting(
   existing: ExistingRow,
   minted: MintedToken,
 ): Promise<RegisterInterestResult> {
+  // input.formData is deliberately NOT written on this path. Anyone can type
+  // someone else's address into the public form, so a repeat signup only
+  // resends the link to the address on file; letting it overwrite the stored
+  // answers would let a stranger rewrite another person's signup.
+
   // A revoked record does not rotate. Rotating one would spend an email on a
   // link the gate refuses, and hand the recipient something that silently does
   // not work. Generic success, exactly like a cooldown.
