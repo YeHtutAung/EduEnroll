@@ -10,7 +10,7 @@ const config: Config = {
     extend: {
       fontFamily: {
         sans: ["var(--font-noto-sans)", "var(--font-noto-sans-myanmar)", "sans-serif"],
-        myanmar: ["var(--font-noto-sans-myanmar)", "sans-serif"],
+        myanmar: ["var(--font-noto-sans-myanmar)", "var(--font-noto-sans)", "sans-serif"],
         mono: ["var(--font-jetbrains-mono)", "monospace"],
       },
       colors: {
