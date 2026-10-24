@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { EventTemplateProps, TemplateClass } from "./types";
 import { getCardState, fmtDate } from "./types";
+import PackBadge from "./PackBadge";
 import { eventFontCssUrl, eventFontStyle } from "@/lib/eventFont";
 
 function TicketCard({
@@ -65,6 +66,7 @@ function TicketCard({
           <div>
             <h3 className="text-lg font-bold text-gray-900">{cls.level}</h3>
             <p className="text-sm font-semibold font-myanmar mt-0.5" style={{ color: primaryColor }}>{cls.fee_formatted}</p>
+            <PackBadge cls={cls} currency={currency} className="mt-0.5 text-gray-500" savingsStyle={{ color: primaryColor }} />
           </div>
           <div className="text-right text-xs text-gray-400 mt-0.5">
             <div>{cls.seat_remaining} of {cls.seat_total}</div>

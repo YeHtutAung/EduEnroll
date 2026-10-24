@@ -4,6 +4,7 @@ import { useState, type CSSProperties } from "react";
 import { formatCurrency, formatAmount } from "@/lib/utils";
 import { eventFontCssUrl, eventFontStack } from "@/lib/eventFont";
 import { getCardState } from "./types";
+import PackBadge from "./PackBadge";
 import type { EventTemplateProps, TemplateClass } from "./types";
 
 // ─── Seat badge ───────────────────────────────────────────────────────────────
@@ -136,6 +137,7 @@ function TicketCard({
           <div className="font-myanmar text-base tracking-wider" style={{ color: "#888880" }}>
             {currency === "MMK" ? `${formatAmount(cls.fee_amount)} ကျပ် · MMK` : formatCurrency(cls.fee_amount, currency)}
           </div>
+          <PackBadge cls={cls} currency={currency} className="mt-2 tracking-wider" style={{ color: "#888880" }} savingsStyle={{ color: goldLight }} />
         </div>
 
         <div className="w-full h-px mb-7"
