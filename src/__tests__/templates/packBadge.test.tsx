@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import PackBadge from "@/components/enrollment/templates/PackBadge";
-import { packInfo } from "@/components/enrollment/templates/types";
+import { cartTicketCount, packInfo } from "@/components/enrollment/templates/types";
 
 // Louder Myanmar's promotion: 3 GA for 125,000 (single GA 45,000) and
 // 3 VIP for 220,000 (single VIP 85,000).
@@ -34,5 +34,30 @@ describe("PackBadge", () => {
     );
     expect(html).toContain("3 tickets per package");
     expect(html).toContain("Save 10,000 MMK");
+  });
+});
+
+// The cart bar's "N tickets in cart" label: one 3-pack is three tickets.
+describe("cartTicketCount", () => {
+  const classes = [
+    { id: "pack", pack_size: 3 },
+    { id: "vip", pack_size: 1 },
+    { id: "legacy" }, // no pack_size: a pre-package response
+  ];
+
+  it("counts one 3-pack as 3 tickets", () => {
+    expect(cartTicketCount(classes, [["pack", 1]])).toBe(3);
+  });
+
+  it("adds packs and ordinary tickets together", () => {
+    expect(cartTicketCount(classes, [["pack", 2], ["vip", 1], ["legacy", 2]])).toBe(9);
+  });
+
+  it("counts a line whose tier is not in the list as one per unit", () => {
+    expect(cartTicketCount(classes, [["unknown", 2]])).toBe(2);
+  });
+
+  it("is 0 for an empty cart", () => {
+    expect(cartTicketCount(classes, [])).toBe(0);
   });
 });
