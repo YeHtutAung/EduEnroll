@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { EventTemplateProps, TemplateClass } from "./types";
-import { getCardState, fmtDate } from "./types";
+import { cartTicketCount, getCardState, fmtDate } from "./types";
 import PackBadge from "./PackBadge";
 import { eventFontCssUrl, eventFontStyle } from "@/lib/eventFont";
 
@@ -164,6 +164,7 @@ export default function EvFestivalTemplate({
   }
 
   const cartCount = Object.values(cart).reduce((s, v) => s + v.qty, 0);
+  const cartTickets = cartTicketCount(classes, Object.entries(cart).map(([id, v]) => [id, v.qty]));
 
   function handleCheckout() {
     onCartCheckout(
@@ -250,7 +251,7 @@ export default function EvFestivalTemplate({
           <div className="mx-auto max-w-lg rounded-2xl p-4 flex items-center justify-between gap-4"
             style={{ background: "rgba(20,20,30,0.95)", border: `1.5px solid ${accent}40`, backdropFilter: "blur(20px)" }}>
             <div>
-              <p className="text-white font-bold text-sm">{cartCount} ticket{cartCount > 1 ? "s" : ""}</p>
+              <p className="text-white font-bold text-sm">{cartTickets} ticket{cartTickets > 1 ? "s" : ""}</p>
               <p className="text-xs font-myanmar" style={{ color: accent }}>
                 {currency} {Object.values(cart).reduce((s, v) => s + v.qty * v.fee, 0).toLocaleString()}
               </p>

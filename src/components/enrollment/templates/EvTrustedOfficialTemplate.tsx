@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { TenantAppearance } from "@/types/database";
 import type { TemplateClass, TemplateIntake, TemplateLabels } from "./types";
-import { getCardState } from "./types";
+import { cartTicketCount, getCardState } from "./types";
 import PackBadge from "./PackBadge";
 import {
   PresentingSponsorBanner,
@@ -233,6 +233,7 @@ export default function EvTrustedOfficialTemplate({
   const [termsError, setTermsError] = useState(false);
 
   const cartCount = Object.values(cart).reduce((s, q) => s + q, 0);
+  const cartTickets = cartTicketCount(classes, Object.entries(cart));
   const cartTotal = classes.reduce((s, cls) => s + (cart[cls.id] ?? 0) * cls.fee_amount, 0);
 
   function handleQtyChange(classId: string, delta: number) {
@@ -390,7 +391,7 @@ export default function EvTrustedOfficialTemplate({
           <div className="max-w-[480px] mx-auto">
             <div className="flex items-center justify-between mb-3">
               <span className="text-[11.5px] font-bold" style={{ color: brand }}>
-                {cartCount} ticket{cartCount > 1 ? "s" : ""} selected
+                {cartTickets} ticket{cartTickets > 1 ? "s" : ""} selected
               </span>
               <span className="text-[12px] font-extrabold" style={{ color: brand }}>
                 {cartTotal.toLocaleString()}
