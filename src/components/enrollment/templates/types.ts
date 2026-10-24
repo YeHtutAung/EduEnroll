@@ -116,6 +116,22 @@ export function packInfo(cls: Pick<TemplateClass, "fee_amount" | "pack_size" | "
   return { size, savings };
 }
 
+/**
+ * Tickets (people) in a cart, for the cart bar's "N tickets" label. A cart
+ * line counts units bought, and one unit of a "GA 3-Pack" is three tickets,
+ * so a line is quantity x pack_size. Display only: the cart and the order
+ * still carry units, which is what is priced.
+ */
+export function cartTicketCount(
+  classes: Pick<TemplateClass, "id" | "pack_size">[],
+  lines: Iterable<[classId: string, qty: number]>,
+): number {
+  const packSizes = new Map(classes.map((c) => [c.id, c.pack_size ?? 1]));
+  let total = 0;
+  for (const [classId, qty] of Array.from(lines)) total += qty * Math.max(1, packSizes.get(classId) ?? 1);
+  return total;
+}
+
 export function fmtDate(iso: string, opts?: Intl.DateTimeFormatOptions) {
   return new Date(iso).toLocaleDateString("en-GB", opts ?? { day: "numeric", month: "short", year: "numeric" });
 }
