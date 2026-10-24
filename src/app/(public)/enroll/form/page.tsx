@@ -405,6 +405,10 @@ function EnrollmentFormPage() {
   const [cartItems, setCartItems] = useState<
     { class_id: string; level: string; quantity: number; fee_amount: number; image_url: string | null }[] | null
   >(null);
+  // class_id -> pack_size, from the event's tiers. A "GA 3-Pack" cart line is
+  // quantity 1 but three tickets, which the per_ticket fee preview must count
+  // the way the payment routes do.
+  const [packSizes, setPackSizes] = useState<Map<string, number>>(() => new Map());
 
   // Data state
   const [intake, setIntake] = useState<IntakeInfo | null>(null);
@@ -454,7 +458,7 @@ function EnrollmentFormPage() {
     ? cartItems.reduce((sum, item) => sum + item.fee_amount * item.quantity, 0)
     : 0;
   const cartTotalQty = isCartMode
-    ? cartItems.reduce((sum, item) => sum + item.quantity, 0)
+    ? cartItems.reduce((sum, item) => sum + item.quantity * (packSizes.get(item.class_id) ?? 1), 0)
     : 0;
 
   // The same calculator the payment routes use, so the figure reviewed here is
@@ -495,6 +499,11 @@ function EnrollmentFormPage() {
         if (json.school_name) setSchoolName(json.school_name);
         setOrganiserTerms(json.organiser_terms ?? null);
         setOrganiserTermsSha256(json.organiser_terms_sha256 ?? null);
+        setPackSizes(
+          new Map(
+            ((json.classes ?? []) as { id: string; pack_size?: number }[]).map((c) => [c.id, c.pack_size ?? 1]),
+          ),
+        );
 
         // For single-class mode, find the selected class
         if (classId && !cartKey) {

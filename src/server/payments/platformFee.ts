@@ -26,7 +26,22 @@ export type PlatformFeeConfig = {
 export type OrderItem = {
   fee_amount: number;
   quantity: number;
+  /**
+   * Admissions per unit (classes.pack_size). A "GA 3-Pack" line is quantity 1
+   * at the package price but three tickets, and per_ticket mode charges per
+   * ticket. Absent means 1. Pricing never reads it: fee_amount is already the
+   * package price.
+   */
+  pack_size?: number | null;
 };
+
+/** Tickets (people admitted) across the order — quantity x pack_size per line. */
+export function admissionCount(items: OrderItem[]): number {
+  return items.reduce(
+    (sum, item) => sum + item.quantity * Math.max(1, Math.trunc(item.pack_size ?? 1)),
+    0,
+  );
+}
 
 export type OrderTotal = {
   /** Tickets alone. */
@@ -86,7 +101,7 @@ export function computeOrderTotal(
     (sum, item) => sum + item.fee_amount * item.quantity,
     0,
   );
-  const ticketCount = items.reduce((sum, item) => sum + item.quantity, 0);
+  const ticketCount = admissionCount(items);
 
   const platformFee =
     alreadyPaid > 0 ? 0 : computePlatformFee(tenant, ticketSubtotal, ticketCount);
@@ -104,9 +119,48 @@ export function computeOrderTotal(
 type EnrollmentLike = {
   tenant_id: string;
   quantity?: number | null;
-  classes?: { fee_amount: number } | null;
-  enrollment_items?: { fee_amount: number; quantity: number }[] | null;
+  classes?: { id?: string; fee_amount: number } | null;
+  enrollment_items?: { class_id?: string; fee_amount: number; quantity: number }[] | null;
 };
+
+type ClassQuery = {
+  select: (cols: string) => {
+    in: (col: string, vals: string[]) => PromiseLike<{ data: unknown; error: unknown }>;
+  };
+};
+
+/**
+ * Fills in each line's pack_size, which only the per_ticket fee depends on.
+ *
+ * Every other mode returns the items untouched without a query, so tenants
+ * not on per_ticket see no new lookup and no new way to fail. A lookup that
+ * fails counts each line as one ticket per unit, the behaviour before
+ * packages existed, rather than refusing the payment: the same choice as an
+ * unreadable tenant row, which charges no fee rather than block the buyer.
+ */
+export async function attachPackSizes<T extends OrderItem & { class_id?: string }>(
+  supabase: FeeQueryClient,
+  items: T[],
+  tenant: PlatformFeeConfig & { platform_fee_mode?: string | null },
+): Promise<T[]> {
+  if (tenant.platform_fee_mode !== "per_ticket") return items;
+  const ids = Array.from(new Set(items.map((i) => i.class_id).filter((id): id is string => !!id)));
+  if (ids.length === 0) return items;
+
+  try {
+    const { data, error } = await (supabase.from("classes") as ClassQuery)
+      .select("id, pack_size")
+      .in("id", ids);
+    if (error || !Array.isArray(data)) throw error ?? new Error("no rows");
+    const sizes = new Map(
+      (data as { id: string; pack_size: number | null }[]).map((c) => [c.id, c.pack_size ?? 1]),
+    );
+    return items.map((i) => (i.class_id ? { ...i, pack_size: sizes.get(i.class_id) ?? 1 } : i));
+  } catch (err) {
+    console.error("[platform-fee] pack_size lookup failed; counting one ticket per unit:", err);
+    return items;
+  }
+}
 
 /**
  * Only `from` is needed, and it is deliberately opaque.
@@ -140,14 +194,19 @@ export async function resolveOrderTotal(
   enrollment: EnrollmentLike,
   alreadyPaid = 0,
 ): Promise<OrderTotal> {
-  const items: OrderItem[] =
+  const items: (OrderItem & { class_id?: string })[] =
     enrollment.enrollment_items && enrollment.enrollment_items.length > 0
       ? enrollment.enrollment_items.map((i) => ({
+          class_id: i.class_id,
           fee_amount: i.fee_amount,
           quantity: i.quantity,
         }))
       : enrollment.classes
-        ? [{ fee_amount: enrollment.classes.fee_amount, quantity: enrollment.quantity ?? 1 }]
+        ? [{
+            class_id: enrollment.classes.id,
+            fee_amount: enrollment.classes.fee_amount,
+            quantity: enrollment.quantity ?? 1,
+          }]
         : [];
 
   // A tenant row that cannot be read must not invent a fee: charging one we
@@ -164,7 +223,7 @@ export async function resolveOrderTotal(
     console.error("[platform-fee] tenant lookup failed; charging no fee:", err);
   }
 
-  return computeOrderTotal(items, config, alreadyPaid);
+  return computeOrderTotal(await attachPackSizes(supabase, items, config), config, alreadyPaid);
 }
 
 // ─── What a completed order reports ─────────────────────────────────────────
