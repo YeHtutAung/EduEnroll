@@ -6,6 +6,7 @@ import { signTicketJwt } from "@/lib/tickets/sign";
 import { isTicketQrFormat, ticketQrPayload, type TicketQrFormat } from "@/lib/tickets/qrPayload";
 import { clientIpFrom, publicEnrollmentLookupLimiter } from "@/lib/rateLimit";
 import {
+  admissionCount,
   computePlatformFee,
   displayTotals,
   selectOrderPayment,
@@ -74,8 +75,8 @@ export async function GET(
     .from("enrollments")
     .select(`
       id, enrollment_ref, status, student_name_en, email,
-      enrollment_items(quantity, fee_amount, classes(level, intakes(id, name, slug))),
-      classes(level, fee_amount, intakes(id, name, slug)),
+      enrollment_items(quantity, fee_amount, classes(level, pack_size, intakes(id, name, slug))),
+      classes(level, fee_amount, pack_size, intakes(id, name, slug)),
       quantity,
       payments(stripe_payment_intent_id, status, payment_method, card_brand, card_last4, amount, platform_fee)
     `)
@@ -101,9 +102,15 @@ export async function GET(
           level: (i.classes as { level: string } | null)?.level ?? "Ticket",
           quantity: i.quantity,
           fee_amount: i.fee_amount,
+          pack_size: i.classes?.pack_size ?? 1,
         }))
       : enrollment.classes
-      ? [{ level: enrollment.classes.level, quantity: enrollment.quantity ?? 1, fee_amount: enrollment.classes.fee_amount }]
+      ? [{
+          level: enrollment.classes.level,
+          quantity: enrollment.quantity ?? 1,
+          fee_amount: enrollment.classes.fee_amount,
+          pack_size: enrollment.classes.pack_size ?? 1,
+        }]
       : [];
 
   const ticketSubtotal = items.reduce((s, i) => s + i.fee_amount * i.quantity, 0);
@@ -244,7 +251,7 @@ export async function GET(
         platform_fee_amount: tenant?.platform_fee_amount,
       },
       ticketSubtotal,
-      items.reduce((s, i) => s + i.quantity, 0),
+      admissionCount(items),
     ),
   );
 
@@ -412,7 +419,7 @@ interface EnrollmentRow {
   student_name_en: string | null;
   email: string | null;
   quantity: number | null;
-  enrollment_items: { quantity: number; fee_amount: number; classes: { level: string; intakes: { id: string; name: string; slug: string } | null } | null }[] | null;
-  classes: { level: string; fee_amount: number; intakes: { id: string; name: string; slug: string } | null } | null;
+  enrollment_items: { quantity: number; fee_amount: number; classes: { level: string; pack_size: number | null; intakes: { id: string; name: string; slug: string } | null } | null }[] | null;
+  classes: { level: string; fee_amount: number; pack_size: number | null; intakes: { id: string; name: string; slug: string } | null } | null;
   payments: PaymentRow[] | null;
 }
