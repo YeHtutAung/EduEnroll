@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
   // ── Enrollment, fail-closed ──────────────────────────────────────────────
   const { data: enrollment, error: enrollmentError } = (await supabase
     .from("enrollments")
-    .select("id, status, tenant_id, enrollment_ref, enrollment_items(quantity, fee_amount), classes(fee_amount), quantity")
+    .select("id, status, tenant_id, enrollment_ref, enrollment_items(class_id, quantity, fee_amount), classes(id, fee_amount), quantity")
     .eq("enrollment_ref", ref)
     .eq("tenant_id", tenantId)
     .maybeSingle()) as { data: EnrollmentRow | null; error: { message: string } | null };
@@ -301,6 +301,6 @@ interface EnrollmentRow {
   tenant_id: string;
   enrollment_ref: string;
   quantity: number | null;
-  enrollment_items: { quantity: number; fee_amount: number }[] | null;
-  classes: { fee_amount: number } | null;
+  enrollment_items: { class_id: string; quantity: number; fee_amount: number }[] | null;
+  classes: { id: string; fee_amount: number } | null;
 }
