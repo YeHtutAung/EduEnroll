@@ -45,6 +45,8 @@ interface EnrollmentInfo {
   fee_formatted: string | null;
   currency?: string;
   quantity: number;
+  /** People admitted (quantity x pack_size); absent from older responses. */
+  ticket_count?: number;
   intake_slug: string | null;
   status: string;
   status_label_en: string;
@@ -1540,9 +1542,11 @@ export default function PaymentInstructionsPage() {
   });
   // Ticket subtotal above; the fee is added here from the same calculator the
   // payment routes use, so the figure shown matches what the gateway charged.
-  const ticketCount = isCart
+  // A "GA 3-Pack" line is quantity 1 but three tickets; the status endpoint
+  // counts that. The fallback is the pre-package count.
+  const ticketCount = enrollment.ticket_count ?? (isCart
     ? enrollment.items!.reduce((sum, i) => sum + i.quantity, 0)
-    : qty;
+    : qty);
   // Once a gateway order exists its amount is fixed — the QR encodes it, and
   // the provider will charge exactly that. Recomputing from the tenant's
   // current settings means an admin changing the fee while an order is

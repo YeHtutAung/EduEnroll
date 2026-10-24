@@ -53,7 +53,7 @@ const PAYMENT_STATUS_LABELS: Record<PaymentStatus, { en: string; mm: string }> =
 // ─── Joined row types ─────────────────────────────────────────────────────────
 
 interface EnrollmentWithClass extends Enrollment {
-  classes: Pick<Class, "id" | "level" | "fee_amount" | "image_url"> & {
+  classes: Pick<Class, "id" | "level" | "fee_amount" | "image_url" | "pack_size"> & {
     intakes: Pick<Intake, "name" | "year" | "slug"> | null;
   } | null;
 }
@@ -106,7 +106,7 @@ export async function GET(request: NextRequest) {
   // ── Fetch enrollment with class info ─────────────────────────────
   const { data: enrollment, error: enrollmentError } = await supabase
     .from("enrollments")
-    .select("*, classes(id, level, fee_amount, image_url, intakes(name, year, slug))")
+    .select("*, classes(id, level, fee_amount, image_url, pack_size, intakes(name, year, slug))")
     .eq("enrollment_ref", ref)
     .eq("tenant_id", tenantId)
     .single() as EnrollmentResult;
@@ -129,18 +129,22 @@ export async function GET(request: NextRequest) {
 
   // ── Fetch enrollment items for cart enrollments ──────────────────
   let cartItems: { class_level: string; quantity: number; fee_amount: number; subtotal: number; image_url: string | null }[] | null = null;
+  // People admitted: a "GA 3-Pack" line is quantity 1 but three tickets. The
+  // payment page's per_ticket fee preview counts this, as the routes do.
+  let ticketCount = (enrollment.quantity ?? 1) * Math.max(1, enrollment.classes?.pack_size ?? 1);
   let cartIntakeInfo: Pick<Intake, "name" | "year" | "slug"> | null = null;
 
   if (enrollment.class_id === null) {
     const { data: items } = await supabase
       .from("enrollment_items")
-      .select("quantity, fee_amount, classes(level, image_url, intakes(name, year, slug))")
+      .select("quantity, fee_amount, classes(level, image_url, pack_size, intakes(name, year, slug))")
       .eq("enrollment_id", enrollment.id) as {
-      data: { quantity: number; fee_amount: number; classes: { level: string; image_url: string | null; intakes: Pick<Intake, "name" | "year" | "slug"> | null } | null }[] | null;
+      data: { quantity: number; fee_amount: number; classes: { level: string; image_url: string | null; pack_size: number | null; intakes: Pick<Intake, "name" | "year" | "slug"> | null } | null }[] | null;
       error: unknown;
     };
 
     if (items && items.length > 0) {
+      ticketCount = items.reduce((n, i) => n + i.quantity * Math.max(1, i.classes?.pack_size ?? 1), 0);
       cartItems = items.map((i) => ({
         class_level: i.classes?.level ?? "Unknown",
         quantity: i.quantity,
@@ -223,6 +227,7 @@ export async function GET(request: NextRequest) {
     fee_formatted:    displayFee != null ? formatCurrency(displayFee, tenantInfo?.currency || "MMK") : null,
     currency:         tenantInfo?.currency || "MMK",
     quantity:          enrollment.quantity ?? 1,
+    ticket_count:      ticketCount,
     intake_slug:      intakeSlug,
     status:           enrollment.status,
     status_label_en:  enrollmentLabel.en,

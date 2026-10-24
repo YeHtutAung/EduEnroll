@@ -17,6 +17,10 @@ export interface TemplateClass {
   venue?: string | null;
   image_url?: string | null;
   max_tickets_per_person?: number;
+  /** Admissions per unit; > 1 marks a package tier ("3 tickets"). */
+  pack_size?: number;
+  /** Display only: regular price of the package as single tickets. */
+  compare_at_amount?: number | null;
   /**
    * This visitor holds a priority-access token and the event's priority window
    * has opened, so the tier's "not open yet" shutter does not apply to them.
@@ -96,6 +100,20 @@ export function getCardState(cls: TemplateClass) {
   const isDisabled = isFull || notYetOpen || alreadyClosed;
   const overlayState = isFull ? "full" : notYetOpen ? "not_open" : alreadyClosed ? "closed" : null;
   return { isFull, notYetOpen, alreadyClosed, isDisabled, overlayState };
+}
+
+/**
+ * A package tier sells several admissions as one unit ("GA 3-Pack": 3 tickets
+ * for one price). Null for an ordinary tier. `savings` is null unless the
+ * organiser set a regular price above the package price, so a mistyped
+ * regular price can never advertise a negative or zero saving.
+ */
+export function packInfo(cls: Pick<TemplateClass, "fee_amount" | "pack_size" | "compare_at_amount">) {
+  const size = cls.pack_size ?? 1;
+  if (size <= 1) return null;
+  const regular = cls.compare_at_amount ?? null;
+  const savings = regular !== null && regular > cls.fee_amount ? regular - cls.fee_amount : null;
+  return { size, savings };
 }
 
 export function fmtDate(iso: string, opts?: Intl.DateTimeFormatOptions) {

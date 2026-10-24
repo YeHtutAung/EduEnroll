@@ -123,6 +123,8 @@ interface EditForm {
   end_time: string;
   venue: string;
   max_tickets_per_person: string;
+  pack_size: string;
+  compare_at_amount: string;
 }
 
 function classToForm(cls: Class): EditForm {
@@ -138,6 +140,8 @@ function classToForm(cls: Class): EditForm {
     end_time: cls.end_time ?? "",
     venue: cls.venue ?? "",
     max_tickets_per_person: String(cls.max_tickets_per_person ?? 1),
+    pack_size: String(cls.pack_size ?? 1),
+    compare_at_amount: cls.compare_at_amount ? String(cls.compare_at_amount) : "",
   };
 }
 
@@ -187,6 +191,10 @@ function EditClassModal({
     const seats = Number(form.seat_total);
     if (!fee || fee <= 0) { toast.error("Fee must be a positive number."); return; }
     if (!seats || seats < 1 || !Number.isInteger(seats)) { toast.error("Seats must be a positive integer."); return; }
+    const packSize = Number(form.pack_size);
+    if (!Number.isInteger(packSize) || packSize < 1 || packSize > 20) { toast.error("Tickets per package must be 1 to 20."); return; }
+    const compareAt = form.compare_at_amount.trim() === "" ? null : Number(form.compare_at_amount);
+    if (compareAt !== null && (!Number.isInteger(compareAt) || compareAt <= 0)) { toast.error("Regular price must be a positive whole number."); return; }
 
     savingRef.current = true;
     setSaving(true);
@@ -227,6 +235,12 @@ function EditClassModal({
         venue: form.venue || null,
         max_tickets_per_person: maxTix >= 1 ? maxTix : 1,
       };
+      if (showEventFields) {
+        // Sent only when changed: the route refuses any pack_size change once
+        // the tier has sold, even to the same value it already holds.
+        if (packSize !== (cls.pack_size ?? 1)) payload.pack_size = packSize;
+        payload.compare_at_amount = packSize > 1 ? compareAt : null;
+      }
       if (image_url !== undefined) {
         payload.image_url = image_url;
       }
@@ -438,6 +452,41 @@ function EditClassModal({
                   placeholder="1"
                 />
                 <p className="text-xs text-gray-400 mt-1">How many tickets one person can buy at once.</p>
+              </div>
+              <div className="border-t border-gray-100 pt-4">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Package</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className={labelClass}>Tickets per Package</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      step={1}
+                      value={form.pack_size}
+                      onChange={(e) => set("pack_size", e.target.value)}
+                      disabled={cls.seat_remaining < cls.seat_total}
+                      className={`${inputClass} disabled:bg-gray-50 disabled:text-gray-400`}
+                    />
+                  </div>
+                  <div>
+                    <label className={labelClass}>Regular Price ({tl.currency})</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={form.compare_at_amount}
+                      onChange={(e) => set("compare_at_amount", e.target.value)}
+                      disabled={Number(form.pack_size) <= 1}
+                      className={`${inputClass} disabled:bg-gray-50 disabled:text-gray-400`}
+                      placeholder="Optional"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-gray-400 mt-1">
+                  {cls.seat_remaining < cls.seat_total
+                    ? "Locked: this ticket type has sold. Create a new ticket type to change it."
+                    : "1 = normal ticket. 3 = each purchase is 3 tickets (3 QR codes) for the Fee above; Total Seats then counts packages. Regular Price shows a \"Save\" label."}
+                </p>
               </div>
             </>
           )}
