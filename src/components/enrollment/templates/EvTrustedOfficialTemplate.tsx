@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { TenantAppearance } from "@/types/database";
 import type { TemplateClass, TemplateIntake, TemplateLabels } from "./types";
 import { getCardState } from "./types";
+import PackBadge from "./PackBadge";
 import {
   PresentingSponsorBanner,
   SponsorLogoWall,
@@ -38,6 +39,7 @@ function TicketCard({
   featured,
   brand,
   priority,
+  currency,
 }: {
   cls: TemplateClass;
   qty: number;
@@ -47,6 +49,7 @@ function TicketCard({
   /** First card in the list — its artwork is above the fold, so it must not
    *  be lazy-loaded. */
   priority: boolean;
+  currency: string;
 }) {
   const { isDisabled, overlayState } = getCardState(cls);
   const max = cls.max_tickets_per_person ?? 10;
@@ -133,6 +136,7 @@ function TicketCard({
             {cls.fee_formatted}
           </span>
         </div>
+        <PackBadge cls={cls} currency={currency} className="-mt-2 mb-3" style={{ color: "#6b6f7a" }} savingsStyle={{ color: "#b7912b" }} />
 
         {/* Seats remaining */}
         {SHOW_SEAT_COUNT && (
@@ -203,6 +207,7 @@ export default function EvTrustedOfficialTemplate({
   intake,
   classes,
   slug,
+  currency,
   organiserTerms = null,
   organiserTermsSha256 = null,
 }: EvTrustedOfficialTemplateProps) {
@@ -353,6 +358,7 @@ export default function EvTrustedOfficialTemplate({
                 featured={i === 0 && classes.length > 1}
                 brand={brand}
                 priority={i === 0}
+                currency={currency}
               />
             ))
           )}
