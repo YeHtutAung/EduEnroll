@@ -276,6 +276,10 @@ export interface Class {
   venue: string | null;
   image_url: string | null;
   max_tickets_per_person: number;
+  /** Admissions issued per unit sold; 1 for an ordinary tier, 3 for a "3-Pack". */
+  pack_size: number;
+  /** Display only: regular price of the package as single tickets. */
+  compare_at_amount: number | null;
   created_at: string;
 }
 
