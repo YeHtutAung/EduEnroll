@@ -3,11 +3,11 @@ import type { AuthContext } from "@/lib/api";
 
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
-  return { ...actual, requireOwner: vi.fn() };
+  return { ...actual, requireAuth: vi.fn() };
 });
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn() }));
 
-import { requireOwner } from "@/lib/api";
+import { requireAuth } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { GET } from "@/app/api/admin/interest/[intakeId]/route";
 import { makeInterestMock, scheduledIntake, OWNER_TENANT } from "./interestMocks";
@@ -51,11 +51,11 @@ function request(query = "") {
   return new Request(`http://acme.localhost/api/admin/interest/intake-1${query}`);
 }
 
-function authAs(tenantId: string) {
-  vi.mocked(requireOwner).mockResolvedValue({
+function authAs(tenantId: string, role: "owner" | "staff" | "superadmin" = "owner") {
+  vi.mocked(requireAuth).mockResolvedValue({
     supabase: {} as never,
     tenantId,
-    user: {} as never,
+    user: { role } as never,
     isAgent: false,
     agentChatId: null,
   } satisfies AuthContext);
@@ -245,5 +245,53 @@ describe("GET /api/admin/interest/[intakeId]", () => {
 
     const json = await (await GET(request() as never, { params: { intakeId: "intake-1" } })).json();
     expect(json.fields).toContainEqual({ field_key: "tshirt", field_label: "T-shirt size", field_type: "file" });
+  });
+});
+
+// Staff may view the list (as they may view Students and Pending Payments);
+// the CSV export, which leaves the system, stays owner-only.
+describe("GET /api/admin/interest/[intakeId] — roles", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("lets staff view the list", async () => {
+    authAs(OWNER_TENANT, "staff");
+    const mock = makeInterestMock({ intake: { data: scheduledIntake() }, entries: { data: [ROW_WITH_SECRETS] }, formFields: { data: FORM_FIELDS } });
+    vi.mocked(createAdminClient).mockReturnValue(mock.client as never);
+
+    const res = await GET(request() as never, { params: { intakeId: "intake-1" } });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.entries).toHaveLength(1);
+  });
+
+  it("refuses staff a CSV export before reading anything", async () => {
+    authAs(OWNER_TENANT, "staff");
+    const mock = makeInterestMock({ intake: { data: scheduledIntake() }, entries: { data: [ROW_WITH_SECRETS] }, formFields: { data: FORM_FIELDS } });
+    vi.mocked(createAdminClient).mockReturnValue(mock.client as never);
+
+    const res = await GET(request("?format=csv") as never, { params: { intakeId: "intake-1" } });
+
+    expect(res.status).toBe(403);
+    expect(createAdminClient).not.toHaveBeenCalled();
+  });
+
+  it("still lets the owner export CSV", async () => {
+    authAs(OWNER_TENANT, "owner");
+    const mock = makeInterestMock({ intake: { data: scheduledIntake() }, entries: { data: [ROW_WITH_SECRETS] }, formFields: { data: FORM_FIELDS } });
+    vi.mocked(createAdminClient).mockReturnValue(mock.client as never);
+
+    const res = await GET(request("?format=csv") as never, { params: { intakeId: "intake-1" } });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("refuses any other role, as requireOwner did", async () => {
+    authAs(OWNER_TENANT, "superadmin");
+
+    const res = await GET(request() as never, { params: { intakeId: "intake-1" } });
+
+    expect(res.status).toBe(403);
+    expect(createAdminClient).not.toHaveBeenCalled();
   });
 });
