@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireOwner } from "@/lib/api";
+import { requireAuth } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadInterestEmailContext } from "@/lib/interest/adminInterest";
 import { interestCustomFields, type InterestFieldDef } from "@/lib/interest/interestFields";
@@ -26,6 +26,13 @@ import { interestCustomFields, type InterestFieldDef } from "@/lib/interest/inte
 //    subsequent rotation can recall. `token_prefix` is fine: it is eight
 //    characters of the raw token kept deliberately in the clear so an admin can
 //    match a row against the link a recipient quotes at them.
+//
+// 3. WHO MAY READ IT. Owners and staff may view the list, as they may view the
+//    Students and Pending Payments lists, which hold the same kind of personal
+//    data. The CSV export stays owner-only: a file leaves the system and cannot
+//    be recalled. Sending invitations and revoking links are separate
+//    owner-only routes. Other roles (superadmin included) are refused, as
+//    requireOwner refused them before staff were let in.
 //
 // See docs/superpowers/specs/2026-08-26-event-interest-priority-window-design.md
 // (v11), section "Admin".
@@ -90,9 +97,18 @@ export async function GET(
   request: NextRequest,
   { params }: { params: { intakeId: string } },
 ) {
-  const auth = await requireOwner();
+  const auth = await requireAuth();
   if (auth instanceof NextResponse) return auth;
   const { tenantId } = auth;
+
+  const role = auth.user.role;
+  const wantsCsv = new URL(request.url).searchParams.get("format") === "csv";
+  if (role !== "owner" && role !== "staff") {
+    return NextResponse.json({ error: "Forbidden", message: "Owner or staff access required." }, { status: 403 });
+  }
+  if (wantsCsv && role !== "owner") {
+    return NextResponse.json({ error: "Forbidden", message: "Owner access required to export." }, { status: 403 });
+  }
 
   const supabase = createAdminClient();
 
@@ -142,10 +158,10 @@ export async function GET(
 
   const fields = answerColumns(fieldRows ?? [], rows);
 
-  // new URL(request.url) rather than request.nextUrl: the standard property is
-  // present on a plain Request too, so the route is exercisable without
-  // constructing a NextRequest. Same value either way.
-  if (new URL(request.url).searchParams.get("format") === "csv") {
+  // wantsCsv reads new URL(request.url) rather than request.nextUrl: the
+  // standard property is present on a plain Request too, so the route is
+  // exercisable without constructing a NextRequest. Same value either way.
+  if (wantsCsv) {
     return csvResponse(rows, fields, ctx.intake.slug);
   }
 
