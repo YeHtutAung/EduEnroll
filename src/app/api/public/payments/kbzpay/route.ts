@@ -5,7 +5,7 @@ import { platformOrigin } from "@/lib/origin";
 import { precreate, buildMerchOrderId, type CallBudget } from "@/lib/kbzpay";
 import { resolveKbzpayOrder } from "@/server/payments/resolveKbzpayOrder";
 import { orderWindow } from "@/server/payments/kbzpayOrderWindow";
-import { computeOrderTotal } from "@/server/payments/platformFee";
+import { attachPackSizes, computeOrderTotal } from "@/server/payments/platformFee";
 
 // The Vercel plan caps a function at 10s and it cannot be raised, so declare
 // it rather than inherit it silently. This route can make FOUR sequential
@@ -223,9 +223,9 @@ export async function POST(request: NextRequest) {
     !enrollment.class_id && enrollment.enrollment_items && enrollment.enrollment_items.length > 0;
 
   const orderItems = isCart
-    ? enrollment.enrollment_items!.map((i) => ({ fee_amount: i.fee_amount, quantity: i.quantity }))
+    ? enrollment.enrollment_items!.map((i) => ({ class_id: i.class_id, fee_amount: i.fee_amount, quantity: i.quantity }))
     : enrollment.classes
-      ? [{ fee_amount: enrollment.classes.fee_amount, quantity: enrollment.quantity ?? 1 }]
+      ? [{ class_id: enrollment.classes.id, fee_amount: enrollment.classes.fee_amount, quantity: enrollment.quantity ?? 1 }]
       : null;
 
   if (!orderItems) return fail(500, "Class data not found.", "Internal Server Error");
@@ -235,7 +235,11 @@ export async function POST(request: NextRequest) {
   // computeOrderTotal is shared with every other payment route so no two can
   // disagree about the figure — a disagreement means the payer is charged and
   // then refused with amount_mismatch.
-  const order = computeOrderTotal(orderItems, tenant ?? {});
+  // pack_size matters only to the per_ticket fee: a 3-pack is three tickets.
+  const order = computeOrderTotal(
+    await attachPackSizes(supabase, orderItems, tenant ?? {}),
+    tenant ?? {},
+  );
   let totalFee = order.total;
   // What THIS ROW records. The partial-payment branch below charges a
   // remainder rather than the order total, and a remainder is not the row that

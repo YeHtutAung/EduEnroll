@@ -46,6 +46,10 @@ interface PublicClass {
   venue?: string | null;
   image_url?: string | null;
   max_tickets_per_person?: number;
+  /** Admissions per unit; > 1 marks a package tier ("3 tickets"). */
+  pack_size?: number;
+  /** Display only: regular price of the package as single tickets. */
+  compare_at_amount?: number | null;
 }
 
 interface PublicIntake {

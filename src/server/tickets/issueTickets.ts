@@ -131,13 +131,18 @@ export async function issueTicketsForEnrollment(enrollmentId: string): Promise<v
   for (const line of rawLines) {
     byClass.set(line.class_id, (byClass.get(line.class_id) ?? 0) + (line.quantity ?? 1));
   }
-  const expectedTotal = Array.from(byClass.values()).reduce((sum, q) => sum + q, 0);
 
   const { data: classes, error: classesError } = (await supabase
     .from("classes")
-    .select("id, level, intake_id, event_date")
+    .select("id, level, intake_id, event_date, pack_size")
     .in("id", Array.from(byClass.keys()))) as unknown as {
-    data: { id: string; level: string; intake_id: string; event_date: string | null }[] | null;
+    data: {
+      id: string;
+      level: string;
+      intake_id: string;
+      event_date: string | null;
+      pack_size: number | null;
+    }[] | null;
     error: unknown;
   };
   if (classesError) {
@@ -155,10 +160,25 @@ export async function issueTicketsForEnrollment(enrollmentId: string): Promise<v
     );
   }
 
+  // A package tier ("GA 3-Pack") sells units of several admissions: one unit
+  // bought is pack_size tickets, one QR per person. The line quantity counts
+  // packs, which is what was priced and paid; tickets count people.
+  // migration 20261024120000 freezes pack_size once a tier has sold, so a
+  // repair run here issues the same number the first run did.
+  const admissions = new Map<string, number>();
+  for (const [classId, quantity] of Array.from(byClass.entries())) {
+    const packSize = byId.get(classId)!.pack_size ?? 1;
+    if (!Number.isInteger(packSize) || packSize < 1) {
+      throw new Error(`issueTickets: class ${classId} has an invalid pack_size`);
+    }
+    admissions.set(classId, quantity * packSize);
+  }
+  const expectedTotal = Array.from(admissions.values()).reduce((sum, q) => sum + q, 0);
+
   const { kid } = loadSigningKey();
 
   const rows: Record<string, unknown>[] = [];
-  for (const [classId, quantity] of Array.from(byClass.entries())) {
+  for (const [classId, quantity] of Array.from(admissions.entries())) {
     const c = byId.get(classId)!;
     const expIso = new Date(ticketExpiry(c.event_date, TZ) * 1000).toISOString();
     for (let seat = 1; seat <= quantity; seat++) {

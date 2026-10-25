@@ -16,6 +16,8 @@ type ClassResult = { data: Class | null; error: unknown };
 //   enrollment_open_at   — ISO 8601 datetime (pass null to clear)
 //   enrollment_close_at  — ISO 8601 datetime (pass null to clear)
 //   status               — draft | open | full | closed
+//   pack_size            — admissions per unit sold (1–20); frozen once the tier has sold
+//   compare_at_amount    — display-only regular price of a package (pass null to clear)
 
 export async function PATCH(
   request: NextRequest,
@@ -55,6 +57,8 @@ export async function PATCH(
     venue,
     image_url,
     max_tickets_per_person,
+    pack_size,
+    compare_at_amount,
   } = body as Record<string, unknown>;
 
   const update: Partial<Omit<Class, "id" | "created_at">> = {};
@@ -160,6 +164,36 @@ export async function PATCH(
       return badRequest("max_tickets_per_person must be a positive integer.");
     }
     update.max_tickets_per_person = max_tickets_per_person;
+  }
+
+  // pack_size — issueTickets reads the current value, including when it
+  // repairs an already-paid order, so it cannot change once anything has sold.
+  // The classes_guard_pack_size trigger enforces the same rule.
+  if (pack_size !== undefined && pack_size !== existing.pack_size) {
+    if (typeof pack_size !== "number" || !Number.isInteger(pack_size) || pack_size < 1 || pack_size > 20) {
+      return badRequest("pack_size must be an integer from 1 to 20.");
+    }
+    if (existing.seat_remaining < existing.seat_total) {
+      return NextResponse.json(
+        {
+          error: "Conflict",
+          message: "Tickets per package cannot change after this ticket type has sold. Create a new ticket type instead.",
+        },
+        { status: 409 },
+      );
+    }
+    update.pack_size = pack_size;
+  }
+
+  // compare_at_amount — display only, null clears it
+  if ("compare_at_amount" in (body as object)) {
+    if (
+      compare_at_amount !== null &&
+      (typeof compare_at_amount !== "number" || !Number.isInteger(compare_at_amount) || compare_at_amount <= 0)
+    ) {
+      return badRequest("compare_at_amount must be a positive integer or null.");
+    }
+    update.compare_at_amount = (compare_at_amount as number | null) ?? null;
   }
 
   if (Object.keys(update).length === 0) {

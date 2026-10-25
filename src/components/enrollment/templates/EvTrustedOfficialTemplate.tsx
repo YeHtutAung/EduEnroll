@@ -4,7 +4,8 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { TenantAppearance } from "@/types/database";
 import type { TemplateClass, TemplateIntake, TemplateLabels } from "./types";
-import { getCardState } from "./types";
+import { cartTicketCount, getCardState } from "./types";
+import PackBadge from "./PackBadge";
 import {
   PresentingSponsorBanner,
   SponsorLogoWall,
@@ -38,6 +39,7 @@ function TicketCard({
   featured,
   brand,
   priority,
+  currency,
 }: {
   cls: TemplateClass;
   qty: number;
@@ -47,6 +49,7 @@ function TicketCard({
   /** First card in the list — its artwork is above the fold, so it must not
    *  be lazy-loaded. */
   priority: boolean;
+  currency: string;
 }) {
   const { isDisabled, overlayState } = getCardState(cls);
   const max = cls.max_tickets_per_person ?? 10;
@@ -133,6 +136,7 @@ function TicketCard({
             {cls.fee_formatted}
           </span>
         </div>
+        <PackBadge cls={cls} currency={currency} className="-mt-2 mb-3" style={{ color: "#6b6f7a" }} savingsStyle={{ color: "#b7912b" }} />
 
         {/* Seats remaining */}
         {SHOW_SEAT_COUNT && (
@@ -203,6 +207,7 @@ export default function EvTrustedOfficialTemplate({
   intake,
   classes,
   slug,
+  currency,
   organiserTerms = null,
   organiserTermsSha256 = null,
 }: EvTrustedOfficialTemplateProps) {
@@ -228,6 +233,7 @@ export default function EvTrustedOfficialTemplate({
   const [termsError, setTermsError] = useState(false);
 
   const cartCount = Object.values(cart).reduce((s, q) => s + q, 0);
+  const cartTickets = cartTicketCount(classes, Object.entries(cart));
   const cartTotal = classes.reduce((s, cls) => s + (cart[cls.id] ?? 0) * cls.fee_amount, 0);
 
   function handleQtyChange(classId: string, delta: number) {
@@ -353,6 +359,7 @@ export default function EvTrustedOfficialTemplate({
                 featured={i === 0 && classes.length > 1}
                 brand={brand}
                 priority={i === 0}
+                currency={currency}
               />
             ))
           )}
@@ -384,7 +391,7 @@ export default function EvTrustedOfficialTemplate({
           <div className="max-w-[480px] mx-auto">
             <div className="flex items-center justify-between mb-3">
               <span className="text-[11.5px] font-bold" style={{ color: brand }}>
-                {cartCount} ticket{cartCount > 1 ? "s" : ""} selected
+                {cartTickets} ticket{cartTickets > 1 ? "s" : ""} selected
               </span>
               <span className="text-[12px] font-extrabold" style={{ color: brand }}>
                 {cartTotal.toLocaleString()}

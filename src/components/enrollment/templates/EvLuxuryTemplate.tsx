@@ -3,7 +3,8 @@
 import { useState, type CSSProperties } from "react";
 import { formatCurrency, formatAmount } from "@/lib/utils";
 import { eventFontCssUrl, eventFontStack } from "@/lib/eventFont";
-import { getCardState } from "./types";
+import { cartTicketCount, getCardState } from "./types";
+import PackBadge from "./PackBadge";
 import type { EventTemplateProps, TemplateClass } from "./types";
 
 // ─── Seat badge ───────────────────────────────────────────────────────────────
@@ -136,6 +137,7 @@ function TicketCard({
           <div className="font-myanmar text-base tracking-wider" style={{ color: "#888880" }}>
             {currency === "MMK" ? `${formatAmount(cls.fee_amount)} ကျပ် · MMK` : formatCurrency(cls.fee_amount, currency)}
           </div>
+          <PackBadge cls={cls} currency={currency} className="mt-2 tracking-wider" style={{ color: "#888880" }} savingsStyle={{ color: goldLight }} />
         </div>
 
         <div className="w-full h-px mb-7"
@@ -265,6 +267,7 @@ export default function EvLuxuryTemplate({ appearance, intake, classes, slug, cu
   const [cart, setCart] = useState<Map<string, { classId: string; level: string; qty: number; fee: number; imageUrl: string | null }>>(new Map());
   const cartTotal = Array.from(cart.values()).reduce((sum, i) => sum + i.fee * i.qty, 0);
   const cartItemCount = Array.from(cart.values()).reduce((sum, i) => sum + i.qty, 0);
+  const cartTickets = cartTicketCount(classes, Array.from(cart.values(), (i) => [i.classId, i.qty]));
   const hasMultipleTickets = classes.filter((c) => c.seat_remaining > 0 && c.status === "open").length > 1;
   const maxFee = classes.length > 0 ? Math.max(...classes.map((c) => c.fee_amount)) : 0;
   // Tiers a visitor can buy right now — the same rule the cards use, so not
@@ -450,7 +453,7 @@ export default function EvLuxuryTemplate({ appearance, intake, classes, slug, cu
         <div className="fixed bottom-0 left-0 right-0 z-50" style={{ background: "linear-gradient(to top, rgba(8,8,8,0.98), rgba(8,8,8,0.9))", backdropFilter: "blur(12px)" }}>
           <div className="px-4 py-3 sm:px-8 flex items-center justify-between max-w-[1200px] mx-auto">
             <div>
-              <div className="text-[11px] tracking-[2px] uppercase" style={{ color: gold }}>{cartItemCount} ticket{cartItemCount !== 1 ? "s" : ""} in cart</div>
+              <div className="text-[11px] tracking-[2px] uppercase" style={{ color: gold }}>{cartTickets} ticket{cartTickets !== 1 ? "s" : ""} in cart</div>
               <div className="text-[15px] font-semibold" style={{ color: "#F8F4EE" }}>{formatCurrency(cartTotal, currency)}</div>
             </div>
             <button onClick={handleCartCheckout} className="px-6 py-2.5 rounded-sm text-[12px] font-semibold tracking-[1.5px] uppercase transition-all"

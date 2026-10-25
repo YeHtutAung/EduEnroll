@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import type { EventTemplateProps, TemplateClass } from "./types";
-import { getCardState, fmtDate } from "./types";
+import { cartTicketCount, getCardState, fmtDate } from "./types";
+import PackBadge from "./PackBadge";
 import { eventFontCssUrl, eventFontStyle } from "@/lib/eventFont";
 
 function TicketCard({
@@ -65,6 +66,7 @@ function TicketCard({
           <div>
             <h3 className="text-lg font-bold text-gray-900">{cls.level}</h3>
             <p className="text-sm font-semibold font-myanmar mt-0.5" style={{ color: primaryColor }}>{cls.fee_formatted}</p>
+            <PackBadge cls={cls} currency={currency} className="mt-0.5 text-gray-500" savingsStyle={{ color: primaryColor }} />
           </div>
           <div className="text-right text-xs text-gray-400 mt-0.5">
             <div>{cls.seat_remaining} of {cls.seat_total}</div>
@@ -164,6 +166,7 @@ export default function EvCorporateTemplate({
   }
 
   const cartCount = Object.values(cart).reduce((s, v) => s + v.qty, 0);
+  const cartTickets = cartTicketCount(classes, Object.entries(cart).map(([id, v]) => [id, v.qty]));
   const cartTotal = Object.values(cart).reduce((s, v) => s + v.qty * v.fee, 0);
 
   function handleCheckout() {
@@ -256,7 +259,7 @@ export default function EvCorporateTemplate({
         <div className="fixed bottom-0 left-0 right-0 z-50 px-4 pb-6">
           <div className="mx-auto max-w-lg bg-white rounded-xl shadow-xl p-4 flex items-center justify-between gap-4 border border-gray-200">
             <div>
-              <p className="text-gray-900 font-bold text-sm">{cartCount} ticket{cartCount > 1 ? "s" : ""} selected</p>
+              <p className="text-gray-900 font-bold text-sm">{cartTickets} ticket{cartTickets > 1 ? "s" : ""} selected</p>
               <p className="text-xs text-gray-500 font-myanmar">{currency} {cartTotal.toLocaleString()}</p>
             </div>
             <button

@@ -20,7 +20,14 @@ let tenantError: unknown = null;
 let itemsError: unknown = null;
 let classesError: unknown = null;
 let enrollmentItemsData: { class_id: string; quantity: number }[] = [];
-let classesData: { id: string; level: string; intake_id: string; event_date: string | null }[] = [];
+let classesData: {
+  id: string;
+  level: string;
+  intake_id: string;
+  event_date: string | null;
+  // Optional: fixtures without it exercise the pre-package default of 1.
+  pack_size?: number | null;
+}[] = [];
 
 const mockUpsert = vi.fn().mockResolvedValue({ data: null, error: null });
 const mockUpdateEq = vi.fn().mockResolvedValue({ data: null, error: null });
@@ -157,6 +164,49 @@ describe("issueTicketsForEnrollment", () => {
 
     await issueTicketsForEnrollment("e1");
 
+    expect(mockUpsert).not.toHaveBeenCalled();
+  });
+});
+
+describe("issueTicketsForEnrollment — ticket packages", () => {
+  it("issues pack_size tickets per pack, alongside an ordinary tier", async () => {
+    enrollmentData = { id: "e1", tenant_id: "t1", class_id: null, quantity: null, status: "confirmed" };
+    enrollmentItemsData = [
+      { class_id: "pack", quantity: 1 },
+      { class_id: "vip", quantity: 1 },
+    ];
+    classesData = [
+      { id: "pack", level: "GA 3-Pack", intake_id: "i1", event_date: "2026-12-12", pack_size: 3 },
+      { id: "vip", level: "VIP", intake_id: "i1", event_date: "2026-12-12", pack_size: 1 },
+    ];
+
+    await issueTicketsForEnrollment("e1");
+
+    const rows = mockUpsert.mock.calls[0][0] as Record<string, unknown>[];
+    expect(rows).toHaveLength(4);
+    const packRows = rows.filter((r) => r.class_id === "pack");
+    // One QR per person, each admitting one, numbered so none collapse on the
+    // (enrollment_id, class_id, seat_no) key.
+    expect(packRows.map((r) => r.seat_no)).toEqual([1, 2, 3]);
+    for (const r of packRows) expect(r).toMatchObject({ tier: "GA 3-Pack", admits: 1 });
+    expect(rows.filter((r) => r.class_id === "vip")).toHaveLength(1);
+  });
+
+  it("multiplies packs bought by pack_size on a single-class order", async () => {
+    enrollmentData = { id: "e1", tenant_id: "t1", class_id: "pack", quantity: 2, status: "confirmed" };
+    classesData = [{ id: "pack", level: "VIP 3-Pack", intake_id: "i1", event_date: null, pack_size: 3 }];
+
+    await issueTicketsForEnrollment("e1");
+
+    const rows = mockUpsert.mock.calls[0][0] as Record<string, unknown>[];
+    expect(rows.map((r) => r.seat_no)).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it("throws on an invalid pack_size rather than issuing a guess", async () => {
+    enrollmentData = { id: "e1", tenant_id: "t1", class_id: "pack", quantity: 1, status: "confirmed" };
+    classesData = [{ id: "pack", level: "GA 3-Pack", intake_id: "i1", event_date: null, pack_size: 0 }];
+
+    await expect(issueTicketsForEnrollment("e1")).rejects.toThrow(/invalid pack_size/);
     expect(mockUpsert).not.toHaveBeenCalled();
   });
 });
