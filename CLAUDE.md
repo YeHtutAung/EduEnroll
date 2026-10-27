@@ -56,3 +56,7 @@
   2. **Codex** — what Codex (ChatGPT) reviewed or found, and any review to trigger (`@codex review` on the PR)
   3. **Human** — what the owner must do (apply migrations, merge PRs, Vercel / DNS / env settings), marked Required or Optional, in order
 - Use this whenever reporting where a PR or change stands, and at the end of any task that needs human follow-up
+
+## Client Work
+- Facts about active clients (tenants) live in `docs/clients/<slug>.md`
+- Use the `tenant-ops` agent for client-specific investigations
