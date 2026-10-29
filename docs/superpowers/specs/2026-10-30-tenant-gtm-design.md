@@ -73,6 +73,7 @@ payment details or tickets.**
 | Purchase conversion | Sent **server-side** after payment is confirmed (phase 2), not from the success page. |
 | "Started checkout" signal | Pushed to `dataLayer` on the event page when the buyer clicks Buy, before leaving. |
 | Leaving a GTM page | Always a **full page load**, so the container does not survive into a non-GTM page. |
+| Order creation | **Never on a tracked page.** No tracked page may receive an enrollment ref. |
 | Sensitive query params | If present, GTM is **not loaded** for that page view. |
 | Events fired before GTM is ready | **Queued** in `window.dataLayer`, which GTM replays when it starts. |
 | Consent banner | Out of scope for v1. Open question below. |
@@ -236,8 +237,29 @@ page must be a full page load**:
   already a full load. Keep it that way.
 - `/enroll/[slug]` → `/enroll/[slug]/tickets` (Trusted Official redirect):
   both tracked, so it can stay a client-side `router.replace`.
-- `/enroll/[slug]/tickets` → `/enroll/[slug]/checkout`: today `router.push`
-  in `EvTrustedOfficialTemplate.tsx`. Becomes a full page load.
+- `/enroll/[slug]/tickets` → checkout: today the template creates the order
+  on `/tickets` and then `router.push`es to `/checkout/?ref=…`. See below.
+
+### No order refs on tracked pages
+
+An enrollment ref is a bearer key: `/api/public/enrollment/[ref]` returns the
+buyer's details, payment state and issued tickets, and keeps doing so after
+checkout. So **no tracked page may ever receive one**, whether in a response,
+a URL, storage or the DOM. Hard navigation does not help if the ref arrives
+while GTM is still running, since container JS can wrap `fetch` and read the
+response.
+
+The Trusted Official template breaks this today: it POSTs
+`/api/public/enroll` on `/tickets` and gets `enrollment_ref` back. Order
+creation therefore moves to a new untracked page,
+`/enroll/[slug]/checkout/new`. `/tickets` stashes only the ticket choice and
+terms acceptance (no ref, no personal data) under a `cart_<digits>` key and
+does a full page load there; the new page creates the order and moves on to
+`/checkout/?ref=…`. Details in the phase 1 plan, task 4b.
+
+The other buy flow already complies: the event page sends the buyer to
+`/enroll/form`, which creates the order and is untracked. The only other API
+call on a tracked page is the public intake read, which carries no refs.
 
 To keep this from regressing, the change adds one helper (for example
 `hardNavigate(url)`) and a test that fails if an allowlisted page uses

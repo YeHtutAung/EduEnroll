@@ -38,6 +38,16 @@ Two things the design did not know, both now in the design doc:
 | P2 | Trusted Official renders on `/enroll/<slug>/tickets`, which was excluded, so its `begin_checkout` had no consumer | `/tickets` is ticket selection, not issued tickets: added to the allowlist. Tasks 2, 4. |
 | P2 | `view_item` could fire before GTM exists and be dropped | `pushDataLayer` always queues onto `window.dataLayer`; GTM replays it. Task 2. |
 
+### Codex re-review of `934bc61` (1 finding, confirmed)
+
+| # | Finding | Change |
+|---|---|---|
+| P1 | Trusted Official POSTs `/api/public/enroll` from the tracked `/tickets` page, so container JS can read `enrollment_ref` from the response. The ref opens `/api/public/enrollment/[ref]` (buyer details, payment, tickets), even after checkout. | Order creation moves to a new untracked page, `/enroll/<slug>/checkout/new`, reached by a full page load. Task 4b. |
+
+Checked at the same time: the only other API call on any tracked page is
+`GET /api/public/enroll/<slug>` (public intake data, no refs). The other buy
+flow already creates its order on `/enroll/form`, which is untracked.
+
 ## Tasks
 
 ### 1. Migration: column, format check, change guard
@@ -173,13 +183,8 @@ renders nothing on `/enroll/form`, `/enroll/payment/X`, `/enroll/x/checkout`,
   as the event page. The event page does not fire `view_item` when it
   redirects here, so it is counted once.
 
-`src/components/enrollment/templates/EvTrustedOfficialTemplate.tsx`:
-
-- Push `begin_checkout` when Buy is pressed, before the POST to
-  `/api/public/enroll`. Payload from the cart, nothing else.
-- Replace `router.push(\`/enroll/${slug}/checkout/?ref=…\`)` with
-  `hardNavigate(...)`. GTM must not survive into checkout, which shows the
-  buyer form.
+`src/components/enrollment/templates/EvTrustedOfficialTemplate.tsx`: see
+task 4b. The template no longer creates the order.
 
 Always hard-navigate, whether or not GTM is active: one code path, and the
 cost is one page load at the step where the buyer is already committing.
@@ -191,6 +196,55 @@ Test: `src/__tests__/tracking/noSoftExits.test.ts`, a static check that
 `router.replace` to anything but allowlisted paths, and no
 `next/link` `href` outside the allowlist. Allowlisted patterns are listed in the
 test with a comment pointing at the design.
+
+### 4b. Trusted Official: create the order off the tracked page
+
+Rule: **no tracked page may receive an enrollment ref**, in a response, a
+URL, storage or the DOM. Today `handleCheckout` in
+`EvTrustedOfficialTemplate.tsx` POSTs `/api/public/enroll` on `/tickets` and
+gets `enrollment_ref` back while GTM is running.
+
+New flow:
+
+1. **`/tickets` (tracked), Buy pressed.** Validate as today (cart not empty,
+   terms ticked). Write one stash to `sessionStorage` under
+   `cart_<Date.now()>` (the key shape the storage allowlist already accepts):
+   `{ slug, items: [{ class_id, quantity }], terms_accepted, terms_version,
+   organiser_terms_sha256, idempotency_key }`. No ref, no personal data, no
+   priority token. Push `begin_checkout`, then
+   `hardNavigate(\`/enroll/${slug}/checkout/new?cart_key=${key}\`)`.
+2. **`/enroll/<slug>/checkout/new` (untracked, new page).** On mount, read
+   and validate the stash (slug matches, items non-empty). Read the priority
+   token from `pa_<slug>` here, not on `/tickets`. POST `/api/public/enroll`
+   with exactly the body the template sends today. On success, delete the
+   stash and `router.replace(\`/enroll/${slug}/checkout/?ref=…\`)`; both pages
+   are untracked, so a client-side move is fine. On error, show it with a
+   "Back to tickets" plain `<a>` to `/enroll/<slug>/tickets/`. Missing or
+   invalid stash (back button, reload after success): redirect to
+   `/enroll/<slug>/tickets/`.
+3. A reload during step 2 re-sends the same `idempotency_key`, so the server's
+   cart idempotency (`20261022130000_cart_idempotency.sql`) returns the same
+   order instead of creating a second one.
+
+Terms: the buyer still ticks the box on `/tickets`; the POST that records
+acceptance follows one page load later in the same tab, with the same
+`terms_version` and `organiser_terms_sha256`. What the server records does
+not change.
+
+The page sits under `checkout/**`, so it is untracked by the allowlist with no
+extra rule, and it reuses the checkout page's shell and loading state.
+
+Tests:
+
+- `src/__tests__/enrollment/trustedOfficialCheckoutNew.test.tsx`: POSTs the
+  stashed body once, includes the priority token when present, replaces to
+  `/checkout/?ref=…`, deletes the stash; redirects to `/tickets/` on missing,
+  malformed or other-slug stash; shows the error and back link on a failed
+  POST.
+- `src/__tests__/tracking/noRefOnTrackedPages.test.ts`: a static check that
+  the tracked pages and `src/components/enrollment/templates/*.tsx` contain no
+  `fetch` to `/api/public/enroll` with a POST, and no read of
+  `enrollment_ref`. Fails if order creation ever moves back.
 
 ### 5. Superadmin: set and clear
 
@@ -250,7 +304,9 @@ Preview mode:
 - Set `sessionStorage.cs_TEST = "x"`, reload the event page: no container.
 - Log in to `/admin` in the same browser, open the event page: no container.
 - A Trusted Official event: `view_item` on `/tickets`, `begin_checkout` on
-  Buy, then a full load into checkout.
+  Buy, then a full load into `/checkout/new`, which creates the order and
+  moves to `/checkout/?ref=…`. In DevTools Network on `/tickets`, no request
+  returns an `enrollment_ref`.
 
 ## Deploy order
 
