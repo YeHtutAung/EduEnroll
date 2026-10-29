@@ -121,21 +121,28 @@ tenants want it.
 
 ### Component
 
-A server component `TenantTagManager` reads the tenant's `gtm_container_id`
-(same tenant resolution as the public layout: `x-tenant-slug`, then
-`extractSubdomainFromHost`, which also covers custom domains). It renders the
-standard GTM snippet through `next/script` with `strategy="afterInteractive"`
-when the ID is set, and nothing otherwise. There is no `<noscript>` iframe,
-because these pages need JavaScript anyway.
+The public layout (`src/app/(public)/layout.tsx`) already looks up the tenant
+on the server (`x-tenant-slug`, then `extractSubdomainFromHost`, which also
+covers custom domains). It adds `gtm_container_id` to that query and passes it
+to a small client component, `TenantTagManager`.
 
-It is rendered by a dedicated layout that wraps only the allowlisted routes,
-not by `src/app/(public)/layout.tsx` or `src/app/(public)/enroll/[slug]/layout.tsx`,
-since those also wrap checkout, success, status and tickets. The likely shape
-is a route group, for example `(public)/(tracked)/enroll/page.tsx` and
-`(public)/(tracked)/enroll/[slug]/page.tsx`, with the URL unchanged. The
-implementation plan will confirm that Next 14 resolves this without route
-conflicts. If it does not, the fallback is to render the component from each
-allowlisted page's server wrapper.
+`TenantTagManager` decides on the client, from `usePathname()`, whether the
+current page is on the allowlist (`/enroll`, or `/enroll/<slug>` where the
+segment is not `form` or `payment`). Only then, and only when the ID is set
+and the sensitive-context guard below passes, does it render the standard GTM
+snippet through `next/script` (`strategy="afterInteractive"`). There is no
+`<noscript>` iframe, because these pages need JavaScript anyway.
+
+Why a pathname gate rather than a separate layout: the public layout and
+`enroll/[slug]/layout.tsx` also wrap checkout, success, status and tickets,
+and a route group would mean moving the two pages and their siblings' layout.
+The gate keeps every file where it is. The container ID does reach the RSC
+payload of non-tracked pages, which is harmless: the ID is public, and no
+script is rendered there.
+
+A gate only stops GTM from *starting* on the wrong page. Once started, it
+stays in `window` across client navigations, which is why every exit from a
+tracked page is a full page load (below).
 
 ### Sensitive parameters
 
@@ -145,6 +152,14 @@ it has any of `psid`, `ref`, `cart_key`, `pi`, `payment_intent` or
 mainly means priority-link visits (`psid`) are not tracked. That is an
 acceptable loss, and simpler and safer than rewriting the URL under Next's
 router.
+
+**Priority-access tokens.** The emailed priority link carries its token in the
+URL fragment (`#pa=…`). The event page moves it into `sessionStorage` under
+`pa_<slug>` and strips the fragment (`src/lib/interest/priorityUnlock.ts`).
+`sessionStorage` is readable by any script on the origin, GTM included. So
+the guard also skips GTM when the fragment has `pa=` or any `pa_*` key exists
+in `sessionStorage`. Priority-window buyers are not tracked; everyone else
+is.
 
 Ad parameters are **not** on this list: `fbclid`, `ttclid` and `utm_*` are
 how Meta and TikTok attribute a landing to an ad, so they must reach the
