@@ -244,8 +244,10 @@ page must be a full page load**:
 
 An enrollment ref is a bearer key: `/api/public/enrollment/[ref]` returns the
 buyer's details, payment state and issued tickets, and keeps doing so after
-checkout. So **no tracked page may ever receive one**, whether in a response,
-a URL, storage or the DOM. Hard navigation does not help if the ref arrives
+checkout. So **no tracked page may ever receive one, or anything that can be exchanged
+for one**, whether in a response, a URL, storage or the DOM. The cart
+idempotency key counts: the cart RPC returns the existing order, ref
+included, for a known key in the same tenant. Hard navigation does not help if the ref arrives
 while GTM is still running, since container JS can wrap `fetch` and read the
 response.
 
@@ -253,9 +255,10 @@ The Trusted Official template breaks this today: it POSTs
 `/api/public/enroll` on `/tickets` and gets `enrollment_ref` back. Order
 creation therefore moves to a new untracked page,
 `/enroll/[slug]/checkout/new`. `/tickets` stashes only the ticket choice and
-terms acceptance (no ref, no personal data) under a `cart_<digits>` key and
-does a full page load there; the new page creates the order and moves on to
-`/checkout/?ref=…`. Details in the phase 1 plan, task 4b.
+terms acceptance (no ref, no idempotency key, no personal data) under a
+`cart_<digits>` key and does a full page load there. The new page creates the
+idempotency key, keeps it under `ck_<cart_key>` (not on the GTM storage
+allowlist), creates the order and moves on to `/checkout/?ref=…`. Details in the phase 1 plan, task 4b.
 
 The other buy flow already complies: the event page sends the buyer to
 `/enroll/form`, which creates the order and is untracked. The only other API
