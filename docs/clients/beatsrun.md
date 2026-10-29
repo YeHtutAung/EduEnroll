@@ -19,10 +19,9 @@
   - CB merchant name: YOUNG MONEY CO.,LTD (the organiser's own merchant account,
     not the platform's).
   - Docs from CB: QR Gateway API spec v1.0.10 (30 Jul 2026), an MMQR UI
-    guideline (v1.0, Apr 2025) and a static sample page. The existing
-    `MmqrCard` already follows the UI guideline.
-  - On 2026-10-28 CB asked for a callback URL and a public IP to whitelist, for
-    UAT and Live. Callback URLs for the reply (the tenant's canonical subdomain,
+    guideline (v1.0, Apr 2025) and a static sample page ("E-commerce MMQR
+    WebFrame").
+  - Callback URLs sent to CB on 2026-10-29 (the tenant's canonical subdomain,
     never a custom domain, like the planned per-tenant KBZPay design):
     - Production: `https://beatsrun.kuunyi.com/api/webhooks/cbmmqr`
     - UAT/sandbox: `https://beatsrun.staging.kuunyi.com/api/webhooks/cbmmqr`
@@ -30,18 +29,31 @@
       no redirect).
     - These replace the platform-wide `www.kuunyi.com` / `staging.kuunyi.com`
       URLs given in the 2026-10-23 paperwork.
+    - CB confirmed (2026-10-29) that the gateway calls the URL exactly as
+      given. It does not append the spec's `/dynamicqr/callback` path.
   - The future route must be `src/app/api/webhooks/cbmmqr/route.ts` and the
-    notify origin must produce exactly the URLs CB registers.
-  - Public IP: no IP was given. Vercel has no fixed egress IP, so the reply asks
-    CB whether whitelisting is mandatory and, if so, what alternative they
-    accept for a serverless platform. TODO: CB's answer. If a fixed IP is
-    required, the fallback is a static-IP proxy like `KBZPAY_PROXY_URL`.
-  - Other open questions in the reply to CB: gateway base URLs (UAT and Live); whether CB
-    calls the registered URL as given or appends the spec's
-    `/dynamicqr/callback` path; UAT credentials and IDs; the meaning of
-    return code `0006`, which the spec lists as both "invalid reference" and
-    "waiting for payment"; QR lifetime (the sample page says 3 minutes) and the
-    maximum amount; whether CB need screenshots for Central Bank approval.
+    notify origin must produce exactly these URLs.
+  - **Blocker: public IP whitelisting is mandatory.** CB answered on 2026-10-29
+    and did not offer an alternative. UAT credentials and integration
+    parameters will be issued only after IP whitelisting and callback setup
+    are complete. Vercel has no fixed egress IP, so CB traffic must leave
+    through a static IP: either the existing `KBZPAY_PROXY_URL` host (as a
+    `CBPAY_PROXY_URL`) or Vercel Static IPs. TODO: choose one and send the IP
+    to CB.
+  - Gateway base URLs (UAT and Live): CB will share them separately. TODO.
+  - Return code `0006` (listed as both "Invalid Reference No." and "Waiting for
+    payment"): CB's answer did not resolve it ("use the status check API"). Pin
+    down its meaning in UAT before building on it.
+  - QR validity: CB will update the sample page with the validity period (it
+    currently says 3 minutes). TODO.
+  - Maximum amount: not given. Amounts over the limit return `0052`. TODO: the
+    actual limit, to check against ticket prices.
+  - QR display: CB require the WebFrame sample layout, not our existing card
+    as it is. Same as `MmqrCard`: MyanmarPay header, yellow dotted rule,
+    "MMQR" label, colours. Different: receiver name and amount left-aligned
+    (12.5% inset), QR at 80% of card width, CB Bank logo below the QR, a blue
+    footer rule, and "QR will be expired in 3 mins" under the card. Needs a CB
+    variant of `MmqrCard`; the KBZPay card stays unchanged.
 
 ## Branding
 
