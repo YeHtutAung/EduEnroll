@@ -36,12 +36,26 @@ On our public pages that means:
 | `/enroll/[slug]/checkout/payment`, `/enroll/payment/[ref]` | Payment QR codes (MMQR, KBZPay), redirects to Stripe / HitPay / PayPay |
 | `/enroll/[slug]/checkout/success` | Ticket QR codes and signed ticket JWTs, i.e. working tickets |
 | `/enroll/[slug]/status`, `/status`, `/enroll/[slug]/success` | Buyer's name, order and payment status |
-| `/enroll/[slug]/tickets` | Ticket QR codes |
 | `/enroll/[slug]/interest` | Signup form, and on success the priority-access link (a bearer credential) |
 
 Tags also report the full page URL by default. Several URLs carry secrets or
 identifiers in the query string: `ref`, `pi`, `payment_intent`, `session_id`,
 `psid`, `cart_key`.
+
+The same origin also holds two things that are not on any one page:
+
+- **Staff sessions.** On `<tenant>.kuunyi.com` the admin dashboard and the
+  public event pages share one origin. `@supabase/ssr` keeps the session in
+  cookies that JavaScript can read (the browser client needs them), so a
+  script on a public page can read a logged-in organiser's session, or call
+  `/api/admin/*` as them. A tenant's **custom domain** does not have this
+  problem: the middleware sends every staff surface to the kuunyi subdomain,
+  so no staff session ever exists on the custom domain's origin.
+- **Browser storage.** Checkout writes the Stripe client secret to
+  `sessionStorage["cs_<ref>"]`, and the key itself is an order ref, which the
+  public API accepts to show buyer details and tickets. The priority-access
+  token sits in `sessionStorage["pa_<slug>"]`. Both are still there when the
+  buyer goes back to the event page.
 
 The design goal is: **organisers get ad attribution and a purchase
 conversion, and no third-party script ever runs on a page that shows PII,
@@ -53,11 +67,14 @@ payment details or tickets.**
 |---|---|
 | Who sets a tenant's GTM ID | **Superadmin only** in v1. Organisers request it; we enable it. |
 | Where GTM loads | An explicit **allowlist** of browse pages. Everything else is off by default. |
+| Which origin | **Production: the tenant's custom domain only.** The kuunyi subdomain shares an origin with staff sessions. Dev / staging (UAT) may use the subdomain, behind the guard. |
+| Credentials already in the browser | **Fail closed**: GTM loads only if browser storage holds nothing but known-safe keys and no Supabase session cookie exists. |
 | Forms and checkout | **No GTM**, including the buyer-details form. |
 | Purchase conversion | Sent **server-side** after payment is confirmed (phase 2), not from the success page. |
 | "Started checkout" signal | Pushed to `dataLayer` on the event page when the buyer clicks Buy, before leaving. |
 | Leaving a GTM page | Always a **full page load**, so the container does not survive into a non-GTM page. |
 | Sensitive query params | If present, GTM is **not loaded** for that page view. |
+| Events fired before GTM is ready | **Queued** in `window.dataLayer`, which GTM replays when it starts. |
 | Consent banner | Out of scope for v1. Open question below. |
 
 ## Pages
@@ -68,14 +85,20 @@ payment details or tickets.**
 |---|---|
 | `/enroll` | Event list: ad landing, page views |
 | `/enroll/[slug]` | Event page: main ad landing, `view_item`, `begin_checkout` |
+| `/enroll/[slug]/tickets` | Ticket selection for the Trusted Official template: `view_item`, `begin_checkout` |
 
-That is all for v1. Both pages show only public event information.
+That is all for v1. All three show only public event information.
+
+`/tickets` is **not** issued tickets. The event page redirects Trusted
+Official events there (`router.replace` in `src/app/(public)/enroll/[slug]/page.tsx`),
+and it renders `EvTrustedOfficialTemplate`, which is the tier picker and Buy
+button. Issued QR tickets are on `/checkout/success`, which stays off.
 
 ### Never
 
 Every other route, including all of `/enroll/[slug]/checkout/**`,
 `/enroll/form`, `/enroll/payment/**`, `/enroll/[slug]/success`,
-`/enroll/[slug]/status`, `/enroll/[slug]/tickets`, `/enroll/[slug]/interest`,
+`/enroll/[slug]/status`, `/enroll/[slug]/interest`,
 `/status`, and all of `/admin`, `/superadmin`, `/login`, `/register`,
 `/onboarding`.
 
@@ -127,16 +150,17 @@ covers custom domains). It adds `gtm_container_id` to that query and passes it
 to a small client component, `TenantTagManager`.
 
 `TenantTagManager` decides on the client, from `usePathname()`, whether the
-current page is on the allowlist (`/enroll`, or `/enroll/<slug>` where the
-segment is not `form` or `payment`). Only then, and only when the ID is set
-and the sensitive-context guard below passes, does it render the standard GTM
+current page is on the allowlist (`/enroll`, `/enroll/<slug>` where the
+segment is not `form` or `payment`, or `/enroll/<slug>/tickets`). Only then,
+and only when the ID is set and the isolation rules below pass, does it render the standard GTM
 snippet through `next/script` (`strategy="afterInteractive"`). There is no
 `<noscript>` iframe, because these pages need JavaScript anyway.
 
 Why a pathname gate rather than a separate layout: the public layout and
 `enroll/[slug]/layout.tsx` also wrap checkout, success, status and tickets,
 and a route group would mean moving the two pages and their siblings' layout.
-The gate keeps every file where it is. The container ID does reach the RSC
+The gate keeps every file where it is. The server decides the origin rule
+(below) and passes `null` instead of the ID when it fails. The container ID does reach the RSC
 payload of non-tracked pages, which is harmless: the ID is public, and no
 script is rendered there.
 
@@ -144,22 +168,55 @@ A gate only stops GTM from *starting* on the wrong page. Once started, it
 stays in `window` across client navigations, which is why every exit from a
 tracked page is a full page load (below).
 
-### Sensitive parameters
+### Isolation
 
-Before injecting the snippet, a small client guard checks the current URL. If
+GTM gets the whole origin, so the rules are about what is on the origin, not
+only what is on the page. All of them must pass, every page view.
+
+**1. Origin (server).** In production (`VERCEL_ENV === "production"`), the
+layout passes the ID only when the request host is the tenant's custom domain
+(`tenantForCustomHost(host)` returns this tenant). On the kuunyi subdomain it
+passes `null`. Outside production the subdomain is allowed, so UAT works
+without a custom domain; staging staff accounts are test accounts.
+
+A tenant that wants GTM in production therefore needs a custom domain first.
+This is the only rule that fully separates GTM from staff sessions: a cookie
+check (rule 3) cannot stop an organiser logging in in another tab while the
+event page is open.
+
+**2. URL (client).** If
 it has any of `psid`, `ref`, `cart_key`, `pi`, `payment_intent` or
 `session_id`, GTM is not loaded for that page view. On the event page this
 mainly means priority-link visits (`psid`) are not tracked. That is an
 acceptable loss, and simpler and safer than rewriting the URL under Next's
 router.
 
-**Priority-access tokens.** The emailed priority link carries its token in the
-URL fragment (`#pa=…`). The event page moves it into `sessionStorage` under
-`pa_<slug>` and strips the fragment (`src/lib/interest/priorityUnlock.ts`).
-`sessionStorage` is readable by any script on the origin, GTM included. So
-the guard also skips GTM when the fragment has `pa=` or any `pa_*` key exists
-in `sessionStorage`. Priority-window buyers are not tracked; everyone else
-is.
+The fragment counts too: `#pa=…` is the emailed priority link.
+
+**3. Browser state (client), fail closed.** GTM loads only if:
+
+- every key in `sessionStorage` and `localStorage` matches an allowlist of
+  known-safe keys. In v1 that is only `cart_<digits>` (ticket choices: class
+  ids, quantities, prices, image URLs);
+- no Supabase auth cookie (`sb-*`) is present in `document.cookie`;
+- reading storage does not throw.
+
+Anything else, including keys we do not know about yet, means no GTM for that
+page view. So `cs_<ref>` (Stripe secret), `pa_<slug>` (priority token) and a
+logged-in staff session all block it today, and a future feature that stores
+a credential blocks it too, instead of leaking until someone updates a
+denylist. The cost is that a buyer who comes back to the event page after
+starting checkout in the same tab is not tracked again. The implementation
+must check the keys that our own libraries (for example Vercel Analytics)
+write, and allowlist them only if they hold nothing sensitive.
+
+Effect order makes this work for the priority token: the event page's
+capture effect (child) moves `#pa=` into `sessionStorage` before the layout's
+effect (parent) runs the check.
+
+**Residual risk.** On the subdomain outside production, a staff session
+created in another tab *after* GTM loaded is readable. Accepted for UAT only;
+rule 1 removes it in production.
 
 Ad parameters are **not** on this list: `fbclid`, `ttclid` and `utm_*` are
 how Meta and TikTok attribute a landing to an ad, so they must reach the
@@ -177,16 +234,16 @@ page must be a full page load**:
   `src/app/(public)/enroll/[slug]/page.tsx`). Becomes `window.location.assign`.
 - `/enroll/[slug]` → `/enroll/[slug]/interest`: already a plain `<a>`, so
   already a full load. Keep it that way.
-- Event templates (`src/components/enrollment/templates`): only
-  `EvTrustedOfficialTemplate.tsx` uses `router.push` / `next/link`. Any of its
-  exits to non-allowlisted pages get the same treatment.
+- `/enroll/[slug]` → `/enroll/[slug]/tickets` (Trusted Official redirect):
+  both tracked, so it can stay a client-side `router.replace`.
+- `/enroll/[slug]/tickets` → `/enroll/[slug]/checkout`: today `router.push`
+  in `EvTrustedOfficialTemplate.tsx`. Becomes a full page load.
 
 To keep this from regressing, the change adds one helper (for example
 `hardNavigate(url)`) and a test that fails if an allowlisted page uses
 `router.push` or `next/link` towards a non-allowlisted route.
 
-Navigating between `/enroll` and `/enroll/[slug]` can stay client-side, since
-both are tracked.
+Navigating between allowlisted pages can stay client-side.
 
 ### Referrer
 
@@ -210,12 +267,20 @@ ever pushed.
 | Event | Where | Fields |
 |---|---|---|
 | `page_view` | Automatic (GTM) | URL with no sensitive params, guaranteed by the guard above |
-| `view_item` | `/enroll/[slug]` load | `event_slug`, `event_name`, `currency`, lowest ticket price |
-| `begin_checkout` | `/enroll/[slug]`, on Buy click, before the hard navigation | `event_slug`, `ticket_tier`, `quantity`, `value`, `currency` |
+| `view_item` | `/enroll/[slug]` load, or `/enroll/[slug]/tickets` load for Trusted Official | `event_slug`, `event_name`, `currency`, ticket tiers and prices |
+| `begin_checkout` | Same pages, on Buy click, before the hard navigation | `event_slug`, `ticket_tier`, `quantity`, `value`, `currency` |
 
-`begin_checkout` must be pushed before navigation, and the navigation must
-wait for it briefly (GTM's `eventCallback` with a short timeout, around
-300 ms), so slow tag loads cannot block the buyer.
+**Queue, do not drop.** Events are pushed onto `window.dataLayer`, creating it
+if needed, even before the GTM script has run. When GTM starts, it processes
+everything already in the array in order, so `view_item` fired right after the
+intake loads is not lost if the container loads later. If GTM never loads
+(the rules above failed), the array is only a list of public event data in
+our own page, with no reader.
+
+`begin_checkout` must be pushed before navigation. If GTM is running
+(`window.google_tag_manager` exists), navigation waits for its
+`eventCallback` or 300 ms, whichever is first. If it is not running, navigate
+at once.
 
 Names follow the GA4 recommended e-commerce events, so most organiser setups
 work without custom mapping.
@@ -293,17 +358,20 @@ Turning it off is clearing the field. No deploy needed.
 
 ## Open questions
 
-1. **Consent.** Do Sky Festival's buyers include EU or other regions that need
+1. **Sky Festival's custom domain.** Production GTM needs one (Isolation,
+   rule 1). Do they have a domain they can point at us, and which? Staging
+   UAT does not need it.
+2. **Consent.** Do Sky Festival's buyers include EU or other regions that need
    a cookie consent banner before loading tags? If yes, we need a consent
    banner and GTM Consent Mode before go-live.
-2. **Who controls the container on Sky Festival's side.** Them, or an agency?
+3. **Who controls the container on Sky Festival's side.** Them, or an agency?
    This should be in their agreement, since that party gets script access to
    the two tracked pages.
-3. ~~**Ad platforms.**~~ Answered: Meta and TikTok. Sky Festival adds the
+4. ~~**Ad platforms.**~~ Answered: Meta and TikTok. Sky Festival adds the
    Meta Pixel and TikTok Pixel inside GTM themselves (2026-10-30). Still open:
    do they need a purchase event before launch, or is `InitiateCheckout`
    enough to start? This drives when phase 2 is built.
-4. **Self-serve later?** If several tenants want GTM, do we move the field to
+5. **Self-serve later?** If several tenants want GTM, do we move the field to
    the tenant's settings, with owner-only access and an audit log?
-5. **Terms / privacy page.** Does `/privacy` need a line that organisers may
+6. **Terms / privacy page.** Does `/privacy` need a line that organisers may
    use analytics on event pages?
