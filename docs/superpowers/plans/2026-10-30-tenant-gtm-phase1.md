@@ -44,6 +44,12 @@ Two things the design did not know, both now in the design doc:
 |---|---|---|
 | P1 | Trusted Official POSTs `/api/public/enroll` from the tracked `/tickets` page, so container JS can read `enrollment_ref` from the response. The ref opens `/api/public/enrollment/[ref]` (buyer details, payment, tickets), even after checkout. | Order creation moves to a new untracked page, `/enroll/<slug>/checkout/new`, reached by a full page load. Task 4b. |
 
+### Codex re-review of `54c2074` (1 finding, confirmed)
+
+| # | Finding | Change |
+|---|---|---|
+| P1 | The handoff stash written on `/tickets` held the `idempotency_key`. `submit_cart_enrollment` returns the existing order for a known key and tenant, so container JS could replay the POST after checkout and get `enrollment_ref` back. | The key is created and kept only on `/checkout/new`, in storage the GTM allowlist rejects. `/tickets` passes ticket choices and terms acceptance only. Task 4b. |
+
 Checked at the same time: the only other API call on any tracked page is
 `GET /api/public/enroll/<slug>` (public intake data, no refs). The other buy
 flow already creates its order on `/enroll/form`, which is untracked.
@@ -199,8 +205,11 @@ test with a comment pointing at the design.
 
 ### 4b. Trusted Official: create the order off the tracked page
 
-Rule: **no tracked page may receive an enrollment ref**, in a response, a
-URL, storage or the DOM. Today `handleCheckout` in
+Rule: **no tracked page may receive an enrollment ref, or anything that can
+be exchanged for one**, in a response, a URL, storage or the DOM. The cart
+idempotency key is such a thing: `submit_cart_enrollment` returns the
+existing order, ref included, for a known key in the same tenant
+(`20261022130000_cart_idempotency.sql`). Today `handleCheckout` in
 `EvTrustedOfficialTemplate.tsx` POSTs `/api/public/enroll` on `/tickets` and
 gets `enrollment_ref` back while GTM is running.
 
@@ -210,21 +219,27 @@ New flow:
    terms ticked). Write one stash to `sessionStorage` under
    `cart_<Date.now()>` (the key shape the storage allowlist already accepts):
    `{ slug, items: [{ class_id, quantity }], terms_accepted, terms_version,
-   organiser_terms_sha256, idempotency_key }`. No ref, no personal data, no
-   priority token. Push `begin_checkout`, then
+   organiser_terms_sha256 }`. No ref, no idempotency key, no personal data, no
+   priority token. Anything a script copies from it can only create a *new*
+   order, which the public endpoint allows anyone to do already. Push `begin_checkout`, then
    `hardNavigate(\`/enroll/${slug}/checkout/new?cart_key=${key}\`)`.
 2. **`/enroll/<slug>/checkout/new` (untracked, new page).** On mount, read
-   and validate the stash (slug matches, items non-empty). Read the priority
-   token from `pa_<slug>` here, not on `/tickets`. POST `/api/public/enroll`
-   with exactly the body the template sends today. On success, delete the
-   stash and `router.replace(\`/enroll/${slug}/checkout/?ref=…\`)`; both pages
+   and validate the stash (slug matches, items non-empty). Get the
+   idempotency key from `sessionStorage["ck_<cart_key>"]`, or create one with
+   `randomId()` and write it there **before** the POST. `ck_` is not on the
+   GTM storage allowlist, so while it exists no tracked page in this tab loads
+   GTM. Read the priority token from `pa_<slug>` here, not on `/tickets`.
+   POST `/api/public/enroll` with the body the template sends today. On
+   success, delete the stash and `ck_<cart_key>`, and `router.replace(\`/enroll/${slug}/checkout/?ref=…\`)`; both pages
    are untracked, so a client-side move is fine. On error, show it with a
    "Back to tickets" plain `<a>` to `/enroll/<slug>/tickets/`. Missing or
    invalid stash (back button, reload after success): redirect to
    `/enroll/<slug>/tickets/`.
-3. A reload during step 2 re-sends the same `idempotency_key`, so the server's
-   cart idempotency (`20261022130000_cart_idempotency.sql`) returns the same
-   order instead of creating a second one.
+3. A reload during step 2 finds `ck_<cart_key>` and re-sends the same key, so
+   the server returns the same order instead of creating a second one. If
+   the POST failed, `ck_` stays (the order may exist with a lost response),
+   which keeps GTM off `/tickets` in that tab. That is the intended fail-closed
+   cost.
 
 Terms: the buyer still ticks the box on `/tickets`; the POST that records
 acceptance follows one page load later in the same tab, with the same
@@ -238,13 +253,17 @@ Tests:
 
 - `src/__tests__/enrollment/trustedOfficialCheckoutNew.test.tsx`: POSTs the
   stashed body once, includes the priority token when present, replaces to
-  `/checkout/?ref=…`, deletes the stash; redirects to `/tickets/` on missing,
+  `/checkout/?ref=…`, deletes the stash and `ck_`; creates the key on this
+  page and reuses it from `ck_` on reload; never reads a key from the stash;
+  redirects to `/tickets/` on missing,
   malformed or other-slug stash; shows the error and back link on a failed
   POST.
 - `src/__tests__/tracking/noRefOnTrackedPages.test.ts`: a static check that
   the tracked pages and `src/components/enrollment/templates/*.tsx` contain no
-  `fetch` to `/api/public/enroll` with a POST, and no read of
-  `enrollment_ref`. Fails if order creation ever moves back.
+  `fetch` to `/api/public/enroll` with a POST, no read of `enrollment_ref`,
+  and no `idempotency_key` or `randomId` use. Fails if order creation or its
+  key ever moves back.
+- In `tagManager.test.ts`: a `ck_x` storage key blocks GTM.
 
 ### 5. Superadmin: set and clear
 
