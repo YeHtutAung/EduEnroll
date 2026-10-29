@@ -30,6 +30,14 @@ Two things the design did not know, both now in the design doc:
    `src/lib/interest/priorityUnlock.ts`), readable by any script on the page.
    The guard (task 3) skips GTM when one is present.
 
+### Codex review of `d5d51c3` (3 findings, all confirmed in code)
+
+| # | Finding | Change |
+|---|---|---|
+| P1 | `sessionStorage["cs_<ref>"]` (Stripe secret + order ref) and staff sessions on the same origin pass a URL-and-`pa_*` guard | Origin rule (production: custom domain only) and a **fail-closed** storage / cookie allowlist. Tasks 2, 3. |
+| P2 | Trusted Official renders on `/enroll/<slug>/tickets`, which was excluded, so its `begin_checkout` had no consumer | `/tickets` is ticket selection, not issued tickets: added to the allowlist. Tasks 2, 4. |
+| P2 | `view_item` could fire before GTM exists and be dropped | `pushDataLayer` always queues onto `window.dataLayer`; GTM replays it. Task 2. |
+
 ## Tasks
 
 ### 1. Migration: column, format check, change guard
@@ -88,23 +96,35 @@ component and the tests:
 - `GTM_CONTAINER_ID_RE = /^GTM-[A-Z0-9]{4,12}$/` and
   `normalizeGtmContainerId(input: unknown): string | null | "invalid"`
   (trims, uppercases, `""` → `null`).
-- `isTrackedPath(pathname)`: true for `/enroll` and `/enroll/<seg>` where
-  `<seg>` is not `form` or `payment`; tolerates a trailing slash; false for
-  everything else.
+- `isTrackedPath(pathname)`: true for `/enroll`, `/enroll/<seg>` where
+  `<seg>` is not `form` or `payment`, and `/enroll/<seg>/tickets`; tolerates
+  a trailing slash; false for everything else.
+- `gtmAllowedOnHost({ host, tenantSlug, isProduction })`: in production,
+  true only when `tenantForCustomHost(host) === tenantSlug`; otherwise true.
 - `SENSITIVE_PARAMS = ["psid", "ref", "cart_key", "pi", "payment_intent",
-  "session_id"]` and `hasSensitiveContext(location, storage)`: true if any
-  sensitive param is in the query, `pa=` is in the hash, or any
-  `sessionStorage` key starts with `pa_`. `storage` access is wrapped in
-  try/catch; if storage throws, return true (fail closed).
-- `pushDataLayer(event, payload)`: no-op when `window.dataLayer` is absent;
-  pushes `{ ecommerce: null }` first, then the event (GA4 convention so
-  ecommerce objects do not merge).
+  "session_id"]`.
+- `SAFE_STORAGE_KEYS = [/^cart_\d+$/]` (plus any key our own libraries write
+  that the implementation confirms is harmless, each with a comment).
+- `isBrowserStateClean({ location, sessionStorage, localStorage, cookie })`:
+  false if any sensitive param is in the query, `pa=` is in the hash, any key
+  in either storage fails `SAFE_STORAGE_KEYS`, or `cookie` has a name
+  starting with `sb-`. Any thrown error returns false. This is an
+  **allowlist**: unknown keys block GTM.
+- `pushDataLayer(event, payload)`: `window.dataLayer = window.dataLayer || []`,
+  then pushes `{ ecommerce: null }` and the event (GA4 convention so
+  ecommerce objects do not merge). Never a no-op, so events fired before GTM
+  starts are queued and replayed.
 - `hardNavigate(url, opts?)`: `window.location.assign(url)`. With
-  `opts.afterEvent`, pushes the event with `eventCallback` and navigates on
-  callback or after 300 ms, whichever comes first, exactly once.
+  `opts.afterEvent`, pushes the event; if `window.google_tag_manager` exists,
+  navigates on `eventCallback` or after 300 ms, whichever comes first,
+  exactly once; otherwise navigates at once.
 
 Tests: `src/__tests__/lib/tagManager.test.ts`, covering every branch above,
-including `fbclid` / `ttclid` / `utm_source` **not** counting as sensitive.
+including `fbclid` / `ttclid` / `utm_source` **not** counting as sensitive,
+`cs_ABC` / `pa_x` / an unknown key / an `sb-…-auth-token` cookie each
+blocking, `cart_123` alone passing, a throwing storage blocking, events pushed
+before `dataLayer` exists being kept, and `gtmAllowedOnHost` for custom
+domain vs subdomain in and out of production.
 
 ### 3. `TenantTagManager` client component and wiring
 
@@ -112,7 +132,7 @@ including `fbclid` / `ttclid` / `utm_source` **not** counting as sensitive.
 
 - Props: `containerId: string | null`.
 - Returns `null` unless `containerId` matches the regex, `isTrackedPath(usePathname())`
-  holds, and `hasSensitiveContext(window.location, sessionStorage)` is false.
+  holds, and `isBrowserStateClean(...)` is true.
   The last check runs in an effect, so the first render is always `null` and
   hydration matches.
 - Otherwise renders `<Script id="tenant-gtm" strategy="afterInteractive">` with
@@ -123,15 +143,18 @@ Effect order matters for the priority token: the event page's capture effect
 runs the token is already in `sessionStorage` and the guard sees it.
 
 Wiring in `src/app/(public)/layout.tsx`: add `gtm_container_id` to the
-existing `tenants` select and render `<TenantTagManager containerId={…} />`
-once, inside the outer `div`.
+existing `tenants` select, apply `gtmAllowedOnHost` with the request host and
+`process.env.VERCEL_ENV === "production"`, and render
+`<TenantTagManager containerId={allowed ? id : null} />` once, inside the
+outer `div`.
 
 Tests: `src/__tests__/tracking/tenantTagManager.test.tsx`: renders the script
-on `/enroll` and `/enroll/sky-fest-2026`; renders nothing on
-`/enroll/form`, `/enroll/payment/X`, `/enroll/x/checkout`,
-`/enroll/x/checkout/success`, `/enroll/x/status`, `/enroll/x/tickets`,
-`/enroll/x/interest`, `/status`; nothing with a null or malformed ID; nothing
-with `?psid=…`, `#pa=…` or a `pa_x` storage key; renders with `?fbclid=…`.
+on `/enroll`, `/enroll/sky-fest-2026` and `/enroll/sky-fest-2026/tickets`;
+renders nothing on `/enroll/form`, `/enroll/payment/X`, `/enroll/x/checkout`,
+`/enroll/x/checkout/success`, `/enroll/x/status`, `/enroll/x/interest`,
+`/status`; nothing with a null or malformed ID; nothing with `?psid=…`,
+`#pa=…`, a `pa_x` or `cs_x` storage key, or an `sb-` cookie; renders with
+`?fbclid=…`.
 
 ### 4. Event page: events and hard exits
 
@@ -143,6 +166,12 @@ with `?psid=…`, `#pa=…` or a `pa_x` storage key; renders with `?fbclid=…`.
 - `handleSelectClass` and `handleCartCheckout`: build the `begin_checkout`
   payload (`value` = sum of price × quantity, `currency`, `items`), then
   `hardNavigate(url, { afterEvent })` instead of `router.push`.
+
+`src/app/(public)/enroll/[slug]/tickets/page.tsx` (Trusted Official):
+
+- After the intake loads, `pushDataLayer("view_item", …)` with the same shape
+  as the event page. The event page does not fire `view_item` when it
+  redirects here, so it is counted once.
 
 `src/components/enrollment/templates/EvTrustedOfficialTemplate.tsx`:
 
@@ -156,9 +185,10 @@ Always hard-navigate, whether or not GTM is active: one code path, and the
 cost is one page load at the step where the buyer is already committing.
 
 Test: `src/__tests__/tracking/noSoftExits.test.ts`, a static check that
-`src/app/(public)/enroll/[slug]/page.tsx`, `src/app/(public)/enroll/page.tsx`
-and `src/components/enrollment/templates/*.tsx` contain no `router.push` /
-`router.replace` to anything but `/enroll` or `/enroll/<slug>`, and no
+`src/app/(public)/enroll/[slug]/page.tsx`, `src/app/(public)/enroll/page.tsx`,
+`src/app/(public)/enroll/[slug]/tickets/page.tsx` and
+`src/components/enrollment/templates/*.tsx` contain no `router.push` /
+`router.replace` to anything but allowlisted paths, and no
 `next/link` `href` outside the allowlist. Allowlisted patterns are listed in the
 test with a comment pointing at the design.
 
@@ -217,6 +247,10 @@ Preview mode:
 - Click Buy: `begin_checkout` fires, a full page load follows, and
   `window.google_tag_manager` is `undefined` on the form / checkout page.
 - Open the event page with `#pa=test`: no container.
+- Set `sessionStorage.cs_TEST = "x"`, reload the event page: no container.
+- Log in to `/admin` in the same browser, open the event page: no container.
+- A Trusted Official event: `view_item` on `/tickets`, `begin_checkout` on
+  Buy, then a full load into checkout.
 
 ## Deploy order
 
@@ -230,7 +264,10 @@ Preview mode:
    them the staging event page URL; they verify in GTM Preview and set up
    their FB / TikTok pixels.
 6. Sky Festival launches ads once staging checks out. Production follows the
-   normal `staging` → `main` path; set the ID on production after that.
+   normal `staging` → `main` path. **In production GTM loads only on the
+   tenant's custom domain**, so Sky Festival needs one mapped in
+   `TENANT_CUSTOM_DOMAINS` before the ID does anything there. Ads must link
+   to the custom domain.
 
 ## Rollback
 
