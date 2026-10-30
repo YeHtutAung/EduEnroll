@@ -122,8 +122,18 @@ base spec's unique index already use.
 
 Backfill in the same migration: existing KBZPay rows get `'BRAVE'` (only Brave has ever used
 KBZPay). Then
-`CHECK (payment_method <> 'kbzpay_mmqr' OR kbzpay_merchant IS NOT NULL)` makes the pin
-mandatory for KBZPay rows going forward.
+`CHECK ((payment_method IS NOT DISTINCT FROM 'kbzpay_mmqr') = (kbzpay_merchant IS NOT NULL))`
+makes the pin mandatory for KBZPay rows and forbidden on every other row, null-safe because
+`payment_method` is nullable. The second direction also stops a pinned KBZPay row from being
+re-labelled as another method while keeping its pin. The backfill must therefore cover every
+KBZPay row before the CHECK is added, and it does: **every** existing `kbzpay_mmqr` row is
+pinned to `'BRAVE'`, whatever its tenant. The pin records the merchant that *created* the
+order, and before this migration the only KBZPay credentials were the platform-wide set, which
+was Brave's merchant. Any legacy order belonging to another tenant (the dev DB had one, a
+rejected BeatsRun test order from 2026-10-22) therefore lives under Brave's merchant at KBZPay
+and can only be queried or closed there. That tenant gets no assignment, so the pin grants it
+nothing new. (An earlier revision scoped the backfill to Brave's tenant so that such a row
+would abort the migration; the dev pre-check found one and showed that the scoping was wrong.)
 
 **The pin is enforced in the database, not by convention.** The pin decides which
 merchant's credentials an order is queried, closed and verified with, so it must not depend

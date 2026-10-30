@@ -106,11 +106,77 @@ export function buildMerchOrderId(enrollmentId: string): string {
   return `KBZ_${short}_${randomBytes(8).toString("hex")}`;
 }
 
-// ── Transport ──────────────────────────────────────────────────────────────
+// ── Merchants ──────────────────────────────────────────────────────────────
 
-const APPID = () => process.env.KBZPAY_APPID!;
-const MERCH_CODE = () => process.env.KBZPAY_MERCH_CODE!;
-const APP_KEY = () => process.env.KBZPAY_APP_KEY!;
+/**
+ * One KBZPay merchant's credentials, read from `KBZPAY_<ID>_*`.
+ *
+ * Spec 2026-10-30 §3, §5.1. A tenant's merchant id comes from
+ * kbzpay_merchant_assignments and is pinned on each payment row; every call
+ * for an order uses the merchant pinned on it.
+ */
+export type KbzMerchant = {
+  id: string;
+  appid: string;
+  merchCode: string;
+  appKey: string;
+  /** https origin KBZPay calls back, registered with KBZPay for this merchant. */
+  notifyOrigin: string;
+};
+
+const MERCHANT_ID_PATTERN = /^[A-Z][A-Z0-9_]{1,31}$/;
+
+/**
+ * Resolves a merchant, failing closed.
+ *
+ * There is deliberately NO fallback — not to another merchant, not to the
+ * retired unprefixed KBZPAY_APPID/MERCH_CODE/APP_KEY. A fallback is exactly
+ * how one tenant's buyers would end up paying another tenant's account.
+ *
+ * Errors name the variable, never its value.
+ */
+export function getKbzMerchant(id: string | null | undefined): KbzMerchant {
+  if (!id || !MERCHANT_ID_PATTERN.test(id)) {
+    throw new Error("KBZPay merchant id is missing or malformed");
+  }
+
+  const read = (suffix: string): string => {
+    const name = `KBZPAY_${id}_${suffix}`;
+    const value = process.env[name]?.trim();
+    if (!value) throw new Error(`${name} is not set`);
+    return value;
+  };
+
+  return {
+    id,
+    appid: read("APPID"),
+    merchCode: read("MERCH_CODE"),
+    appKey: read("APP_KEY"),
+    notifyOrigin: parseNotifyOrigin(`KBZPAY_${id}_NOTIFY_ORIGIN`, read("NOTIFY_ORIGIN")),
+  };
+}
+
+/**
+ * https only, normalised to the origin. Unlike the old KBZPAY_NOTIFY_ORIGIN,
+ * a bad value is an error rather than a fallback to platformOrigin(): with
+ * several merchants, a fallback would send this merchant's callbacks to a
+ * host KBZPay has not registered for it.
+ */
+function parseNotifyOrigin(name: string, value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`${name} is not a valid URL`);
+  }
+  if (parsed.protocol !== "https:") throw new Error(`${name} must use https`);
+  // Credentials would be stripped silently by .origin, and a value such as
+  // https://a.com\@evil.com resolves to evil.com; refuse rather than guess.
+  if (parsed.username || parsed.password) throw new Error(`${name} must not contain credentials`);
+  return parsed.origin;
+}
+
+// ── Transport ──────────────────────────────────────────────────────────────
 
 // KBZPay's UAT gateway is split by scheme, and not by any choice of ours.
 // Probing all six host/scheme pairs on 2026-09-01 gave:
@@ -285,6 +351,7 @@ type CallResult = {
 };
 
 async function call(
+  merchant: KbzMerchant,
   path: string,
   method: string,
   version: string,
@@ -308,7 +375,7 @@ async function call(
     biz_content: bizContent,
     ...extraCommon,
   };
-  request.sign = sign(request, APP_KEY());
+  request.sign = sign(request, merchant.appKey);
 
   // Resolved outside the try on purpose. A bad KBZPAY_MODE is an operator
   // error, not a transport failure, and must not be laundered into a handled
@@ -395,14 +462,19 @@ function safeTimeoutMinutes(value: number): number {
   return Math.min(Math.max(Math.floor(value), 1), 120);
 }
 
-export async function precreate(p: PrecreateParams, budget?: CallBudget): Promise<PrecreateResult> {
+export async function precreate(
+  merchant: KbzMerchant,
+  p: PrecreateParams,
+  budget?: CallBudget,
+): Promise<PrecreateResult> {
   const r = await call(
+    merchant,
     "precreate",
     "kbz.payment.precreate",
     "1.0",
     {
-      appid: APPID(),
-      merch_code: MERCH_CODE(),
+      appid: merchant.appid,
+      merch_code: merchant.merchCode,
       merch_order_id: p.merchOrderId,
       trade_type: "PAY_BY_QRCODE",
       title: p.title,
@@ -450,10 +522,14 @@ export type QueryResult =
  * no terminal mmqr_status transition and no order-slot release may be decided
  * from local state; only from this call's answer.
  */
-export async function queryOrder(merchOrderId: string, budget?: CallBudget): Promise<QueryResult> {
-  const r = await call("queryorder", "kbz.payment.queryorder", "3.0", {
-    appid: APPID(),
-    merch_code: MERCH_CODE(),
+export async function queryOrder(
+  merchant: KbzMerchant,
+  merchOrderId: string,
+  budget?: CallBudget,
+): Promise<QueryResult> {
+  const r = await call(merchant, "queryorder", "kbz.payment.queryorder", "3.0", {
+    appid: merchant.appid,
+    merch_code: merchant.merchCode,
     merch_order_id: merchOrderId,
   }, {}, budget);
 
@@ -502,10 +578,14 @@ export async function queryOrder(merchOrderId: string, budget?: CallBudget): Pro
  * not payable *now*, without saying whether it was cancelled or completed.
  * The caller MUST re-query afterwards. Spec §5.1 step 7b, R12.
  */
-export async function closeOrder(merchOrderId: string, budget?: CallBudget): Promise<{ ok: boolean }> {
-  const r = await call("closeorder", "kbz.payment.closeorder", "3.0", {
-    appid: APPID(),
-    merch_code: MERCH_CODE(),
+export async function closeOrder(
+  merchant: KbzMerchant,
+  merchOrderId: string,
+  budget?: CallBudget,
+): Promise<{ ok: boolean }> {
+  const r = await call(merchant, "closeorder", "kbz.payment.closeorder", "3.0", {
+    appid: merchant.appid,
+    merch_code: merchant.merchCode,
     merch_order_id: merchOrderId,
   }, {}, budget);
 
@@ -516,5 +596,5 @@ export async function closeOrder(merchOrderId: string, budget?: CallBudget): Pro
 
 // ── Export ─────────────────────────────────────────────────────────────────
 
-const kbzpay = { precreate, queryOrder, closeOrder, sign, verifySign, buildMerchOrderId };
+const kbzpay = { precreate, queryOrder, closeOrder, sign, verifySign, buildMerchOrderId, getKbzMerchant };
 export default kbzpay;
