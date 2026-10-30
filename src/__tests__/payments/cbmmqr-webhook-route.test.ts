@@ -40,7 +40,7 @@ const post = (body: unknown = BODY) =>
     method: "POST", body: typeof body === "string" ? body : JSON.stringify(body),
     headers: { "Content-Type": "application/json" },
   }));
-const PAID = { kind: "answer", code: "0000", referenceNo: REF, currency: "MMK", amount: 40000 };
+const PAID = { kind: "answer", code: "0000", referenceNo: REF, qrReferenceNo: "QR-1", currency: "MMK", amount: 40000 };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -68,6 +68,37 @@ describe("POST /api/webhooks/cbmmqr", () => {
   it("never passes a callback field to settlement — only the status response", async () => {
     await post({ ...BODY, transAmount: 1, transCurrency: "840" });
     expect(mockSettle.mock.calls[0][0].status).toBe(PAID);
+  });
+
+  it("passes settlement exactly the payment's identity fields", async () => {
+    payment = { ...payment, provider_order_ref: "QR-1" };
+    await post();
+    expect(mockSettle.mock.calls[0][0].payment).toEqual({
+      payment_ref: REF, payment_method: "cb_mmqr", cbmmqr_merchant: "YOUNGMONEY",
+    });
+  });
+
+  it("accepts numeric transCurrency / transStatusCode and a string transAmount", async () => {
+    const res = await post({ ...BODY, transCurrency: 104, transStatusCode: 0, transAmount: "40000" });
+    expect(res.status).toBe(200);
+    expect(mockSettle).toHaveBeenCalledTimes(1);
+  });
+
+  it("500 when the status check throws a configuration error", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mockStatus.mockRejectedValue(new Error("CBMMQR_MODE is set to an unrecognised value"));
+    expect((await post()).status).toBe(500);
+    expect(mockSettle).not.toHaveBeenCalled();
+    expect(spy.mock.calls.some((c) => String(c[0]).includes(`[cbmmqr-webhook] config error for ${REF}`))).toBe(true);
+    spy.mockRestore();
+  });
+
+  it("refuses (acknowledged, no settlement) when CB's answer names a different QR reference", async () => {
+    mockStatus.mockResolvedValue({ ...PAID, qrReferenceNo: "QR-OTHER" });
+    const res = await post();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ qrReferenceNo: "QR-1", returnCode: "0000", message: "Success" });
+    expect(mockSettle).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -102,10 +133,21 @@ describe("POST /api/webhooks/cbmmqr", () => {
   });
 
   it("403 without calling CB when the callback's QR reference is not the stored one", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
     payment = { ...payment, provider_order_ref: "QR-STORED" };
     expect((await post()).status).toBe(403);
     expect(mockStatus).not.toHaveBeenCalled();
     expect(mockSettle).not.toHaveBeenCalled();
+    const line = spy.mock.calls.map((c) => String(c[0])).find((l) => l.includes("QR-STORED"));
+    expect(line).toContain("YOUNGMONEY");
+    expect(line).not.toContain("ym-api-key");
+    spy.mockRestore();
+  });
+
+  it("403 for a different stored reference even when the description is FAIL", async () => {
+    payment = { ...payment, provider_order_ref: "QR-STORED" };
+    expect((await post({ ...BODY, transStatusDescription: "FAIL" })).status).toBe(403);
+    expect(mockStatus).not.toHaveBeenCalled();
   });
 
   it("queries CB with the stored QR reference when there is one", async () => {

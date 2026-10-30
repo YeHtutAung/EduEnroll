@@ -89,6 +89,12 @@ describe("GET /api/public/payments/cbmmqr/status", () => {
     expect((await (await get()).json()).mmqr_status).toBe("PENDING");
   });
 
+  it("PENDING with expiresAt when the status check throws a configuration error", async () => {
+    mockStatus.mockRejectedValue(new Error("CBMMQR_MODE is set to an unrecognised value"));
+    expect(await (await get()).json()).toEqual({ mmqr_status: "PENDING", expiresAt: PAYMENT.provider_order_expires_at });
+    expect(mockSettle).not.toHaveBeenCalled();
+  });
+
   it("PENDING when the pinned merchant has no config", async () => {
     payment = { ...PAYMENT, cbmmqr_merchant: "NOCONFIG" };
     expect((await (await get()).json()).mmqr_status).toBe("PENDING");
