@@ -292,6 +292,13 @@ describe("review fixes", () => {
     expect(calls.filter((c) => route(c.url) === "create")).toHaveLength(0);
   });
 
+  it("a credential failure on the refresh after CB answered is ambiguous, not a rejection", async () => {
+    answers.token = [tokenOk(), { body: { returnCode: "0021" } }];
+    answers.create = [{ body: { returnCode: "0017" } }];
+    expect((await createDynamicQr(MERCHANT, params)).kind).toBe("ambiguous");
+    expect(calls.filter((c) => route(c.url) === "create")).toHaveLength(1);
+  });
+
   it("a 5xx token failure with a credential code is ambiguous", async () => {
     answers.token = [{ status: 503, body: { returnCode: "0021" } }];
     expect((await createDynamicQr(MERCHANT, params)).kind).toBe("ambiguous");
@@ -327,11 +334,15 @@ describe("review fixes", () => {
   });
 
   it("a bad CBMMQR_PROXY_URL surfaces as a configuration error, not 'CB down'", async () => {
-    process.env.CBMMQR_PROXY_URL = "not a url";
+    process.env.CBMMQR_PROXY_URL = "http://u:sekret@host:99999";
     vi.resetModules(); // the dispatcher is cached per module instance
     try {
       const fresh = await import("@/lib/cbmmqr");
-      await expect(fresh.createDynamicQr(MERCHANT, params)).rejects.toThrow();
+      const err = await fresh.createDynamicQr(MERCHANT, params).then(() => null, (e: unknown) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect((err as Error).message).toBe("CBMMQR_PROXY_URL is not a valid proxy URL");
+      expect(err).not.toHaveProperty("input");
+      expect(String(err)).not.toContain("sekret");
     } finally { delete process.env.CBMMQR_PROXY_URL; }
   });
 

@@ -233,7 +233,16 @@ let cachedProxy: ProxyAgent | null | undefined;
 function egressDispatcher(): ProxyAgent | Agent {
   if (cachedProxy === undefined) {
     const url = process.env.CBMMQR_PROXY_URL;
-    cachedProxy = url ? new ProxyAgent(url) : null;
+    if (url) {
+      try {
+        cachedProxy = new ProxyAgent(url);
+      } catch {
+        // undici's TypeError carries the whole URL, credentials included.
+        throw new Error("CBMMQR_PROXY_URL is not a valid proxy URL");
+      }
+    } else {
+      cachedProxy = null;
+    }
   }
   return cachedProxy ?? ipv4Agent;
 }
@@ -368,7 +377,9 @@ async function withToken(
   if (!r.ok || !TOKEN_CODES.has(r.code ?? "")) return r;
 
   const second = await getToken(merchant, budget, true);
-  if (!("token" in second)) return { tokenFailCode: second.failCode };
+  // CB already answered the first call, so a failed refresh is never a definite
+  // rejection: it stays ambiguous.
+  if (!("token" in second)) return { ok: false };
   return call(second.token);
 }
 
@@ -403,7 +414,8 @@ export async function createDynamicQr(
   );
 
   if ("tokenFailCode" in r) {
-    // No token means CB was never asked to create anything.
+    // Only reached from the first token fetch, before any call to CB: no token
+    // means CB was never asked to create anything.
     if (r.tokenFailCode === "0016" || r.tokenFailCode === "0021") {
       return { kind: "rejected", reason: "config", code: r.tokenFailCode };
     }
