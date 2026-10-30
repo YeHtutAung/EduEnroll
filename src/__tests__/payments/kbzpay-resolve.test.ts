@@ -218,6 +218,10 @@ describe("merchant", () => {
 
     await resolve();
 
+    // Pin the call counts so the loop below cannot pass vacuously.
+    expect(mockQueryOrder).toHaveBeenCalledTimes(2);
+    expect(mockCloseOrder).toHaveBeenCalledTimes(1);
+
     for (const call of [...mockQueryOrder.mock.calls, ...mockCloseOrder.mock.calls]) {
       expect(call[0]).toBe(MERCHANT);
       expect(call[1]).toBe(OLD_REF);

@@ -195,6 +195,13 @@ describe("merchant", () => {
     expect(mockQueryOrder).not.toHaveBeenCalled();
   });
 
+  it("answers SUCCESS without calling KBZPay when verified locally, even if the pinned merchant is misconfigured", async () => {
+    payment = { ...payment!, status: "verified", kbzpay_merchant: "SKYFEST" }; // no KBZPAY_SKYFEST_* set
+    const res = await GET(req());
+    expect(await body(res)).toEqual({ mmqr_status: "SUCCESS" });
+    expect(mockQueryOrder).not.toHaveBeenCalled();
+  });
+
   it("answers PENDING without calling KBZPay for a non-KBZPay ref", async () => {
     payment = null; // the method filter excludes it
     const res = await GET(req("ABANK_123"));
