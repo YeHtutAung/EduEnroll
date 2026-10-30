@@ -113,9 +113,6 @@ const liveRows = (enrollmentId: string) =>
     [enrollmentId],
   );
 
-const enrollmentStatusOf = async (id: string) =>
-  (await sql<{ status: string }>(`SELECT status FROM enrollments WHERE id=$1`, [id]))[0].status;
-
 beforeAll(async () => {
   made = fresh();
   await pool.query("SELECT 1");
