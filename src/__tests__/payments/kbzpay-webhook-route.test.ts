@@ -24,6 +24,7 @@ process.env.KBZPAY_SKYFEST_NOTIFY_ORIGIN = "https://skyfest.kuunyi.com";
 type Row = Record<string, unknown>;
 
 let payment: Row | null;
+let lookupError: { message: string } | null;
 let queryResult: Row;
 let settleResult: Row;
 let eqCalls: [string, unknown][];
@@ -91,12 +92,13 @@ beforeEach(() => {
   mockQueryOrder.mockImplementation(async () => queryResult);
   mockSettle.mockImplementation(async () => settleResult);
   eqCalls = [];
+  lookupError = null;
   mockFrom.mockImplementation(() => ({
     select: () => ({
       eq: (c1: string, v1: unknown) => ({
         eq: (c2: string, v2: unknown) => {
           eqCalls.push([c1, v1], [c2, v2]);
-          return { maybeSingle: async () => ({ data: payment, error: null }) };
+          return { maybeSingle: async () => ({ data: payment, error: lookupError }) };
         },
       }),
     }),
@@ -279,6 +281,21 @@ describe("per-merchant verification", () => {
   it("rejects a correctly signed callback whose merch_code is not the pinned merchant's", async () => {
     const res = await POST(signedRequest({ merch_code: "70000000002" }));
     expect(res.status).toBe(403);
+    expect(mockQueryOrder).not.toHaveBeenCalled();
+    expect(mockSettle).not.toHaveBeenCalled();
+  });
+
+  // Every field is coherent for SKYFEST (key, merch_code, appid), but the row
+  // is pinned to BRAVE: a whole other merchant's identity must still be refused.
+  it("rejects a fully coherent callback from ANOTHER merchant against a BRAVE-pinned row", async () => {
+    const res = await POST(
+      signedRequest(
+        { merch_code: "70000000002", appid: "kpsky00000000000000000000000000000" },
+        SKYFEST_KEY,
+      ),
+    );
+    expect(res.status).toBe(403);
+    expect(mockQueryOrder).not.toHaveBeenCalled();
     expect(mockSettle).not.toHaveBeenCalled();
   });
 
@@ -304,6 +321,33 @@ describe("per-merchant verification", () => {
     payment = { ...payment!, kbzpay_merchant: "NOPE" };
     const res = await POST(signedRequest());
     expect(res.status).toBe(500);
+    expect(mockSettle).not.toHaveBeenCalled();
+  });
+});
+
+describe("callback ref and lookup failures", () => {
+  // The lookup runs before authentication, so an unauthenticated caller
+  // controls the ref: bound it before it reaches the DB or a log line.
+  it.each([
+    ["contains CR/LF", "KBZ_1a2b3c4d_9f3c\r\nforged log line"],
+    ["is 65 characters long", "K".repeat(65)],
+  ])("returns 400 without a DB call when the ref %s", async (_label, ref) => {
+    const res = await POST(signedRequest({ merch_order_id: ref }));
+
+    expect(res.status).toBe(400);
+    expect(mockFrom).not.toHaveBeenCalled();
+    expect(mockQueryOrder).not.toHaveBeenCalled();
+    expect(mockSettle).not.toHaveBeenCalled();
+  });
+
+  // A DB failure is not "no such payment": 404 would hide an outage as a race.
+  it("returns 500 so KBZPay retries when the payment lookup fails", async () => {
+    payment = null;
+    lookupError = { message: "boom" };
+    const res = await POST(signedRequest());
+
+    expect(res.status).toBe(500);
+    expect(mockQueryOrder).not.toHaveBeenCalled();
     expect(mockSettle).not.toHaveBeenCalled();
   });
 });
