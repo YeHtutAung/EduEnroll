@@ -106,6 +106,73 @@ export function buildMerchOrderId(enrollmentId: string): string {
   return `KBZ_${short}_${randomBytes(8).toString("hex")}`;
 }
 
+// ── Merchants ──────────────────────────────────────────────────────────────
+
+/**
+ * One KBZPay merchant's credentials, read from `KBZPAY_<ID>_*`.
+ *
+ * Spec 2026-10-30 §3, §5.1. A tenant's merchant id comes from
+ * kbzpay_merchant_assignments and is pinned on each payment row; every call
+ * for an order uses the merchant pinned on it.
+ */
+export type KbzMerchant = {
+  id: string;
+  appid: string;
+  merchCode: string;
+  appKey: string;
+  /** https origin KBZPay calls back, registered with KBZPay for this merchant. */
+  notifyOrigin: string;
+};
+
+const MERCHANT_ID_PATTERN = /^[A-Z][A-Z0-9_]{1,31}$/;
+
+/**
+ * Resolves a merchant, failing closed.
+ *
+ * There is deliberately NO fallback — not to another merchant, not to the
+ * retired unprefixed KBZPAY_APPID/MERCH_CODE/APP_KEY. A fallback is exactly
+ * how one tenant's buyers would end up paying another tenant's account.
+ *
+ * Errors name the variable, never its value.
+ */
+export function getKbzMerchant(id: string | null | undefined): KbzMerchant {
+  if (!id || !MERCHANT_ID_PATTERN.test(id)) {
+    throw new Error("KBZPay merchant id is missing or malformed");
+  }
+
+  const read = (suffix: string): string => {
+    const name = `KBZPAY_${id}_${suffix}`;
+    const value = process.env[name]?.trim();
+    if (!value) throw new Error(`${name} is not set`);
+    return value;
+  };
+
+  return {
+    id,
+    appid: read("APPID"),
+    merchCode: read("MERCH_CODE"),
+    appKey: read("APP_KEY"),
+    notifyOrigin: parseNotifyOrigin(`KBZPAY_${id}_NOTIFY_ORIGIN`, read("NOTIFY_ORIGIN")),
+  };
+}
+
+/**
+ * https only, normalised to the origin. Unlike the old KBZPAY_NOTIFY_ORIGIN,
+ * a bad value is an error rather than a fallback to platformOrigin(): with
+ * several merchants, a fallback would send this merchant's callbacks to a
+ * host KBZPay has not registered for it.
+ */
+function parseNotifyOrigin(name: string, value: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    throw new Error(`${name} is not a valid URL`);
+  }
+  if (parsed.protocol !== "https:") throw new Error(`${name} must use https`);
+  return parsed.origin;
+}
+
 // ── Transport ──────────────────────────────────────────────────────────────
 
 const APPID = () => process.env.KBZPAY_APPID!;
