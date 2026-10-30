@@ -29,6 +29,14 @@ const { resolveKbzpayOrder } = await import("@/server/payments/resolveKbzpayOrde
 
 const OLD_REF = "KBZ_1a2b3c4d_9f3c7b21d0e4a856";
 
+const MERCHANT = {
+  id: "BRAVE",
+  appid: "kptest0000000000000000000000000000",
+  merchCode: "70000000001",
+  appKey: "testkey0123456789abcdef",
+  notifyOrigin: "https://brave.kuunyi.com",
+};
+
 const paid = {
   ok: true,
   tradeStatus: "PAY_SUCCESS",
@@ -43,7 +51,7 @@ beforeEach(() => {
   mockSettle.mockResolvedValue({ kind: "settled", paymentId: "p1", enrollmentId: "e1" });
 });
 
-const resolve = () => resolveKbzpayOrder({ oldRef: OLD_REF, source: "create" });
+const resolve = () => resolveKbzpayOrder({ oldRef: OLD_REF, merchant: MERCHANT, source: "create" });
 
 describe("first query says the order is paid", () => {
   it("settles and reports already_paid, without closing anything", async () => {
@@ -110,7 +118,7 @@ describe("still payable → close, then re-query (R12)", () => {
 
     expect(await resolve()).toEqual({ kind: "retire", reason: "SUPERSEDED" });
 
-    expect(mockCloseOrder.mock.calls[0][0]).toBe(OLD_REF);
+    expect(mockCloseOrder.mock.calls[0][1]).toBe(OLD_REF);
     // The re-query is the whole point: the close return code is not evidence.
     expect(mockQueryOrder).toHaveBeenCalledTimes(2);
   });
@@ -198,5 +206,21 @@ describe("retire reason depends on the stage", () => {
     mockCloseOrder.mockResolvedValue({ ok: true });
 
     expect(await resolve()).toEqual({ kind: "retire", reason: "SUPERSEDED" });
+  });
+});
+
+describe("merchant", () => {
+  it("queries and closes with the merchant it was given", async () => {
+    mockQueryOrder
+      .mockResolvedValueOnce({ ok: true, tradeStatus: "WAIT_PAY" })
+      .mockResolvedValueOnce({ ok: true, tradeStatus: "ORDER_CLOSED" });
+    mockCloseOrder.mockResolvedValue({ ok: true });
+
+    await resolve();
+
+    for (const call of [...mockQueryOrder.mock.calls, ...mockCloseOrder.mock.calls]) {
+      expect(call[0]).toBe(MERCHANT);
+      expect(call[1]).toBe(OLD_REF);
+    }
   });
 });
