@@ -72,7 +72,7 @@ export async function GET(request: NextRequest) {
 
   const supabase = createAdminClient();
 
-  const { data: payment } = (await supabase
+  const { data: payment, error: lookupError } = (await supabase
     .from("payments")
     .select("id, enrollment_id, mmqr_status, status, kbzpay_merchant")
     .eq("payment_ref", paymentRef)
@@ -86,11 +86,16 @@ export async function GET(request: NextRequest) {
       status: string;
       kbzpay_merchant: string | null;
     } | null;
-    error: unknown;
+    error: { message: string } | null;
   };
 
   // Unknown ref: keep the modal polling rather than showing an error. A row
   // created moments ago may not be visible to this read yet.
+  // A failed read answers the same way, but must not be silent: it is the one
+  // case that looks identical to "unknown ref" from the browser.
+  if (lookupError) {
+    console.error(`[kbzpay-status] payment lookup failed for ${paymentRef}: ${lookupError.message}`);
+  }
   if (!payment) return NextResponse.json({ mmqr_status: "PENDING" });
 
   // ── Already final locally — no provider call needed ────────

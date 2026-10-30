@@ -337,6 +337,36 @@ describe("claim outcomes", () => {
     expect(mockResolve).not.toHaveBeenCalled();
   });
 
+  // An old RPC (code deployed before the migration) returns no merchant at all.
+  it("returns 503 and does not precreate when a created claim has no merchant property", async () => {
+    claimRows = [{ outcome: "created", payment_id: "pay-1", ref: null, qr: null }];
+
+    const res = await POST(req());
+
+    expect(res.status).toBe(503);
+    expect(mockPrecreate).not.toHaveBeenCalled();
+  });
+
+  it("returns 503 and does not re-serve the QR when a reuse claim has no merchant property", async () => {
+    claimRows = [{ outcome: "reuse", payment_id: "pay-1", ref: "KBZ_old", qr: "STORED_QR" }];
+
+    const res = await POST(req());
+    const text = await res.text();
+
+    expect(res.status).toBe(503);
+    expect(text).not.toContain("STORED_QR");
+    expect(mockPrecreate).not.toHaveBeenCalled();
+  });
+
+  it("returns 502 and does not precreate for an unknown claim outcome", async () => {
+    claimRows = [{ outcome: "something_new", payment_id: "pay-1", ref: "KBZ_x", qr: null, merchant: "BRAVE" }];
+
+    const res = await POST(req());
+
+    expect(res.status).toBe(502);
+    expect(mockPrecreate).not.toHaveBeenCalled();
+  });
+
   // P1 review: the enrollment stopped being a legal payment target between the
   // route's guard and the function's lock.
   it("returns 409 for invalid_enrollment and never calls KBZPay", async () => {
