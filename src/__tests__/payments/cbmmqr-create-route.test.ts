@@ -11,6 +11,8 @@ import { NextRequest } from "next/server";
 Object.assign(process.env, {
   CBMMQR_YOUNGMONEY_USER_ID: "u", CBMMQR_YOUNGMONEY_PASSWORD: "p", CBMMQR_YOUNGMONEY_SOURCE_ID: "s",
   CBMMQR_YOUNGMONEY_MERCHANT_ID: "M0001", CBMMQR_YOUNGMONEY_TERMINAL_ID: "T0001", CBMMQR_YOUNGMONEY_API_KEY: "k",
+  CBMMQR_OTHER_USER_ID: "u2", CBMMQR_OTHER_PASSWORD: "p2", CBMMQR_OTHER_SOURCE_ID: "s2",
+  CBMMQR_OTHER_MERCHANT_ID: "M0002", CBMMQR_OTHER_TERMINAL_ID: "T0002", CBMMQR_OTHER_API_KEY: "k2",
 });
 
 type Row = Record<string, unknown>;
@@ -20,6 +22,8 @@ let rpcResults: Record<string, { data: unknown; error: { message: string } | nul
 let rpcCalls: { name: string; args: Row }[];
 let paymentUpdates: { payload: Row; filters: [string, unknown][] }[];
 let events: string[];
+let latestPayment: Row | null;
+let claimErrorsLeft: number;
 
 vi.mock("@/lib/api", () => ({ resolveTenantId: async () => "ten-1" }));
 
@@ -72,6 +76,8 @@ beforeEach(() => {
   rpcCalls = [];
   paymentUpdates = [];
   events = [];
+  latestPayment = null;
+  claimErrorsLeft = 0;
   rpcResults = {
     claim_cbmmqr_order_slot: { data: [claimRow()], error: null },
     store_cbmmqr_qr: { data: "stored", error: null },
@@ -82,6 +88,10 @@ beforeEach(() => {
   mockRpc.mockImplementation(async (name: string, args: Row) => {
     events.push(`rpc:${name}`);
     rpcCalls.push({ name, args });
+    if (name === "claim_cbmmqr_order_slot" && claimErrorsLeft > 0) {
+      claimErrorsLeft--;
+      return { data: null, error: { message: "duplicate key value violates unique constraint" } };
+    }
     const result = rpcResults[name];
     // As the SQL: a 'created' claim returns the p_payment_ref it inserted.
     if (name === "claim_cbmmqr_order_slot" && Array.isArray(result.data)) {
@@ -102,7 +112,7 @@ beforeEach(() => {
     }
     if (table === "payments") {
       return {
-        select: () => ({ eq: () => ({ order: () => ({ limit: () => ({ single: async () => ({ data: null, error: null }) }) }) }) }),
+        select: () => ({ eq: () => ({ order: () => ({ limit: () => ({ single: async () => ({ data: latestPayment, error: latestPayment ? null : { message: "none" } }) }) }) }) }),
         update: (payload: Row) => {
           const entry = { payload, filters: [] as [string, unknown][] };
           paymentUpdates.push(entry);
@@ -175,6 +185,46 @@ describe("created", () => {
     expect(mockCreate.mock.calls[0][0]).toMatchObject({ id: "YOUNGMONEY", merchantId: "M0001" });
   });
 
+  it("broken merchant config right after a created claim: marks the new row FAILED, 503", async () => {
+    rpcResults.claim_cbmmqr_order_slot = { data: [claimRow({ merchant: "NOCONFIG" })], error: null };
+    expect((await POST(req())).status).toBe(503);
+    const ref = called("claim_cbmmqr_order_slot")[0].args.p_payment_ref;
+    expect(paymentUpdates).toHaveLength(1);
+    expect(paymentUpdates[0].payload).toEqual({ mmqr_status: "FAILED" });
+    expect(paymentUpdates[0].filters).toEqual(expect.arrayContaining([
+      ["payment_ref", ref], ["payment_method", "cb_mmqr"], ["mmqr_status", "PENDING"],
+    ]));
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("reuse with a pinned merchant lacking config: 503, row untouched, QR not returned", async () => {
+    rpcResults.claim_cbmmqr_order_slot = {
+      data: [claimRow({ outcome: "reuse", ref: "CBOLD", qr: "000201OLD", merchant: "NOCONFIG" })], error: null,
+    };
+    const res = await POST(req());
+    expect(res.status).toBe(503);
+    expect(JSON.stringify(await res.json())).not.toContain("000201OLD");
+    expect(paymentUpdates).toHaveLength(0);
+  });
+
+  it("retries the claim once on a unique violation, with a fresh reference", async () => {
+    claimErrorsLeft = 1;
+    expect((await POST(req())).status).toBe(200);
+    const refs = called("claim_cbmmqr_order_slot").map((c) => c.args.p_payment_ref);
+    expect(refs).toHaveLength(2);
+    expect(refs[0]).not.toBe(refs[1]);
+    expect(mockCreate.mock.calls[0][1].referenceNo).toBe(refs[1]);
+  });
+
+  it("partial_payment: charges the remainder and records no platform fee", async () => {
+    enrollment = { ...ENROLLMENT, status: "partial_payment" };
+    latestPayment = { received_amount: 15000 };
+    const body = await (await POST(req())).json();
+    expect(called("claim_cbmmqr_order_slot")[0].args).toMatchObject({ p_amount: 25000, p_platform_fee: 0 });
+    expect(mockCreate.mock.calls[0][1]).toMatchObject({ amount: 25000 });
+    expect(body).toMatchObject({ status: "created", amount: 25000 });
+  });
+
   it("reuse: returns the stored QR without calling CB", async () => {
     rpcResults.claim_cbmmqr_order_slot = { data: [claimRow({ outcome: "reuse", ref: "CBOLD", qr: "000201OLD" })], error: null };
     const body = await (await POST(req())).json();
@@ -212,7 +262,10 @@ describe("CB's answer", () => {
     expect((await POST(req())).status).toBe(status);
     expect(paymentUpdates).toHaveLength(1);
     expect(paymentUpdates[0].payload).toEqual({ mmqr_status: "FAILED" });
-    expect(paymentUpdates[0].filters).toEqual(expect.arrayContaining([["mmqr_status", "PENDING"]]));
+    const ref = called("claim_cbmmqr_order_slot")[0].args.p_payment_ref;
+    expect(paymentUpdates[0].filters).toEqual(expect.arrayContaining([
+      ["payment_ref", ref], ["payment_method", "cb_mmqr"], ["mmqr_status", "PENDING"],
+    ]));
   });
 
   it("post-check too late: stores CB's reference WITHOUT the QR and answers 409", async () => {
@@ -228,6 +281,24 @@ describe("CB's answer", () => {
     mockCreate.mockResolvedValue({ kind: "created", qr: "000201QR", qrReferenceNo: "QR-1", expiresAtMs: null });
     expect((await POST(req())).status).toBe(409);
     expect(called("store_cbmmqr_qr")[0].args).toMatchObject({ p_qr: null });
+  });
+
+  it("logs an unreadable expiry and an expiry past the deadline as different causes", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const logged = () => spy.mock.calls.map((c) => String(c[0])).join("\n");
+    mockCreate.mockResolvedValue({ kind: "created", qr: "000201QR", qrReferenceNo: "QR-1", expiresAtMs: null });
+    await POST(req());
+    const unreadable = logged();
+    spy.mockClear();
+    tenant = { ...tenant, auto_cancel_hours: 15 };
+    mockCreate.mockResolvedValue({ kind: "created", qr: "000201QR", qrReferenceNo: "QR-1", expiresAtMs: Date.now() + 60 * MIN });
+    await POST(req());
+    const late = logged();
+    spy.mockRestore();
+    expect(unreadable).toMatch(/expiry unreadable/);
+    expect(unreadable).not.toMatch(/outlive/);
+    expect(late).toMatch(/outlive/);
+    expect(late).not.toMatch(/expiry unreadable/);
   });
 
   it("409 when the enrollment stopped being payable before the QR was stored", async () => {
@@ -275,6 +346,35 @@ describe("unresolved", () => {
     });
   });
 
+  it("passes createdAtMs, expiresAtMs and displayed from the claim row", async () => {
+    const createdAt = new Date(Date.now() - 7 * MIN).toISOString();
+    const expiresAt = new Date(Date.now() - 2 * MIN).toISOString();
+    mockResolve.mockResolvedValue({ kind: "active", retryAtMs: Date.now() + MIN });
+    const unresolved = (qr: string | null) => ({
+      data: [claimRow({ outcome: "unresolved", ref: "CBOLD", order_ref: "QR-OLD", qr, created_at: createdAt, expires_at: expiresAt })],
+      error: null,
+    });
+
+    rpcResults.claim_cbmmqr_order_slot = unresolved("000201OLD");
+    const res = await POST(req());
+    expect(mockResolve.mock.calls[0][0].row).toEqual({
+      ref: "CBOLD", orderRef: "QR-OLD", createdAtMs: Date.parse(createdAt), expiresAtMs: Date.parse(expiresAt), displayed: true,
+    });
+    expect(JSON.stringify(await res.json())).not.toContain("000201OLD");
+
+    rpcResults.claim_cbmmqr_order_slot = unresolved(null);
+    await POST(req());
+    expect(mockResolve.mock.calls[1][0].row).toMatchObject({ displayed: false });
+  });
+
+  it("uses the merchant the replace pinned on the new row", async () => {
+    mockResolve.mockResolvedValue({ kind: "retire", reason: "FAILED" });
+    rpcResults.complete_cbmmqr_replace = { data: [{ outcome: "replaced", payment_id: "pay-2", merchant: "OTHER" }], error: null };
+    expect((await POST(req())).status).toBe(200);
+    expect(mockResolve.mock.calls[0][0].merchant).toMatchObject({ id: "YOUNGMONEY" });
+    expect(mockCreate.mock.calls[0][0]).toMatchObject({ id: "OTHER", merchantId: "M0002" });
+  });
+
   it("already_paid → { status: 'already_paid' }", async () => {
     mockResolve.mockResolvedValue({ kind: "already_paid" });
     expect(await (await POST(req())).json()).toEqual({ status: "already_paid" });
@@ -298,7 +398,7 @@ describe("unresolved", () => {
 
   it.each([
     ["already_settled", 200], ["settling", 409], ["not_payable", 409], ["invalid_enrollment", 409],
-    ["no_merchant", 503], ["not_live", 502],
+    ["no_merchant", 503], ["not_live", 502], ["not_found", 502],
   ])("replace outcome %s → %i", async (outcome, status) => {
     mockResolve.mockResolvedValue({ kind: "retire", reason: "EXPIRED" });
     rpcResults.complete_cbmmqr_replace = { data: [{ outcome, payment_id: null, merchant: null }], error: null };

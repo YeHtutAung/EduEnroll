@@ -229,7 +229,8 @@ columns) and `20261030120000_kbzpay_per_tenant_merchants.sql` (pin, locking, gra
      `qrExpiredDateTime`.
 7. **Post-check.** CB's expiry at or after the enrollment deadline minus the margin, or
    unparseable → store `provider_order_ref` and the expiry but **not** `provider_qr`, and
-   return 409 `deadline`. The QR was never displayed, so it cannot be paid.
+   return 409 `deadline`. The QR was never displayed, so it cannot be paid; the next attempt
+   frees the slot through §5.2's never-displayed time rule, after a status check.
 8. Store through `store_cbmmqr_qr` (§4.3), which re-checks under a lock that the row is live
    and its enrollment still `pending_payment` / `partial_payment`. `not_payable` → the QR is
    withheld and the route answers 409; `not_live`, `ref_conflict` or an error → 502 and the
@@ -250,16 +251,25 @@ provider and is out of scope.
 
 Reached when the amount changed, the QR is missing, or the stored expiry has passed.
 
-- **The row has `provider_order_ref`** → status check with the **pinned** merchant:
+The claim returns the row's stored `provider_qr` (NULL when none). A row is **displayed** only
+if it has both a `provider_order_ref` and a `provider_qr`; the QR is never sent to the browser
+from this path.
+
+- **The row has `provider_order_ref`** → status check with the **pinned** merchant first,
+  whether or not it was displayed:
   - success → §5.5 → `{ status: 'already_paid' }` (R10, R11);
-  - `isConfirmedDead` → `complete_cbmmqr_replace(reason 'EXPIRED')`, then §5.1 step 6 for the
-    new row; `already_settled` → `{ status: 'already_paid' }`; `settling` → 409 "we are
-    confirming a payment for this booking", never a new QR;
+  - otherwise, if the row was **not displayed** (QR withheld at §5.1 step 7) → the time rule
+    below, exactly as for a lost response;
+  - otherwise (displayed) `isConfirmedDead` → `complete_cbmmqr_replace(reason 'EXPIRED')`, then
+    §5.1 step 6 for the new row; `already_settled` → `{ status: 'already_paid' }`; `settling` →
+    409 "we are confirming a payment for this booking", never a new QR;
   - anything else, including a failed status check → 409 `qr_active` with `retryAt` = stored
     expiry + margin. Nothing is replaced.
-- **The row has no `provider_order_ref`** — CB's create response was lost or never arrived.
-  CB may hold a QR for this reference, but we never received `qrCodeInfo`: the payable
-  artefact never reached our server, so it was never displayed and no buyer can scan it.
+- **The row was never displayed** — it has no `provider_order_ref` (CB's create response was
+  lost or never arrived; no status check is possible), **or** no `provider_qr` (CB answered,
+  but the post-check withheld the QR at §5.1 step 7; the status check above ran first). CB may
+  hold a QR for this reference, but its payload was never shown to anyone, so no buyer can
+  scan it.
   - Once now is past the row's `created_at` + `CB_MAX_QR_MINUTES` + margin →
     `complete_cbmmqr_replace(reason 'FAILED')`; before that → 409 `qr_active`. If a callback
     bound a payment to the row meanwhile, the replace answers `settling` and nothing is
@@ -422,8 +432,8 @@ page cannot read assignments. Assigning a tenant is an operator step recorded in
 |---|---|---|
 | Amount below 1,000, or CB `0051` | 422 `below_minimum` | none, or `FAILED` |
 | CB `0052` | 422 `above_maximum` | `FAILED` |
-| No assignment, bad config, CB credential/merchant/terminal codes | 503 | none, or `FAILED` |
-| Deadline too close (pre- or post-check) | 409 `deadline` | none, or kept without a QR |
+| No assignment, bad config, CB credential/merchant/terminal codes | 503 | none; `FAILED` for a row this request created (bad config before the CB call, or a CB rejection); a reused or unresolved row is unchanged |
+| Deadline too close (pre- or post-check) | 409 `deadline` | none, or kept without a QR (never displayed; freed by the §5.2 time rule) |
 | Transport error, timeout, `0003`, unknown code, missing QR fields | 502 | kept `PENDING` |
 | QR store failed after CB success | 502 | kept `PENDING` |
 | Previous QR live and not proven dead | 409 `qr_active` + `retryAt` | unchanged |

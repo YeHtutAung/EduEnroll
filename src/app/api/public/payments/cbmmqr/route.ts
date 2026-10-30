@@ -202,7 +202,13 @@ export async function POST(request: NextRequest) {
   // The pinned merchant, before ANY branch — including reuse: a merchant whose
   // config is broken must not keep handing out QRs we cannot verify.
   let merchant = resolveMerchant(claimed.merchant, claimed.ref ?? enrollment.enrollment_ref);
-  if (!merchant) return notConfigured();
+  if (!merchant) {
+    // A row this request just created has never reached CB, so freeing it now
+    // is safe and keeps it from holding the slot until §5.2's window passes.
+    // reuse / unresolved rows may be live at CB: those are left untouched.
+    if (claimed.outcome === "created" && claimed.ref) await markFailed(claimed.ref);
+    return notConfigured();
+  }
 
   if (claimed.outcome === "reuse") {
     return NextResponse.json({
@@ -230,6 +236,8 @@ export async function POST(request: NextRequest) {
         orderRef: claimed.order_ref,
         expiresAtMs: claimed.expires_at ? Date.parse(claimed.expires_at) : null,
         createdAtMs: claimed.created_at ? Date.parse(claimed.created_at) : Date.now(),
+        // No stored QR → never displayed (lost response or withheld at step 10).
+        displayed: claimed.qr !== null,
       },
       merchant,
       source: "create",
@@ -303,12 +311,7 @@ export async function POST(request: NextRequest) {
 
   if (created.kind === "rejected") {
     // CB created nothing, so the slot can be freed now.
-    const { error: markError } = (await supabase
-      .from("payments")
-      .update({ mmqr_status: "FAILED" } as never)
-      .eq("payment_ref", ref)
-      .eq("mmqr_status", "PENDING")) as { error: { message: string } | null };
-    if (markError) console.error(`[cbmmqr] could not mark ${ref} FAILED: ${markError.message}`);
+    await markFailed(ref);
     console.error(`[cbmmqr] CB rejected ${ref} with ${created.code} (${created.reason})`);
     if (created.reason === "below_minimum") return belowMinimum();
     if (created.reason === "above_maximum") return aboveMaximum();
@@ -336,7 +339,11 @@ export async function POST(request: NextRequest) {
     return gatewayError();
   }
   if (!displayable) {
-    console.error(`[cbmmqr] QR for ${ref} would outlive its enrollment; withheld`);
+    if (created.expiresAtMs === null) {
+      console.error(`[cbmmqr] QR for ${ref} withheld: CB's expiry unreadable, cannot prove it ends before the enrollment`);
+    } else {
+      console.error(`[cbmmqr] QR for ${ref} withheld: it would outlive its enrollment`);
+    }
     return deadlineConflict();
   }
 
@@ -347,6 +354,20 @@ export async function POST(request: NextRequest) {
     amount: totalFee,
     expiresAt: expiresAtIso,
   });
+
+  // ── Free a slot CB never received ──────────────────────────
+  // Only for a row CB has proven it holds nothing for. Scoped to cb_mmqr and to
+  // a still-PENDING row, so it can never touch a settled or another provider's
+  // payment.
+  async function markFailed(paymentRef: string): Promise<void> {
+    const { error: markError } = (await supabase
+      .from("payments")
+      .update({ mmqr_status: "FAILED" } as never)
+      .eq("payment_ref", paymentRef)
+      .eq("payment_method", "cb_mmqr")
+      .eq("mmqr_status", "PENDING")) as { error: { message: string } | null };
+    if (markError) console.error(`[cbmmqr] could not mark ${paymentRef} FAILED: ${markError.message}`);
+  }
 
   // ── Claim with one retry on a lost unique-index race ───────
   async function claimSlot(): Promise<ClaimRow | NextResponse> {

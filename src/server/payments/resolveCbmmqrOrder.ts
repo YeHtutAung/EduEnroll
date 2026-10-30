@@ -35,7 +35,14 @@ export type CbResolveOutcome =
   | { kind: "blocked"; reason: string };
 
 export async function resolveCbmmqrOrder(input: {
-  row: { ref: string; orderRef: string | null; expiresAtMs: number | null; createdAtMs: number };
+  row: {
+    ref: string;
+    orderRef: string | null;
+    expiresAtMs: number | null;
+    createdAtMs: number;
+    /** A QR payload for this row was stored, so it may have been shown to a buyer. */
+    displayed: boolean;
+  };
   /** The merchant pinned on THIS row — never the tenant's current assignment. */
   merchant: CbMerchant;
   source: SettleMmqrSource;
@@ -46,34 +53,46 @@ export async function resolveCbmmqrOrder(input: {
   const now = input.now ?? Date.now();
   const margin = CB_EXPIRY_MARGIN_MINUTES * MIN;
 
-  // CB's create response was lost: we never received the QR, so it was never
-  // displayed and nobody can scan it. This is the ONE documented exception to
+  // Where CB gave us its reference, ask CB first: a QR we never displayed can
+  // still have been paid (a lost response, or one paid between CB's answer and
+  // our post-check), and that money must be settled, never stranded.
+  // With no reference there is nothing to ask (unchanged: no status call).
+  let status: StatusResult | null = null;
+  if (row.orderRef) {
+    status = await checkStatus(merchant, row.orderRef, budget);
+
+    if (status.kind === "answer" && status.code === CB_SUCCESS) {
+      const settled = await settleCbmmqrPayment({
+        payment: { payment_ref: row.ref, payment_method: "cb_mmqr", cbmmqr_merchant: merchant.id },
+        merchant,
+        status,
+        source,
+      });
+      if (settled.kind === "settled" || settled.kind === "already_settled") return { kind: "already_paid" };
+      if (settled.kind === "refused") return { kind: "settlement_conflict", reason: settled.reason };
+      return { kind: "blocked", reason: settled.reason };
+    }
+  }
+
+  // NEVER DISPLAYED: we hold no QR payload for this row, so no buyer was ever
+  // shown it and nobody can scan it. Two ways to get here:
+  //   - CB's create response was lost (no provider_order_ref, no QR);
+  //   - CB answered but the post-check withheld the QR because it would have
+  //     outlived the enrollment (§5.1 step 7: reference stored, QR not).
+  // Both free the slot on elapsed time — the ONE documented exception to
   // "never free a slot on elapsed time" (spec §5.2; disputed by Codex in two
   // reviews and kept deliberately — holding the slot would block the buyer for
-  // good after one network failure). If a callback arrives meanwhile, the bind
-  // sets bank_reference and complete_cbmmqr_replace refuses with 'settling'.
-  // Idempotent re-create with the same reference (spec §5.2) is NOT built: it
-  // waits for CB's answer to question 3.
-  if (!row.orderRef) {
+  // good). If a callback arrives meanwhile, the bind sets bank_reference and
+  // complete_cbmmqr_replace refuses with 'settling'. Idempotent re-create with
+  // the same reference (spec §5.2) is NOT built: it waits for CB's answer to
+  // question 3.
+  if (!row.orderRef || !row.displayed) {
     const freeAt = row.createdAtMs + CB_MAX_QR_MINUTES * MIN + margin;
     return now > freeAt ? { kind: "retire", reason: "FAILED" } : { kind: "active", retryAtMs: freeAt };
   }
 
-  const status = await checkStatus(merchant, row.orderRef, budget);
-
-  if (status.kind === "answer" && status.code === CB_SUCCESS) {
-    const settled = await settleCbmmqrPayment({
-      payment: { payment_ref: row.ref, payment_method: "cb_mmqr", cbmmqr_merchant: merchant.id },
-      merchant,
-      status,
-      source,
-    });
-    if (settled.kind === "settled" || settled.kind === "already_settled") return { kind: "already_paid" };
-    if (settled.kind === "refused") return { kind: "settlement_conflict", reason: settled.reason };
-    return { kind: "blocked", reason: settled.reason };
-  }
-
-  if (isConfirmedDead(status, row.expiresAtMs, now)) return { kind: "retire", reason: "EXPIRED" };
+  // DISPLAYED: only CB's confirmed-final answer may free it (gate G1).
+  if (status && isConfirmedDead(status, row.expiresAtMs, now)) return { kind: "retire", reason: "EXPIRED" };
 
   return { kind: "active", retryAtMs: Math.max(row.expiresAtMs ?? now, now) + margin };
 }
