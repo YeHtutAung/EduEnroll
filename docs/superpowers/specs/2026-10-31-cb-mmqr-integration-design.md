@@ -1,6 +1,6 @@
 # CB Bank MMQR Integration — Design
 
-Status: design, revision 3 (after two Codex reviews, §13). Not implemented.
+Status: design, revision 4 (after four Codex reviews and the plan review, §13). Not implemented.
 Tenant: `beatsrun` (The Beats Run). Client notes: `docs/clients/beatsrun.md`.
 
 ## 1. Context
@@ -67,8 +67,8 @@ Source: CB's PDF (not in the repo) and CB's email of 2026-10-29.
 
 | File | Responsibility |
 |---|---|
-| `src/lib/cbmmqr.ts` | Pure client, no Supabase or Next.js imports: token, `createDynamicQr()`, `checkStatus()`, `buildReferenceNo()`, timestamp parsing, return-code mapping, currency `104` ↔ `MMK`. Same call timeout, IPv4 agent and optional `CBMMQR_PROXY_URL` hook as `kbzpay.ts`. |
-| `src/server/payments/cbmmqrMerchant.ts` | Per-merchant config lookup and validation (§6). |
+| `src/lib/cbmmqr.ts` | Pure client, no Supabase or Next.js imports: per-merchant config (`getCbMerchant()`, §6, as `getKbzMerchant()` in `kbzpay.ts`), token, `createDynamicQr()`, `checkStatus()`, `buildReferenceNo()`, timestamp parsing, return-code mapping, currency `104` ↔ `MMK`. Same call timeout, IPv4 agent and optional `CBMMQR_PROXY_URL` hook as `kbzpay.ts`. |
+| `src/lib/mmqrProvider.ts` | The one list of MMQR providers, so a new one cannot become MMPay by omission (§4.2). |
 | `src/server/payments/cbmmqrOrderWindow.ts` | "The QR must not outlive the enrollment" — pre-check and post-check (§5.1). |
 | `src/server/payments/resolveCbmmqrOrder.ts` | `isConfirmedDead()` and the unresolved-row procedure (§5.2), shared by the create and status routes. |
 | `src/server/payments/settleCbmmqrPayment.ts` | Settlement wrapper (§5.5): field checks, then the `bind_cbmmqr_settlement` RPC, then `settleMmqrPayment()` unchanged. |
@@ -127,13 +127,15 @@ BeatsRun buyers an MMPay QR.
 - **One live CB order per enrollment:** partial unique index on `(enrollment_id)` `WHERE
   payment_method = 'cb_mmqr' AND status = 'awaiting_payment' AND mmqr_status = 'PENDING'`.
 - **`claim_cbmmqr_order_slot(p_enrollment_id, p_tenant_id, p_payment_ref, p_amount,
-  p_platform_fee, p_expires_at)`** → `(outcome, payment_ref, merchant)` with outcome
-  `created | reuse | unresolved`.
+  p_expires_at, p_platform_fee)`** → `(outcome, payment_id, ref, qr, merchant, expires_at,
+  order_ref, created_at)` with outcome `created | reuse | unresolved | invalid_enrollment |
+  no_merchant` (the same outcomes as `claim_kbzpay_order_slot`; the last three columns let
+  the route decide an unresolved row, §5.2).
   - `SECURITY DEFINER`, `SET search_path = public`, `EXECUTE` to `service_role` only.
   - Locks the enrollment `FOR UPDATE`, then the tenant's assignment `FOR SHARE` (same order
-    as the KBZPay functions); no assignment → raises.
+    as the KBZPay functions); no assignment on the insert path → `no_merchant`.
   - Re-checks tenant ownership and that the enrollment is `pending_payment` or
-    `partial_payment` under the lock.
+    `partial_payment` under the lock; otherwise `invalid_enrollment`.
   - `reuse` only when the live row has the same amount and platform fee, a non-null
     `provider_qr`, and `now()` is before its `provider_order_expires_at`.
   - Any other live row → `unresolved` with its `payment_ref`; inserts nothing.
@@ -146,11 +148,21 @@ BeatsRun buyers an MMPay QR.
     `p_enrollment_id` and `p_tenant_id` (as `complete_kbzpay_supersede` does).
   - `p_reason IN ('EXPIRED', 'FAILED')` only — there is no `SUPERSEDED` for CB, because
     nothing can be superseded while still payable.
+  - Locks the old payment row `FOR UPDATE`, so it waits for a concurrent
+    `bind_cbmmqr_settlement` to commit.
   - Outcomes, checked in this order: `invalid_enrollment` (no such enrollment for that
-    tenant); `already_settled` (old row `verified`); `not_live` (old row is not the live
-    `PENDING` order); `not_payable` (enrollment no longer `pending_payment` /
-    `partial_payment`); `no_merchant` (assignment missing); `replaced` — the old row's
-    `mmqr_status` set to `p_reason` and the replacement inserted, atomically.
+    tenant); `not_found`; `already_settled` (old row `verified`); `settling` (old row has a
+    bound `bank_reference`: CB reported it paid and settlement is finishing — never
+    retired); `not_live` (old row is not the live `PENDING` order); `not_payable`
+    (enrollment no longer `pending_payment` / `partial_payment`); `no_merchant` (assignment
+    missing); `replaced` — the old row's `mmqr_status` set to `p_reason` and the
+    replacement inserted, atomically.
+- **`store_cbmmqr_qr(p_payment_ref, p_qr, p_order_ref, p_expires_at)`** → `stored |
+  not_payable | not_live | ref_conflict | not_found`. Same security and grants. Locks the
+  enrollment, then the payment. For a live row it always writes CB's `qrReferenceNo` and
+  expiry (so §5.2 can resolve it later), and writes the QR only when `p_qr` is non-null and
+  the enrollment is still payable; otherwise `not_payable` and the QR is withheld (§5.1
+  step 8).
 - **`bind_cbmmqr_settlement(p_payment_ref, p_qr_reference_no, p_transaction_id,
   p_merchant)`** → `bound | duplicate_transaction | mismatch | not_found`. Same security and
   grants. Locks the payment `FOR UPDATE`; requires `payment_method = 'cb_mmqr'`, the pin
@@ -168,8 +180,9 @@ columns) and `20261030120000_kbzpay_per_tenant_merchants.sql` (pin, locking, gra
 
 ### 5.0 Shared rules
 
-- **Time.** CB timestamps are parsed in `CBMMQR_TIMEZONE` (default `Asia/Yangon`, to be
-  confirmed — gate G2). An unparseable timestamp makes the QR non-displayable.
+- **Time.** CB timestamps are parsed at the fixed offset `CBMMQR_UTC_OFFSET` (default
+  `+06:30`; Myanmar has one offset and no DST — to be confirmed, gate G2). An unparseable
+  timestamp makes the QR non-displayable.
 - **Constants.** `CB_MAX_QR_MINUTES` — CB's maximum QR validity (3 until CB answers question
   2) — and `CB_EXPIRY_MARGIN_MINUTES` = 2.
 - **`isConfirmedDead(statusResponse, row, now)`** — the only code allowed to free the slot of a
@@ -216,11 +229,10 @@ columns) and `20261030120000_kbzpay_per_tenant_merchants.sql` (pin, locking, gra
 7. **Post-check.** CB's expiry at or after the enrollment deadline minus the margin, or
    unparseable → store `provider_order_ref` and the expiry but **not** `provider_qr`, and
    return 409 `deadline`. The QR was never displayed, so it cannot be paid.
-8. Store `provider_qr`, `provider_order_ref` and `provider_order_expires_at` = CB's expiry in
-   one conditional update that also requires the row to be live and its enrollment still
-   `pending_payment` / `partial_payment` (re-checked in the same statement). Zero rows → do
-   not return the QR: 409 `deadline` if the enrollment was cancelled or rejected meanwhile,
-   else 502; the row stays `PENDING` (R13).
+8. Store through `store_cbmmqr_qr` (§4.3), which re-checks under a lock that the row is live
+   and its enrollment still `pending_payment` / `partial_payment`. `not_payable` → the QR is
+   withheld and the route answers 409; `not_live`, `ref_conflict` or an error → 502 and the
+   row stays `PENDING` (R13).
 9. Return `{ qr, orderId, amount, expiresAt }`.
 
 **Cancellation or rejection while a QR is displayed.** Auto-cancel and admin rejection are
@@ -240,22 +252,26 @@ Reached when the amount changed, the QR is missing, or the stored expiry has pas
 - **The row has `provider_order_ref`** → status check with the **pinned** merchant:
   - success → §5.5 → `{ status: 'already_paid' }` (R10, R11);
   - `isConfirmedDead` → `complete_cbmmqr_replace(reason 'EXPIRED')`, then §5.1 step 6 for the
-    new row; `already_settled` → `{ status: 'already_paid' }`;
+    new row; `already_settled` → `{ status: 'already_paid' }`; `settling` → 409 "we are
+    confirming a payment for this booking", never a new QR;
   - anything else, including a failed status check → 409 `qr_active` with `retryAt` = stored
     expiry + margin. Nothing is replaced.
 - **The row has no `provider_order_ref`** — CB's create response was lost or never arrived.
   CB may hold a QR for this reference, but we never received `qrCodeInfo`: the payable
   artefact never reached our server, so it was never displayed and no buyer can scan it.
-  - If CB confirms that `referenceNo` is idempotent (question 3), recover by calling
-    `createDynamicQr` again with the **same** reference: a returned QR and `qrReferenceNo`
-    are stored and served (§5.1 steps 7–8); `0003` without them stays ambiguous.
-  - Otherwise, once now is past the row's `created_at` + `CB_MAX_QR_MINUTES` + margin →
-    `complete_cbmmqr_replace(reason 'FAILED')`; before that → 409 `qr_active`.
+  - Once now is past the row's `created_at` + `CB_MAX_QR_MINUTES` + margin →
+    `complete_cbmmqr_replace(reason 'FAILED')`; before that → 409 `qr_active`. If a callback
+    bound a payment to the row meanwhile, the replace answers `settling` and nothing is
+    replaced.
+  - **Deferred:** if CB confirms that `referenceNo` is idempotent (question 3), a later
+    change may recover by calling `createDynamicQr` again with the **same** reference. It is
+    not built until CB answers.
 
-  This branch frees a slot on elapsed time, which KBZPay's R13 forbids. It is accepted here
-  because the R13 hazard — a provider order someone can still pay — needs a QR that was shown
-  to a buyer, and this one never was. Holding the slot instead would leave the buyer unable
-  to pay at all after a single network failure. See §13 (second review, #5).
+  This branch frees a slot on elapsed time, which KBZPay's R13 forbids. It is the one
+  documented exception: the R13 hazard — a provider order someone can still pay — needs a QR
+  that was shown to a buyer, and this one never was. Holding the slot instead would leave the
+  buyer unable to pay at all after a single network failure. Codex disputed it in two reviews
+  (§13); it is kept deliberately.
 
 **Residual risk.** A replaced row can only be paid if CB accepted payment on a QR whose
 "final" status was not final (a breach of G1), or on a QR that never left CB. The callback
@@ -265,8 +281,13 @@ logged loudly and one is refunded by hand.
 
 ### 5.3 Callback — `POST /api/webhooks/cbmmqr`
 
-1. Body ≤ 8 KB, valid JSON, required fields present with the expected types and lengths →
-   else 400.
+1. Body ≤ 8 KB and a JSON object. Required, with type and length: `referenceNo` (our
+   `CB…` format), `qrReferenceNo` (≤ 25), `apiKey` (≤ 150), `transStatusDescription`
+   (≤ 250). CB's other fields may be absent — a `FAIL` callback need not carry a
+   transaction, and none of them moves money — but if present they must have CB's types and
+   lengths (`transactionId` ≤ 35, `merchantId` ≤ 15, `terminalId` ≤ 8, `institutionName`
+   ≤ 150, `remark` ≤ 140, `transAmount` a non-negative number). Anything else → 400, before
+   any database read.
 2. Find the payment by `referenceNo`; it must be `cb_mmqr` → else 404.
 3. Compare `apiKey` in constant time with the API key of the merchant **pinned on that
    payment** → else 403. That merchant's config missing → 500.
@@ -284,8 +305,9 @@ logged loudly and one is refunded by hand.
 
 ### 5.4 Status — `GET /api/public/payments/cbmmqr/status?ref=`
 
-Same response shape and time budget as KBZPay's: `{ mmqr_status: PENDING | SUCCESS |
-FAILED, expiresAt }`. There is no `EXPIRED` status: local time never says a QR is dead.
+Same time budget as KBZPay's, response `{ mmqr_status: PENDING | SUCCESS, expiresAt }`.
+There is no `EXPIRED` and no `FAILED`: local time never says a QR is dead, and a row retired
+by §5.1 or §5.2 simply reports `PENDING` while the modal's "Get a new QR" path takes over.
 
 - Local `verified` → `SUCCESS`.
 - Otherwise, if the row has `provider_order_ref`, one status check; success → §5.5.
@@ -333,7 +355,7 @@ Per deployment:
 CBMMQR_MODE=uat|production   # production is required on VERCEL_ENV=production, and only there
 CBMMQR_BASE_URL=             # CB will send the UAT and Live URLs
 CBMMQR_PROXY_URL=            # optional fixed-IP egress; unset for UAT
-CBMMQR_TIMEZONE=Asia/Yangon  # until confirmed (G2)
+CBMMQR_UTC_OFFSET=+06:30     # zone of CB's timestamps, until confirmed (G2)
 ```
 
 Per merchant, where `<ID>` matches `^[A-Z][A-Z0-9_]{1,31}$` (e.g. `YOUNGMONEY`):
@@ -345,13 +367,13 @@ CBMMQR_<ID>_SOURCE_ID=
 CBMMQR_<ID>_MERCHANT_ID=
 CBMMQR_<ID>_TERMINAL_ID=
 CBMMQR_<ID>_API_KEY=         # secret; expected on callbacks
-CBMMQR_<ID>_NOTIFY_ORIGIN=   # UAT: the tunnel host; Live: https://beatsrun.kuunyi.com
 ```
 
 - A missing or invalid value is a configuration error. There is no fallback to another
   merchant and no unprefixed set.
-- `NOTIFY_ORIGIN` keeps KBZPay's rules (https only, normalised to an origin) and is what is
-  registered with CB. The callback path is `/api/webhooks/cbmmqr`.
+- There is no notify-origin variable: CB's `/dynamicqr` takes no callback URL. The URL is
+  registered with CB out of band, per merchant and environment (UAT: the tunnel host; Live:
+  `https://beatsrun.kuunyi.com/api/webhooks/cbmmqr`).
 - Values go in `.env.local` for dev and in Vercel env vars for deployed environments, set with
   `printf`, never `echo`. Secrets are never logged.
 
@@ -451,8 +473,8 @@ Mirrors the KBZPay suites in `src/__tests__/payments/` and `src/__tests__/db/`:
 
 1. Code and migration go to **dev** only, through a PR to `dev`. The migration is applied to
    the dev DB after its diff is shown. Production receives nothing from this spec.
-2. UAT runs locally on the office IP behind the tunnel, with `CBMMQR_<ID>_NOTIFY_ORIGIN` set to
-   the tunnel host.
+2. UAT runs locally on the office IP behind the tunnel; CB is given the tunnel host's callback
+   URL.
 3. **Go-live gates** — all required before any production use:
    - **G1** CB confirms in writing which status response is a **final** unpaid state (no
      in-flight or later payment can settle) and UAT reproduces it; only then is
@@ -530,3 +552,19 @@ offers them.
 | # | Finding | Outcome |
 |---|---|---|
 | 1 | P1 — the assignment table is "service_role only" but the design only revokes; it never grants `service_role`, so the operator could not manage assignments | Accepted: explicit `GRANT SELECT, INSERT, UPDATE, DELETE … TO service_role` (§4.3), as the KBZPay migration does; grants tested for `service_role`, `anon` and `authenticated` (§9). |
+
+**Implementation plan, 2026-10-31** — `docs/superpowers/plans/2026-10-31-cb-mmqr-integration.md`.
+Writing it against the code refined this spec, which was updated before implementation:
+`CBMMQR_UTC_OFFSET` instead of a zone name; no notify-origin variable (CB takes no callback
+URL per request); `getCbMerchant()` in `src/lib/cbmmqr.ts`; the claim's full outcomes and
+columns; `store_cbmmqr_qr`; status `PENDING | SUCCESS` only. Codex reviewed the plan —
+6 findings:
+
+| # | Finding | Outcome |
+|---|---|---|
+| 1 | P0 — bind commits before settlement, so a concurrent replace could retire a paid row and issue a second QR | Accepted: `complete_cbmmqr_replace` locks the old payment and answers `settling` once a transaction is bound (§4.3, §5.2); concurrent bind-vs-replace database test. |
+| 2 | P1 — the lost-response branch frees a slot on elapsed time | **Kept** as the one documented exception (§5.2), as in the second review; #1's fix closes the race with a late callback. |
+| 3 | P2 — idempotent re-create not implemented | Accepted as **deferred** until CB answers question 3 (§5.2). |
+| 4 | P2 — retrying an expired QR left the old poll timers running | Accepted: one `stopPolling()` used before every retry and new poller; checked in UAT. |
+| 5 | P2 — callback fields beyond the four used were not validated | Accepted: optional fields bounded to CB's types and lengths (§5.3). |
+| 6 | P3 — the spec was to be aligned only after implementation | Accepted: aligned now, before implementation. |
