@@ -74,7 +74,10 @@ export async function POST(request: NextRequest) {
 
   const merchOrderId = typeof fields.merch_order_id === "string" ? fields.merch_order_id : "";
 
-  if (!merchOrderId) {
+  // The payment lookup below runs BEFORE authentication, so this value is
+  // attacker-controlled. Bound it to the shape buildMerchOrderId produces: it
+  // caps unauthenticated DB reads and keeps CR/LF out of the log lines.
+  if (!/^[A-Za-z0-9_]{1,64}$/.test(merchOrderId)) {
     return NextResponse.json({ error: "Bad Request" }, { status: 400 });
   }
 
@@ -86,15 +89,22 @@ export async function POST(request: NextRequest) {
   // guarantees every match carries a pin.
   // 404 rather than success: a genuine race between order creation and this
   // callback resolves on KBZPay's retry.
-  const { data: payment } = (await supabase
+  const { data: payment, error: lookupError } = (await supabase
     .from("payments")
     .select("id, enrollment_id, status, kbzpay_merchant")
     .eq("payment_ref", merchOrderId)
     .eq("payment_method", "kbzpay_mmqr")
     .maybeSingle()) as {
     data: { id: string; kbzpay_merchant: string | null } | null;
-    error: unknown;
+    error: { message: string } | null;
   };
+
+  // A failed read is not "no such payment". 500 so KBZPay retries, rather than
+  // a 404 that would read as a creation race.
+  if (lookupError) {
+    console.error(`[kbzpay-webhook] payment lookup failed for ${merchOrderId}: ${lookupError.message}`);
+    return NextResponse.json({ error: "Lookup Failed" }, { status: 500 });
+  }
 
   if (!payment) {
     console.warn(`[kbzpay-webhook] no payment row for ${merchOrderId}`);
