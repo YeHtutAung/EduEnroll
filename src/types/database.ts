@@ -322,6 +322,11 @@ export interface Payment {
    * top-ups, and every row predating the column.
    */
   platform_fee: number;
+  /**
+   * KBZPay merchant id (KBZPAY_<ID>_*) that created this order. Set once at
+   * insert and immutable; null for every other payment method.
+   */
+  kbzpay_merchant: string | null;
   proof_image_url: string | null;
   proof_image_urls: string[];
   bank_reference: string | null;
