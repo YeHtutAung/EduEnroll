@@ -89,11 +89,17 @@ export async function POST(request: NextRequest) {
   // ── 2. The payment (its pin decides which key is valid) ────
   const { data: payment, error: lookupError } = (await createAdminClient()
     .from("payments")
-    .select("payment_ref, payment_method, cbmmqr_merchant, status")
+    .select("payment_ref, payment_method, cbmmqr_merchant, status, provider_order_ref")
     .eq("payment_ref", referenceNo)
     .eq("payment_method", "cb_mmqr")
     .maybeSingle()) as {
-    data: { payment_ref: string; payment_method: string | null; cbmmqr_merchant: string | null; status: string } | null;
+    data: {
+      payment_ref: string;
+      payment_method: string | null;
+      cbmmqr_merchant: string | null;
+      status: string;
+      provider_order_ref: string | null;
+    } | null;
     error: { message: string } | null;
   };
 
@@ -121,6 +127,16 @@ export async function POST(request: NextRequest) {
     return err(403, "Forbidden");
   }
 
+  // ── 4b. The QR must be the one we stored for this payment ─
+  // Only when the create response was lost (nothing stored) do we query the
+  // callback's QR reference; the bind then records it once.
+  const storedQrRef = payment.provider_order_ref;
+  if (storedQrRef && storedQrRef !== qrReferenceNo) {
+    console.warn(`[cbmmqr-webhook] ${referenceNo}: callback QR ${qrReferenceNo} is not the stored ${storedQrRef}`);
+    return err(403, "Forbidden");
+  }
+  const queryQrRef = storedQrRef ?? qrReferenceNo;
+
   // ── 5. FAIL changes nothing: the QR may still be paid ──────
   if (description.trim().toUpperCase() !== "SUCCESS") {
     console.warn(`[cbmmqr-webhook] ${referenceNo} reported ${description.slice(0, 40)}; nothing changed`);
@@ -128,7 +144,7 @@ export async function POST(request: NextRequest) {
   }
 
   // ── 6. Ask CB ourselves ────────────────────────────────────
-  const status = await checkStatus(merchant, qrReferenceNo, gatewayBudget());
+  const status = await checkStatus(merchant, queryQrRef, gatewayBudget());
   if (status.kind !== "answer") return err(500, "Query Failed");
   if (status.code !== CB_SUCCESS) {
     console.warn(`[cbmmqr-webhook] ${referenceNo}: callback said SUCCESS, status says ${status.code}`);
@@ -136,7 +152,12 @@ export async function POST(request: NextRequest) {
   }
 
   // ── 7. Settle on the status answer ─────────────────────────
-  const outcome = await settleCbmmqrPayment({ payment, merchant, status, source: "callback" });
+  const outcome = await settleCbmmqrPayment({
+    payment: { payment_ref: payment.payment_ref, payment_method: payment.payment_method, cbmmqr_merchant: payment.cbmmqr_merchant },
+    merchant,
+    status,
+    source: "callback",
+  });
 
   switch (outcome.kind) {
     case "settled":

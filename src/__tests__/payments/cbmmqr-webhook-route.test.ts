@@ -44,7 +44,10 @@ const PAID = { kind: "answer", code: "0000", referenceNo: REF, currency: "MMK", 
 
 beforeEach(() => {
   vi.clearAllMocks();
-  payment = { payment_ref: REF, payment_method: "cb_mmqr", cbmmqr_merchant: "YOUNGMONEY", status: "awaiting_payment" };
+  payment = {
+    payment_ref: REF, payment_method: "cb_mmqr", cbmmqr_merchant: "YOUNGMONEY", status: "awaiting_payment",
+    provider_order_ref: null,
+  };
   lookupError = null;
   mockFrom.mockImplementation(() => ({
     select: () => ({ eq: () => ({ eq: () => ({ maybeSingle: async () => ({ data: payment, error: lookupError }) }) }) }),
@@ -96,6 +99,27 @@ describe("POST /api/webhooks/cbmmqr", () => {
     expect((await post({ ...BODY, apiKey: "wrong" })).status).toBe(403);
     expect((await post({ ...BODY, apiKey: "other-api-key" })).status).toBe(403);
     expect(mockStatus).not.toHaveBeenCalled();
+  });
+
+  it("403 without calling CB when the callback's QR reference is not the stored one", async () => {
+    payment = { ...payment, provider_order_ref: "QR-STORED" };
+    expect((await post()).status).toBe(403);
+    expect(mockStatus).not.toHaveBeenCalled();
+    expect(mockSettle).not.toHaveBeenCalled();
+  });
+
+  it("queries CB with the stored QR reference when there is one", async () => {
+    payment = { ...payment, provider_order_ref: "QR-1" };
+    const res = await post();
+    expect(res.status).toBe(200);
+    expect(mockStatus).toHaveBeenCalledWith(expect.objectContaining({ id: "YOUNGMONEY" }), "QR-1", undefined);
+    expect(await res.json()).toEqual({ qrReferenceNo: "QR-1", returnCode: "0000", message: "Success" });
+  });
+
+  it("queries CB with the callback's QR reference only when none is stored", async () => {
+    payment = { ...payment, provider_order_ref: null };
+    await post({ ...BODY, qrReferenceNo: "QR-LOST" });
+    expect(mockStatus).toHaveBeenCalledWith(expect.objectContaining({ id: "YOUNGMONEY" }), "QR-LOST", undefined);
   });
 
   it("500 when the pinned merchant has no config", async () => {
