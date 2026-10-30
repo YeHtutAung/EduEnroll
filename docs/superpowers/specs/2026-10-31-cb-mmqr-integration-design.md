@@ -102,8 +102,10 @@ BeatsRun buyers an MMPay QR.
 - **`public.cbmmqr_merchant_assignments`** `(tenant_id uuid PK → tenants, merchant_id text
   CHECK '^[A-Z][A-Z0-9_]{1,31}$', created_at, updated_at)`. RLS on, no policies, `REVOKE ALL`
   from `public`, `anon`, `authenticated`; `service_role` only. Same shape as
-  `kbzpay_merchant_assignments`. Seeded with `beatsrun` → `YOUNGMONEY` if that tenant exists
-  (a `NOTICE`, not an error, if it does not).
+  `kbzpay_merchant_assignments`, including its `BEFORE UPDATE … EXECUTE FUNCTION
+  public.set_updated_at()` trigger (`cbmmqr_merchant_assignments_updated_at`), so a
+  reassignment keeps `updated_at` truthful. Seeded with `beatsrun` → `YOUNGMONEY` if that
+  tenant exists (a `NOTICE`, not an error, if it does not).
 - **`payments.cbmmqr_merchant text`** — the merchant pin.
   - Two-way CHECK: `(payment_method IS NOT DISTINCT FROM 'cb_mmqr') = (cbmmqr_merchant IS NOT
     NULL)`.
@@ -437,7 +439,9 @@ Mirrors the KBZPay suites in `src/__tests__/payments/` and `src/__tests__/db/`:
   every `complete_cbmmqr_replace` outcome including the wrong tenant; replace vs settlement
   race (`already_settled`); the trigger (pin, `tenant_id`, NULL → value only for
   `provider_order_ref` and `bank_reference`); `bind_cbmmqr_settlement` outcomes and two
-  concurrent binds with different transaction ids; grants (anon and authenticated denied).
+  concurrent binds with different transaction ids; reassigning a tenant in
+  `cbmmqr_merchant_assignments` advances `updated_at`; grants (anon and authenticated
+  denied).
 - The existing KBZPay, ABank and MMPay suites pass unchanged.
 
 ## 10. Rollout and gates
@@ -511,3 +515,9 @@ offers them.
 | 7 | P2 — status route called a QR `EXPIRED` from local time | Accepted: no `EXPIRED` status; the modal hides an expired QR and keeps polling (§5.4, §7.2). |
 | 8 | P2 — the KBZPay trigger does not cover `provider_order_ref` | Accepted: a new CB trigger with NULL → value rules (§4.3). |
 | 9 | P3 — touch points not precise; `database.ts` lacks `kbzpay` | Accepted: exact lines and a dispatch regression test (§4.2, §9). |
+
+**Codex, revision 3 (PR review), 2026-10-31** — 1 finding:
+
+| # | Finding | Outcome |
+|---|---|---|
+| 1 | P2 — `cbmmqr_merchant_assignments` has `updated_at` but no `set_updated_at()` trigger, unlike the KBZPay table | Accepted: trigger added to §4.3 and covered in the database test (§9). |
