@@ -42,6 +42,7 @@ describe("settleCbmmqrPayment", () => {
       paymentRef: PAYMENT.payment_ref, observedAmount: 40000, observedCurrency: "MMK",
       mmOrderId: "TXN-1", walletIdentifier: "Wave Money", source: "callback",
     });
+    expect(mockRpc.mock.invocationCallOrder[0]).toBeLessThan(mockSettle.mock.invocationCallOrder[0]);
   });
 
   it("passes already_settled through", async () => {
@@ -68,7 +69,7 @@ describe("settleCbmmqrPayment", () => {
     expect(mockSettle).not.toHaveBeenCalled();
   });
 
-  it.each(["mismatch", "duplicate_transaction", "duplicate_order_ref", "not_found"])("refuses when the bind returns %s", async (r) => {
+  it.each(["mismatch", "duplicate_transaction", "duplicate_order_ref", "not_found", "weird", null])("refuses when the bind returns %s", async (r) => {
     mockRpc.mockResolvedValue({ data: r, error: null });
     expect(await run()).toEqual({ kind: "refused", reason: `bind ${r}` });
     expect(mockSettle).not.toHaveBeenCalled();
