@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { queryOrder, type TradeStatus, type CallBudget } from "@/lib/kbzpay";
+import {
+  queryOrder,
+  getKbzMerchant,
+  type KbzMerchant,
+  type TradeStatus,
+  type CallBudget,
+} from "@/lib/kbzpay";
 import { settleMmqrPayment } from "@/server/payments/settleMmqrPayment";
 
 // Same 10s platform cap as the creation route. Declared rather than
@@ -68,10 +74,18 @@ export async function GET(request: NextRequest) {
 
   const { data: payment } = (await supabase
     .from("payments")
-    .select("id, enrollment_id, mmqr_status, status")
+    .select("id, enrollment_id, mmqr_status, status, kbzpay_merchant")
     .eq("payment_ref", paymentRef)
+    // KBZPay rows only (spec §5.4): another provider's ref must never reach KBZPay.
+    .eq("payment_method", "kbzpay_mmqr")
     .maybeSingle()) as {
-    data: { id: string; enrollment_id: string; mmqr_status: string; status: string } | null;
+    data: {
+      id: string;
+      enrollment_id: string;
+      mmqr_status: string;
+      status: string;
+      kbzpay_merchant: string | null;
+    } | null;
     error: unknown;
   };
 
@@ -87,8 +101,20 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ mmqr_status: "FAILED" });
   }
 
+  // ── Resolve the merchant pinned on this order ──────────────
+  // A config error is not a payment outcome. Keep polling, never terminal.
+  let merchant: KbzMerchant;
+  try {
+    merchant = getKbzMerchant(payment.kbzpay_merchant);
+  } catch (err) {
+    console.error(
+      `[kbzpay-status] merchant config error for ${paymentRef}: ${err instanceof Error ? err.message : err}`,
+    );
+    return NextResponse.json({ mmqr_status: "PENDING" });
+  }
+
   // ── Ask KBZPay ─────────────────────────────────────────────
-  const result = await queryOrder(paymentRef, budget);
+  const result = await queryOrder(merchant, paymentRef, budget);
   if (!result.ok) {
     // Unreachable is not failed. Keep polling.
     return NextResponse.json({ mmqr_status: "PENDING" });
