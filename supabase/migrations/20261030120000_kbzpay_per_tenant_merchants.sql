@@ -49,16 +49,17 @@ ALTER TABLE public.payments ADD COLUMN kbzpay_merchant text;
 COMMENT ON COLUMN public.payments.kbzpay_merchant IS
   'KBZPay merchant id (KBZPAY_<ID>_*) that created this order. Written once at insert by claim_kbzpay_order_slot / complete_kbzpay_supersede; immutable (trg_protect_payment_kbzpay_merchant). NULL for every other payment method.';
 
--- Only Brave has ever used KBZPay. Backfill Brave's rows by tenant, not every
--- KBZPay row: if any other tenant had KBZPay rows, the CHECK below fails and
--- the migration aborts, instead of silently attributing them to Brave.
-UPDATE public.payments p
+-- The pin records which merchant CREATED an order, not which tenant owns it.
+-- Before this migration there was exactly one KBZPay credential set, the
+-- platform-wide KBZPAY_* vars, and it was Brave's merchant. So every existing
+-- KBZPay order, whichever tenant it belongs to, lives under BRAVE at KBZPay and
+-- can only be queried or closed there. Tenants other than Brave get no
+-- assignment above, so this grants them nothing: they cannot create a new
+-- KBZPay order until the operator assigns them their own merchant.
+UPDATE public.payments
    SET kbzpay_merchant = 'BRAVE'
-  FROM public.tenants t
- WHERE p.tenant_id = t.id
-   AND t.subdomain = 'brave'
-   AND p.payment_method = 'kbzpay_mmqr'
-   AND p.kbzpay_merchant IS NULL;
+ WHERE payment_method = 'kbzpay_mmqr'
+   AND kbzpay_merchant IS NULL;
 
 ALTER TABLE public.payments
   ADD CONSTRAINT payments_kbzpay_merchant_required
