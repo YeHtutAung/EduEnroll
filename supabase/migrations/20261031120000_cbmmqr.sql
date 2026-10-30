@@ -23,6 +23,16 @@
 -- Fail fast rather than queue every payment read behind ADD COLUMN's lock.
 SET LOCAL lock_timeout = '5s';
 
+-- Preflight: this migration adds a CHECK that requires every cb_mmqr row to
+-- carry a pin; rows created before it cannot be pinned retroactively.
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM public.payments WHERE payment_method = 'cb_mmqr') THEN
+    RAISE EXCEPTION 'cbmmqr: payments rows with payment_method = cb_mmqr already exist; resolve them before applying this migration';
+  END IF;
+END;
+$$;
+
 -- ── 1. Tenant → merchant mapping ────────────────────────────────────────────
 -- Not a tenants column: tenant owners can update their own tenant row, and the
 -- mapping is the operator's alone.
@@ -97,7 +107,7 @@ CREATE UNIQUE INDEX idx_payments_one_live_cbmmqr_order
 CREATE OR REPLACE FUNCTION public.protect_payment_cbmmqr_fields()
 RETURNS trigger
 LANGUAGE plpgsql
-SET search_path = public
+SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_assigned text;
@@ -170,7 +180,7 @@ RETURNS TABLE (
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_live     public.payments%ROWTYPE;
@@ -274,13 +284,17 @@ CREATE FUNCTION public.store_cbmmqr_qr(
 RETURNS text
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_enrollment_id uuid;
   v_status        public.enrollments.status%TYPE;
   v_pay           public.payments%ROWTYPE;
 BEGIN
+  IF coalesce(p_order_ref, '') = '' THEN
+    RAISE EXCEPTION 'p_order_ref is required';
+  END IF;
+
   SELECT p.enrollment_id INTO v_enrollment_id
     FROM public.payments p
    WHERE p.payment_ref = p_payment_ref AND p.payment_method = 'cb_mmqr';
@@ -307,19 +321,23 @@ BEGIN
     RETURN 'ref_conflict';
   END IF;
 
-  IF v_status IN ('pending_payment', 'partial_payment') AND p_qr IS NOT NULL THEN
+  BEGIN
+    IF v_status IN ('pending_payment', 'partial_payment') AND p_qr IS NOT NULL THEN
+      UPDATE public.payments
+         SET provider_qr = p_qr,
+             provider_order_ref = p_order_ref,
+             provider_order_expires_at = p_expires_at
+       WHERE id = v_pay.id;
+      RETURN 'stored';
+    END IF;
+
     UPDATE public.payments
-       SET provider_qr = p_qr,
-           provider_order_ref = p_order_ref,
+       SET provider_order_ref = p_order_ref,
            provider_order_expires_at = p_expires_at
      WHERE id = v_pay.id;
-    RETURN 'stored';
-  END IF;
-
-  UPDATE public.payments
-     SET provider_order_ref = p_order_ref,
-         provider_order_expires_at = p_expires_at
-   WHERE id = v_pay.id;
+  EXCEPTION WHEN unique_violation THEN
+    RETURN 'ref_conflict';
+  END;
   RETURN CASE WHEN p_qr IS NULL THEN 'stored' ELSE 'not_payable' END;
 END;
 $$;
@@ -345,7 +363,7 @@ CREATE FUNCTION public.complete_cbmmqr_replace(
 RETURNS TABLE (outcome text, payment_id uuid, merchant text)
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_old               public.payments%ROWTYPE;
@@ -356,6 +374,24 @@ DECLARE
 BEGIN
   IF p_reason NOT IN ('EXPIRED', 'FAILED') THEN
     RAISE EXCEPTION 'invalid reason: %', p_reason;
+  END IF;
+
+  -- Lock order: OLD PAYMENT FIRST, then the enrollment. settleMmqrPayment
+  -- locks the payment and then (via trg_payments_sync_enrollment's UPDATE
+  -- enrollments) the enrollment; taking them in the opposite order here would
+  -- deadlock against it. Taking the payment lock also makes a replace that
+  -- races bind_cbmmqr_settlement wait for the bind to commit, and then see its
+  -- bank_reference below (plan review #1).
+  SELECT * INTO v_old
+    FROM public.payments
+   WHERE enrollment_id  = p_enrollment_id
+     AND payment_ref    = p_expected_old_ref
+     AND payment_method = 'cb_mmqr'
+   FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN QUERY SELECT 'not_found'::text, NULL::uuid, NULL::text;
+    RETURN;
   END IF;
 
   -- Ownership on every path; status checked only just before the write, so the
@@ -370,21 +406,6 @@ BEGIN
 
   IF NOT FOUND THEN
     RETURN QUERY SELECT 'invalid_enrollment'::text, NULL::uuid, NULL::text;
-    RETURN;
-  END IF;
-
-  -- FOR UPDATE: bind_cbmmqr_settlement locks this same row. Taking the lock
-  -- here makes a replace that races a settlement wait for the bind to commit,
-  -- and then see its bank_reference below (plan review #1).
-  SELECT * INTO v_old
-    FROM public.payments
-   WHERE enrollment_id  = p_enrollment_id
-     AND payment_ref    = p_expected_old_ref
-     AND payment_method = 'cb_mmqr'
-   FOR UPDATE;
-
-  IF NOT FOUND THEN
-    RETURN QUERY SELECT 'not_found'::text, NULL::uuid, NULL::text;
     RETURN;
   END IF;
 
@@ -456,7 +477,7 @@ CREATE FUNCTION public.bind_cbmmqr_settlement(
 RETURNS text
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_pay        public.payments%ROWTYPE;
@@ -487,8 +508,10 @@ BEGIN
      WHERE id = v_pay.id;
   EXCEPTION WHEN unique_violation THEN
     GET STACKED DIAGNOSTICS v_constraint = CONSTRAINT_NAME;
-    RETURN CASE WHEN v_constraint = 'idx_payments_cbmmqr_transaction_unique'
-                THEN 'duplicate_transaction' ELSE 'mismatch' END;
+    RETURN CASE v_constraint
+             WHEN 'idx_payments_cbmmqr_transaction_unique' THEN 'duplicate_transaction'
+             WHEN 'idx_payments_provider_order_ref_unique' THEN 'duplicate_order_ref'
+             ELSE 'mismatch' END;
   END;
 
   RETURN 'bound';
