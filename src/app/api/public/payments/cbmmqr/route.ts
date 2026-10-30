@@ -28,7 +28,8 @@ const CB_MIN_AMOUNT = 1000;
 // Design: docs/superpowers/specs/2026-10-31-cb-mmqr-integration-design.md §5.1
 //
 // Body: { enrollmentRef: string }
-// 200 { status: 'created', qr, orderId, amount, expiresAt } | { status: 'already_paid' }
+// 200 { status: 'created', qr, orderId, amount, expiresAt, serverNow } | { status: 'already_paid' }
+// serverNow lets the modal count down on the server's clock, not the phone's.
 // Every other answer is an error with a `message` the modal shows as is.
 
 type EnrollmentRow = {
@@ -217,6 +218,7 @@ export async function POST(request: NextRequest) {
       orderId: claimed.ref,
       amount: totalFee,
       expiresAt: claimed.expires_at,
+      serverNow: new Date().toISOString(),
     });
   }
 
@@ -353,6 +355,7 @@ export async function POST(request: NextRequest) {
     orderId: ref,
     amount: totalFee,
     expiresAt: expiresAtIso,
+    serverNow: new Date().toISOString(),
   });
 
   // ── Free a slot CB never received ──────────────────────────

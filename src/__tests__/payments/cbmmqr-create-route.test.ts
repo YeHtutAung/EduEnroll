@@ -178,6 +178,8 @@ describe("created", () => {
     expect(called("store_cbmmqr_qr")[0].args).toMatchObject({ p_payment_ref: ref, p_qr: "000201QR", p_order_ref: "QR-1" });
     expect(body).toMatchObject({ status: "created", qr: "000201QR", orderId: ref, amount: 40000 });
     expect(Date.parse(body.expiresAt)).toBeGreaterThan(Date.now());
+    // The modal counts down against the server's clock, not the phone's.
+    expect(Math.abs(Date.parse(body.serverNow) - Date.now())).toBeLessThan(5000);
   });
 
   it("uses the merchant pinned by the claim", async () => {
@@ -229,6 +231,7 @@ describe("created", () => {
     rpcResults.claim_cbmmqr_order_slot = { data: [claimRow({ outcome: "reuse", ref: "CBOLD", qr: "000201OLD" })], error: null };
     const body = await (await POST(req())).json();
     expect(body).toMatchObject({ status: "created", qr: "000201OLD", orderId: "CBOLD" });
+    expect(Math.abs(Date.parse(body.serverNow) - Date.now())).toBeLessThan(5000);
     expect(mockCreate).not.toHaveBeenCalled();
   });
 

@@ -4114,19 +4114,23 @@ export function qrCountdown(expiresAtMs: number | null, nowMs: number): { expire
 const [qrExpiresAtMs, setQrExpiresAtMs] = useState<number | null>(null);
 const [nowMs, setNowMs] = useState(() => Date.now());
 
+const cbQrExpired = qrCountdown(qrExpiresAtMs, nowMs).expired;
 useEffect(() => {
-  if (provider !== "cbmmqr" || state !== "qr" || qrExpiresAtMs === null) return;
+  if (provider !== "cbmmqr" || state !== "qr" || qrExpiresAtMs === null || cbQrExpired) return;
   const id = setInterval(() => setNowMs(Date.now()), 1000);
   return () => clearInterval(id);
-}, [provider, state, qrExpiresAtMs]);
+}, [provider, state, qrExpiresAtMs, cbQrExpired]); // stops once expired (review fix)
 ```
 
 6. In **both** places that handle a `kind: "qr"` response (the mount effect and `handleRetry`), right after `setOrderId(interpreted.orderId);` add:
 
 ```ts
-setQrExpiresAtMs(interpreted.expiresAt ? Date.parse(interpreted.expiresAt) : null);
-setNowMs(Date.now());
+const now = Date.now();
+setQrExpiresAtMs(localExpiryMs(interpreted.expiresAt, interpreted.serverNow, now));
+setNowMs(now);
 ```
+
+(Review fix.) The CB create route also returns `serverNow`; `interpretCreateResponse` passes it through, and the exported pure `localExpiryMs(expiresAt, serverNow, nowMs)` returns `nowMs + (expiresAt - serverNow)`, the raw expiry when `serverNow` is missing, and `null` when `expiresAt` does not parse. The countdown is then right on a phone whose clock is off.
 
 7. In the QR state's render, add a CB branch **before** the generic MMQR branch (`qrImageUrl || qrData ? <MmqrCard …`):
 
@@ -4175,7 +4179,8 @@ const stopPolling = useCallback(() => {
 }, []);
 ```
 
-- Call `stopPolling()` as the first line of `handleRetry` (replacing its `if (pollRef.current) clearInterval(pollRef.current);`).
+- `handleRetry`: do **not** stop the old poller up front (remove its `if (pollRef.current) clearInterval(pollRef.current);`). The new QR's `startPolling()` stops it. In `handleRetry`'s failure branches (`!res.ok`, `!interpreted`, catch): for `cbmmqr` leave the old poller running, so a late payment on the old QR still turns into SUCCESS (spec §7.2); for every other provider call `stopPolling()` there. Once the payment is known paid (`paidRef`), an in-flight retry does nothing.
+- Generation counter: `startPolling` increments `pollGenRef` after `stopPolling()`; `pollFn` captures its generation and ignores any result once it no longer matches, so a status request from an old poller never touches a new QR.
 - Call `stopPolling()` as the first line inside `startPolling`'s callback, before `pollRef.current = setInterval(...)`, so a new poller never runs beside an old one.
 - Replace the three-line clears in the `SUCCESS` / `FAILED` branches of `pollFn` and in the unmount cleanup with `stopPolling()`.
 
@@ -4195,7 +4200,7 @@ setMmqrProvider(normaliseMmqrProvider(d.mmqr_provider, "mmpay"));
 provider={qrProvider as MmqrProvider | "paypay"}
 ```
 
-`src/app/(public)/enroll/payment/[ref]/page.tsx:58`: `mmqr_provider?: MmqrProvider;` (import the type). Its `:1587` fallback to `"abank"` is unchanged.
+`src/app/(public)/enroll/payment/[ref]/page.tsx:58`: `mmqr_provider?: MmqrProvider;` (import the type). Its `:1587` fallback becomes `normaliseMmqrProvider(enrollment.mmqr_provider, "abank")` (review fix), so an unknown value still falls back to ABank.
 
 `src/app/admin/settings/page.tsx`: the three `"abank" | "mmpay" | "kbzpay"` unions (`:539`, `:607`, `:1399`) become `MmqrProvider`, and after the KBZPay `<option>` add:
 

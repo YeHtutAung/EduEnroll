@@ -235,7 +235,9 @@ columns) and `20261030120000_kbzpay_per_tenant_merchants.sql` (pin, locking, gra
    and its enrollment still `pending_payment` / `partial_payment`. `not_payable` → the QR is
    withheld and the route answers 409; `not_live`, `ref_conflict` or an error → 502 and the
    row stays `PENDING` (R13).
-9. Return `{ qr, orderId, amount, expiresAt }`.
+9. Return `{ qr, orderId, amount, expiresAt, serverNow }` (the reuse answer too). `serverNow`
+   is the server's clock at response time; the modal counts down `expiresAt - serverNow` from
+   the device's own now, so a phone clock that is off does not shift the expiry.
 
 **Cancellation or rejection while a QR is displayed.** Auto-cancel and admin rejection are
 not changed by this spec. A CB QR is displayed for at most `CB_MAX_QR_MINUTES` (about 3
@@ -421,7 +423,11 @@ CB requires its WebFrame layout (email of 2026-10-29). From CB's sample page and
 ### 7.2 `QRPaymentModal`
 
 - Countdown under the card from `expiresAt` ("QR will expire in m:ss"), never a fixed 3
-  minutes.
+  minutes, measured against `serverNow` (§5.1 step 9) rather than the device clock. The clock
+  stops ticking once the QR has expired.
+- "Get a new QR" keeps polling the old QR until the new one is shown; if the new QR cannot be
+  created, polling of the old one continues. A status answer for the old QR never touches the
+  new one.
 - New states: `below_minimum` ("CB Bank QR needs at least 1,000 MMK"); `above_maximum`;
   `qr_active` ("Your previous QR is still active — try again in m:ss"); QR display time over
   (from `expiresAt`, §5.4: "This QR has expired. If you already paid, we are still confirming
