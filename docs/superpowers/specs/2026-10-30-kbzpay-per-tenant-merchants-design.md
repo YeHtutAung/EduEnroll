@@ -201,9 +201,13 @@ migration `DROP`s each function and recreates it. Grants are re-applied exactly 
   goes away.
 - `no_merchant` → `503` with a neutral message ("Payment is not available for this event
   yet"), logged as a configuration error with the tenant id. No KBZPay call is made.
-- `getKbzMerchant` throws → `503`, same message, before any KBZPay call. The claimed row stays
-  `PENDING` and is resolved on the next request as in base spec R13; it is never marked
-  `FAILED` on a config error.
+- The merchant is resolved with `getKbzMerchant` **immediately after every successful claim,
+  before any outcome branch** — including `reuse`, which today returns the stored QR without
+  touching KBZPay. Otherwise a merchant whose configuration was removed or broken would keep
+  handing out payable QRs whose callbacks and status checks can no longer be verified.
+- `getKbzMerchant` throws → `503`, same message. No QR is served (a stored one is **not**
+  re-served) and no KBZPay call is made. The claimed row stays `PENDING` and is resolved on
+  the next request as in base spec R13; it is never marked `FAILED` on a config error.
 - When superseding, `resolveKbzpayOrder` queries and closes the **old** order with the old
   row's pinned merchant, which is what the claim returns for it.
 
@@ -236,8 +240,10 @@ is worth more.
 
 ### 5.4 Status route and `resolveKbzpayOrder`
 
-`GET /api/public/payments/kbzpay/status` already loads the payment row by ref. It also
-selects `kbzpay_merchant` and passes the resolved merchant to `queryOrder`. If the merchant
+`GET /api/public/payments/kbzpay/status` already loads the payment row by ref. Like the
+callback (§5.3), the lookup also filters on `payment_method = 'kbzpay_mmqr'`, so a ref from
+another provider is never sent to KBZPay; no match keeps answering `PENDING`. It also selects
+`kbzpay_merchant` and passes the resolved merchant to `queryOrder`. If the merchant
 cannot be resolved (config error), it logs and answers `{ mmqr_status: "PENDING" }`, the
 route's existing convention for anything it cannot resolve — never an unhandled 500 to the
 poller, and never a terminal status.
@@ -291,7 +297,10 @@ Unit (`src/__tests__/payments/`):
   mismatch → 403; the pinned merchant is used even after the tenant's assignment changes;
   unknown ref → 404; missing config for the pinned merchant → 500.
 - Status route and supersede use the pinned merchant.
-- Status route: config error for the pinned merchant → `PENDING`, no gateway call.
+- Creation route: `reuse` of a live order whose pinned merchant is misconfigured → 503, and
+  the stored QR is not in the response.
+- Status route: config error for the pinned merchant → `PENDING`, no gateway call; a
+  non-KBZPay payment ref → `PENDING`, no gateway call.
 - Existing tests that pin the old globals are rewritten, not deleted:
   `kbzpay-create-route.test.ts` (the `KBZPAY_NOTIFY_ORIGIN` suite — its "falls back to
   `platformOrigin()`" cases become configuration-error cases), `kbzpay-webhook-route.test.ts`
