@@ -5,6 +5,10 @@
 -- immutability trigger in place first, the backfill (NULL → 'BRAVE') would be
 -- rejected and this migration would abort.
 
+-- Fail fast rather than queue every payment read behind a long-running
+-- transaction while ADD COLUMN holds ACCESS EXCLUSIVE on payments.
+SET LOCAL lock_timeout = '5s';
+
 -- ── 1. Tenant → merchant mapping (§4.1) ─────────────────────────────────────
 -- Not a tenants column: tenant owners can update their own tenant row, and the
 -- mapping is the operator's alone.
@@ -23,10 +27,21 @@ CREATE TRIGGER kbzpay_merchant_assignments_updated_at
 ALTER TABLE public.kbzpay_merchant_assignments ENABLE ROW LEVEL SECURITY;
 -- No policies: anon and authenticated can neither read nor write.
 REVOKE ALL ON public.kbzpay_merchant_assignments FROM public, anon, authenticated;
+-- The RPCs run as owner and don't need this; it documents intent and covers operator scripts.
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.kbzpay_merchant_assignments TO service_role;
 
 INSERT INTO public.kbzpay_merchant_assignments (tenant_id, merchant_id)
 SELECT id, 'BRAVE' FROM public.tenants WHERE subdomain = 'brave'
 ON CONFLICT (tenant_id) DO NOTHING;
+
+-- A NOTICE, not an exception: an environment without Brave is legitimate.
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM public.tenants WHERE subdomain = 'brave') THEN
+    RAISE NOTICE 'kbzpay: no tenant with subdomain brave; no BRAVE assignment inserted';
+  END IF;
+END;
+$$;
 
 -- ── 2. Pin column, backfill, CHECK (§4.2) ───────────────────────────────────
 ALTER TABLE public.payments ADD COLUMN kbzpay_merchant text;
@@ -68,6 +83,9 @@ BEGIN
     IF new.kbzpay_merchant IS DISTINCT FROM old.kbzpay_merchant THEN
       RAISE EXCEPTION 'payments.kbzpay_merchant is immutable' USING errcode = '42501';
     END IF;
+    IF new.tenant_id IS DISTINCT FROM old.tenant_id AND old.kbzpay_merchant IS NOT NULL THEN
+      RAISE EXCEPTION 'a pinned KBZPay payment cannot move tenant' USING errcode = '42501';
+    END IF;
     RETURN new;
   END IF;
 
@@ -86,7 +104,7 @@ END;
 $$;
 
 CREATE TRIGGER trg_protect_payment_kbzpay_merchant
-  BEFORE INSERT OR UPDATE OF kbzpay_merchant ON public.payments
+  BEFORE INSERT OR UPDATE OF kbzpay_merchant, tenant_id ON public.payments
   FOR EACH ROW EXECUTE FUNCTION public.protect_payment_kbzpay_merchant();
 
 -- ── 4. claim_kbzpay_order_slot (§4.3) ───────────────────────────────────────
@@ -164,9 +182,12 @@ BEGIN
   END IF;
 
   -- No assignment → no new order. Checked only on the insert path (§4.3).
+  -- FOR SHARE holds the assignment until commit, so a concurrent reassignment
+  -- cannot make the trigger's re-read disagree.
   SELECT a.merchant_id INTO v_merchant
     FROM public.kbzpay_merchant_assignments a
-   WHERE a.tenant_id = v_tenant;
+   WHERE a.tenant_id = v_tenant
+     FOR SHARE;
 
   IF NOT FOUND THEN
     RETURN QUERY SELECT 'no_merchant'::text, NULL::uuid, NULL::text, NULL::text, NULL::text;
@@ -293,9 +314,12 @@ BEGIN
   END IF;
 
   -- Before the write below, so no_merchant changes nothing (§4.3).
+  -- FOR SHARE holds the assignment until commit, so a concurrent reassignment
+  -- cannot make the trigger's re-read disagree.
   SELECT a.merchant_id INTO v_merchant
     FROM public.kbzpay_merchant_assignments a
-   WHERE a.tenant_id = v_tenant;
+   WHERE a.tenant_id = v_tenant
+     FOR SHARE;
 
   IF NOT FOUND THEN
     RETURN QUERY SELECT 'no_merchant'::text, NULL::uuid, NULL::text;
