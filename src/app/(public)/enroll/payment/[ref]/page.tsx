@@ -15,7 +15,7 @@ import { buildQrMap } from "@/lib/tickets/render/ticketPng";
 import { successRedirectUrl } from "@/lib/enrollment/successRedirect";
 import type { QrMap, TicketData, TicketRenderContext } from "@/lib/tickets/render/types";
 import type { SponsorPlacements } from "@/types/database";
-import type { MmqrProvider } from "@/lib/mmqrProvider";
+import { normaliseMmqrProvider, type MmqrProvider } from "@/lib/mmqrProvider";
 import { jsPDF } from "jspdf";
 import { computePlatformFee, displayTotals } from "@/server/payments/platformFee";
 import { ticketSubtotal } from "@/lib/payments/statusTicketAmounts";
@@ -1585,7 +1585,7 @@ export default function PaymentInstructionsPage() {
   const showUpload = enrollment.status === "pending_payment" || enrollment.status === "partial_payment";
   const isPartialReUpload = enrollment.status === "partial_payment";
   const paymentMode = enrollment.payment_mode ?? "bank_transfer";
-  const mmqrProvider = enrollment.mmqr_provider ?? "abank";
+  const mmqrProvider = normaliseMmqrProvider(enrollment.mmqr_provider, "abank");
 
   const isConfirmed = enrollment.status === "confirmed";
 
