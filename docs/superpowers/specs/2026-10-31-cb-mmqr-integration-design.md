@@ -101,7 +101,9 @@ BeatsRun buyers an MMPay QR.
 
 - **`public.cbmmqr_merchant_assignments`** `(tenant_id uuid PK → tenants, merchant_id text
   CHECK '^[A-Z][A-Z0-9_]{1,31}$', created_at, updated_at)`. RLS on, no policies, `REVOKE ALL`
-  from `public`, `anon`, `authenticated`; `service_role` only. Same shape as
+  from `public`, `anon`, `authenticated`, and an explicit `GRANT SELECT, INSERT, UPDATE,
+  DELETE … TO service_role` so the operator can add, rotate and remove assignments (the RPCs
+  run as owner and do not need it). Same shape as
   `kbzpay_merchant_assignments`, including its `BEFORE UPDATE … EXECUTE FUNCTION
   public.set_updated_at()` trigger (`cbmmqr_merchant_assignments_updated_at`), so a
   reassignment keeps `updated_at` truthful. Seeded with `beatsrun` → `YOUNGMONEY` if that
@@ -440,8 +442,9 @@ Mirrors the KBZPay suites in `src/__tests__/payments/` and `src/__tests__/db/`:
   race (`already_settled`); the trigger (pin, `tenant_id`, NULL → value only for
   `provider_order_ref` and `bank_reference`); `bind_cbmmqr_settlement` outcomes and two
   concurrent binds with different transaction ids; reassigning a tenant in
-  `cbmmqr_merchant_assignments` advances `updated_at`; grants (anon and authenticated
-  denied).
+  `cbmmqr_merchant_assignments` advances `updated_at`; grants: `service_role` can select,
+  insert, update and delete assignments, `anon` and `authenticated` can do none of these, and
+  only `service_role` can execute the three RPCs.
 - The existing KBZPay, ABank and MMPay suites pass unchanged.
 
 ## 10. Rollout and gates
@@ -521,3 +524,9 @@ offers them.
 | # | Finding | Outcome |
 |---|---|---|
 | 1 | P2 — `cbmmqr_merchant_assignments` has `updated_at` but no `set_updated_at()` trigger, unlike the KBZPay table | Accepted: trigger added to §4.3 and covered in the database test (§9). |
+
+**Codex, revision 4 (PR review), 2026-10-31** — 1 finding:
+
+| # | Finding | Outcome |
+|---|---|---|
+| 1 | P1 — the assignment table is "service_role only" but the design only revokes; it never grants `service_role`, so the operator could not manage assignments | Accepted: explicit `GRANT SELECT, INSERT, UPDATE, DELETE … TO service_role` (§4.3), as the KBZPay migration does; grants tested for `service_role`, `anon` and `authenticated` (§9). |
