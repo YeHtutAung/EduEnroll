@@ -193,8 +193,9 @@ columns) and `20261030120000_kbzpay_per_tenant_merchants.sql` (pin, locking, gra
   already-authorised or in-flight payment can settle afterwards, and the status can never
   change to success.
 - **Token.** One cache entry per merchant, single-flight, expiring 60 s before
-  `expiredDateTime`. On `0012` drop it and retry the call once; `0012` is a rejection, so the
-  retry cannot create a second QR.
+  `expiredDateTime`. On `0012` or `0017` (expired / invalid token) drop it and retry once; the
+  retry reuses the same referenceNo, so even if CB had acted on the first call a second
+  create gets `0003`, which is ambiguous, never a second QR.
 - **Reference.** `payment_ref` = `CB` + 23 characters of cryptographically random base32
   (≥ 110 bits): 25 characters, distinct from every other provider's format, backed by the
   existing `idx_payments_payment_ref_unique`. A unique violation retries the claim with a new

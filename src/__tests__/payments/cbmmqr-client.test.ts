@@ -202,7 +202,7 @@ describe("createDynamicQr", () => {
   });
 
   it("is ambiguous without calling CB when the token request fails", async () => {
-    answers.token = [{ body: { returnCode: "0021" } }];
+    answers.token = [{ body: { returnCode: "0099" } }];
     expect((await createDynamicQr(MERCHANT, params)).kind).toBe("ambiguous");
     expect(calls.filter((c) => route(c.url) === "create")).toHaveLength(0);
   });
@@ -272,5 +272,97 @@ describe("mode and base URL", () => {
   it("refuses a missing base URL", async () => {
     delete process.env.CBMMQR_BASE_URL;
     await expect(createDynamicQr(MERCHANT, params)).rejects.toThrow(/CBMMQR_BASE_URL/);
+  });
+});
+
+describe("review fixes", () => {
+  it("a 5xx is never a definite rejection, whatever its code", async () => {
+    answers.create = [{ status: 500, body: { returnCode: "0001" } }];
+    expect((await createDynamicQr(MERCHANT, params)).kind).toBe("ambiguous");
+  });
+
+  it("a 4xx with a rejection code is still a definite rejection", async () => {
+    answers.create = [{ status: 400, body: { returnCode: "0051" } }];
+    expect(await createDynamicQr(MERCHANT, params)).toEqual({ kind: "rejected", reason: "below_minimum", code: "0051" });
+  });
+
+  it.each(["0016", "0021"])("token credential failure %s is a config rejection and creates nothing", async (code) => {
+    answers.token = [{ body: { returnCode: code } }];
+    expect(await createDynamicQr(MERCHANT, params)).toEqual({ kind: "rejected", reason: "config", code });
+    expect(calls.filter((c) => route(c.url) === "create")).toHaveLength(0);
+  });
+
+  it("a 5xx token failure with a credential code is ambiguous", async () => {
+    answers.token = [{ status: 503, body: { returnCode: "0021" } }];
+    expect((await createDynamicQr(MERCHANT, params)).kind).toBe("ambiguous");
+  });
+
+  it("checkStatus stays unreachable when the token request fails", async () => {
+    answers.token = [{ body: { returnCode: "0021" } }];
+    expect(await checkStatus(MERCHANT, "QR-1")).toEqual({ kind: "unreachable" });
+  });
+
+  it.each([
+    [40000, 40000], ["40000", 40000], ["40000.50", 40000.5],
+    ["", null], [" ", null], [false, null], [true, null], [[], null], ["1e3", null], ["-5", null], [null, null],
+  ])("checkStatus amount %j gives %j", async (v, out) => {
+    answers.status = [{ body: { returnCode: "0000", transAmount: v } }];
+    expect(await checkStatus(MERCHANT, "QR-1")).toMatchObject({ kind: "answer", amount: out });
+  });
+
+  it("rejects an out-of-range UTC offset", () => {
+    process.env.CBMMQR_UTC_OFFSET = "+24:00";
+    try {
+      expect(() => parseCbTimestamp("20261031 10:14:14")).toThrow(/CBMMQR_UTC_OFFSET/);
+    } finally { delete process.env.CBMMQR_UTC_OFFSET; }
+  });
+
+  it("clears the single-flight entry when the call is refused", async () => {
+    process.env.VERCEL_ENV = "production";
+    await expect(createDynamicQr(MERCHANT, params)).rejects.toThrow(/CBMMQR_MODE/);
+    delete process.env.VERCEL_ENV;
+    answers.create = [createOk];
+    expect((await createDynamicQr(MERCHANT, params)).kind).toBe("created");
+    expect(calls.filter((c) => route(c.url) === "token")).toHaveLength(1);
+  });
+
+  it("a bad CBMMQR_PROXY_URL surfaces as a configuration error, not 'CB down'", async () => {
+    process.env.CBMMQR_PROXY_URL = "not a url";
+    vi.resetModules(); // the dispatcher is cached per module instance
+    try {
+      const fresh = await import("@/lib/cbmmqr");
+      await expect(fresh.createDynamicQr(MERCHANT, params)).rejects.toThrow();
+    } finally { delete process.env.CBMMQR_PROXY_URL; }
+  });
+
+  it("normalises the base URL and refuses a query or fragment", async () => {
+    process.env.CBMMQR_BASE_URL = "https://cbgw.test/api///";
+    answers.create = [createOk];
+    await createDynamicQr(MERCHANT, params);
+    expect(calls[0].url).toBe("https://cbgw.test/api/auth/token");
+    for (const bad of ["https://cbgw.test/api?x=1", "https://cbgw.test/api#f"]) {
+      process.env.CBMMQR_BASE_URL = bad;
+      await expect(createDynamicQr(MERCHANT, params)).rejects.toThrow(/query or fragment/);
+    }
+  });
+
+  it("never exposes secrets in logs or thrown configuration messages", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const secrets = ["ym-password", "TOKEN-1", "ym-api-key"];
+    answers.token = [{ body: { returnCode: "0021", token: "TOKEN-1" } }];
+    await createDynamicQr(MERCHANT, params);
+    const messages: string[] = [];
+    const attempt = async () => {
+      try { await createDynamicQr(MERCHANT, params); } catch (e) { messages.push((e as Error).message); }
+    };
+    process.env.CBMMQR_MODE = "prod"; await attempt();
+    process.env.CBMMQR_MODE = "production"; process.env.CBMMQR_BASE_URL = "http://x.test"; await attempt();
+    delete process.env.CBMMQR_BASE_URL; await attempt();
+    process.env.CBMMQR_BASE_URL = "https://x.test/?a=b"; await attempt();
+    delete process.env.CBMMQR_MODE;
+    expect(messages).toHaveLength(4);
+    const all = [...spy.mock.calls.flat().map(String), ...messages].join(" ");
+    for (const secret of secrets) expect(all).not.toContain(secret);
+    spy.mockRestore();
   });
 });

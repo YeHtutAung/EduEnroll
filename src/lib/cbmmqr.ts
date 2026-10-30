@@ -89,7 +89,7 @@ export function buildReferenceNo(): string {
 // ── Time ───────────────────────────────────────────────────────────────────
 
 const CB_TIMESTAMP = /^(\d{4})(\d{2})(\d{2}) (\d{2}):(\d{2}):(\d{2})$/;
-const OFFSET_PATTERN = /^[+-]\d{2}:\d{2}$/;
+const OFFSET_PATTERN = /^[+-](0\d|1[0-4]):[0-5]\d$/;
 
 /**
  * CB's timestamps carry no zone. Myanmar has one fixed offset and no DST, so a
@@ -216,7 +216,10 @@ function baseUrl(): string {
   if (mode === "production" && parsed.protocol !== "https:") {
     throw new Error("CBMMQR_BASE_URL must use https in production");
   }
-  return raw.replace(/\/+$/, "");
+  if (parsed.search || parsed.hash) {
+    throw new Error("CBMMQR_BASE_URL must not have a query or fragment");
+  }
+  return `${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}`;
 }
 
 // ── Egress and timeout (as src/lib/kbzpay.ts) ──────────────────────────────
@@ -247,7 +250,9 @@ function timeoutFor(budget: CallBudget | undefined, now: number): number | null 
   return Math.min(CALL_TIMEOUT_MS, remaining);
 }
 
-type SendResult = { ok: false } | { ok: true; code: string | null; body: Record<string, unknown> };
+type SendResult =
+  | { ok: false }
+  | { ok: true; status: number; code: string | null; body: Record<string, unknown> };
 
 /**
  * One HTTP call. `ok: false` means we did not get a parseable answer. A non-2xx
@@ -269,6 +274,8 @@ async function send(
 
   // Outside the try: a configuration error must surface, not read as "CB down".
   const url = `${baseUrl()}${path}`;
+  // Resolved here too: a bad CBMMQR_PROXY_URL is a configuration error, not "CB down".
+  const dispatcher = egressDispatcher();
 
   try {
     const res = await fetch(url, {
@@ -276,7 +283,7 @@ async function send(
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeout),
-      dispatcher: egressDispatcher(),
+      dispatcher,
     } as RequestInit & { dispatcher?: ProxyAgent | Agent });
 
     const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
@@ -289,7 +296,7 @@ async function send(
       console.error(`[cbmmqr] ${label} HTTP ${res.status}`);
       return { ok: false };
     }
-    return { ok: true, code, body: json };
+    return { ok: true, status: res.status, code, body: json };
   } catch (err) {
     const timedOut = err instanceof Error && err.name === "TimeoutError";
     console.error(
@@ -307,7 +314,8 @@ const TOKEN_CODES = new Set(["0012", "0017"]);
 const TOKEN_EARLY_MS = 60_000;
 
 const tokens = new Map<string, { token: string; expiresAtMs: number }>();
-const inflight = new Map<string, Promise<string | null>>();
+type TokenOutcome = { token: string } | { failCode: string | null };
+const inflight = new Map<string, Promise<TokenOutcome>>();
 
 export function __resetTokenCacheForTests(): void {
   tokens.clear();
@@ -316,33 +324,35 @@ export function __resetTokenCacheForTests(): void {
 
 /**
  * The merchant's token, cached per instance until 60s before CB's expiry.
- * Concurrent callers share one request (single-flight). null = no token.
+ * Concurrent callers share one request (single-flight). `failCode` is CB's
+ * code when the token request was answered with a definite (non-5xx) failure.
  */
-async function getToken(merchant: CbMerchant, budget: CallBudget | undefined, force: boolean): Promise<string | null> {
+async function getToken(merchant: CbMerchant, budget: CallBudget | undefined, force: boolean): Promise<TokenOutcome> {
   const cached = tokens.get(merchant.id);
-  if (!force && cached && cached.expiresAtMs - TOKEN_EARLY_MS > Date.now()) return cached.token;
+  if (!force && cached && cached.expiresAtMs - TOKEN_EARLY_MS > Date.now()) return { token: cached.token };
 
+  // Joiners share the starter's budget.
   const pending = inflight.get(merchant.id);
   if (pending) return pending;
 
-  const request = (async () => {
+  const request = (async (): Promise<TokenOutcome> => {
     tokens.delete(merchant.id);
     const r = await send("auth/token", "POST", "/auth/token",
       { userId: merchant.userId, password: merchant.password }, budget);
     if (!r.ok || r.code !== CB_SUCCESS || typeof r.body.token !== "string" || !r.body.token) {
       console.error(`[cbmmqr] token request failed for ${merchant.id}: code=${r.ok ? r.code : "none"}`);
-      return null;
+      return { failCode: r.ok && r.status < 500 ? r.code : null };
     }
     const expiresAtMs = parseCbTimestamp(r.body.expiredDateTime) ?? Date.now() + 5 * 60_000;
     tokens.set(merchant.id, { token: r.body.token, expiresAtMs });
-    return r.body.token;
+    return { token: r.body.token };
   })();
 
   inflight.set(merchant.id, request);
   try {
     return await request;
   } finally {
-    inflight.delete(merchant.id);
+    if (inflight.get(merchant.id) === request) inflight.delete(merchant.id);
   }
 }
 
@@ -351,15 +361,15 @@ async function withToken(
   merchant: CbMerchant,
   budget: CallBudget | undefined,
   call: (token: string) => Promise<SendResult>,
-): Promise<SendResult> {
+): Promise<SendResult | { tokenFailCode: string | null }> {
   const first = await getToken(merchant, budget, false);
-  if (!first) return { ok: false };
-  const r = await call(first);
+  if (!("token" in first)) return { tokenFailCode: first.failCode };
+  const r = await call(first.token);
   if (!r.ok || !TOKEN_CODES.has(r.code ?? "")) return r;
 
   const second = await getToken(merchant, budget, true);
-  if (!second) return { ok: false };
-  return call(second);
+  if (!("token" in second)) return { tokenFailCode: second.failCode };
+  return call(second.token);
 }
 
 // ── Create QR ──────────────────────────────────────────────────────────────
@@ -392,6 +402,13 @@ export async function createDynamicQr(
     }, budget),
   );
 
+  if ("tokenFailCode" in r) {
+    // No token means CB was never asked to create anything.
+    if (r.tokenFailCode === "0016" || r.tokenFailCode === "0021") {
+      return { kind: "rejected", reason: "config", code: r.tokenFailCode };
+    }
+    return { kind: "ambiguous", code: null };
+  }
   if (!r.ok) return { kind: "ambiguous", code: null };
 
   if (r.code === CB_SUCCESS) {
@@ -404,7 +421,8 @@ export async function createDynamicQr(
     return { kind: "created", qr, qrReferenceNo: qrRef, expiresAtMs: parseCbTimestamp(r.body.qrExpiredDateTime) };
   }
 
-  const reason = r.code ? CREATE_REJECTIONS[r.code] : undefined;
+  // A 5xx never counts as a definite rejection, whatever its body says.
+  const reason = r.code && r.status < 500 ? CREATE_REJECTIONS[r.code] : undefined;
   if (reason) return { kind: "rejected", reason, code: r.code! };
 
   console.error(`[cbmmqr] dynamicqr returned ${r.code ?? "no code"} for ${p.referenceNo}; treating as ambiguous`);
@@ -427,6 +445,12 @@ export type StatusResult =
       institutionName?: string;
     };
 
+function parseAmount(v: unknown): number | null {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "string" && /^\d+(\.\d+)?$/.test(v)) return Number(v);
+  return null;
+}
+
 /**
  * The settlement authority (spec §5.5). Its answer is only ever used together
  * with every field check in settleCbmmqrPayment(); a code alone means little,
@@ -442,17 +466,16 @@ export async function checkStatus(
       { token, sourceId: merchant.sourceId }, budget),
   );
 
-  if (!r.ok || r.code === null) return { kind: "unreachable" };
+  if ("tokenFailCode" in r || !r.ok || r.code === null) return { kind: "unreachable" };
 
   const b = r.body;
   const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
-  const amount = Number(b.transAmount);
 
   const answer: StatusResult = {
     kind: "answer",
     code: r.code,
     currency: currencyFromCb(b.transCurrency),
-    amount: b.transAmount === undefined || b.transAmount === null || !Number.isFinite(amount) ? null : amount,
+    amount: parseAmount(b.transAmount),
   };
   if (str(b.referenceNo)) answer.referenceNo = str(b.referenceNo);
   if (str(b.qrReferenceNo)) answer.qrReferenceNo = str(b.qrReferenceNo);
