@@ -403,6 +403,9 @@ export default function QRPaymentModal({
           setQrExpiresAtMs(localExpiryMs(interpreted.expiresAt, interpreted.serverNow, now));
           setNowMs(now);
         }
+        // Only now, with the new order known: if rendering the new QR fails, the old
+        // (possibly expired) image must not stay on screen under the new order id.
+        setQrImageUrl(null);
         if (qrSource) {
           try {
             const dataUrl = await QRCode.toDataURL(qrSource, {
