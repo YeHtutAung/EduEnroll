@@ -5,6 +5,7 @@
 // Pure module: no Supabase, no Next.js imports. Mirrors src/lib/kbzpay.ts.
 
 import { randomBytes, timingSafeEqual } from "crypto";
+import { Agent, ProxyAgent } from "undici";
 
 // ── Merchants ──────────────────────────────────────────────────────────────
 
@@ -178,4 +179,285 @@ export function apiKeyMatches(received: unknown, expected: string): boolean {
 /** CB sends ISO 4217 numeric. 104 is MMK; nothing else is accepted. */
 export function currencyFromCb(value: unknown): "MMK" | null {
   return String(value ?? "").trim() === "104" ? "MMK" : null;
+}
+
+// ── Mode and base URL ──────────────────────────────────────────────────────
+
+/**
+ * Same fail-closed rules as KBZPay's resolveMode(): an unrecognised value is
+ * always an error, and on VERCEL_ENV=production only "production" is accepted.
+ */
+function resolveMode(): "production" | "uat" {
+  const raw = (process.env.CBMMQR_MODE ?? "").trim().toLowerCase();
+  if (raw === "production") return "production";
+  if (process.env.VERCEL_ENV === "production") {
+    throw new Error('CBMMQR_MODE must be "production" on a production deployment.');
+  }
+  if (raw !== "" && raw !== "uat") {
+    throw new Error('CBMMQR_MODE is set to an unrecognised value — expected "production" or "uat".');
+  }
+  return "uat";
+}
+
+/**
+ * CB will send the UAT and Live gateway URLs (spec §6). Production must be
+ * https; UAT may be whatever CB gives us, since its scheme is not ours to pick.
+ */
+function baseUrl(): string {
+  const mode = resolveMode();
+  const raw = process.env.CBMMQR_BASE_URL?.trim();
+  if (!raw) throw new Error("CBMMQR_BASE_URL is not set");
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error("CBMMQR_BASE_URL is not a valid URL");
+  }
+  if (mode === "production" && parsed.protocol !== "https:") {
+    throw new Error("CBMMQR_BASE_URL must use https in production");
+  }
+  return raw.replace(/\/+$/, "");
+}
+
+// ── Egress and timeout (as src/lib/kbzpay.ts) ──────────────────────────────
+
+// CB allowlists caller IPs (spec §3). CBMMQR_PROXY_URL routes ONLY this client
+// through a fixed-IP host; unset means direct egress (UAT runs on the office
+// IP). Per-request dispatcher, never setGlobalDispatcher().
+const ipv4Agent = new Agent({ connect: { family: 4 } } as unknown as Agent.Options);
+let cachedProxy: ProxyAgent | null | undefined;
+
+function egressDispatcher(): ProxyAgent | Agent {
+  if (cachedProxy === undefined) {
+    const url = process.env.CBMMQR_PROXY_URL;
+    cachedProxy = url ? new ProxyAgent(url) : null;
+  }
+  return cachedProxy ?? ipv4Agent;
+}
+
+const CALL_TIMEOUT_MS = 20_000;
+const MIN_CALL_MS = 1_000;
+
+export type CallBudget = { deadlineMs: number };
+
+function timeoutFor(budget: CallBudget | undefined, now: number): number | null {
+  if (!budget) return CALL_TIMEOUT_MS;
+  const remaining = budget.deadlineMs - now;
+  if (remaining < MIN_CALL_MS) return null;
+  return Math.min(CALL_TIMEOUT_MS, remaining);
+}
+
+type SendResult = { ok: false } | { ok: true; code: string | null; body: Record<string, unknown> };
+
+/**
+ * One HTTP call. `ok: false` means we did not get a parseable answer. A non-2xx
+ * with a JSON body is still an answer: CB may put a returnCode on a 400.
+ * Bodies are never logged — the token request carries the password.
+ */
+async function send(
+  label: string,
+  method: "POST" | "PATCH",
+  path: string,
+  body: Record<string, unknown>,
+  budget?: CallBudget,
+): Promise<SendResult> {
+  const timeout = timeoutFor(budget, Date.now());
+  if (timeout === null) {
+    console.error(`[cbmmqr] ${label} skipped: request budget exhausted`);
+    return { ok: false };
+  }
+
+  // Outside the try: a configuration error must surface, not read as "CB down".
+  const url = `${baseUrl()}${path}`;
+
+  try {
+    const res = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(timeout),
+      dispatcher: egressDispatcher(),
+    } as RequestInit & { dispatcher?: ProxyAgent | Agent });
+
+    const json = (await res.json().catch(() => null)) as Record<string, unknown> | null;
+    if (!json || typeof json !== "object") {
+      console.error(`[cbmmqr] ${label} HTTP ${res.status} without a JSON body`);
+      return { ok: false };
+    }
+    const code = normaliseCode(json.returnCode);
+    if (!res.ok && code === null) {
+      console.error(`[cbmmqr] ${label} HTTP ${res.status}`);
+      return { ok: false };
+    }
+    return { ok: true, code, body: json };
+  } catch (err) {
+    const timedOut = err instanceof Error && err.name === "TimeoutError";
+    console.error(
+      `[cbmmqr] ${label} transport error${timedOut ? " (timeout — check IP allowlisting)" : ""}:`,
+      err instanceof Error ? err.message : "unknown",
+    );
+    return { ok: false };
+  }
+}
+
+// ── Token cache ────────────────────────────────────────────────────────────
+
+/** Token codes: expired / invalid. Refresh and retry once. */
+const TOKEN_CODES = new Set(["0012", "0017"]);
+const TOKEN_EARLY_MS = 60_000;
+
+const tokens = new Map<string, { token: string; expiresAtMs: number }>();
+const inflight = new Map<string, Promise<string | null>>();
+
+export function __resetTokenCacheForTests(): void {
+  tokens.clear();
+  inflight.clear();
+}
+
+/**
+ * The merchant's token, cached per instance until 60s before CB's expiry.
+ * Concurrent callers share one request (single-flight). null = no token.
+ */
+async function getToken(merchant: CbMerchant, budget: CallBudget | undefined, force: boolean): Promise<string | null> {
+  const cached = tokens.get(merchant.id);
+  if (!force && cached && cached.expiresAtMs - TOKEN_EARLY_MS > Date.now()) return cached.token;
+
+  const pending = inflight.get(merchant.id);
+  if (pending) return pending;
+
+  const request = (async () => {
+    tokens.delete(merchant.id);
+    const r = await send("auth/token", "POST", "/auth/token",
+      { userId: merchant.userId, password: merchant.password }, budget);
+    if (!r.ok || r.code !== CB_SUCCESS || typeof r.body.token !== "string" || !r.body.token) {
+      console.error(`[cbmmqr] token request failed for ${merchant.id}: code=${r.ok ? r.code : "none"}`);
+      return null;
+    }
+    const expiresAtMs = parseCbTimestamp(r.body.expiredDateTime) ?? Date.now() + 5 * 60_000;
+    tokens.set(merchant.id, { token: r.body.token, expiresAtMs });
+    return r.body.token;
+  })();
+
+  inflight.set(merchant.id, request);
+  try {
+    return await request;
+  } finally {
+    inflight.delete(merchant.id);
+  }
+}
+
+/** Runs `call` with a token; on a token code, refreshes once and retries once. */
+async function withToken(
+  merchant: CbMerchant,
+  budget: CallBudget | undefined,
+  call: (token: string) => Promise<SendResult>,
+): Promise<SendResult> {
+  const first = await getToken(merchant, budget, false);
+  if (!first) return { ok: false };
+  const r = await call(first);
+  if (!r.ok || !TOKEN_CODES.has(r.code ?? "")) return r;
+
+  const second = await getToken(merchant, budget, true);
+  if (!second) return { ok: false };
+  return call(second);
+}
+
+// ── Create QR ──────────────────────────────────────────────────────────────
+
+export type CreateQrParams = { referenceNo: string; amount: number; purpose: string };
+
+export type CreateQrResult =
+  | { kind: "created"; qr: string; qrReferenceNo: string; expiresAtMs: number | null }
+  /** CB created nothing (spec §5.1 step 6): the row may be marked FAILED. */
+  | { kind: "rejected"; reason: "below_minimum" | "above_maximum" | "config"; code: string }
+  /** We cannot tell whether CB created a QR: the row stays PENDING (R13). */
+  | { kind: "ambiguous"; code: string | null };
+
+export async function createDynamicQr(
+  merchant: CbMerchant,
+  p: CreateQrParams,
+  budget?: CallBudget,
+): Promise<CreateQrResult> {
+  const r = await withToken(merchant, budget, (token) =>
+    send("dynamicqr", "POST", "/dynamicqr", {
+      token,
+      sourceId: merchant.sourceId,
+      // CB's spec shows "104"; whether it wants a string or a number is a UAT check.
+      transCurrency: "104",
+      transAmount: p.amount,
+      purposeOfTransaction: p.purpose.slice(0, 25),
+      referenceNo: p.referenceNo,
+      merchantId: merchant.merchantId,
+      terminalId: merchant.terminalId,
+    }, budget),
+  );
+
+  if (!r.ok) return { kind: "ambiguous", code: null };
+
+  if (r.code === CB_SUCCESS) {
+    const qr = r.body.qrCodeInfo;
+    const qrRef = r.body.qrReferenceNo;
+    if (typeof qr !== "string" || !qr || typeof qrRef !== "string" || !qrRef) {
+      console.error(`[cbmmqr] dynamicqr 0000 without a QR or reference for ${p.referenceNo}`);
+      return { kind: "ambiguous", code: r.code };
+    }
+    return { kind: "created", qr, qrReferenceNo: qrRef, expiresAtMs: parseCbTimestamp(r.body.qrExpiredDateTime) };
+  }
+
+  const reason = r.code ? CREATE_REJECTIONS[r.code] : undefined;
+  if (reason) return { kind: "rejected", reason, code: r.code! };
+
+  console.error(`[cbmmqr] dynamicqr returned ${r.code ?? "no code"} for ${p.referenceNo}; treating as ambiguous`);
+  return { kind: "ambiguous", code: r.code };
+}
+
+// ── Status check ───────────────────────────────────────────────────────────
+
+export type StatusResult =
+  | { kind: "unreachable" }
+  | {
+      kind: "answer";
+      code: string;
+      referenceNo?: string;
+      qrReferenceNo?: string;
+      transactionId?: string;
+      currency: "MMK" | null;
+      amount: number | null;
+      merchantId?: string;
+      institutionName?: string;
+    };
+
+/**
+ * The settlement authority (spec §5.5). Its answer is only ever used together
+ * with every field check in settleCbmmqrPayment(); a code alone means little,
+ * since CB gives several codes two meanings.
+ */
+export async function checkStatus(
+  merchant: CbMerchant,
+  qrReferenceNo: string,
+  budget?: CallBudget,
+): Promise<StatusResult> {
+  const r = await withToken(merchant, budget, (token) =>
+    send("status", "PATCH", `/dynamicqr/${encodeURIComponent(qrReferenceNo)}/status`,
+      { token, sourceId: merchant.sourceId }, budget),
+  );
+
+  if (!r.ok || r.code === null) return { kind: "unreachable" };
+
+  const b = r.body;
+  const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+  const amount = Number(b.transAmount);
+
+  const answer: StatusResult = {
+    kind: "answer",
+    code: r.code,
+    currency: currencyFromCb(b.transCurrency),
+    amount: b.transAmount === undefined || b.transAmount === null || !Number.isFinite(amount) ? null : amount,
+  };
+  if (str(b.referenceNo)) answer.referenceNo = str(b.referenceNo);
+  if (str(b.qrReferenceNo)) answer.qrReferenceNo = str(b.qrReferenceNo);
+  if (str(b.transactionId)) answer.transactionId = str(b.transactionId);
+  if (str(b.merchantId)) answer.merchantId = str(b.merchantId);
+  if (str(b.institutionName)) answer.institutionName = str(b.institutionName);
+  return answer;
 }
