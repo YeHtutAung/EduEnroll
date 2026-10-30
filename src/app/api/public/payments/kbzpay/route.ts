@@ -269,6 +269,14 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  // ── 6a. Only 'created' and 'unresolved' (after its supersede) may precreate ──
+  // Anything else is an outcome this code does not know, e.g. from a newer
+  // claim function. Fail closed rather than fall through to the gateway.
+  if (claimed.outcome !== "created" && claimed.outcome !== "unresolved") {
+    console.error(`[kbzpay] unexpected claim outcome "${claimed.outcome}"; refusing to call precreate`);
+    return gatewayError();
+  }
+
   // ── 7. unresolved → resolve against KBZPay, then swap ──────
   if (claimed.outcome === "unresolved") {
     const oldRef = claimed.ref!;

@@ -16,6 +16,7 @@ process.env.KBZPAY_BRAVE_NOTIFY_ORIGIN = "https://brave.kuunyi.com";
 type Row = Record<string, unknown>;
 
 let payment: Row | null;
+let lookupError: { message: string } | null;
 let eqCalls: [string, unknown][];
 let queryResult: Row;
 let settleResult: Row;
@@ -67,12 +68,13 @@ beforeEach(() => {
   mockQueryOrder.mockImplementation(async () => queryResult);
   mockSettle.mockImplementation(async () => settleResult);
   eqCalls = [];
+  lookupError = null;
   mockFrom.mockImplementation(() => ({
     select: () => ({
       eq: (c1: string, v1: unknown) => ({
         eq: (c2: string, v2: unknown) => {
           eqCalls.push([c1, v1], [c2, v2]);
-          return { maybeSingle: async () => ({ data: payment, error: null }) };
+          return { maybeSingle: async () => ({ data: payment, error: lookupError }) };
         },
       }),
     }),
@@ -87,6 +89,23 @@ describe("request handling", () => {
   it("reports PENDING for an unknown ref rather than erroring the modal", async () => {
     payment = null;
     expect(await body(await GET(req()))).toEqual({ mmqr_status: "PENDING" });
+  });
+
+  it("logs a lookup error but still answers PENDING without calling KBZPay", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      payment = null;
+      lookupError = { message: "boom" };
+
+      expect(await body(await GET(req()))).toEqual({ mmqr_status: "PENDING" });
+      expect(mockQueryOrder).not.toHaveBeenCalled();
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(String(spy.mock.calls[0][0])).toContain("[kbzpay-status]");
+      expect(String(spy.mock.calls[0][0])).toContain(REF);
+      expect(String(spy.mock.calls[0][0])).toContain("boom");
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
