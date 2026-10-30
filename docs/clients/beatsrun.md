@@ -37,23 +37,60 @@
     and did not offer an alternative. UAT credentials and integration
     parameters will be issued only after IP whitelisting and callback setup
     are complete. Vercel has no fixed egress IP, so CB traffic must leave
-    through a static IP: either the existing `KBZPAY_PROXY_URL` host (as a
-    `CBPAY_PROXY_URL`) or Vercel Static IPs. TODO: choose one and send the IP
-    to CB.
+    through a static IP. TODO: choose one and send the IP to CB. Options:
+    - A new static-IP proxy host. No such host exists yet: `src/lib/kbzpay.ts`
+      only supports one, and `KBZPAY_PROXY_URL` was unset everywhere when
+      that code merged (2026-08-31, PR #234). A CB
+      client could use the same mechanism (e.g. `CBPAY_PROXY_URL`).
+    - Vercel Static IPs.
+    - For UAT only, the KBZPay precedent: the office IP, the app run locally
+      and a Cloudflare tunnel. That conflicts with the UAT callback already
+      registered (the staging URL), which would have to change.
   - Gateway base URLs (UAT and Live): CB will share them separately. TODO.
-  - Return code `0006` (listed as both "Invalid Reference No." and "Waiting for
-    payment"): CB's answer did not resolve it ("use the status check API"). Pin
-    down its meaning in UAT before building on it.
-  - QR validity: CB will update the sample page with the validity period (it
-    currently says 3 minutes). TODO.
-  - Maximum amount: not given. Amounts over the limit return `0052`. TODO: the
-    actual limit, to check against ticket prices.
-  - QR display: CB require the WebFrame sample layout, not our existing card
-    as it is. Same as `MmqrCard`: MyanmarPay header, yellow dotted rule,
-    "MMQR" label, colours. Different: receiver name and amount left-aligned
-    (12.5% inset), QR at 80% of card width, CB Bank logo below the QR, a blue
-    footer rule, and "QR will be expired in 3 mins" under the card. Needs a CB
-    variant of `MmqrCard`; the KBZPay card stays unchanged.
+  - Amounts: the spec sets a minimum of 1,000 (`0051`), so the UAT test item
+    must be at least 1,000 MMK (the KBZPay UAT used 100 MMK) and tickets below
+    that cannot use CB. The maximum is not given: amounts over it return
+    `0052`, and the spec's text is a placeholder ("xxxxx"). TODO: the actual
+    maximum, to check against ticket prices.
+  - QR validity: each `/dynamicqr` response carries `qrExpiredDateTime` (the
+    spec's example is 3 minutes after issue). The countdown and the "expired"
+    text must come from that field, not a hard-coded 3 minutes. CB will also
+    update the sample page with the period.
+  - Return codes: v1.0.10 §4.2 gives `0006` two meanings ("Invalid Reference
+    No." and "Waiting for payment"); `0017` and `0018` are duplicated too, so
+    a code alone does not identify the outcome. CB answered that the reference
+    only exists once the payment completes and to use the status check. Until
+    UAT shows otherwise, treat `0006` from the status check as not paid yet:
+    keep polling, and never fail the enrollment or release the seat on it.
+  - Callback: the request authenticates only with a static `apiKey` in the
+    body; there is no signature. The route must check the key and then
+    confirm with the status check (`PATCH /dynamicqr/{qrReferenceNo}/status`)
+    before marking the payment verified. The response body carries
+    `qrReferenceNo`, `returnCode` and `message`.
+  - Token: `/auth/token` returns `expiredDateTime`. Reuse the token until then
+    and fetch a new one on `0012` (Token Expired).
+  - QR display: CB require the WebFrame sample layout (CB's reply of
+    2026-10-29), so CB needs its own variant of `MmqrCard`; the KBZPay card
+    stays unchanged. The sample against `MmqrCard`:
+    - Header: one full-width MyanmarPay banner image (yellow rule, logo and
+      "MyanmarPay" wordmark), not cropped.
+    - Receiver name and amount left-aligned at a 12.5% inset; the currency
+      follows the amount. Amount shown with two decimals (`100,000.00`).
+    - Yellow (`#FBD913`) dotted rule across the full card width, not inset.
+    - "MMQR" label centred and **black**, not blue.
+    - QR at 80% of card width, CB Bank logo at 20% width centred below it.
+    - A solid blue rule at the bottom, in `#264EA1` (not `#17479E`), and a
+      1px grey border round the card.
+    - "QR will be expired in 3 mins..." under the card, outside it.
+    - The sample uses Calibri, but CB's UI guideline says Arial: keep Arial.
+    - The sample has no fixed ratio; the UI guideline requires 20:29. At an
+      80% QR the content only just fits 20:29, so the CB card needs its own
+      vertical layout and cannot reuse `MmqrCard`'s.
+    - The UI guideline also says the QR must be at least 0.6 inches and that
+      account numbers may not appear on the card.
+  - Central Bank approval: CB's UI guideline says participants must submit
+    their mockups to the Central Bank of Myanmar for approval. CB's reply did
+    not mention this. TODO: submit the CB card mockup once it is built.
 
 ## Branding
 
