@@ -178,10 +178,6 @@ function parseNotifyOrigin(name: string, value: string): string {
 
 // ── Transport ──────────────────────────────────────────────────────────────
 
-const APPID = () => process.env.KBZPAY_APPID!;
-const MERCH_CODE = () => process.env.KBZPAY_MERCH_CODE!;
-const APP_KEY = () => process.env.KBZPAY_APP_KEY!;
-
 // KBZPay's UAT gateway is split by scheme, and not by any choice of ours.
 // Probing all six host/scheme pairs on 2026-09-01 gave:
 //
@@ -355,6 +351,7 @@ type CallResult = {
 };
 
 async function call(
+  merchant: KbzMerchant,
   path: string,
   method: string,
   version: string,
@@ -378,7 +375,7 @@ async function call(
     biz_content: bizContent,
     ...extraCommon,
   };
-  request.sign = sign(request, APP_KEY());
+  request.sign = sign(request, merchant.appKey);
 
   // Resolved outside the try on purpose. A bad KBZPAY_MODE is an operator
   // error, not a transport failure, and must not be laundered into a handled
@@ -465,14 +462,19 @@ function safeTimeoutMinutes(value: number): number {
   return Math.min(Math.max(Math.floor(value), 1), 120);
 }
 
-export async function precreate(p: PrecreateParams, budget?: CallBudget): Promise<PrecreateResult> {
+export async function precreate(
+  merchant: KbzMerchant,
+  p: PrecreateParams,
+  budget?: CallBudget,
+): Promise<PrecreateResult> {
   const r = await call(
+    merchant,
     "precreate",
     "kbz.payment.precreate",
     "1.0",
     {
-      appid: APPID(),
-      merch_code: MERCH_CODE(),
+      appid: merchant.appid,
+      merch_code: merchant.merchCode,
       merch_order_id: p.merchOrderId,
       trade_type: "PAY_BY_QRCODE",
       title: p.title,
@@ -520,10 +522,14 @@ export type QueryResult =
  * no terminal mmqr_status transition and no order-slot release may be decided
  * from local state; only from this call's answer.
  */
-export async function queryOrder(merchOrderId: string, budget?: CallBudget): Promise<QueryResult> {
-  const r = await call("queryorder", "kbz.payment.queryorder", "3.0", {
-    appid: APPID(),
-    merch_code: MERCH_CODE(),
+export async function queryOrder(
+  merchant: KbzMerchant,
+  merchOrderId: string,
+  budget?: CallBudget,
+): Promise<QueryResult> {
+  const r = await call(merchant, "queryorder", "kbz.payment.queryorder", "3.0", {
+    appid: merchant.appid,
+    merch_code: merchant.merchCode,
     merch_order_id: merchOrderId,
   }, {}, budget);
 
@@ -572,10 +578,14 @@ export async function queryOrder(merchOrderId: string, budget?: CallBudget): Pro
  * not payable *now*, without saying whether it was cancelled or completed.
  * The caller MUST re-query afterwards. Spec §5.1 step 7b, R12.
  */
-export async function closeOrder(merchOrderId: string, budget?: CallBudget): Promise<{ ok: boolean }> {
-  const r = await call("closeorder", "kbz.payment.closeorder", "3.0", {
-    appid: APPID(),
-    merch_code: MERCH_CODE(),
+export async function closeOrder(
+  merchant: KbzMerchant,
+  merchOrderId: string,
+  budget?: CallBudget,
+): Promise<{ ok: boolean }> {
+  const r = await call(merchant, "closeorder", "kbz.payment.closeorder", "3.0", {
+    appid: merchant.appid,
+    merch_code: merchant.merchCode,
     merch_order_id: merchOrderId,
   }, {}, budget);
 
@@ -586,5 +596,5 @@ export async function closeOrder(merchOrderId: string, budget?: CallBudget): Pro
 
 // ── Export ─────────────────────────────────────────────────────────────────
 
-const kbzpay = { precreate, queryOrder, closeOrder, sign, verifySign, buildMerchOrderId };
+const kbzpay = { precreate, queryOrder, closeOrder, sign, verifySign, buildMerchOrderId, getKbzMerchant };
 export default kbzpay;
