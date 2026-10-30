@@ -88,6 +88,16 @@ describe("getKbzMerchant", () => {
     expect(getKbzMerchant("BRAVE").notifyOrigin).toBe("https://brave.kuunyi.com");
   });
 
+  it("rejects a notify origin carrying credentials", () => {
+    process.env.KBZPAY_BRAVE_NOTIFY_ORIGIN = "https://u:p@brave.kuunyi.com";
+    expect(() => getKbzMerchant("BRAVE")).toThrow("KBZPAY_BRAVE_NOTIFY_ORIGIN must not contain credentials");
+  });
+
+  it("trims a trailing newline from a value", () => {
+    process.env.KBZPAY_BRAVE_APP_KEY = "testkey0123456789abcdef\n";
+    expect(getKbzMerchant("BRAVE").appKey).toBe("testkey0123456789abcdef");
+  });
+
   it("never puts a secret value in an error message", () => {
     process.env.KBZPAY_BRAVE_NOTIFY_ORIGIN = "http://brave.kuunyi.com";
     try {

@@ -170,6 +170,9 @@ function parseNotifyOrigin(name: string, value: string): string {
     throw new Error(`${name} is not a valid URL`);
   }
   if (parsed.protocol !== "https:") throw new Error(`${name} must use https`);
+  // Credentials would be stripped silently by .origin, and a value such as
+  // https://a.com\@evil.com resolves to evil.com; refuse rather than guess.
+  if (parsed.username || parsed.password) throw new Error(`${name} must not contain credentials`);
   return parsed.origin;
 }
 
