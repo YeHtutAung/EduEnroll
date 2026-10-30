@@ -5,6 +5,12 @@
 -- a KBZPay, ABank or MMPay row: every constraint and index is scoped to
 -- payment_method = 'cb_mmqr', and the trigger ignores other rows.
 --
+-- Lock order: every function that locks an existing payment takes the payment
+-- row first, then its enrollment. That matches settleMmqrPayment (UPDATE
+-- payments, then trg_payments_sync_enrollment updates the enrollment).
+-- claim_cbmmqr_order_slot locks only the enrollment and never locks an existing
+-- payment. Any future function must follow this order.
+--
 -- ROLLBACK (safe only while no cb_mmqr payment exists):
 --   DROP FUNCTION IF EXISTS public.bind_cbmmqr_settlement(text, text, text, text);
 --   DROP FUNCTION IF EXISTS public.store_cbmmqr_qr(text, text, text, timestamptz);
@@ -287,7 +293,6 @@ SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
 DECLARE
-  v_enrollment_id uuid;
   v_status        public.enrollments.status%TYPE;
   v_pay           public.payments%ROWTYPE;
 BEGIN
@@ -295,22 +300,18 @@ BEGIN
     RAISE EXCEPTION 'p_order_ref is required';
   END IF;
 
-  SELECT p.enrollment_id INTO v_enrollment_id
-    FROM public.payments p
-   WHERE p.payment_ref = p_payment_ref AND p.payment_method = 'cb_mmqr';
+  -- Lock order: payment first, then its enrollment (see the header).
+  SELECT * INTO v_pay
+    FROM public.payments
+   WHERE payment_ref = p_payment_ref AND payment_method = 'cb_mmqr'
+   FOR UPDATE;
   IF NOT FOUND THEN
     RETURN 'not_found';
   END IF;
 
-  -- Lock order matches the claim: enrollment, then payment.
   SELECT e.status INTO v_status
     FROM public.enrollments e
-   WHERE e.id = v_enrollment_id
-   FOR UPDATE;
-
-  SELECT * INTO v_pay
-    FROM public.payments
-   WHERE payment_ref = p_payment_ref AND payment_method = 'cb_mmqr'
+   WHERE e.id = v_pay.enrollment_id
    FOR UPDATE;
 
   IF v_pay.status <> 'awaiting_payment' OR v_pay.mmqr_status IS DISTINCT FROM 'PENDING' THEN
