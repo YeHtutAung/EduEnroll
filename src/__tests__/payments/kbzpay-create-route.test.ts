@@ -1,5 +1,14 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
+
+process.env.KBZPAY_BRAVE_APPID = "kptest0000000000000000000000000000";
+process.env.KBZPAY_BRAVE_MERCH_CODE = "70000000001";
+process.env.KBZPAY_BRAVE_APP_KEY = "testkey0123456789abcdef";
+process.env.KBZPAY_BRAVE_NOTIFY_ORIGIN = "https://brave.kuunyi.com";
+process.env.KBZPAY_SKYFEST_APPID = "kpsky00000000000000000000000000000";
+process.env.KBZPAY_SKYFEST_MERCH_CODE = "70000000002";
+process.env.KBZPAY_SKYFEST_APP_KEY = "skyfestkey0123456789abcd";
+process.env.KBZPAY_SKYFEST_NOTIFY_ORIGIN = "https://skyfest.kuunyi.com";
 
 // ─── POST /api/public/payments/kbzpay ───────────────────────────────────────
 // Spec §5.1 and §5.1a. The route composes the claim function, the resolve
@@ -45,10 +54,6 @@ vi.mock("@/server/payments/resolveKbzpayOrder", () => ({
   resolveKbzpayOrder: (...a: unknown[]) => mockResolve(...a),
 }));
 
-vi.mock("@/lib/origin", () => ({
-  platformOrigin: () => "https://www.kuunyi.com",
-}));
-
 const { POST } = await import("@/app/api/public/payments/kbzpay/route");
 const { orderWindow } = await import("@/server/payments/kbzpayOrderWindow");
 
@@ -75,9 +80,9 @@ const req = (body: unknown = { enrollmentRef: "ENR-1" }) =>
 beforeEach(() => {
   vi.clearAllMocks();
   enrollment = { ...ENROLLMENT };
-  claimRows = [{ outcome: "created", payment_id: "pay-1", ref: null, qr: null }];
+  claimRows = [{ outcome: "created", payment_id: "pay-1", ref: null, qr: null, merchant: "BRAVE" }];
   claimError = null;
-  supersedeRows = [{ outcome: "replaced", payment_id: "pay-2" }];
+  supersedeRows = [{ outcome: "replaced", payment_id: "pay-2", merchant: "BRAVE" }];
   paymentUpdates = [];
   enrollmentUpdates = [];
   rpcCalls = [];
@@ -205,120 +210,99 @@ describe("ordering — row before provider call (R2)", () => {
     expect(String(args.p_payment_ref)).toMatch(/^[A-Za-z0-9_]{1,40}$/);
   });
 
-  it("builds notify_url from platformOrigin, never the inbound Host", async () => {
+  it("builds notify_url from the merchant's notify origin, never the inbound Host", async () => {
     await POST(req());
 
-    expect(mockPrecreate.mock.calls[0][0]).toEqual(
-      expect.objectContaining({ notifyUrl: "https://www.kuunyi.com/api/webhooks/kbzmmqr" }),
+    expect(mockPrecreate.mock.calls[0][1]).toEqual(
+      expect.objectContaining({ notifyUrl: "https://brave.kuunyi.com/api/webhooks/kbzmmqr" }),
     );
   });
 });
 
-// KBZPay registers a callback host per environment, and the host they register
-// must match what we send per order. KBZPAY_NOTIFY_ORIGIN is the operator-set,
-// per-deployment value for that — never derived from the request or from
-// whichever tenant is checking out (spec §7).
-describe("KBZPAY_NOTIFY_ORIGIN", () => {
-  afterEach(() => {
-    delete process.env.KBZPAY_NOTIFY_ORIGIN;
-  });
-
-  it("overrides the notify_url origin when set", async () => {
-    process.env.KBZPAY_NOTIFY_ORIGIN = "https://brave.kuunyi.com";
+// The notify origin is per merchant and operator-set (spec 2026-10-30 §3):
+// KBZPay registers a callback host per merchant, never derived from the
+// request or the tenant's domain.
+describe("merchant", () => {
+  it("creates the order under the merchant the claim pinned, with its notify origin", async () => {
+    claimRows = [{ outcome: "created", payment_id: "pay-1", ref: null, qr: null, merchant: "SKYFEST" }];
 
     await POST(req());
 
-    expect(mockPrecreate.mock.calls[0][0]).toEqual(
-      expect.objectContaining({ notifyUrl: "https://brave.kuunyi.com/api/webhooks/kbzmmqr" }),
+    expect(mockPrecreate.mock.calls[0][0]).toEqual(expect.objectContaining({ id: "SKYFEST" }));
+    expect(mockPrecreate.mock.calls[0][1]).toEqual(
+      expect.objectContaining({ notifyUrl: "https://skyfest.kuunyi.com/api/webhooks/kbzmmqr" }),
     );
   });
 
-  it("uses only the origin, discarding any path or query in the value", async () => {
-    // KBZPay rejects a notify_url carrying query parameters, so the value is
-    // normalised to an origin rather than concatenated blindly.
-    process.env.KBZPAY_NOTIFY_ORIGIN = "https://brave.kuunyi.com/some/path?x=1";
+  it("returns 503 and calls nothing at KBZPay when the tenant has no merchant", async () => {
+    claimRows = [{ outcome: "no_merchant", payment_id: null, ref: null, qr: null, merchant: null }];
+
+    const res = await POST(req());
+
+    expect(res.status).toBe(503);
+    expect(mockPrecreate).not.toHaveBeenCalled();
+    expect(mockResolve).not.toHaveBeenCalled();
+  });
+
+  it("returns 503 and never marks the row FAILED when the pinned merchant is misconfigured", async () => {
+    claimRows = [{ outcome: "created", payment_id: "pay-1", ref: null, qr: null, merchant: "NOPE" }];
+
+    const res = await POST(req());
+
+    expect(res.status).toBe(503);
+    expect(mockPrecreate).not.toHaveBeenCalled();
+    expect(paymentUpdates).toEqual([]);
+  });
+
+  it("does NOT re-serve a stored QR when the reused order's merchant is misconfigured", async () => {
+    claimRows = [{ outcome: "reuse", payment_id: "pay-1", ref: "KBZ_old", qr: "STORED_QR", merchant: "NOPE" }];
+
+    const res = await POST(req());
+    const text = await res.text();
+
+    expect(res.status).toBe(503);
+    expect(text).not.toContain("STORED_QR");
+  });
+
+  it("resolves the old order under ITS pin and creates the new one under the supersede's", async () => {
+    claimRows = [{ outcome: "unresolved", payment_id: "pay-1", ref: "KBZ_old", qr: null, merchant: "BRAVE" }];
+    supersedeRows = [{ outcome: "replaced", payment_id: "pay-2", merchant: "SKYFEST" }];
+    mockResolve.mockResolvedValue({ kind: "retire", reason: "EXPIRED" });
 
     await POST(req());
 
-    expect(mockPrecreate.mock.calls[0][0]).toEqual(
-      expect.objectContaining({ notifyUrl: "https://brave.kuunyi.com/api/webhooks/kbzmmqr" }),
-    );
+    expect(mockResolve.mock.calls[0][0].merchant).toEqual(expect.objectContaining({ id: "BRAVE" }));
+    expect(mockPrecreate.mock.calls[0][0]).toEqual(expect.objectContaining({ id: "SKYFEST" }));
   });
 
-  it("falls back to platformOrigin when unset", async () => {
-    await POST(req());
-
-    expect(mockPrecreate.mock.calls[0][0]).toEqual(
-      expect.objectContaining({ notifyUrl: "https://www.kuunyi.com/api/webhooks/kbzmmqr" }),
-    );
-  });
-
-  // A malformed value must not become a relative or empty URL — that would
-  // hand KBZPay an unreachable callback and strand every payment silently.
-  it("falls back to platformOrigin when the value is not a valid URL", async () => {
-    process.env.KBZPAY_NOTIFY_ORIGIN = "brave.kuunyi.com";
-
-    await POST(req());
-
-    expect(mockPrecreate.mock.calls[0][0]).toEqual(
-      expect.objectContaining({ notifyUrl: "https://www.kuunyi.com/api/webhooks/kbzmmqr" }),
-    );
-  });
-
-  // new URL() accepts http:, ftp: and file: perfectly happily, and .origin
-  // returns them unchanged — so without an explicit scheme check the callback
-  // could be delivered over plaintext, or worse.
-  it.each([
-    ["http", "http://brave.kuunyi.com"],
-    ["ftp", "ftp://brave.kuunyi.com"],
-    ["javascript", "javascript:alert(1)"],
-  ])("refuses a %s scheme and falls back to platformOrigin", async (_label, value) => {
-    process.env.KBZPAY_NOTIFY_ORIGIN = value;
-
-    await POST(req());
-
-    expect(mockPrecreate.mock.calls[0][0]).toEqual(
-      expect.objectContaining({ notifyUrl: "https://www.kuunyi.com/api/webhooks/kbzmmqr" }),
-    );
-  });
-
-  // file: is the nastiest case: its .origin is the literal string "null", so
-  // the pre-fix code would have sent KBZPay "null/api/webhooks/kbzmmqr".
-  it("refuses a file: URL, whose origin is the literal string 'null'", async () => {
-    expect(new URL("file:///tmp/x").origin).toBe("null");
-
-    process.env.KBZPAY_NOTIFY_ORIGIN = "file:///tmp/x";
-    await POST(req());
-
-    const sent = mockPrecreate.mock.calls[0][0].notifyUrl as string;
-    expect(sent).toBe("https://www.kuunyi.com/api/webhooks/kbzmmqr");
-    expect(sent).not.toContain("null");
-  });
-
-  it("never emits a non-https notify_url for any accepted value", async () => {
-    for (const value of [
-      "https://brave.kuunyi.com",
-      "http://brave.kuunyi.com",
-      "ftp://brave.kuunyi.com",
-      "file:///tmp/x",
-      "brave.kuunyi.com",
-      "",
-    ]) {
-      mockPrecreate.mockClear();
-      if (value) process.env.KBZPAY_NOTIFY_ORIGIN = value;
-      else delete process.env.KBZPAY_NOTIFY_ORIGIN;
-
-      await POST(req());
-
-      const sent = mockPrecreate.mock.calls[0][0].notifyUrl as string;
-      expect(sent.startsWith("https://")).toBe(true);
+  it("returns 503 without calling KBZPay when the merchant's notify origin is invalid", async () => {
+    // Replaces the old suite's fallback cases: a bad origin is now an error, never platformOrigin().
+    const saved = process.env.KBZPAY_BRAVE_NOTIFY_ORIGIN;
+    process.env.KBZPAY_BRAVE_NOTIFY_ORIGIN = "http://brave.kuunyi.com";
+    try {
+      const res = await POST(req());
+      expect(res.status).toBe(503);
+      expect(mockPrecreate).not.toHaveBeenCalled();
+    } finally {
+      process.env.KBZPAY_BRAVE_NOTIFY_ORIGIN = saved;
     }
+  });
+
+  it("returns 503 when the supersede finds no merchant, without creating anything", async () => {
+    claimRows = [{ outcome: "unresolved", payment_id: "pay-1", ref: "KBZ_old", qr: null, merchant: "BRAVE" }];
+    supersedeRows = [{ outcome: "no_merchant", payment_id: null, merchant: null }];
+    mockResolve.mockResolvedValue({ kind: "retire", reason: "EXPIRED" });
+
+    const res = await POST(req());
+
+    expect(res.status).toBe(503);
+    expect(mockPrecreate).not.toHaveBeenCalled();
   });
 });
 
 describe("claim outcomes", () => {
   it("returns the stored QR on reuse without calling KBZPay", async () => {
-    claimRows = [{ outcome: "reuse", payment_id: "pay-9", ref: "KBZ_old", qr: "STOREDQR" }];
+    claimRows = [{ outcome: "reuse", payment_id: "pay-9", ref: "KBZ_old", qr: "STOREDQR", merchant: "BRAVE" }];
 
     const res = await POST(req());
     const body = await json(res);
@@ -356,7 +340,7 @@ describe("claim outcomes", () => {
 
 describe("unresolved → resolve procedure", () => {
   beforeEach(() => {
-    claimRows = [{ outcome: "unresolved", payment_id: "pay-old", ref: "KBZ_old", qr: null }];
+    claimRows = [{ outcome: "unresolved", payment_id: "pay-old", ref: "KBZ_old", qr: null, merchant: "BRAVE" }];
   });
 
   // R10/R11/R12: all three already-paid branches return the SAME browser shape.
@@ -471,7 +455,7 @@ describe("ambiguous creation states (R13)", () => {
 
 describe("browser contract (§5.1a)", () => {
   it("never leaks a settleMmqrPayment result object", async () => {
-    claimRows = [{ outcome: "unresolved", payment_id: "pay-old", ref: "KBZ_old", qr: null }];
+    claimRows = [{ outcome: "unresolved", payment_id: "pay-old", ref: "KBZ_old", qr: null, merchant: "BRAVE" }];
     mockResolve.mockResolvedValue({ kind: "already_paid" });
 
     const body = await json(await POST(req()));
@@ -498,7 +482,7 @@ describe("browser contract (§5.1a)", () => {
 // NOTE: tenants.auto_cancel_hours holds MINUTES, not hours (migration 058).
 describe("order window (route level)", () => {
   const fresh = () => { enrollment = { ...ENROLLMENT, enrolled_at: new Date().toISOString() }; };
-  const timeoutOf = () => mockPrecreate.mock.calls[0][0].timeoutMinutes as number;
+  const timeoutOf = () => mockPrecreate.mock.calls[0][1].timeoutMinutes as number;
   const claimExpiry = () =>
     Date.parse(rpcCalls.find((c) => c.name === "claim_kbzpay_order_slot")!.args
       .p_expires_at as string);
@@ -625,7 +609,7 @@ describe("tenant lookup failure", () => {
     const res = await POST(req());
 
     expect(res.status).toBe(200);
-    expect(mockPrecreate.mock.calls[0][0].timeoutMinutes).toBe(120);
+    expect(mockPrecreate.mock.calls[0][1].timeoutMinutes).toBe(120);
   });
 });
 
@@ -730,7 +714,7 @@ describe("route honours the remaining window", () => {
 
       await POST(req());
 
-      expect(mockPrecreate.mock.calls[0][0].timeoutMinutes).toBe(5);
+      expect(mockPrecreate.mock.calls[0][1].timeoutMinutes).toBe(5);
     } finally {
       clock.mockRestore();
     }
