@@ -8,6 +8,7 @@ import {
   getCbMerchant,
   type CallBudget,
   type CbMerchant,
+  type StatusResult,
 } from "@/lib/cbmmqr";
 import { settleCbmmqrPayment } from "@/server/payments/settleCbmmqrPayment";
 
@@ -132,7 +133,9 @@ export async function POST(request: NextRequest) {
   // callback's QR reference; the bind then records it once.
   const storedQrRef = payment.provider_order_ref;
   if (storedQrRef && storedQrRef !== qrReferenceNo) {
-    console.warn(`[cbmmqr-webhook] ${referenceNo}: callback QR ${qrReferenceNo} is not the stored ${storedQrRef}`);
+    console.error(
+      `[cbmmqr-webhook] ${referenceNo} (merchant ${merchant.id}): callback QR ${qrReferenceNo} is not the stored ${storedQrRef}`,
+    );
     return err(403, "Forbidden");
   }
   const queryQrRef = storedQrRef ?? qrReferenceNo;
@@ -144,11 +147,26 @@ export async function POST(request: NextRequest) {
   }
 
   // ── 6. Ask CB ourselves ────────────────────────────────────
-  const status = await checkStatus(merchant, queryQrRef, gatewayBudget());
+  let status: StatusResult;
+  try {
+    status = await checkStatus(merchant, queryQrRef, gatewayBudget());
+  } catch (e) {
+    // checkStatus throws only for our own configuration (e.g. CBMMQR_MODE).
+    console.error(`[cbmmqr-webhook] config error for ${referenceNo}: ${e instanceof Error ? e.message : e}`);
+    return err(500, "Configuration Error");
+  }
   if (status.kind !== "answer") return err(500, "Query Failed");
   if (status.code !== CB_SUCCESS) {
     console.warn(`[cbmmqr-webhook] ${referenceNo}: callback said SUCCESS, status says ${status.code}`);
     return err(500, "Not Settled");
+  }
+  // CB's answer must be about the QR we asked for. A refusal, like a
+  // settlement refusal: a retry sends the same facts and cannot change it.
+  if (status.qrReferenceNo !== queryQrRef) {
+    console.error(
+      `[cbmmqr-webhook] refused ${referenceNo} (merchant ${merchant.id}): status answered QR ${status.qrReferenceNo ?? "none"}, asked ${queryQrRef}`,
+    );
+    return ack(qrReferenceNo);
   }
 
   // ── 7. Settle on the status answer ─────────────────────────

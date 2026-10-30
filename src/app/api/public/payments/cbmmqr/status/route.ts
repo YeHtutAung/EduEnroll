@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { CB_SUCCESS, REFERENCE_PATTERN, checkStatus, getCbMerchant, type CallBudget, type CbMerchant } from "@/lib/cbmmqr";
+import { CB_SUCCESS, REFERENCE_PATTERN, checkStatus, getCbMerchant, type CallBudget, type CbMerchant, type StatusResult } from "@/lib/cbmmqr";
 import { settleCbmmqrPayment } from "@/server/payments/settleCbmmqrPayment";
 
 export const maxDuration = 10;
@@ -60,7 +60,14 @@ export async function GET(request: NextRequest) {
     return pending();
   }
 
-  const status = await checkStatus(merchant, payment.provider_order_ref, gatewayBudget());
+  let status: StatusResult;
+  try {
+    status = await checkStatus(merchant, payment.provider_order_ref, gatewayBudget());
+  } catch (err) {
+    // checkStatus throws only for our own configuration (e.g. CBMMQR_MODE).
+    console.error(`[cbmmqr-status] config error for ${ref}: ${err instanceof Error ? err.message : err}`);
+    return pending();
+  }
   if (status.kind !== "answer" || status.code !== CB_SUCCESS) return pending();
 
   const outcome = await settleCbmmqrPayment({

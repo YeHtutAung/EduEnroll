@@ -299,20 +299,27 @@ logged loudly and one is refunded by hand.
    lengths (`transactionId` ≤ 35, `merchantId` ≤ 15, `terminalId` ≤ 8, `institutionName`
    ≤ 150, `remark` ≤ 140, `transAmount` a non-negative number). Anything else → 400, before
    any database read.
-2. Find the payment by `referenceNo`; it must be `cb_mmqr` → else 404.
+2. Find the payment by `referenceNo` (with its stored `provider_order_ref`); it must be
+   `cb_mmqr` → else 404.
 3. Compare `apiKey` in constant time with the API key of the merchant **pinned on that
    payment** → else 403. That merchant's config missing → 500.
-4. `transStatusDescription = FAIL` → 200 acknowledged; change nothing (the QR may still be
+4. If the row has a stored `provider_order_ref` and the callback's `qrReferenceNo` differs →
+   403, logged as an error (references and the merchant id only), whatever the description
+   says. CB is not called.
+5. `transStatusDescription = FAIL` → 200 acknowledged; change nothing (the QR may still be
    paid).
-5. `SUCCESS` → status check with the callback's `qrReferenceNo` and the pinned merchant's
-   credentials → §5.5. **No callback field is used to settle.**
-6. Replies:
+6. `SUCCESS` → status check with the pinned merchant's credentials, for the **stored**
+   `provider_order_ref` when there is one, else (create response lost) the callback's
+   `qrReferenceNo`, which the §5.5 bind then records once. CB's answer must carry that same
+   `qrReferenceNo`; a different one is refused (logged, 200 acknowledged, no settlement)
+   → otherwise §5.5. **No callback field is used to settle.**
+7. Replies:
    - settled or already settled → 200 `{ qrReferenceNo, returnCode: "0000", message }`;
    - §5.5 refuses on a mismatch → logged loudly, 200 acknowledged, no settlement (KBZPay
      parity);
    - status check, configuration or database failure → 500, so CB retries (CB's retry policy
      is question 5).
-7. Nothing is derived from the request `Host`.
+8. Nothing is derived from the request `Host`.
 
 ### 5.4 Status — `GET /api/public/payments/cbmmqr/status?ref=`
 
@@ -321,7 +328,10 @@ There is no `EXPIRED` and no `FAILED`: local time never says a QR is dead, and a
 by §5.1 or §5.2 simply reports `PENDING` while the modal's "Get a new QR" path takes over.
 
 - Local `verified` → `SUCCESS`.
-- Otherwise, if the row has `provider_order_ref`, one status check; success → §5.5.
+- Otherwise, only for a **live** row (`awaiting_payment` and `mmqr_status = PENDING`) with a
+  `provider_order_ref`, one status check; success → §5.5. A configuration error → `PENDING`.
+  A retired row is never checked here: if it is paid late, it settles through the callback
+  (§5.2 residual risk).
 - Anything else → `PENDING`, even past `expiresAt`.
 - The modal hides the QR once `expiresAt` passes and shows "This QR has expired. If you
   already paid, we are still confirming it." with a "Get a new QR" button. The button calls
@@ -438,8 +448,10 @@ page cannot read assignments. Assigning a tenant is an operator step recorded in
 | QR store failed after CB success | 502 | kept `PENDING` |
 | Previous QR live and not proven dead | 409 `qr_active` + `retryAt` | unchanged |
 | Callback malformed / unknown reference / bad key | 400 / 404 / 403 | unchanged |
-| Callback that §5.5 refuses | 200, logged loudly | unchanged |
+| Callback `qrReferenceNo` differs from the stored `provider_order_ref` | 403, logged as an error | unchanged |
+| Callback that §5.5 refuses, or whose status answer names another QR | 200, logged loudly | unchanged |
 | Callback status-check or database failure | 500 | unchanged |
+| Callback or status route configuration error (merchant or `CBMMQR_*` config) | callback 500; status route `PENDING` | unchanged |
 
 Log lines carry the merchant id and our reference, never passwords, API keys or tokens.
 
@@ -514,6 +526,8 @@ To send with the office IP and the tunnel callback URL:
    acknowledged?
 6. Callback source IP ranges, and is a signed callback available?
 7. The maximum amount per transaction (`0052`), and does the 1,000 minimum apply in UAT?
+8. Is the callback's `qrReferenceNo` byte-identical to the one `/dynamicqr` returned (same
+   case, no padding or prefix)? The callback is refused with 403 when it differs.
 
 ## 12. Out of scope
 
