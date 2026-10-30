@@ -4351,7 +4351,12 @@ SELECT count(*) FROM public.payments WHERE payment_method = 'cb_mmqr';
 SELECT proname FROM pg_proc WHERE proname LIKE '%cbmmqr%' ORDER BY 1;
 ```
 
-Expected: one row (`beatsrun` → `YOUNGMONEY`) if the dev DB has a `beatsrun` tenant, otherwise none (the migration logged a NOTICE); `0` CB payments; `bind_cbmmqr_settlement`, `claim_cbmmqr_order_slot`, `complete_cbmmqr_replace`, `protect_payment_cbmmqr_fields`, `store_cbmmqr_qr`.
+```sql
+SELECT has_table_privilege('anon','public.cbmmqr_merchant_assignments','SELECT'),
+       has_table_privilege('authenticated','public.cbmmqr_merchant_assignments','SELECT');
+```
+
+Expected: one row (`beatsrun` → `YOUNGMONEY`) if the dev DB has a `beatsrun` tenant, otherwise none (the migration logged a NOTICE); `0` CB payments; `bind_cbmmqr_settlement`, `claim_cbmmqr_order_slot`, `complete_cbmmqr_replace`, `protect_payment_cbmmqr_fields`, `store_cbmmqr_qr`; and `false, false` for the privilege check. The local test setup grants every table to `anon` and `authenticated`, so the migration's `REVOKE` on `cbmmqr_merchant_assignments` is only provable on a hosted DB.
 
 Production gets nothing from this plan (spec §10, gate G6).
 
@@ -4386,8 +4391,20 @@ Staging reads the dev DB, so this also switches BeatsRun's checkout on **staging
 6. A QR left unpaid past its expiry: record the exact status-check `returnCode` and `message`. This is the evidence for G1; do **not** add it to `CB_CONFIRMED_DEAD_CODES` until CB confirms in writing that it is final.
 7. An amount below 1,000 returns 422 without calling CB.
 8. Let a CB QR expire in the modal, press "Get a new QR", and leave the new QR open for over 10 minutes: it must not switch to "QR code has expired" because of the old QR's timers (Task 12 step 8).
+9. Compare CB's `qrIssuedDateTime` with our server clock to confirm `CBMMQR_UTC_OFFSET` (`+06:30`) before trusting any expiry (G2). A wrong offset shifts every expiry by hours.
+10. Does a new `/auth/token` invalidate earlier tokens? If so, per-instance token caches on Vercel invalidate each other, and each call gets only one `0012`/`0017` retry. Also ask CB (spec §11, question 9).
+11. `purposeOfTransaction` is truncated to 25 UTF-16 units. Check CB's limit (characters or bytes) with a Burmese enrollment ref, if refs can contain Burmese.
+12. Is the callback's `qrReferenceNo` byte-identical to the one `/dynamicqr` returned? The callback is refused with 403 when it differs (spec §11, question 8).
 
 - [ ] **Step 4: Restore the tenant settings recorded in Step 2.**
+
+---
+
+## Operator notes (for the PR body and whoever runs CB payments)
+
+- **Amount mismatch after bind.** A CB status answer whose amount does not match the payment snapshot is refused *after* `bind_cbmmqr_settlement` has committed `bank_reference`. `complete_cbmmqr_replace` then answers `settling` for that enrollment, so the buyer cannot get a new CB QR until an operator resolves it (refund or manual verify). The only signal is the `[cbmmqr-settle] refused` log line. **Alert on it.**
+- **Log prefix.** `settleMmqrPayment` logs with a `[kbzpay-settle]` prefix for CB payments too (shared code, unchanged by design). Do not read those lines as KBZPay-only.
+- **Partial-payment remainder (inherited from KBZPay, not changed here).** `computeOrderTotal` adds the platform fee, then the latest payment's `received_amount` is subtracted. With a non-zero fee the remainder may charge the fee again, and the "latest payment" may be a retired attempt with no `received_amount`. The KBZPay route behaves the same. Worth a shared fix and tests, as a separate change.
 
 ---
 

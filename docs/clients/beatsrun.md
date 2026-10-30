@@ -14,8 +14,8 @@
 ## Payments
 
 - TODO: current `payment_mode` / methods in use.
-- CB Bank MMQR — **in onboarding, not built.** Paperwork started on 2026-10-23.
-  No code and no credentials exist yet.
+- CB Bank MMQR — **in onboarding; code built on the dev branch only.** Paperwork started on
+  2026-10-23. No CB credentials exist yet and the migration is applied nowhere.
   - CB merchant name: YOUNG MONEY CO.,LTD (the organiser's own merchant account,
     not the platform's).
   - Docs from CB: QR Gateway API spec v1.0.10 (30 Jul 2026), an MMQR UI
@@ -34,8 +34,13 @@
       URLs given in the 2026-10-23 paperwork.
     - CB confirmed (2026-10-29) that the gateway calls the URL exactly as
       given. It does not append the spec's `/dynamicqr/callback` path.
-  - The future route must be `src/app/api/webhooks/cbmmqr/route.ts` and the
-    notify origin must produce exactly these URLs.
+  - The route is `src/app/api/webhooks/cbmmqr/route.ts`; the URLs above must reach it
+    exactly (CB's API takes no callback URL per request, so there is no notify origin).
+  - Code: built to the dev DB only (PR to `dev`, number added when opened). Env vars
+    `CBMMQR_YOUNGMONEY_*` (see `.env.local.example`). The tenant is assigned in
+    `cbmmqr_merchant_assignments` (`beatsrun` → `YOUNGMONEY`, seeded by the migration);
+    switching the tenant to CB means `tenants.mmqr_provider = 'cbmmqr'` with
+    `payment_mode = 'mmqr'`.
   - **Blocker: public IP whitelisting is mandatory.** CB answered on 2026-10-29
     and did not offer an alternative. UAT credentials and integration
     parameters will be issued only after IP whitelisting and callback setup
