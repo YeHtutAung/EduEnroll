@@ -288,7 +288,12 @@ export async function POST(request: NextRequest) {
 
     ref = newRef;
     const next = resolveMerchant(data[0].merchant, newRef);
-    if (!next) return notConfigured();
+    if (!next) {
+      // The replacement row has never reached CB: free its slot now rather
+      // than leave it holding the one live order until §5.2's window passes.
+      await markFailed(newRef);
+      return notConfigured();
+    }
     merchant = next;
   }
 
