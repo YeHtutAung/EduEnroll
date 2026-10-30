@@ -25,6 +25,9 @@
     never a custom domain, like the planned per-tenant KBZPay design):
     - Production: `https://beatsrun.kuunyi.com/api/webhooks/cbmmqr`
     - UAT/sandbox: `https://beatsrun.staging.kuunyi.com/api/webhooks/cbmmqr`
+      — **to be replaced**: UAT runs locally behind a tunnel (see the IP
+      blocker below), so the UAT callback must be the tunnel host. TODO: pick
+      the host, then send it to CB with the office IP.
     - Both answered POST directly on 2026-10-29 (404 until the route exists,
       no redirect).
     - These replace the platform-wide `www.kuunyi.com` / `staging.kuunyi.com`
@@ -37,15 +40,25 @@
     and did not offer an alternative. UAT credentials and integration
     parameters will be issued only after IP whitelisting and callback setup
     are complete. Vercel has no fixed egress IP, so CB traffic must leave
-    through a static IP. TODO: choose one and send the IP to CB. Options:
-    - A new static-IP proxy host. No such host exists yet: `src/lib/kbzpay.ts`
-      only supports one, and `KBZPAY_PROXY_URL` was unset everywhere when
-      that code merged (2026-08-31, PR #234). A CB
-      client could use the same mechanism (e.g. `CBPAY_PROXY_URL`).
-    - Vercel Static IPs.
-    - For UAT only, the KBZPay precedent: the office IP, the app run locally
-      and a Cloudflare tunnel. That conflicts with the UAT callback already
-      registered (the staging URL), which would have to change.
+    through a static IP.
+    - **UAT: decided 2026-10-30 — office IP plus a tunnel**, as for KBZPay.
+      The app runs locally (port 3005), calls CB from the office's public IP,
+      and a Cloudflare tunnel exposes the callback route. Consequences:
+      - The UAT callback URL already sent to CB (staging) must be replaced by
+        the tunnel URL, and the CB notify origin set to the tunnel host in
+        `.env.local`.
+      - The office IP is not fixed. TODO: ask CB whether they will update the
+        whitelist when it changes (KBZ agreed to), and check the current IP
+        before sending it.
+      - TODO: send CB the office IP and the tunnel callback URL. CB issue UAT
+        credentials only after this.
+    - **Live: not decided.** TODO: choose and send the IP to CB before go-live.
+      Options:
+      - A new static-IP proxy host. No such host exists yet:
+        `src/lib/kbzpay.ts` only supports one, and `KBZPAY_PROXY_URL` was
+        unset everywhere when that code merged (2026-08-31, PR #234). A CB
+        client could use the same mechanism (e.g. `CBPAY_PROXY_URL`).
+      - Vercel Static IPs.
   - Gateway base URLs (UAT and Live): CB will share them separately. TODO.
   - Amounts: the spec sets a minimum of 1,000 (`0051`), so the UAT test item
     must be at least 1,000 MMK (the KBZPay UAT used 100 MMK) and tickets below
