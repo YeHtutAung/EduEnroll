@@ -19,8 +19,14 @@ const AMOUNT = 40000;
 const future = () => new Date(Date.now() + 120 * 60_000).toISOString();
 const past = () => new Date(Date.now() - 60_000).toISOString();
 
-type ClaimRow = { outcome: string; payment_id: string | null; ref: string | null; qr: string | null };
-type SupersedeRow = { outcome: string; payment_id: string | null };
+type ClaimRow = {
+  outcome: string;
+  payment_id: string | null;
+  ref: string | null;
+  qr: string | null;
+  merchant: string | null;
+};
+type SupersedeRow = { outcome: string; payment_id: string | null; merchant: string | null };
 
 const claim = (
   enrollmentId: string,
@@ -57,14 +63,20 @@ const fresh = (): Tracked => ({ tenants: [], intakes: [], classes: [], enrollmen
 let seq = 0;
 const uniq = () => `kbz${Date.now().toString(36)}${seq++}`;
 
-async function makeWorld(opts: { enrollmentStatus?: string } = {}) {
-  const { enrollmentStatus = "pending_payment" } = opts;
+async function makeWorld(opts: { enrollmentStatus?: string; merchant?: string | null } = {}) {
+  const { enrollmentStatus = "pending_payment", merchant = "TESTMERCHANT" } = opts;
   const slug = uniq();
   const [t] = await sql<{ id: string }>(
     `INSERT INTO tenants (name, subdomain, org_type) VALUES ($1,$2,'event') RETURNING id`,
     [`KBZ ${slug}`, slug],
   );
   made.tenants.push(t.id);
+  if (merchant) {
+    await sql(
+      `INSERT INTO kbzpay_merchant_assignments (tenant_id, merchant_id) VALUES ($1,$2)`,
+      [t.id, merchant],
+    );
+  }
   const [i] = await sql<{ id: string }>(
     `INSERT INTO intakes (tenant_id, name, year) VALUES ($1,'KBZ intake',2026) RETURNING id`,
     [t.id],
@@ -91,15 +103,16 @@ async function seedLive(
   enrollmentId: string,
   tenantId: string,
   ref: string,
-  opts: { qr?: string | null; amount?: number; expiresAt?: string } = {},
+  opts: { qr?: string | null; amount?: number; expiresAt?: string; merchant?: string } = {},
 ) {
-  const { qr = "0002010102QR", amount = AMOUNT, expiresAt = future() } = opts;
+  const { qr = "0002010102QR", amount = AMOUNT, expiresAt = future(), merchant = "TESTMERCHANT" } = opts;
   const [p] = await sql<{ id: string }>(
     `INSERT INTO payments (enrollment_id, tenant_id, amount, payment_ref, payment_method,
-                           mmqr_status, status, provider_qr, provider_order_expires_at)
-     VALUES ($1,$2,$3,$4,'kbzpay_mmqr','PENDING','awaiting_payment',$5,$6::timestamptz)
+                           mmqr_status, status, provider_qr, provider_order_expires_at,
+                           kbzpay_merchant)
+     VALUES ($1,$2,$3,$4,'kbzpay_mmqr','PENDING','awaiting_payment',$5,$6::timestamptz,$7)
      RETURNING id`,
-    [enrollmentId, tenantId, amount, ref, qr, expiresAt],
+    [enrollmentId, tenantId, amount, ref, qr, expiresAt, merchant],
   );
   return p.id;
 }
@@ -136,6 +149,9 @@ afterEach(async () => {
   }
   if (classes.length) await sql(`DELETE FROM classes WHERE id = ANY($1::uuid[])`, [classes]);
   if (intakes.length) await sql(`DELETE FROM intakes WHERE id = ANY($1::uuid[])`, [intakes]);
+  if (tenants.length) {
+    await sql(`DELETE FROM kbzpay_merchant_assignments WHERE tenant_id = ANY($1::uuid[])`, [tenants]);
+  }
   if (tenants.length) await sql(`DELETE FROM tenants WHERE id = ANY($1::uuid[])`, [tenants]);
   made = fresh();
 });
@@ -474,5 +490,103 @@ describe("platform_fee is recorded on the row it belongs to", () => {
 
     const [changed] = await claim(enrollmentId, tenantId, "KBZ_f_5", AMOUNT, future(), 300);
     expect(changed.outcome).toBe("unresolved");
+  });
+});
+
+// ─── Merchant pinning ───────────────────────────────────────────────────────
+
+describe("merchant pinning", () => {
+  it("claim pins the tenant's assignment on a created row and returns it", async () => {
+    const { tenantId, enrollmentId } = await makeWorld();
+    const [row] = await claim(enrollmentId, tenantId, `KBZ_${uniq()}`);
+    expect(row.outcome).toBe("created");
+    expect(row.merchant).toBe("TESTMERCHANT");
+    const [p] = await sql<{ kbzpay_merchant: string }>(
+      `SELECT kbzpay_merchant FROM payments WHERE id=$1`,
+      [row.payment_id],
+    );
+    expect(p.kbzpay_merchant).toBe("TESTMERCHANT");
+  });
+
+  it("claim returns no_merchant and inserts nothing for a tenant without an assignment", async () => {
+    const { tenantId, enrollmentId } = await makeWorld({ merchant: null });
+    const [row] = await claim(enrollmentId, tenantId, `KBZ_${uniq()}`);
+    expect(row.outcome).toBe("no_merchant");
+    expect(await allKbzRows(enrollmentId)).toEqual([]);
+  });
+
+  it("reuse returns the row's pin even after the assignment is removed", async () => {
+    const { tenantId, enrollmentId } = await makeWorld();
+    const ref = `KBZ_${uniq()}`;
+    await seedLive(enrollmentId, tenantId, ref);
+    await sql(`DELETE FROM kbzpay_merchant_assignments WHERE tenant_id=$1`, [tenantId]);
+    const [row] = await claim(enrollmentId, tenantId, `KBZ_${uniq()}`);
+    expect(row.outcome).toBe("reuse");
+    expect(row.merchant).toBe("TESTMERCHANT");
+  });
+
+  it("supersede returns no_merchant and leaves the old row PENDING", async () => {
+    const { tenantId, enrollmentId } = await makeWorld();
+    const oldRef = `KBZ_${uniq()}`;
+    await seedLive(enrollmentId, tenantId, oldRef);
+    await sql(`DELETE FROM kbzpay_merchant_assignments WHERE tenant_id=$1`, [tenantId]);
+    const [row] = await supersede(enrollmentId, tenantId, oldRef, "EXPIRED", `KBZ_${uniq()}`);
+    expect(row.outcome).toBe("no_merchant");
+    expect((await liveRows(enrollmentId)).map((r) => r.payment_ref)).toEqual([oldRef]);
+  });
+
+  it("supersede pins the CURRENT assignment on the new row", async () => {
+    const { tenantId, enrollmentId } = await makeWorld();
+    const oldRef = `KBZ_${uniq()}`;
+    await seedLive(enrollmentId, tenantId, oldRef);
+    await sql(`UPDATE kbzpay_merchant_assignments SET merchant_id='OTHERMERCHANT' WHERE tenant_id=$1`, [tenantId]);
+    const [row] = await supersede(enrollmentId, tenantId, oldRef, "EXPIRED", `KBZ_${uniq()}`);
+    expect(row.outcome).toBe("replaced");
+    expect(row.merchant).toBe("OTHERMERCHANT");
+  });
+
+  it("rejects any change to a pin", async () => {
+    const { tenantId, enrollmentId } = await makeWorld();
+    const id = await seedLive(enrollmentId, tenantId, `KBZ_${uniq()}`);
+    await expect(
+      sql(`UPDATE payments SET kbzpay_merchant='OTHERMERCHANT' WHERE id=$1`, [id]),
+    ).rejects.toThrow(/immutable/);
+  });
+
+  it("rejects moving a pinned row to another tenant", async () => {
+    const { tenantId, enrollmentId } = await makeWorld();
+    const other = await makeWorld();
+    const id = await seedLive(enrollmentId, tenantId, `KBZ_${uniq()}`);
+    await expect(
+      sql(`UPDATE payments SET tenant_id=$1 WHERE id=$2`, [other.tenantId, id]),
+    ).rejects.toThrow(/cannot move tenant/);
+  });
+
+  it("rejects re-labelling a pinned KBZPay row as another method", async () => {
+    const { tenantId, enrollmentId } = await makeWorld();
+    const id = await seedLive(enrollmentId, tenantId, `KBZ_${uniq()}`);
+    await expect(
+      sql(`UPDATE payments SET payment_method='bank_transfer' WHERE id=$1`, [id]),
+    ).rejects.toThrow(/payments_kbzpay_merchant_required/);
+  });
+
+  it("rejects a pin on a non-KBZPay row", async () => {
+    const { tenantId, enrollmentId } = await makeWorld();
+    // Pin matches the assignment, so only the CHECK can refuse it.
+    await expect(
+      sql(
+        `INSERT INTO payments (enrollment_id, tenant_id, amount, payment_ref, payment_method,
+                               status, kbzpay_merchant)
+         VALUES ($1,$2,$3,$4,'bank_transfer','awaiting_payment','TESTMERCHANT')`,
+        [enrollmentId, tenantId, AMOUNT, `BT_${uniq()}`],
+      ),
+    ).rejects.toThrow(/payments_kbzpay_merchant_required/);
+  });
+
+  it("rejects an insert pinned to a merchant other than the tenant's assignment", async () => {
+    const { tenantId, enrollmentId } = await makeWorld();
+    await expect(
+      seedLive(enrollmentId, tenantId, `KBZ_${uniq()}`, { merchant: "OTHERMERCHANT" }),
+    ).rejects.toThrow(/does not match the tenant assignment/);
   });
 });

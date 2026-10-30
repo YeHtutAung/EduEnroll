@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
+process.env.KBZPAY_BRAVE_APPID = "kptest0000000000000000000000000000";
+process.env.KBZPAY_BRAVE_MERCH_CODE = "70000000001";
+process.env.KBZPAY_BRAVE_APP_KEY = "testkey0123456789abcdef";
+process.env.KBZPAY_BRAVE_NOTIFY_ORIGIN = "https://brave.kuunyi.com";
+
 // ─── GET /api/public/payments/kbzpay/status ─────────────────────────────────
 // Spec §5.3. The poller is a genuine recovery path for a missed callback, not
 // a read-only display: it settles on PAY_SUCCESS like the webhook does.
@@ -11,6 +16,8 @@ import { NextRequest } from "next/server";
 type Row = Record<string, unknown>;
 
 let payment: Row | null;
+let lookupError: { message: string } | null;
+let eqCalls: [string, unknown][];
 let queryResult: Row;
 let settleResult: Row;
 
@@ -48,6 +55,7 @@ beforeEach(() => {
     enrollment_id: "enr-1",
     mmqr_status: "PENDING",
     status: "awaiting_payment",
+    kbzpay_merchant: "BRAVE",
   };
   queryResult = {
     ok: true,
@@ -59,9 +67,16 @@ beforeEach(() => {
 
   mockQueryOrder.mockImplementation(async () => queryResult);
   mockSettle.mockImplementation(async () => settleResult);
+  eqCalls = [];
+  lookupError = null;
   mockFrom.mockImplementation(() => ({
     select: () => ({
-      eq: () => ({ maybeSingle: async () => ({ data: payment, error: null }) }),
+      eq: (c1: string, v1: unknown) => ({
+        eq: (c2: string, v2: unknown) => {
+          eqCalls.push([c1, v1], [c2, v2]);
+          return { maybeSingle: async () => ({ data: payment, error: lookupError }) };
+        },
+      }),
     }),
   }));
 });
@@ -74,6 +89,23 @@ describe("request handling", () => {
   it("reports PENDING for an unknown ref rather than erroring the modal", async () => {
     payment = null;
     expect(await body(await GET(req()))).toEqual({ mmqr_status: "PENDING" });
+  });
+
+  it("logs a lookup error but still answers PENDING without calling KBZPay", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      payment = null;
+      lookupError = { message: "boom" };
+
+      expect(await body(await GET(req()))).toEqual({ mmqr_status: "PENDING" });
+      expect(mockQueryOrder).not.toHaveBeenCalled();
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(String(spy.mock.calls[0][0])).toContain("[kbzpay-status]");
+      expect(String(spy.mock.calls[0][0])).toContain(REF);
+      expect(String(spy.mock.calls[0][0])).toContain("boom");
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
@@ -159,5 +191,40 @@ describe("missed-callback self-healing (§5.3)", () => {
     settleResult = { kind: "already_settled", paymentId: "pay-1", enrollmentId: "enr-1" };
 
     expect(await body(await GET(req()))).toEqual({ mmqr_status: "SUCCESS" });
+  });
+});
+
+describe("merchant", () => {
+  it("looks up KBZPay rows only", async () => {
+    await GET(req());
+    expect(eqCalls).toContainEqual(["payment_method", "kbzpay_mmqr"]);
+    expect(eqCalls).toContainEqual(["payment_ref", REF]);
+  });
+
+  it("queries with the merchant pinned on the row", async () => {
+    await GET(req());
+    expect(mockQueryOrder.mock.calls[0][0]).toEqual(expect.objectContaining({ id: "BRAVE" }));
+    expect(mockQueryOrder.mock.calls[0][1]).toBe(REF);
+  });
+
+  it("answers PENDING without calling KBZPay when the pinned merchant is misconfigured", async () => {
+    payment = { ...payment!, kbzpay_merchant: "SKYFEST" }; // no KBZPAY_SKYFEST_* set
+    const res = await GET(req());
+    expect(await body(res)).toEqual({ mmqr_status: "PENDING" });
+    expect(mockQueryOrder).not.toHaveBeenCalled();
+  });
+
+  it("answers SUCCESS without calling KBZPay when verified locally, even if the pinned merchant is misconfigured", async () => {
+    payment = { ...payment!, status: "verified", kbzpay_merchant: "SKYFEST" }; // no KBZPAY_SKYFEST_* set
+    const res = await GET(req());
+    expect(await body(res)).toEqual({ mmqr_status: "SUCCESS" });
+    expect(mockQueryOrder).not.toHaveBeenCalled();
+  });
+
+  it("answers PENDING without calling KBZPay for a non-KBZPay ref", async () => {
+    payment = null; // the method filter excludes it
+    const res = await GET(req("ABANK_123"));
+    expect(await body(res)).toEqual({ mmqr_status: "PENDING" });
+    expect(mockQueryOrder).not.toHaveBeenCalled();
   });
 });
