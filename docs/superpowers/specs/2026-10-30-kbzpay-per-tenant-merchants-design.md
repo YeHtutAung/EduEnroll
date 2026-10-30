@@ -83,6 +83,10 @@ CREATE TABLE public.kbzpay_merchant_assignments (
   created_at  timestamptz NOT NULL DEFAULT now(),
   updated_at  timestamptz NOT NULL DEFAULT now()
 );
+-- Keeps updated_at truthful when the operator reassigns a tenant (same trigger as tenant_bots).
+CREATE TRIGGER kbzpay_merchant_assignments_updated_at
+  BEFORE UPDATE ON public.kbzpay_merchant_assignments
+  FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 ALTER TABLE public.kbzpay_merchant_assignments ENABLE ROW LEVEL SECURITY;
 -- No policies: authenticated and anon can neither read nor write.
 REVOKE ALL ON public.kbzpay_merchant_assignments FROM anon, authenticated;
