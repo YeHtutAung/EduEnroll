@@ -252,6 +252,7 @@ describe("merchant", () => {
     expect(res.status).toBe(503);
     expect(mockPrecreate).not.toHaveBeenCalled();
     expect(paymentUpdates).toEqual([]);
+    expect(rpcCalls.map((c) => c.name)).toEqual(["claim_kbzpay_order_slot"]);
   });
 
   it("does NOT re-serve a stored QR when the reused order's merchant is misconfigured", async () => {
@@ -262,6 +263,29 @@ describe("merchant", () => {
 
     expect(res.status).toBe(503);
     expect(text).not.toContain("STORED_QR");
+    expect(mockPrecreate).not.toHaveBeenCalled();
+  });
+
+  it("returns 503 without resolving or superseding when the unresolved order's pinned merchant is misconfigured", async () => {
+    claimRows = [{ outcome: "unresolved", payment_id: "pay-1", ref: "KBZ_old", qr: null, merchant: "NOPE" }];
+
+    const res = await POST(req());
+
+    expect(res.status).toBe(503);
+    expect(mockResolve).not.toHaveBeenCalled();
+    expect(rpcCalls.filter((c) => c.name === "complete_kbzpay_supersede")).toHaveLength(0);
+  });
+
+  it("returns 503 and creates nothing when the supersede pins a misconfigured merchant", async () => {
+    claimRows = [{ outcome: "unresolved", payment_id: "pay-1", ref: "KBZ_old", qr: null, merchant: "BRAVE" }];
+    supersedeRows = [{ outcome: "replaced", payment_id: "pay-2", merchant: "NOPE" }];
+    mockResolve.mockResolvedValue({ kind: "retire", reason: "EXPIRED" });
+
+    const res = await POST(req());
+
+    expect(res.status).toBe(503);
+    expect(mockPrecreate).not.toHaveBeenCalled();
+    expect(paymentUpdates).toEqual([]);
   });
 
   it("resolves the old order under ITS pin and creates the new one under the supersede's", async () => {
