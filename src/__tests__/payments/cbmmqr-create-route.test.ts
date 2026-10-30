@@ -370,6 +370,20 @@ describe("unresolved", () => {
     expect(mockResolve.mock.calls[1][0].row).toMatchObject({ displayed: false });
   });
 
+  it("replacement row with a merchant lacking config: marks the NEW row FAILED, 503, no CB call", async () => {
+    mockResolve.mockResolvedValue({ kind: "retire", reason: "FAILED" });
+    rpcResults.complete_cbmmqr_replace = { data: [{ outcome: "replaced", payment_id: "pay-2", merchant: "NOCONFIG" }], error: null };
+    expect((await POST(req())).status).toBe(503);
+    const newRef = called("complete_cbmmqr_replace")[0].args.p_new_ref;
+    expect(newRef).not.toBe("CBOLD");
+    expect(paymentUpdates).toHaveLength(1);
+    expect(paymentUpdates[0].payload).toEqual({ mmqr_status: "FAILED" });
+    expect(paymentUpdates[0].filters).toEqual(expect.arrayContaining([
+      ["payment_ref", newRef], ["payment_method", "cb_mmqr"], ["mmqr_status", "PENDING"],
+    ]));
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
   it("uses the merchant the replace pinned on the new row", async () => {
     mockResolve.mockResolvedValue({ kind: "retire", reason: "FAILED" });
     rpcResults.complete_cbmmqr_replace = { data: [{ outcome: "replaced", payment_id: "pay-2", merchant: "OTHER" }], error: null };
