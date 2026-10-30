@@ -192,8 +192,9 @@ describe("claim_cbmmqr_order_slot", () => {
       claim(enrollmentId, tenantId, REF(1)),
       claim(enrollmentId, tenantId, REF(2)),
     ]);
-    const created = results.filter((r) => r.status === "fulfilled" && r.value[0].outcome === "created");
-    expect(created).toHaveLength(1);
+    expect(results.every((r) => r.status === "fulfilled")).toBe(true);
+    const outcomes = results.map((r) => (r as PromiseFulfilledResult<ClaimRow[]>).value[0].outcome).sort();
+    expect(outcomes).toEqual(["created", "unresolved"]);
     expect(await liveRows(enrollmentId)).toHaveLength(1);
   });
 });
@@ -228,6 +229,12 @@ describe("store_cbmmqr_qr", () => {
     const { tenantId, enrollmentId } = await makeWorld();
     await seedLive(enrollmentId, tenantId, REF(1), { qr: null, orderRef: "QR-1" });
     expect(await store(REF(1), "0002QR", "QR-2")).toBe("ref_conflict");
+  });
+
+  it("raises when the order reference is empty", async () => {
+    const { tenantId, enrollmentId } = await makeWorld();
+    await seedLive(enrollmentId, tenantId, REF(1), { qr: null });
+    await expect(store(REF(1), "0002QR", "")).rejects.toThrow(/p_order_ref is required/);
   });
 
   it("not_live for a retired row; not_found for an unknown reference", async () => {
@@ -307,7 +314,16 @@ describe("complete_cbmmqr_replace", () => {
       await binder.query("BEGIN");
       await binder.query(`SELECT public.bind_cbmmqr_settlement($1,'QR-1','TXN-1','YOUNGMONEY')`, [REF(1)]);
       const pending = replace(enrollmentId, tenantId, REF(1), "FAILED", REF(2));
-      await new Promise((r) => setTimeout(r, 300)); // the replace is now blocked on the row lock
+      // Wait until the replace is actually blocked on a lock.
+      let blocked = false;
+      for (let i = 0; i < 100 && !blocked; i++) {
+        const rows = await sql(
+          `SELECT 1 FROM pg_stat_activity
+            WHERE wait_event_type='Lock' AND query LIKE '%complete_cbmmqr_replace%' AND pid <> pg_backend_pid()`);
+        blocked = rows.length > 0;
+        if (!blocked) await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(blocked).toBe(true);
       await binder.query("COMMIT");
       expect((await pending)[0].outcome).toBe("settling");
     } finally {
@@ -359,6 +375,14 @@ describe("bind_cbmmqr_settlement", () => {
     expect(await bind(REF(2), "QR-2", "TXN-1")).toBe("duplicate_transaction");
   });
 
+  it("duplicate_order_ref when the QR reference already belongs to another payment", async () => {
+    const a = await makeWorld();
+    const b = await makeWorld();
+    await seedLive(a.enrollmentId, a.tenantId, REF(1), { orderRef: "QR-1" });
+    await seedLive(b.enrollmentId, b.tenantId, REF(2), { orderRef: null });
+    expect(await bind(REF(2), "QR-1", "TXN-9")).toBe("duplicate_order_ref");
+  });
+
   it("two concurrent binds with different transactions: exactly one is bound", async () => {
     const { tenantId, enrollmentId } = await makeWorld();
     await seedLive(enrollmentId, tenantId, REF(1), { orderRef: "QR-1" });
@@ -399,6 +423,34 @@ describe("trg_protect_payment_cbmmqr_fields and the CHECK", () => {
       `INSERT INTO payments (enrollment_id, tenant_id, amount, payment_method, status, mmqr_status)
        VALUES ($1,$2,1000,'cb_mmqr','awaiting_payment','PENDING')`, [enrollmentId, tenantId],
     )).rejects.toThrow(/payments_cbmmqr_merchant_required/);
+  });
+});
+
+describe("trigger and CHECK: tenant move, method change, non-CB bank_reference", () => {
+  it("refuses moving a pinned CB row to another tenant", async () => {
+    const a = await makeWorld();
+    const b = await makeWorld();
+    await seedLive(a.enrollmentId, a.tenantId, REF(1));
+    await expect(sql(`UPDATE payments SET tenant_id=$2 WHERE payment_ref=$1`, [REF(1), b.tenantId]))
+      .rejects.toThrow(/cannot move tenant/);
+  });
+
+  it("refuses changing payment_method away from cb_mmqr on a pinned row", async () => {
+    const { tenantId, enrollmentId } = await makeWorld();
+    await seedLive(enrollmentId, tenantId, REF(1));
+    await expect(sql(`UPDATE payments SET payment_method='bank_transfer' WHERE payment_ref=$1`, [REF(1)]))
+      .rejects.toThrow(/payments_cbmmqr_merchant_required/);
+  });
+
+  it("still lets a non-CB row's bank_reference be updated repeatedly", async () => {
+    const { tenantId, enrollmentId } = await makeWorld();
+    await sql(
+      `INSERT INTO payments (enrollment_id, tenant_id, amount, payment_ref, payment_method, status)
+       VALUES ($1,$2,1000,$3,'bank_transfer','awaiting_payment')`, [enrollmentId, tenantId, REF(7)]);
+    await sql(`UPDATE payments SET bank_reference='A' WHERE payment_ref=$1`, [REF(7)]);
+    await sql(`UPDATE payments SET bank_reference='B' WHERE payment_ref=$1`, [REF(7)]);
+    const [p] = await sql(`SELECT bank_reference FROM payments WHERE payment_ref=$1`, [REF(7)]);
+    expect(p).toEqual({ bank_reference: "B" });
   });
 });
 
