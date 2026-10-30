@@ -219,6 +219,9 @@ BEGIN
 
   -- reuse / unresolved return the EXISTING row's pin, never the current
   -- assignment: removing an assignment must not strand an order already live.
+  -- unresolved also returns the stored QR (NULL when none): a row whose QR was
+  -- never stored was never displayed, which decides how §5.2 may free it. The
+  -- route must not hand an unresolved row's QR to the browser.
   IF FOUND THEN
     IF v_live.amount = p_amount
        AND v_live.platform_fee = p_platform_fee
@@ -230,7 +233,7 @@ BEGIN
                           v_live.cbmmqr_merchant, v_live.provider_order_expires_at,
                           v_live.provider_order_ref, v_live.created_at;
     ELSE
-      RETURN QUERY SELECT 'unresolved'::text, v_live.id, v_live.payment_ref, NULL::text,
+      RETURN QUERY SELECT 'unresolved'::text, v_live.id, v_live.payment_ref, v_live.provider_qr,
                           v_live.cbmmqr_merchant, v_live.provider_order_expires_at,
                           v_live.provider_order_ref, v_live.created_at;
     END IF;

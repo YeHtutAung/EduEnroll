@@ -161,11 +161,15 @@ describe("claim_cbmmqr_order_slot", () => {
     ["a different amount", { amount: AMOUNT + 1 }],
     ["no stored QR", { qr: null }],
     ["a passed expiry", { expiresAt: past() }],
-  ])("unresolved with %s, returning the old row's reference; inserts nothing", async (_n, opts) => {
+  ])("unresolved with %s, returning the old row's reference and stored QR; inserts nothing", async (_n, opts) => {
     const { tenantId, enrollmentId } = await makeWorld();
     await seedLive(enrollmentId, tenantId, REF(1), { ...opts, orderRef: "QR-1" });
     const [r] = await claim(enrollmentId, tenantId, REF(2));
-    expect(r).toMatchObject({ outcome: "unresolved", ref: REF(1), order_ref: "QR-1", merchant: "YOUNGMONEY" });
+    // The stored QR (null when none) tells the route whether it was ever displayed (§5.2).
+    const expectedQr = "qr" in opts ? opts.qr : "0002010102QR";
+    expect(r).toMatchObject({
+      outcome: "unresolved", ref: REF(1), order_ref: "QR-1", merchant: "YOUNGMONEY", qr: expectedQr,
+    });
     expect(await liveRows(enrollmentId)).toHaveLength(1);
   });
 

@@ -22,7 +22,7 @@ const MERCHANT = {
 };
 const row = (over: object = {}) => ({
   ref: "CBAAAAAAAAAAAAAAAAAAAAAAA", orderRef: "QR-1" as string | null,
-  expiresAtMs: NOW - 10 * MIN as number | null, createdAtMs: NOW - 15 * MIN, ...over,
+  expiresAtMs: NOW - 10 * MIN as number | null, createdAtMs: NOW - 15 * MIN, displayed: true, ...over,
 });
 const run = (r = row()) => resolveCbmmqrOrder({ row: r, merchant: MERCHANT, source: "create", now: NOW });
 
@@ -94,7 +94,7 @@ describe("resolveCbmmqrOrder — row with CB's reference", () => {
   });
 });
 
-describe("resolveCbmmqrOrder — row without CB's reference (lost create response)", () => {
+describe("resolveCbmmqrOrder — row without CB's reference (lost create response, never displayed)", () => {
   const window = (CB_MAX_QR_MINUTES + CB_EXPIRY_MARGIN_MINUTES) * MIN;
 
   it("retire FAILED after created_at + max validity + margin, without calling CB", async () => {
@@ -106,5 +106,32 @@ describe("resolveCbmmqrOrder — row without CB's reference (lost create respons
     expect(await run(row({ orderRef: null, createdAtMs: NOW - window + 1000 }))).toEqual({
       kind: "active", retryAtMs: NOW + 1000,
     });
+  });
+});
+
+describe("resolveCbmmqrOrder — CB's reference stored but QR withheld (never displayed)", () => {
+  const window = (CB_MAX_QR_MINUTES + CB_EXPIRY_MARGIN_MINUTES) * MIN;
+
+  it("checks status with the pinned merchant, then retires FAILED after the window", async () => {
+    expect(await run(row({ displayed: false, createdAtMs: NOW - window - 1 }))).toEqual({ kind: "retire", reason: "FAILED" });
+    expect(mockStatus).toHaveBeenCalledWith(MERCHANT, "QR-1", undefined);
+  });
+
+  it("checks status, then active until created_at + window", async () => {
+    expect(await run(row({ displayed: false, createdAtMs: NOW - window + 1000 }))).toEqual({
+      kind: "active", retryAtMs: NOW + 1000,
+    });
+    expect(mockStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it("already_paid when the status check shows success, even after the window", async () => {
+    mockStatus.mockResolvedValue({ kind: "answer", code: "0000", currency: "MMK", amount: 40000 });
+    mockSettle.mockResolvedValue({ kind: "settled" });
+    expect(await run(row({ displayed: false, createdAtMs: NOW - window - 1 }))).toEqual({ kind: "already_paid" });
+  });
+
+  it("an unreachable status check does not block the time rule", async () => {
+    mockStatus.mockResolvedValue({ kind: "unreachable" });
+    expect(await run(row({ displayed: false, createdAtMs: NOW - window - 1 }))).toEqual({ kind: "retire", reason: "FAILED" });
   });
 });
