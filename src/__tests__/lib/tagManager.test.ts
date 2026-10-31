@@ -62,6 +62,8 @@ describe("isTrackedPath", () => {
     "/",
     "/admin",
     "/enroll/x/tickets/extra",
+    "/enroll/%66orm",
+    "/enroll/x/%74ickets",
   ])("does not track %s", (p) => expect(isTrackedPath(p)).toBe(false));
 });
 
@@ -108,13 +110,28 @@ function store(entries: Record<string, string> = {}) {
   };
 }
 
-function state(over: Partial<Parameters<typeof isBrowserStateClean>[0]> = {}) {
+type Input = Parameters<typeof isBrowserStateClean>[0];
+const ORIGIN = "https://sky.example.com";
+
+// Tests pass storages as plain objects; state() wraps them in the getters the
+// real signature wants, and fills in origin and referrer.
+function state(
+  over: {
+    location?: { search: string; hash: string };
+    sessionStorage?: ReturnType<typeof store>;
+    localStorage?: ReturnType<typeof store>;
+    cookie?: string;
+    referrer?: string;
+  } = {},
+): Input {
+  const ss = over.sessionStorage ?? store();
+  const ls = over.localStorage ?? store();
   return {
-    location: { search: "", hash: "" },
-    sessionStorage: store(),
-    localStorage: store(),
-    cookie: "",
-    ...over,
+    location: { search: "", hash: "", ...over.location, origin: ORIGIN },
+    sessionStorage: () => ss,
+    localStorage: () => ls,
+    cookie: over.cookie ?? "",
+    referrer: over.referrer ?? "",
   };
 }
 
@@ -183,6 +200,57 @@ describe("isBrowserStateClean", () => {
     expect(isBrowserStateClean(state({ localStorage: throwing }))).toBe(false);
   });
 
+  it("a storage getter that throws blocks GTM", () => {
+    const base = state();
+    const boom = () => {
+      throw new Error("SecurityError");
+    };
+    expect(isBrowserStateClean({ ...base, sessionStorage: boom })).toBe(false);
+    expect(isBrowserStateClean({ ...base, localStorage: boom })).toBe(false);
+  });
+
+  it("matches sensitive query params case-insensitively", () => {
+    expect(isBrowserStateClean(state({ location: { search: "?REF=1", hash: "" } }))).toBe(false);
+    expect(isBrowserStateClean(state({ location: { search: "?Payment_Intent=1", hash: "" } }))).toBe(false);
+  });
+
+  it("checks the whole sensitive list in the hash", () => {
+    expect(isBrowserStateClean(state({ location: { search: "", hash: "#ref=1" } }))).toBe(false);
+    expect(isBrowserStateClean(state({ location: { search: "", hash: "#PSID=1" } }))).toBe(false);
+    expect(isBrowserStateClean(state({ location: { search: "", hash: "#session_id=1" } }))).toBe(false);
+  });
+
+  it("an sb-x-auth-token.0 cookie blocks", () => {
+    expect(isBrowserStateClean(state({ cookie: "sb-x-auth-token.0=abc" }))).toBe(false);
+  });
+
+  describe("referrer", () => {
+    const ref = (r: string) => isBrowserStateClean(state({ referrer: r }));
+    it("blocks a same-origin payment page", () => {
+      expect(ref(`${ORIGIN}/enroll/payment/X`)).toBe(false);
+    });
+    it("blocks a same-origin checkout URL carrying a ref", () => {
+      expect(ref(`${ORIGIN}/enroll/x/checkout?ref=A`)).toBe(false);
+    });
+    it("blocks a tracked path whose query has a sensitive param", () => {
+      expect(ref(`${ORIGIN}/enroll/x?psid=1`)).toBe(false);
+      expect(ref(`${ORIGIN}/enroll/x#ref=1`)).toBe(false);
+    });
+    it("allows a same-origin tracked page", () => {
+      expect(ref(`${ORIGIN}/enroll/x`)).toBe(true);
+      expect(ref(`${ORIGIN}/enroll/x/tickets?fbclid=1`)).toBe(true);
+    });
+    it("allows an empty referrer", () => {
+      expect(ref("")).toBe(true);
+    });
+    it("allows a cross-origin referrer", () => {
+      expect(ref("https://facebook.com/l.php?u=abc")).toBe(true);
+    });
+    it("blocks a malformed referrer", () => {
+      expect(ref("not a url")).toBe(false);
+    });
+  });
+
   it("SAFE_STORAGE_KEYS allows only cart_<digits>", () => {
     expect(SAFE_STORAGE_KEYS.some((re) => re.test("cart_1730000000000"))).toBe(true);
     expect(SAFE_STORAGE_KEYS.some((re) => re.test("ck_cart_1730000000000"))).toBe(false);
@@ -212,6 +280,34 @@ describe("pushDataLayer", () => {
     pushDataLayer("view_item", {});
     expect(win.dataLayer).toBe(existing);
     expect(existing).toHaveLength(3);
+  });
+});
+
+describe("next.config Referrer-Policy", () => {
+  it("untracked public routes send strict-origin, after the global entry", async () => {
+    const cfg = (await import("../../../next.config.mjs")).default as {
+      headers: () => Promise<{ source: string; headers: { key: string; value: string }[] }[]>;
+    };
+    const rules = await cfg.headers();
+    const policy = (r: { headers: { key: string; value: string }[] }) =>
+      r.headers.find((h) => h.key === "Referrer-Policy")?.value;
+    const globalIdx = rules.findIndex((r) => r.source === "/:path*");
+    expect(globalIdx).toBe(0);
+    expect(policy(rules[0])).toBe("strict-origin-when-cross-origin");
+    const sources = [
+      "/enroll/payment/:path*",
+      "/enroll/:slug/checkout/:path*",
+      "/enroll/:slug/status",
+      "/enroll/:slug/success",
+      "/enroll/:slug/interest",
+      "/enroll/form",
+      "/status",
+    ];
+    for (const src of sources) {
+      const i = rules.findIndex((r) => r.source === src);
+      expect(i, src).toBeGreaterThan(globalIdx);
+      expect(policy(rules[i]), src).toBe("strict-origin");
+    }
   });
 });
 

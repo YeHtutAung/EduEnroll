@@ -27,6 +27,8 @@ export function normalizeGtmContainerId(input: unknown): string | null | "invali
  * checkout, status, interest) is excluded. Tolerates a trailing slash.
  */
 export function isTrackedPath(pathname: string): boolean {
+  // Encoded paths fail closed: "/enroll/%66orm" must not read as an event slug.
+  if (pathname.includes("%")) return false;
   const parts = pathname.split("/").filter(Boolean);
   if (parts[0] !== "enroll") return false;
   if (parts.length === 1) return true;
@@ -87,26 +89,43 @@ function storageIsClean(s: KeyedStorage): boolean {
   return true;
 }
 
+function hasSensitiveParam(params: URLSearchParams): boolean {
+  const names = new Set(Array.from(params.keys()).map((k) => k.toLowerCase()));
+  return SENSITIVE_PARAMS.some((p) => names.has(p));
+}
+
 /**
  * True only when nothing sensitive is visible to a third-party script: no
- * sensitive query param, no priority token in the hash, only allowlisted
- * storage keys, and no Supabase auth cookie. Any error counts as not clean.
+ * sensitive query or hash param (any case), no priority token in the hash,
+ * only allowlisted storage keys, no Supabase auth cookie, and no same-origin
+ * referrer that is an untracked page or carries a sensitive param (GA4 records
+ * page_referrer, and the site's referrer policy sends the full same-origin
+ * URL). Storages are passed as getters because merely reading
+ * window.sessionStorage can throw. Any error counts as not clean.
  */
 export function isBrowserStateClean(args: {
-  location: { search: string; hash: string };
-  sessionStorage: KeyedStorage;
-  localStorage: KeyedStorage;
+  location: { search: string; hash: string; origin: string };
+  referrer: string;
+  sessionStorage: () => KeyedStorage;
+  localStorage: () => KeyedStorage;
   cookie: string;
 }): boolean {
   try {
     const query = new URLSearchParams(args.location.search);
-    if (SENSITIVE_PARAMS.some((p) => query.has(p))) return false;
-
     const hash = new URLSearchParams(args.location.hash.replace(/^#/, ""));
-    if (hash.has("pa")) return false;
+    if (hasSensitiveParam(query) || hasSensitiveParam(hash) || hash.has("pa")) return false;
 
-    if (!storageIsClean(args.sessionStorage)) return false;
-    if (!storageIsClean(args.localStorage)) return false;
+    if (args.referrer) {
+      const ref = new URL(args.referrer);
+      if (ref.origin === args.location.origin) {
+        if (!isTrackedPath(ref.pathname)) return false;
+        if (hasSensitiveParam(ref.searchParams)) return false;
+        if (hasSensitiveParam(new URLSearchParams(ref.hash.replace(/^#/, "")))) return false;
+      }
+    }
+
+    if (!storageIsClean(args.sessionStorage())) return false;
+    if (!storageIsClean(args.localStorage())) return false;
 
     const cookieNames = args.cookie
       .split(";")
