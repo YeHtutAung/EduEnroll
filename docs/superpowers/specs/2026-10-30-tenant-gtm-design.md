@@ -241,9 +241,10 @@ starting checkout in the same tab is not tracked again. The implementation
 must check the keys that our own libraries (for example Vercel Analytics)
 write, and allowlist them only if they hold nothing sensitive.
 
-Effect order makes this work for the priority token: the event page's
-capture effect (child) moves `#pa=` into `sessionStorage` before the layout's
-effect (parent) runs the check.
+The priority token is blocked whichever effect runs first. `TenantTagManager`
+and the page content are siblings under the public layout, so the guard runs
+before the event page's capture effect and sees `#pa=` in the hash; any later
+evaluation sees the token in `pa_<slug>` instead.
 
 **4. Clean from the start of the document (client).**
 
@@ -433,8 +434,9 @@ traffic, ad landing and `begin_checkout`.
 2. Ship the component, routes, superadmin field and settings line behind the
    column. With no IDs set there is no visible change.
 3. Sky Festival sends their container ID (received 2026-10-30:
-   `GTM-K7N27G9J`). We set `GTM_ALLOW_NON_PRODUCTION=true` on the staging
-   deployment and the ID on staging first, they verify with GTM Preview, then
+   `GTM-K7N27G9J`). We set `GTM_ALLOW_NON_PRODUCTION=true` for the staging
+   deployment (in Vercel, scoped to the `staging` branch only, not all of
+   Preview) and the ID on staging first, they verify with GTM Preview, then
    we set it on production.
 
    Sky Festival starts its ads once our UAT (staging) environment has GTM
