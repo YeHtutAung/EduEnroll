@@ -7,6 +7,7 @@ import { Elements, PaymentElement, useStripe, useElements } from "@stripe/react-
 import QRCode from "qrcode";
 import TrustedOfficialShell from "@/components/enrollment/TrustedOfficialShell";
 import QRPaymentModal from "@/components/payments/QRPaymentModal";
+import { normaliseMmqrProvider, type MmqrProvider } from "@/lib/mmqrProvider";
 import PayNowQrSaveButton from "@/components/payments/PayNowQrSaveButton";
 
 const stripePromise = loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY!);
@@ -646,7 +647,7 @@ function PaymentContent() {
   const [brandColor, setBrandColor] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [paymentMode, setPaymentMode] = useState<string | null>(null);
-  const [mmqrProvider, setMmqrProvider] = useState<"abank" | "mmpay" | "kbzpay">("mmpay");
+  const [mmqrProvider, setMmqrProvider] = useState<MmqrProvider>("mmpay");
   const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([]);
   const [studentName, setStudentName] = useState("");
   const [showQRModal, setShowQRModal] = useState(false);
@@ -695,11 +696,7 @@ function PaymentContent() {
         setStudentName(d.student_name_en ?? "");
         const mode = d.payment_mode ?? "bank_transfer";
         setPaymentMode(mode);
-        setMmqrProvider(
-          d.mmqr_provider === "abank" || d.mmqr_provider === "kbzpay"
-            ? d.mmqr_provider
-            : "mmpay",
-        );
+        setMmqrProvider(normaliseMmqrProvider(d.mmqr_provider, "mmpay"));
         setBankAccounts(d.bank_accounts ?? []);
         if (mode === "stripe") {
           if (!stored && d.stripe_client_secret) setClientSecret(d.stripe_client_secret);
@@ -811,7 +808,7 @@ function PaymentContent() {
               amount={totalAmount}
               studentName={studentName}
               receiverName={orgName}
-              provider={qrProvider as "abank" | "mmpay" | "paypay" | "kbzpay"}
+              provider={qrProvider as MmqrProvider | "paypay"}
               onSuccess={() => router.push(`/enroll/${params.slug}/checkout/success/?ref=${ref}`)}
               onClose={() => setShowQRModal(false)}
             />

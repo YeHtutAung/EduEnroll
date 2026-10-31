@@ -15,6 +15,7 @@ import { buildQrMap } from "@/lib/tickets/render/ticketPng";
 import { successRedirectUrl } from "@/lib/enrollment/successRedirect";
 import type { QrMap, TicketData, TicketRenderContext } from "@/lib/tickets/render/types";
 import type { SponsorPlacements } from "@/types/database";
+import { normaliseMmqrProvider, type MmqrProvider } from "@/lib/mmqrProvider";
 import { jsPDF } from "jspdf";
 import { computePlatformFee, displayTotals } from "@/server/payments/platformFee";
 import { ticketSubtotal } from "@/lib/payments/statusTicketAmounts";
@@ -55,7 +56,7 @@ interface EnrollmentInfo {
   auto_cancel_minutes?: number;
   telegram_bot_username?: string | null;
   payment_mode?: "bank_transfer" | "mmqr" | "stripe" | "paypay" | "hitpay";
-  mmqr_provider?: "abank" | "mmpay" | "kbzpay";
+  mmqr_provider?: MmqrProvider;
   platform_fee_mode?: string | null;
   platform_fee_amount?: number | null;
   class_image_url?: string | null;
@@ -1584,7 +1585,7 @@ export default function PaymentInstructionsPage() {
   const showUpload = enrollment.status === "pending_payment" || enrollment.status === "partial_payment";
   const isPartialReUpload = enrollment.status === "partial_payment";
   const paymentMode = enrollment.payment_mode ?? "bank_transfer";
-  const mmqrProvider = enrollment.mmqr_provider ?? "abank";
+  const mmqrProvider = normaliseMmqrProvider(enrollment.mmqr_provider, "abank");
 
   const isConfirmed = enrollment.status === "confirmed";
 
