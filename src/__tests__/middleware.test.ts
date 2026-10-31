@@ -235,6 +235,53 @@ describe("middleware — custom domain surface split", () => {
   });
 });
 
+describe("middleware — tenant subdomain root", () => {
+  it("sends a tenant subdomain root to its enroll index", async () => {
+    for (const host of [
+      "nihon-moment.kuunyi.com",
+      "nihon-moment.staging.kuunyi.com",
+      "nihon-moment.edu-enroll-xi.vercel.app",
+      "nihon-moment.localhost:3005",
+    ]) {
+      const res = await get(`https://${host}/`);
+      expect(res.status, host).toBe(307);
+      expect(res.headers.get("location"), host).toBe(`https://${host}/enroll`);
+    }
+  });
+
+  // www and staging are reserved labels, not tenants.
+  it("keeps the homepage on platform hosts", async () => {
+    process.env.VERCEL_ENV = "production";
+    for (const host of [
+      "kuunyi.com",
+      "www.kuunyi.com",
+      "staging.kuunyi.com",
+      "edu-enroll-xi.vercel.app",
+    ]) {
+      const res = await get(`https://${host}/`);
+      expect(res.status, host).not.toBe(307);
+      expect(res.headers.get("location"), host).toBeNull();
+    }
+  });
+
+  // The redirect follows the host resolver only. The dev fallback would put a
+  // tenant on bare localhost and hide the homepage from local development.
+  it("keeps the homepage on bare localhost even with a dev tenant set", async () => {
+    delete process.env.VERCEL_ENV;
+    process.env.NEXT_PUBLIC_DEV_TENANT = "nihon-moment";
+    for (const url of ["http://localhost:3005/", "http://localhost:3005/?tenant=acme"]) {
+      const res = await get(url);
+      expect(res.status, url).not.toBe(307);
+      expect(res.headers.get("location"), url).toBeNull();
+    }
+  });
+
+  it("only redirects the root, not other tenant paths", async () => {
+    const res = await get("https://nihon-moment.kuunyi.com/enroll");
+    expect(res.status).not.toBe(307);
+  });
+});
+
 // TEMPORARY — the transitional agent allowlist from #164 Phase 1.
 // requireAuth() requires an inbound x-tenant-slug for signed agent requests and
 // grants role:"owner" on the named tenant, so the header is still trusted on
