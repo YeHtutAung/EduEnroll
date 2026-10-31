@@ -77,6 +77,7 @@ brand, copy and photos. It doesn't copy their images, text or layout.
    - **Your event, your brand** (`brand.jpg`): your own domain, sponsor logos
      on e-tickets, and Meta / TikTok / Google pixels via Google Tag Manager.
      This is per-tenant GTM, not promoter or affiliate tracking.
+   - **Cashless bars & food stalls** (wide navy card under the four, `pos.jpg`, a bartender at a tap, cropped to cut branded cups). This is the owner's separate **Event Payment System** (web + mobile app), in use at Myanmar festivals since 2017. The facts come from Idea Pro's 2017 Barrack Water Festival quotation in the owner's Drive: prepaid QR cards topped up at cash counters, a scan to pay at bars, stock and sales per counter (VVIP / VIP / GA), staff device management, and income / stock / card-balance reports. No price or contact details on the page.
 5. **How it works, `#how`.** Sits where Ticketmelon has its stats band.
    `how.jpg` (purple laser lines) under an 80% navy overlay, with four big
    numbered steps: tier → pay → QR e-ticket → scan at the gate.
@@ -98,7 +99,7 @@ mockup, and the dark night-stage design.
 
 ## Photos
 
-Twelve photos in `public/marketing/`, from Unsplash under the Unsplash
+Thirteen photos in `public/marketing/`, from Unsplash under the Unsplash
 License (free for commercial use, no attribution required). They were
 resized at download: hero, how and cta at 2000px wide, the rest at
 1000px, JPEG quality 70, about 2.6 MB in total. Each was checked by eye for
@@ -120,6 +121,7 @@ an Alipay screen.
 | `run.jpg` | https://unsplash.com/photos/hundreds-of-runners-participate-in-a-city-marathon-race-WivYzpzTJEQ |
 | `conference.jpg` | https://unsplash.com/photos/photography-of-people-sitting-on-theater-during-nighttime-nz-UtZz81fI |
 | `school.jpg` | https://unsplash.com/photos/teacher-instructing-students-in-a-classroom-lecture-u6OsIM1ZEnk |
+| `pos.jpg` (top 1000×900 crop) | https://unsplash.com/photos/a-group-of-people-standing-around-a-bar-9l0VLh_C6-k |
 | `custom.jpg` | https://unsplash.com/photos/person-holding-yellow-sticky-notes-MDu-53qRVr4 |
 
 `run.jpg` shows race bibs, but their sponsor marks aren't readable at tile

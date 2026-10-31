@@ -326,6 +326,42 @@ export default function LandingPage() {
               </article>
             ))}
           </div>
+
+          {/* Event Payment System — a separate KuuNyi product, in use since 2017. */}
+          <article className="mt-6 grid md:grid-cols-2 rounded-3xl overflow-hidden bg-[#0f1225] text-white">
+            <div className="relative aspect-[16/10] md:aspect-auto md:min-h-[360px]">
+              <Image
+                src="/marketing/pos.jpg"
+                alt=""
+                fill
+                sizes="(min-width: 768px) 50vw, 100vw"
+                className="object-cover"
+              />
+            </div>
+            <div className="p-6 sm:p-10 flex flex-col justify-center">
+              <p className="text-xs font-bold uppercase tracking-[0.16em] text-[#c4b5fd]">On-site payments</p>
+              <h3 className="mt-2 text-2xl sm:text-3xl font-bold tracking-tight">Cashless bars &amp; food stalls</h3>
+              <p className="font-myanmar text-sm text-slate-300 mt-1">ငွေသားမလိုသော ဘားနှင့် စားသောက်ကောင်တာများ</p>
+              <p className="mt-4 text-slate-300 leading-relaxed">
+                Fans top up a prepaid QR card at the cash counter, then pay for drinks, snacks and water at every bar
+                with one scan.
+              </p>
+              <ul className="mt-5 space-y-2 text-sm text-slate-300">
+                {[
+                  "Staff phones, stock and sales for every counter — VVIP, VIP, GA",
+                  "Income, stock and card-balance reports after the show",
+                  "Running at Myanmar festivals since 2017",
+                ].map((item) => (
+                  <li key={item} className="flex gap-2.5">
+                    <svg className="w-5 h-5 shrink-0 text-[#a78bfa]" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+                    </svg>
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </article>
         </div>
       </section>
 
