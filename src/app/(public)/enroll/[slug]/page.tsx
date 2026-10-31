@@ -15,7 +15,7 @@ import {
 import type { TemplateProps, EventTemplateProps } from "@/components/enrollment/templates";
 import { applyPriorityUnlock, capturePriorityToken } from "@/lib/interest/priorityUnlock";
 import { readableTextColor } from "@/lib/readableText";
-import { beginCheckoutPayload, hardNavigate, pushDataLayer, viewItemPayload } from "@/lib/tagManager";
+import { beginCheckoutPayload, claimNavigation, hardNavigate, pushDataLayer, viewItemPayload } from "@/lib/tagManager";
 
 // Shell wrapper for non-template states (loading, error, coming-soon, etc.)
 function PageShell({ children }: { children: React.ReactNode }) {
@@ -349,6 +349,18 @@ function IntakeLandingContent() {
 
   const psid = searchParams.get("psid");
 
+  // One checkout navigation per page view: a fast double click must push one
+  // begin_checkout and write one stash. Released if the page comes back from
+  // the back/forward cache, so Buy works again there.
+  const navigatingRef = useRef(false);
+  useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) navigatingRef.current = false;
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
+
   // Full page load, not router.push: /enroll/form is untracked, and a soft
   // navigation would carry the GTM script into it. begin_checkout is pushed
   // first. See docs/superpowers/specs/2026-10-30-tenant-gtm-design.md.
@@ -365,6 +377,7 @@ function IntakeLandingContent() {
   }
 
   function handleSelectClass(classId: string, quantity: number = 1) {
+    if (!claimNavigation(navigatingRef)) return;
     const qParam = quantity > 1 ? `&quantity=${quantity}` : "";
     const psidParam = psid ? `&psid=${psid}` : "";
     const cls = data?.classes.find((c) => c.id === classId);
@@ -376,8 +389,14 @@ function IntakeLandingContent() {
   }
 
   function handleCartCheckout(cartItems: { class_id: string; level: string; quantity: number; fee_amount: number; image_url: string | null }[]) {
+    if (!claimNavigation(navigatingRef)) return;
     const cartKey = `cart_${Date.now()}`;
-    sessionStorage.setItem(cartKey, JSON.stringify(cartItems));
+    try {
+      sessionStorage.setItem(cartKey, JSON.stringify(cartItems));
+    } catch {
+      navigatingRef.current = false;
+      return;
+    }
     const psidParam = psid ? `&psid=${psid}` : "";
     hardNavigate(`/enroll/form?slug=${params.slug}&cart_key=${cartKey}${psidParam}`, {
       afterEvent: checkoutEvent(

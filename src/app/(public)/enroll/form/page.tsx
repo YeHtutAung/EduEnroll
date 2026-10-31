@@ -699,7 +699,8 @@ function EnrollmentFormPage() {
       <PageWrapper schoolName={schoolName} primaryColor={primaryColor} logoUrl={logoUrl}>
         <ErrorPage
           message={pageError}
-          onBack={slug ? () => router.push(`/enroll/${slug}`) : undefined}
+          // The event page is tracked: a full page load, never a soft move.
+          onBack={slug ? () => window.location.assign(`/enroll/${slug}`) : undefined}
         />
       </PageWrapper>
     );

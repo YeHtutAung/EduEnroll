@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 // the render after the effect has decided.
 const hooks = vi.hoisted(() => ({
   state: undefined as unknown,
-  effect: null as null | (() => void),
+  effects: [] as (() => void | (() => void))[],
   pathname: "/enroll",
 }));
 
@@ -23,8 +23,8 @@ vi.mock("react", async (orig) => {
         },
       ];
     },
-    useEffect: (fn: () => void) => {
-      hooks.effect = fn;
+    useEffect: (fn: () => void | (() => void)) => {
+      hooks.effects.push(fn);
     },
   };
 });
@@ -32,10 +32,13 @@ vi.mock("next/navigation", () => ({ usePathname: () => hooks.pathname }));
 vi.mock("next/script", () => ({ default: () => null }));
 
 import TenantTagManager from "@/components/tracking/TenantTagManager";
+import { resetGtmDocumentLatchForTests } from "@/lib/tagManager";
 
 const GOOD = "GTM-ABC123";
 
-function stubBrowser(opts: {
+const ORIGIN = "https://sky.example.com";
+
+interface Browser {
   search?: string;
   hash?: string;
   session?: string[];
@@ -43,34 +46,81 @@ function stubBrowser(opts: {
   cookie?: string;
   referrer?: string;
   throwingSession?: boolean;
-}) {
+  /** Initial document URL (navigation entry name). null = no entry. */
+  initialUrl?: string | null;
+}
+
+const listeners = new Map<string, Set<(e: unknown) => void>>();
+const reload = vi.fn();
+
+function stubBrowser(opts: Browser, pathname: string) {
   const storage = (keys: string[] = []) => ({
     length: keys.length,
     key: (i: number) => keys[i] ?? null,
   });
+  const initialUrl =
+    opts.initialUrl === null ? undefined : (opts.initialUrl ?? `${ORIGIN}${pathname}${opts.search ?? ""}`);
   vi.stubGlobal("window", {
-    location: { search: opts.search ?? "", hash: opts.hash ?? "", origin: "https://sky.example.com" },
+    location: { search: opts.search ?? "", hash: opts.hash ?? "", origin: ORIGIN, reload },
     get sessionStorage() {
       if (opts.throwingSession) throw new Error("SecurityError");
       return storage(opts.session);
     },
     localStorage: storage(opts.local),
+    performance: {
+      getEntriesByType: (t: string) => (t === "navigation" && initialUrl ? [{ name: initialUrl }] : []),
+    },
+    addEventListener: (t: string, fn: (e: unknown) => void) => {
+      if (!listeners.has(t)) listeners.set(t, new Set());
+      listeners.get(t)!.add(fn);
+    },
+    removeEventListener: (t: string, fn: (e: unknown) => void) => {
+      listeners.get(t)?.delete(fn);
+    },
   });
   vi.stubGlobal("document", { cookie: opts.cookie ?? "", referrer: opts.referrer ?? "" });
 }
 
 type El = { props: { id?: string; strategy?: string; children?: unknown } } | null;
 
-/** First render, run effects, render again. Returns both outputs. */
-function mount(containerId: string | null, pathname: string, browser = {}) {
+let cleanups: (() => void)[] = [];
+
+function runEffects() {
+  const fx = hooks.effects;
+  hooks.effects = [];
+  for (const fn of fx) {
+    const c = fn();
+    if (typeof c === "function") cleanups.push(c);
+  }
+}
+
+/** First render, run effects, render again. Returns both outputs. A fresh document. */
+function mount(containerId: string | null, pathname: string, browser: Browser = {}) {
+  resetGtmDocumentLatchForTests();
   hooks.state = undefined;
-  hooks.effect = null;
+  hooks.effects = [];
   hooks.pathname = pathname;
-  stubBrowser(browser);
+  stubBrowser(browser, pathname);
   const first = TenantTagManager({ containerId }) as El;
-  (hooks.effect as (() => void) | null)?.();
+  runEffects();
   const second = TenantTagManager({ containerId }) as El;
+  hooks.effects = [];
   return { first, second };
+}
+
+/**
+ * A soft navigation in the same document: new pathname and browser state, the
+ * effects run again, render. The latch is NOT reset. Pass the document's
+ * original initialUrl, which a soft navigation does not change.
+ */
+function softNavigate(containerId: string | null, pathname: string, browser: Browser = {}) {
+  hooks.pathname = pathname;
+  stubBrowser(browser, pathname);
+  TenantTagManager({ containerId });
+  runEffects();
+  const out = TenantTagManager({ containerId }) as El;
+  hooks.effects = [];
+  return out;
 }
 
 function renders(el: El, id = GOOD) {
@@ -82,7 +132,12 @@ function renders(el: El, id = GOOD) {
   );
 }
 
-beforeEach(() => vi.unstubAllGlobals());
+beforeEach(() => {
+  vi.unstubAllGlobals();
+  listeners.clear();
+  reload.mockReset();
+  cleanups = [];
+});
 
 describe("TenantTagManager", () => {
   it("renders nothing on the first render, before effects run", () => {
@@ -157,5 +212,60 @@ describe("TenantTagManager", () => {
 
   it("renders with ?fbclid=", () => {
     expect(renders(mount(GOOD, "/enroll/x", { search: "?fbclid=abc" }).second)).toBe(true);
+  });
+
+  it("renders nothing when the initial document URL is unavailable", () => {
+    expect(mount(GOOD, "/enroll/x", { initialUrl: null }).second).toBeNull();
+  });
+
+  it("renders nothing when the document started on an untracked URL", () => {
+    expect(mount(GOOD, "/enroll/x", { initialUrl: `${ORIGIN}/enroll/x/checkout/new?cart_key=1` }).second).toBeNull();
+  });
+
+  it("renders nothing when the document started with a sensitive param", () => {
+    expect(mount(GOOD, "/enroll/x", { initialUrl: `${ORIGIN}/enroll/x?psid=9` }).second).toBeNull();
+  });
+
+  describe("per-document latch", () => {
+    it("a dirty first evaluation keeps GTM off after a clean-looking soft navigation", () => {
+      // Even with every input looking clean on the second evaluation.
+      expect(mount(GOOD, "/enroll/x/checkout/new").second).toBeNull();
+      expect(softNavigate(GOOD, "/enroll/x/tickets", { initialUrl: `${ORIGIN}/enroll/x/tickets` })).toBeNull();
+    });
+
+    it("once enabled, a soft navigation between tracked pages keeps the script", () => {
+      expect(renders(mount(GOOD, "/enroll/x").second)).toBe(true);
+      expect(renders(softNavigate(GOOD, "/enroll/x/tickets", { initialUrl: `${ORIGIN}/enroll/x` }))).toBe(true);
+    });
+
+    it("once enabled, a dirty evaluation stops rendering for the rest of the document", () => {
+      expect(renders(mount(GOOD, "/enroll/x").second)).toBe(true);
+      expect(softNavigate(GOOD, "/enroll/x/tickets", { initialUrl: `${ORIGIN}/enroll/x`, session: ["ck_1"] })).toBeNull();
+      expect(softNavigate(GOOD, "/enroll/x", { initialUrl: `${ORIGIN}/enroll/x` })).toBeNull();
+    });
+  });
+
+  describe("back/forward cache restore", () => {
+    it("reloads when the page is restored from the cache", () => {
+      mount(GOOD, "/enroll/x");
+      const fns = Array.from(listeners.get("pageshow") ?? []);
+      expect(fns).toHaveLength(1);
+      fns[0]({ persisted: false });
+      expect(reload).not.toHaveBeenCalled();
+      fns[0]({ persisted: true });
+      expect(reload).toHaveBeenCalledTimes(1);
+    });
+
+    it("removes the listener on unmount", () => {
+      mount(GOOD, "/enroll/x");
+      expect(listeners.get("pageshow")?.size).toBe(1);
+      for (const c of cleanups) c();
+      expect(listeners.get("pageshow")?.size ?? 0).toBe(0);
+    });
+
+    it("adds no listener when the tenant has no container", () => {
+      mount(null, "/enroll/x");
+      expect(listeners.get("pageshow")?.size ?? 0).toBe(0);
+    });
   });
 });

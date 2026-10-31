@@ -9,6 +9,11 @@ import {
   isBrowserStateClean,
   pushDataLayer,
   hardNavigate,
+  decideGtmForDocument,
+  resetGtmDocumentLatchForTests,
+  initialDocumentUrl,
+  reloadIfRestoredFromCache,
+  claimNavigation,
 } from "@/lib/tagManager";
 
 describe("normalizeGtmContainerId", () => {
@@ -123,6 +128,7 @@ function state(
     localStorage?: TestStore;
     cookie?: string;
     referrer?: string;
+    initialUrl?: string | undefined;
   } = {},
 ): Input {
   const ss = over.sessionStorage ?? store();
@@ -133,6 +139,7 @@ function state(
     localStorage: () => ls,
     cookie: over.cookie ?? "",
     referrer: over.referrer ?? "",
+    initialUrl: "initialUrl" in over ? over.initialUrl : `${ORIGIN}/enroll/x`,
   };
 }
 
@@ -252,6 +259,34 @@ describe("isBrowserStateClean", () => {
     });
   });
 
+  describe("initial document URL", () => {
+    const init = (u: string | undefined) => isBrowserStateClean(state({ initialUrl: u }));
+    it("allows a same-origin tracked URL", () => {
+      expect(init(`${ORIGIN}/enroll`)).toBe(true);
+      expect(init(`${ORIGIN}/enroll/x/tickets/?fbclid=1`)).toBe(true);
+    });
+    it("blocks when unavailable", () => {
+      expect(init(undefined)).toBe(false);
+      expect(init("")).toBe(false);
+    });
+    it("blocks when malformed", () => {
+      expect(init("not a url")).toBe(false);
+    });
+    it("blocks another origin", () => {
+      expect(init("https://other.example.com/enroll/x")).toBe(false);
+    });
+    it("blocks an untracked path", () => {
+      expect(init(`${ORIGIN}/enroll/x/checkout/new`)).toBe(false);
+      expect(init(`${ORIGIN}/enroll/form`)).toBe(false);
+    });
+    it("blocks a sensitive query or hash param", () => {
+      expect(init(`${ORIGIN}/enroll/x?psid=1`)).toBe(false);
+      expect(init(`${ORIGIN}/enroll/x?Cart_Key=1`)).toBe(false);
+      expect(init(`${ORIGIN}/enroll/x#pa=tok`)).toBe(false);
+      expect(init(`${ORIGIN}/enroll/x#ref=1`)).toBe(false);
+    });
+  });
+
   it("SAFE_STORAGE_KEYS allows only cart_<digits>", () => {
     expect(SAFE_STORAGE_KEYS.some((re) => re.test("cart_1730000000000"))).toBe(true);
     expect(SAFE_STORAGE_KEYS.some((re) => re.test("ck_cart_1730000000000"))).toBe(false);
@@ -360,5 +395,73 @@ describe("hardNavigate", () => {
     const evt = (win.dataLayer as Record<string, unknown>[]).find((e) => e.event === "begin_checkout")!;
     (evt.eventCallback as () => void)();
     expect(assign).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("initialDocumentUrl", () => {
+  it("reads the first navigation entry's name", () => {
+    const perf = { getEntriesByType: (t: string) => (t === "navigation" ? [{ name: "https://a/enroll" }] : []) };
+    expect(initialDocumentUrl(perf)).toBe("https://a/enroll");
+  });
+  it("is undefined without an entry, without the API, or when it throws", () => {
+    expect(initialDocumentUrl({ getEntriesByType: () => [] })).toBeUndefined();
+    expect(initialDocumentUrl(undefined)).toBeUndefined();
+    expect(
+      initialDocumentUrl({
+        getEntriesByType: () => {
+          throw new Error("x");
+        },
+      }),
+    ).toBeUndefined();
+  });
+});
+
+describe("decideGtmForDocument (per-document latch)", () => {
+  beforeEach(() => resetGtmDocumentLatchForTests());
+
+  it("a clean first evaluation enables GTM, and later clean ones keep it", () => {
+    expect(decideGtmForDocument(true)).toBe(true);
+    expect(decideGtmForDocument(true)).toBe(true);
+  });
+
+  it("a dirty first evaluation keeps GTM off even if later ones are clean", () => {
+    expect(decideGtmForDocument(false)).toBe(false);
+    expect(decideGtmForDocument(true)).toBe(false);
+    expect(decideGtmForDocument(true)).toBe(false);
+  });
+
+  it("a dirty later evaluation turns it off for the rest of the document", () => {
+    expect(decideGtmForDocument(true)).toBe(true);
+    expect(decideGtmForDocument(false)).toBe(false);
+    expect(decideGtmForDocument(true)).toBe(false);
+  });
+
+  it("the reset starts a fresh document", () => {
+    decideGtmForDocument(false);
+    resetGtmDocumentLatchForTests();
+    expect(decideGtmForDocument(true)).toBe(true);
+  });
+});
+
+describe("reloadIfRestoredFromCache", () => {
+  it("reloads on a back/forward cache restore", () => {
+    const reload = vi.fn();
+    reloadIfRestoredFromCache({ persisted: true }, reload);
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+  it("does nothing on a normal page show", () => {
+    const reload = vi.fn();
+    reloadIfRestoredFromCache({ persisted: false }, reload);
+    expect(reload).not.toHaveBeenCalled();
+  });
+});
+
+describe("claimNavigation", () => {
+  it("lets the first caller through and blocks the rest", () => {
+    const ref = { current: false };
+    expect(claimNavigation(ref)).toBe(true);
+    expect(claimNavigation(ref)).toBe(false);
+    expect(claimNavigation(ref)).toBe(false);
+    expect(ref.current).toBe(true);
   });
 });

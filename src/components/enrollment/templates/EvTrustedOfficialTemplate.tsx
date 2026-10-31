@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { TenantAppearance } from "@/types/database";
 import type { TemplateClass, TemplateIntake, TemplateLabels } from "./types";
 import { cartTicketCount, getCardState } from "./types";
@@ -12,7 +12,7 @@ import {
 import { resolveSponsorPlacements } from "@/lib/sponsors";
 import TermsConsent from "@/components/enrollment/TermsConsent";
 import { TERMS_VERSION } from "@/lib/legal/terms";
-import { beginCheckoutPayload, hardNavigate } from "@/lib/tagManager";
+import { beginCheckoutPayload, claimNavigation, hardNavigate } from "@/lib/tagManager";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -224,6 +224,20 @@ export default function EvTrustedOfficialTemplate({
   // personal details are collected, so consent is taken here.
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [termsError, setTermsError] = useState(false);
+  // One checkout navigation per page view: a fast double click must push one
+  // begin_checkout and write one stash (state updates are too late for that).
+  const navigatingRef = useRef(false);
+  // A back/forward cache restore brings the page back mid-"Processing...":
+  // release the guard and the button so the buyer can try again.
+  useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (!e.persisted) return;
+      navigatingRef.current = false;
+      setLoading(false);
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
 
   const cartCount = Object.values(cart).reduce((s, q) => s + q, 0);
   const cartTickets = cartTicketCount(classes, Object.entries(cart));
@@ -254,6 +268,7 @@ export default function EvTrustedOfficialTemplate({
       setTermsError(true);
       return;
     }
+    if (!claimNavigation(navigatingRef)) return;
     setLoading(true);
     setError(null);
 
@@ -275,6 +290,7 @@ export default function EvTrustedOfficialTemplate({
     } catch {
       setError("Your browser blocked storage. Please enable it and try again.");
       setLoading(false);
+      navigatingRef.current = false;
       return;
     }
 
