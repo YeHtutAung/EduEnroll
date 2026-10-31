@@ -515,6 +515,8 @@ function SettingsContent() {
 
   // ── Organization type + labels ────────────────────────────────────────────
   const [orgType, setOrgType] = useState("language_school");
+  // Read-only: only a superadmin can change it (a DB trigger rejects other writers).
+  const [gtmContainerId, setGtmContainerId] = useState<string | null>(null);
   const [orgLabels, setOrgLabels] = useState({
     intake: "Intake",
     class: "Level",
@@ -566,7 +568,7 @@ function SettingsContent() {
       // Fetch tenant name + logo + org labels
       const { data: tenant } = await supabase
         .from("tenants")
-        .select("name, logo_url, org_type, currency, label_intake, label_class, label_student, label_seat, label_fee, auto_cancel_hours, email_on_enroll, sms_on_payment, payment_mode, mmqr_provider, platform_fee_mode, platform_fee_amount")
+        .select("name, logo_url, org_type, currency, label_intake, label_class, label_student, label_seat, label_fee, auto_cancel_hours, email_on_enroll, sms_on_payment, payment_mode, mmqr_provider, platform_fee_mode, platform_fee_amount, gtm_container_id")
         .eq("id", profile.tenant_id)
         .single() as {
         data: {
@@ -586,6 +588,7 @@ function SettingsContent() {
           mmqr_provider: string;
           platform_fee_mode: string | null;
           platform_fee_amount: number | null;
+          gtm_container_id: string | null;
         } | null;
         error: unknown;
       };
@@ -610,6 +613,7 @@ function SettingsContent() {
           (tenant.platform_fee_mode as "none" | "per_transaction" | "per_ticket") ?? "none",
         );
         setPlatformFeeAmount(String(tenant.platform_fee_amount ?? 0));
+        setGtmContainerId(tenant.gtm_container_id ?? null);
       }
     } catch {
       // non-critical; keep defaults
@@ -1994,6 +1998,14 @@ function SettingsContent() {
                   Contact support to change your login email.
                 </p>
               </div>
+
+              {gtmContainerId && (
+                <p className="text-xs text-gray-400">
+                  <span className="font-semibold text-gray-500">Google Tag Manager:</span>{" "}
+                  <span className="font-mono">{gtmContainerId}</span> is active on your event list
+                  and event pages. Contact KuuNyi to change it.
+                </p>
+              )}
 
               <div className="pt-2">
                 <button
