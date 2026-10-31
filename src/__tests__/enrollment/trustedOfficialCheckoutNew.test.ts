@@ -28,7 +28,7 @@ beforeEach(() => {
     setItem: (k: string, v: string) => void store.set(k, v),
     removeItem: (k: string) => void store.delete(k),
   });
-  fetchMock = vi.fn(async (..._args: unknown[]) => ok());
+  fetchMock = vi.fn(async () => ok());
   vi.stubGlobal("fetch", fetchMock);
   store.set(`cart_${CART}`, JSON.stringify(STASH));
 });
