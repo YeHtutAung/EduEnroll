@@ -2,6 +2,8 @@ import { headers } from "next/headers";
 import Link from "next/link";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { extractSubdomainFromHost } from "@/lib/tenant";
+import { gtmAllowedOnHost } from "@/lib/tagManager";
+import TenantTagManager from "@/components/tracking/TenantTagManager";
 
 // ─── Server component: resolve tenant name for public pages ─────────────────
 
@@ -15,25 +17,38 @@ export default async function PublicLayout({ children }: { children: React.React
   const schoolNameMm: string | null = null;
   let logoUrl: string | null = null;
   let orgType = "language_school";
+  let gtmContainerId: string | null = null;
 
   if (slug) {
     const supabase = createAdminClient();
     const { data: tenant } = (await supabase
       .from("tenants")
-      .select("name, logo_url, org_type")
+      .select("name, logo_url, org_type, gtm_container_id")
       .eq("subdomain", slug)
-      .maybeSingle()) as { data: { name: string; logo_url: string | null; org_type: string } | null; error: unknown };
+      .maybeSingle()) as { data: { name: string; logo_url: string | null; org_type: string; gtm_container_id: string | null } | null; error: unknown };
 
     if (tenant?.name) schoolName = tenant.name;
     if (tenant?.logo_url) logoUrl = tenant.logo_url;
     if (tenant?.org_type) orgType = tenant.org_type;
+    gtmContainerId = tenant?.gtm_container_id ?? null;
   }
 
   // Org-type specific tagline for header (only shown for language_school)
   const isLanguageSchool = orgType === "language_school";
 
+  // GTM runs in production only on the tenant's own custom domain. Computed
+  // here because gtmAllowedOnHost reads TENANT_CUSTOM_DOMAINS (server-only).
+  const gtmAllowed =
+    !!slug &&
+    gtmAllowedOnHost({
+      host: headersList.get("host") ?? "",
+      tenantSlug: slug,
+      isProduction: process.env.VERCEL_ENV === "production",
+    });
+
   return (
     <div className="flex min-h-screen flex-col bg-white">
+      <TenantTagManager containerId={gtmAllowed ? gtmContainerId : null} />
       {/* ─── Header ──────────────────────────────────────────────── */}
       <header className="border-b border-gray-200 bg-white">
         <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-4 sm:px-6">
