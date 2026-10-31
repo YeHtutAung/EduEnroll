@@ -164,9 +164,13 @@ domain vs subdomain in and out of production.
 - Otherwise renders `<Script id="tenant-gtm" strategy="afterInteractive">` with
   the standard GTM snippet, interpolating the regex-checked ID only.
 
-Effect order matters for the priority token: the event page's capture effect
-(child) runs before the layout's effect (parent), so by the time the guard
-runs the token is already in `sessionStorage` and the guard sees it.
+Priority token and effect order: `TenantTagManager` and the page content are
+siblings under the public layout, and `TenantTagManager` comes first, so the
+guard's effect runs **before** the event page's capture effect. On that first
+evaluation `#pa=` is still in the hash, and the guard blocks on it (and the
+initial-URL check blocks on it too). After the capture effect has moved the
+token into `pa_<slug>`, any later evaluation blocks on that storage key. GTM
+is blocked either way; the guard does not rely on which effect runs first.
 
 Wiring in `src/app/(public)/layout.tsx`: read `gtm_container_id` in its own
 query, separate from the main `tenants` select (an error means GTM off, and
@@ -329,7 +333,8 @@ npm run build
 ```
 
 Then a manual pass on a local dev tenant with a test container in GTM
-Preview mode:
+Preview mode. Locally, GTM is off unless `.env.local` sets
+`GTM_ALLOW_NON_PRODUCTION=true` (then restart the dev server):
 
 - On `/enroll` and an event page: the container loads; `view_item` shows in
   Tag Assistant.
@@ -391,8 +396,11 @@ allowlisting after the Preview pass. Nothing is allowlisted now.
 4. Merge to `dev`, then PR `dev` → `staging`. Staging reads the **dev**
    database, so the migration from step 3 already covers it: there is no
    separate staging apply.
-5. On the staging Vercel deployment, set `GTM_ALLOW_NON_PRODUCTION=true`
-   (server-only; without it GTM stays off outside production) and redeploy.
+5. In Vercel, add `GTM_ALLOW_NON_PRODUCTION=true` to the **Preview**
+   environment **scoped to the `staging` branch only** (not to all Preview
+   branches, which would turn it on for every preview deployment). It is
+   server-only; without it GTM stays off outside production. Redeploy
+   staging.
    Then superadmin sets `GTM-K7N27G9J` on Sky Festival's tenant. Send them the
    staging event page URL; they verify in GTM Preview and set up their FB /
    TikTok pixels.
