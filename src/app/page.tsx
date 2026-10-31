@@ -36,6 +36,18 @@ const PAYMENT_LOGOS = [
   { src: "/mastercard.svg", alt: "Mastercard", width: 48, height: 32 },
 ];
 
+// ─── Organizers ──────────────────────────────────────────────────────────────
+// Logos supplied by the owner, with each organizer's permission (2026-11-01).
+
+const ORGANIZERS = [
+  { name: "H-Life Entertainment", src: "/marketing/organizers/h-life.png", width: 611, height: 611 },
+  { name: "Brave Entertainment", src: "/marketing/organizers/brave.png", width: 960, height: 960 },
+  { name: "Louder Myanmar", src: "/marketing/organizers/louder.webp", width: 1500, height: 1500 },
+  { name: "Thingyan Music Festival", src: "/marketing/organizers/tmf.png", width: 1080, height: 1080 },
+  { name: "Sky Festival", src: "/marketing/organizers/sky-festival.png", width: 1080, height: 1080 },
+  { name: "Rock In Mandalay", src: "/marketing/organizers/rock-in-mandalay.webp", width: 1080, height: 1080 },
+];
+
 // ─── Solutions ───────────────────────────────────────────────────────────────
 
 const SOLUTIONS: {
@@ -199,8 +211,42 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ── Trusted by ─────────────────────────────────────── */}
+      <section className="py-16 sm:py-20">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <div className="text-center max-w-2xl mx-auto">
+            <h2 className="text-xl sm:text-2xl font-extrabold uppercase tracking-[0.08em]">
+              Trusted by top event organizers
+            </h2>
+            <p className="font-myanmar text-slate-500 text-sm sm:text-base mt-2">
+              ထိပ်တန်း ပွဲစီစဉ်သူများ၏ ယုံကြည်မှု
+            </p>
+            <p className="mt-3 text-slate-600">
+              Myanmar&apos;s festival and concert organizers run their events with KuuNyi.
+            </p>
+          </div>
+          <ul className="mt-10 max-w-5xl mx-auto grid grid-cols-3 sm:grid-cols-6 gap-4 sm:gap-5">
+            {ORGANIZERS.map((org) => (
+              <li key={org.name} className="flex flex-col items-center text-center">
+                <div className="relative w-full aspect-square rounded-2xl overflow-hidden border border-slate-200 bg-white shadow-sm">
+                  <Image
+                    src={org.src}
+                    alt={org.name}
+                    width={org.width}
+                    height={org.height}
+                    sizes="(min-width: 640px) 160px, 30vw"
+                    className="w-full h-full object-cover"
+                  />
+                </div>
+                <span className="mt-2.5 text-xs sm:text-sm font-semibold text-slate-700 leading-tight">{org.name}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
       {/* ── Payments strip ─────────────────────────────────── */}
-      <section className="border-b border-slate-100">
+      <section className="border-y border-slate-100 bg-slate-50/60">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-10 sm:py-12">
           <p className="text-center text-xs sm:text-sm font-bold uppercase tracking-[0.18em] text-slate-900">
             Accepted payments

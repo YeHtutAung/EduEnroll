@@ -27,7 +27,7 @@ organisations.
 |---|---|
 | How far to pivot | **Events-first.** Festivals lead; other org types stay as one "Built for every event" photo grid. |
 | Features to sell | All four: QR e-tickets + scanner, local + card payments, ticket tiers & sell-out control, organiser branding. |
-| Client names / logos | **None for now.** Generic proof only, until each client agrees in writing. |
+| Client names / logos | **Revised:** a "Trusted by top event organizers" strip with six organiser logos the owner supplied, with each organiser's permission: H-Life Entertainment, Brave Entertainment, Louder Myanmar, Thingyan Music Festival, Sky Festival, Rock In Mandalay. Still no testimonials or sales numbers. |
 | Visual direction | **Revised:** white page with full-width real photos, following the pattern of Ticketmelon's organiser page. (The first "night-stage dark" build was rejected.) |
 | Pricing line | **"Free to start"**: free to set up, small fee only when selling online. No number quoted. |
 | Payment badges | KBZPay, CB Bank MMQR, MMQR (generic), Visa / Mastercard. |
@@ -38,7 +38,7 @@ organisations.
 
 - No pricing page, blog, or other new routes.
 - No database, API, or middleware changes.
-- No client names, logos, testimonials or sales numbers.
+- No testimonials, case studies or sales numbers. Organiser logos only as listed in Decisions.
 - No new dependencies. New images are only the 12 Unsplash photos in `public/marketing/`; the payment badges reuse files already in `/public`.
 - No changes to tenant pages, `/enroll`, `/admin`, or the scanner.
 
@@ -60,9 +60,10 @@ brand, copy and photos. It doesn't copy their images, text or layout.
      → `#how`.
    - Trust line: "Free to set up — a small fee only when you sell online."
      (EN + MM).
-2. **Accepted payments strip (white).** Sits where Ticketmelon has its
+2. **Trusted by top event organizers.** Six logo tiles in `public/marketing/organizers/`, shown as-is in uniform rounded squares because the logos come on different backgrounds. Each tile has the organiser name under it; 3 columns on phones, 6 from `sm`.
+3. **Accepted payments strip (light grey).** Sits where Ticketmelon has its
    organiser-logo strip. KBZPay, CB Bank, MMQR, Visa and Mastercard logos.
-3. **Solutions (white).** "Everything your festival needs", with four large
+4. **Solutions (white).** "Everything your festival needs", with four large
    cards in a 2×2 grid, each with a photo, label, title, Myanmar title and
    description:
    - **QR e-tickets & gate scanning** (`scan.jpg`, phone-to-phone QR):
@@ -76,23 +77,23 @@ brand, copy and photos. It doesn't copy their images, text or layout.
    - **Your event, your brand** (`brand.jpg`): your own domain, sponsor logos
      on e-tickets, and Meta / TikTok / Google pixels via Google Tag Manager.
      This is per-tenant GTM, not promoter or affiliate tracking.
-4. **How it works, `#how`.** Sits where Ticketmelon has its stats band.
+5. **How it works, `#how`.** Sits where Ticketmelon has its stats band.
    `how.jpg` (purple laser lines) under an 80% navy overlay, with four big
    numbered steps: tier → pay → QR e-ticket → scan at the gate.
-5. **Built for every event (light grey).** A 2-column grid (3 columns from
+6. **Built for every event (light grey).** A 2-column grid (3 columns from
    `lg`) of photo tiles with EN + MM labels: Music festivals, Concerts,
    Runs & sports, Conferences & shows, Schools & training, Custom events.
    This replaces the "Also works for" pill strip, so schools still feel
    included.
-6. **CTA.** A rounded photo panel (`cta.jpg`) with a purple overlay:
+7. **CTA.** A rounded photo panel (`cta.jpg`) with a purple overlay:
    **"Ready for your next festival?"**, with **Start selling tickets** and
    **Sign In**.
-7. **Footer (navy).** Logo and a one-line description, then three columns:
+8. **Footer (navy).** Logo and a one-line description, then three columns:
    Product (How it works), Organisers (Get Started, Sign In), Legal
    (Privacy). © line.
 
 **Not included:** stats band (no reliable numbers, by owner decision),
-client logo strip and case studies (no client names), the e-ticket
+case studies and testimonials, the e-ticket
 mockup, and the dark night-stage design.
 
 ## Photos
