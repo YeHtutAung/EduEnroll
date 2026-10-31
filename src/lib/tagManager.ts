@@ -41,14 +41,18 @@ export function isTrackedPath(pathname: string): boolean {
 
 /**
  * In production GTM runs only on the tenant's own custom domain, never on the
- * shared kuunyi.com subdomain. Outside production any host is allowed.
+ * shared kuunyi.com subdomain. Outside production (Vercel previews, staging)
+ * it is OFF unless the deployment opts in explicitly, because there staff
+ * pages share the host; with the opt-in any host is allowed. The opt-in is
+ * passed in (the layout reads GTM_ALLOW_NON_PRODUCTION) so this stays pure.
  */
 export function gtmAllowedOnHost(args: {
   host: string;
   tenantSlug: string;
   isProduction: boolean;
+  allowNonProduction: boolean;
 }): boolean {
-  if (!args.isProduction) return true;
+  if (!args.isProduction) return args.allowNonProduction === true;
   return tenantForCustomHost(args.host) === args.tenantSlug;
 }
 

@@ -8,17 +8,17 @@ import { requireSuperadmin } from "@/lib/superadminAuth";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { PUT } from "@/app/api/superadmin/schools/[id]/gtm/route";
 
-const TENANT = "tenant-1";
+const TENANT = "3f2b8c1e-6a4d-4e7b-9c0a-1d2e3f4a5b6c";
 const SUPER = "super-1";
 
-function put(body: unknown, raw = false) {
+function put(body: unknown, raw = false, id = TENANT) {
   return PUT(
-    new Request(`http://localhost/api/superadmin/schools/${TENANT}/gtm`, {
+    new Request(`http://localhost/api/superadmin/schools/${id}/gtm`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: raw ? (body as string) : JSON.stringify(body),
     }) as never,
-    { params: { id: TENANT } },
+    { params: { id } },
   );
 }
 
@@ -100,6 +100,29 @@ describe("PUT /api/superadmin/schools/[id]/gtm", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ gtm_container_id: null });
     expect(m.update).toHaveBeenCalledWith({ gtm_container_id: null });
+  });
+
+  it.each(["tenant-1", "", "3f2b8c1e-6a4d-4e7b-9c0a-1d2e3f4a5b6", "' or 1=1 --"])(
+    "400s on a non-UUID school id %j, before any database call",
+    async (id) => {
+      const res = await put({ gtm_container_id: "GTM-ABCD123" }, false, id);
+      expect(res.status).toBe(400);
+      expect(createAdminClient).not.toHaveBeenCalled();
+    },
+  );
+
+  it("accepts an upper-case UUID", async () => {
+    mockAdmin({ id: TENANT, gtm_container_id: null });
+    const res = await put({ gtm_container_id: "GTM-ABCD123" }, false, TENANT.toUpperCase());
+    expect(res.status).toBe(200);
+  });
+
+  it("still checks auth before validating the id", async () => {
+    vi.mocked(requireSuperadmin).mockResolvedValue({
+      error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
+    } as never);
+    const res = await put({ gtm_container_id: "GTM-ABCD123" }, false, "tenant-1");
+    expect(res.status).toBe(401);
   });
 
   it("404s for an unknown tenant and updates nothing", async () => {

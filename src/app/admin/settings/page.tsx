@@ -2009,8 +2009,9 @@ function SettingsContent() {
               {gtmContainerId && (
                 <p className="text-xs text-gray-400">
                   <span className="font-semibold text-gray-500">Google Tag Manager:</span>{" "}
-                  <span className="font-mono">{gtmContainerId}</span> is active on your event list
-                  and event pages. Contact KuuNyi to change it.
+                  <span className="font-mono">{gtmContainerId}</span> is configured for your event
+                  list and event pages. It runs only on your custom domain. Contact KuuNyi to
+                  change it.
                 </p>
               )}
 
