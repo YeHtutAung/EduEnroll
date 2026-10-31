@@ -69,7 +69,7 @@ describe("settleCbmmqrPayment", () => {
     expect(mockSettle).not.toHaveBeenCalled();
   });
 
-  it.each(["mismatch", "duplicate_transaction", "duplicate_order_ref", "not_found", "weird", null])("refuses when the bind returns %s", async (r) => {
+  it.each(["mismatch", "duplicate_transaction", "duplicate_order_ref", "not_live", "not_found", "weird", null])("refuses when the bind returns %s", async (r) => {
     mockRpc.mockResolvedValue({ data: r, error: null });
     expect(await run()).toEqual({ kind: "refused", reason: `bind ${r}` });
     expect(mockSettle).not.toHaveBeenCalled();

@@ -175,12 +175,15 @@ BeatsRun buyers an MMPay QR.
   (§5.1 step 8). A null `p_qr` (the post-check withheld the QR) answers `stored`.
 - **`bind_cbmmqr_settlement(p_payment_ref, p_qr_reference_no, p_transaction_id,
   p_merchant)`** → `bound | duplicate_transaction | duplicate_order_ref | mismatch |
-  not_found`. Same security and
+  not_live | not_found`. Same security and
   grants. Locks the payment `FOR UPDATE`; requires `payment_method = 'cb_mmqr'`, the pin
   equal to `p_merchant`, and a non-empty `p_transaction_id` and `p_qr_reference_no`; then
   compare-and-sets
   `provider_order_ref` and `bank_reference` (NULL → value, or equal to the incoming value).
-  A different existing value → `mismatch`; a unique violation on `bank_reference` →
+  A different existing value → `mismatch`. Only the live order binds (`awaiting_payment`
+  and `mmqr_status = PENDING`), or a row already `verified`, or a replay of the transaction
+  already bound; a row retired by `complete_cbmmqr_replace` or marked `FAILED` → `not_live`,
+  with nothing written, so it can never settle beside its replacement; a unique violation on `bank_reference` →
   `duplicate_transaction`, and on `provider_order_ref` → `duplicate_order_ref`. This is what binds a CB transaction to this CB QR before any
   status transition (§5.5).
 - `COMMENT ON COLUMN tenants.mmqr_provider` gains `cbmmqr` (the column has no CHECK).
@@ -351,8 +354,9 @@ by §5.1 or §5.2 simply reports `PENDING` while the modal's "Get a new QR" path
 - Local `verified` → `SUCCESS`.
 - Otherwise, only for a **live** row (`awaiting_payment` and `mmqr_status = PENDING`) with a
   `provider_order_ref`, one status check; success → §5.5. A configuration error, or a settlement that is refused or retryable (logged) → `PENDING`.
-  A retired row is never checked here: if it is paid late, it settles through the callback
-  (§5.2 residual risk).
+  A retired row is never checked here, and it never settles: `bind_cbmmqr_settlement`
+  answers `not_live` (§4.3). If CB reports it paid late, the callback refuses it, logged
+  `[cbmmqr-settle] refused`, for an operator to refund (§5.2 residual risk).
 - Anything else → `PENDING`, even past `expiresAt`.
 - The modal hides the QR once `expiresAt` passes and shows "This QR has expired. If you
   already paid, we are still confirming it." with a "Get a new QR" button. The button calls
@@ -380,7 +384,8 @@ Then, in this order:
 
 1. **`bind_cbmmqr_settlement(payment_ref, qrReferenceNo, transactionId, pin)`** (§4.3)
    atomically binds CB's QR reference and transaction id to this payment, under a lock on
-   the payment row. `mismatch`, `duplicate_transaction` or `not_found` → refuse (logged
+   the payment row. `mismatch`, `duplicate_transaction`, `duplicate_order_ref`, `not_live`
+   or `not_found` → refuse (logged
    loudly; the callback acknowledges). A replay with the same values returns `bound`.
 2. **`settleMmqrPayment()`, unchanged** (`paymentRef`, `observedAmount`,
    `observedCurrency: "MMK"`, `mmOrderId` = `transactionId`, `walletIdentifier` =
@@ -522,7 +527,8 @@ Mirrors the KBZPay suites in `src/__tests__/payments/` and `src/__tests__/db/`:
 - `src/__tests__/db/cbmmqr-order-slot.db.test.ts` — concurrent claims, one live order;
   every `complete_cbmmqr_replace` outcome including the wrong tenant; replace vs settlement
   race (`already_settled`); the trigger (pin, `tenant_id`, NULL → value only for
-  `provider_order_ref` and `bank_reference`); `bind_cbmmqr_settlement` outcomes and two
+  `provider_order_ref` and `bank_reference`); `bind_cbmmqr_settlement` outcomes (including `not_live` for a
+  retired or `FAILED` row) and two
   concurrent binds with different transaction ids; reassigning a tenant in
   `cbmmqr_merchant_assignments` advances `updated_at`; grants: `service_role` can select,
   insert, update and delete assignments, `anon` and `authenticated` can do none of these, and
@@ -634,3 +640,9 @@ columns; `store_cbmmqr_qr`; status `PENDING | SUCCESS` only. Codex reviewed the 
 | 4 | P2 — retrying an expired QR left the old poll timers running | Accepted: one `stopPolling()` used before every retry and new poller; checked in UAT. |
 | 5 | P2 — callback fields beyond the four used were not validated | Accepted: optional fields bounded to CB's types and lengths (§5.3). |
 | 6 | P3 — the spec was to be aligned only after implementation | Accepted: aligned now, before implementation. |
+
+**Codex, PR #331 re-review, 2026-10-31** — 1 finding:
+
+| # | Finding | Outcome |
+|---|---|---|
+| 1 | P1 — a retired CB QR can still settle: replacement leaves the old row `awaiting_payment`, and neither the bind nor `settleMmqrPayment()` requires `mmqr_status = PENDING` | Accepted: `bind_cbmmqr_settlement` answers `not_live` for any row that is not the live order (a replay of the bound transaction or a `verified` row still binds). This reverses §5.4's earlier "a retired row settles through the callback": by G1 a retired displayed QR cannot be paid, and if CB reports one paid anyway, a refusal for an operator is safer than two settled payments for one enrollment. |
