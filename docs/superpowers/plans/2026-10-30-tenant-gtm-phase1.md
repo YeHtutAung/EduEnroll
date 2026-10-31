@@ -115,8 +115,10 @@ component and the tests:
 - `isTrackedPath(pathname)`: true for `/enroll`, `/enroll/<seg>` where
   `<seg>` is not `form` or `payment`, and `/enroll/<seg>/tickets`; tolerates
   a trailing slash; false for everything else.
-- `gtmAllowedOnHost({ host, tenantSlug, isProduction })`: in production,
-  true only when `tenantForCustomHost(host) === tenantSlug`; otherwise true.
+- `gtmAllowedOnHost({ host, tenantSlug, isProduction, allowNonProduction })`:
+  in production, true only when `tenantForCustomHost(host) === tenantSlug`;
+  otherwise true only with `allowNonProduction` (the layout passes
+  `process.env.GTM_ALLOW_NON_PRODUCTION === "true"`). Off by default.
 - `SENSITIVE_PARAMS = ["psid", "ref", "cart_key", "pi", "payment_intent",
   "session_id"]`.
 - `SAFE_STORAGE_KEYS = [/^cart_\d+$/]` (plus any key our own libraries write
@@ -125,7 +127,15 @@ component and the tests:
   false if any sensitive param is in the query, `pa=` is in the hash, any key
   in either storage fails `SAFE_STORAGE_KEYS`, or `cookie` has a name
   starting with `sb-`. Any thrown error returns false. This is an
-  **allowlist**: unknown keys block GTM.
+  **allowlist**: unknown keys block GTM. It also takes `initialUrl` (the
+  document's navigation entry name): it must be same-origin, a tracked path,
+  with no sensitive query or hash param; missing or malformed fails closed.
+- `decideGtmForDocument(clean)`: per-document latch. Only the first
+  evaluation can turn GTM on; any evaluation that is not clean turns it off
+  for the rest of the document.
+- `reloadIfRestoredFromCache(event)`: `pageshow` handler that reloads on a
+  back/forward cache restore. `claimNavigation(ref)`: one checkout
+  navigation per click.
 - `pushDataLayer(event, payload)`: `window.dataLayer = window.dataLayer || []`,
   then pushes `{ ecommerce: null }` and the event (GA4 convention so
   ecommerce objects do not merge). Never a no-op, so events fired before GTM
@@ -158,9 +168,11 @@ Effect order matters for the priority token: the event page's capture effect
 (child) runs before the layout's effect (parent), so by the time the guard
 runs the token is already in `sessionStorage` and the guard sees it.
 
-Wiring in `src/app/(public)/layout.tsx`: add `gtm_container_id` to the
-existing `tenants` select, apply `gtmAllowedOnHost` with the request host and
-`process.env.VERCEL_ENV === "production"`, and render
+Wiring in `src/app/(public)/layout.tsx`: read `gtm_container_id` in its own
+query, separate from the main `tenants` select (an error means GTM off, and
+the header keeps the tenant name, logo and org type), apply
+`gtmAllowedOnHost` with the request host,
+`process.env.VERCEL_ENV === "production"` and the opt-in, and render
 `<TenantTagManager containerId={allowed ? id : null} />` once, inside the
 outer `div`.
 
@@ -220,21 +232,23 @@ New flow:
    `cart_<Date.now()>` (the key shape the storage allowlist already accepts):
    `{ slug, items: [{ class_id, quantity }], terms_accepted, terms_version,
    organiser_terms_sha256 }`. No ref, no idempotency key, no personal data, no
-   priority token. Anything a script copies from it can only create a *new*
-   order, which the public endpoint allows anyone to do already. Push `begin_checkout`, then
+   priority token. Push `begin_checkout`, then
    `hardNavigate(\`/enroll/${slug}/checkout/new?cart_key=${key}\`)`.
 2. **`/enroll/<slug>/checkout/new` (untracked, new page).** On mount, read
-   and validate the stash (slug matches, items non-empty). Get the
-   idempotency key from `sessionStorage["ck_<cart_key>"]`, or create one with
-   `randomId()` and write it there **before** the POST. `ck_` is not on the
+   and validate the stash (slug matches, items non-empty). If the current
+   navigation is a reload of this page
+   (`performance.getEntriesByType("navigation")[0]?.type === "reload"`), reuse
+   the idempotency key from `sessionStorage["ck_<cart_key>"]`. In every other
+   case (including an unknown type), create one with `randomId()` and
+   overwrite `ck_<cart_key>`. Either way it is written **before** the POST. `ck_` is not on the
    GTM storage allowlist, so while it exists no tracked page in this tab loads
    GTM. Read the priority token from `pa_<slug>` here, not on `/tickets`.
    POST `/api/public/enroll` with the body the template sends today. On
    success, delete the stash and `ck_<cart_key>`, and `router.replace(\`/enroll/${slug}/checkout/?ref=…\`)`; both pages
    are untracked, so a client-side move is fine. On error, show it with a
    "Back to tickets" plain `<a>` to `/enroll/<slug>/tickets/`. Missing or
-   invalid stash (back button, reload after success): redirect to
-   `/enroll/<slug>/tickets/`.
+   invalid stash (back button, reload after success): `window.location.replace`
+   to `/enroll/<slug>/tickets/` (a full load: `/tickets` is tracked).
 3. A reload during step 2 finds `ck_<cart_key>` and re-sends the same key, so
    the server returns the same order instead of creating a second one. If
    the POST failed, `ck_` stays (the order may exist with a lost response),
@@ -286,11 +300,13 @@ non-superadmins, 400 for malformed IDs, 200 sets and clears.
 
 ### 6. Tenant settings: read-only line
 
-`src/app/admin/settings/page.tsx` already reads the tenant row. Add
-`gtm_container_id` to that read and show, only when set:
+`src/app/admin/settings/page.tsx` already reads the tenant row. Read
+`gtm_container_id` in a separate query (an error hides the line and leaves
+every other loaded setting alone) and show, only when set:
 
-> **Google Tag Manager:** `GTM-K7N27G9J` is active on your event list and
-> event pages. Contact KuuNyi to change it.
+> **Google Tag Manager:** `GTM-K7N27G9J` is configured for your event list
+> and event pages. It runs only on your custom domain. Contact KuuNyi to
+> change it.
 
 No input. The trigger from task 1 rejects a write anyway.
 
@@ -326,6 +342,45 @@ Preview mode:
   Buy, then a full load into `/checkout/new`, which creates the order and
   moves to `/checkout/?ref=…`. In DevTools Network on `/tickets`, no request
   returns an `enrollment_ref`.
+- From checkout, press Back to `/tickets`: the page reloads (no back/forward
+  cache restore) and no container loads.
+- A Messenger entry with `?psid=` on a Trusted Official event: no container,
+  including after the redirect to `/tickets`.
+- After the pixels have fired, do a second hard page load of the event page
+  and list the `localStorage` / `sessionStorage` keys. Any vendor key keeps
+  GTM off; record it for the allowlist review (design, Open questions 7).
+- A failed POST on `/checkout/new`, then "Back to tickets": no container
+  (`ck_` stays, by design).
+- `curl -I` on `/enroll/x/checkout/new` and `/enroll/form`: both send
+  `Referrer-Policy: strict-origin`.
+- On the dev database, the three trigger checks:
+  1. an owner PATCH of `gtm_container_id` gets 42501;
+  2. an owner PATCH of another column succeeds;
+  3. a service-role PATCH of `gtm_container_id` succeeds.
+
+### Intended fail-closed behaviours
+
+Not bugs; the manual pass should see these:
+
+- GTM stays off for the rest of the tab after a failed checkout POST
+  (`ck_` stays) or after a Stripe payment (`cs_` key).
+- GTM stays off on a tracked page reached from an untracked one: untracked
+  routes send `strict-origin`, so the referrer has path `/`.
+- GTM stays off when the document started dirty, until a full load of a clean
+  tracked URL.
+
+### Guarantee (threat model)
+
+- No passive collection of refs or PII on tracked pages.
+- Nothing exchangeable for a ref is exposed to tracked pages.
+- Against an actively malicious container, the control is the platform
+  vetting the container (superadmin-only setting, agreement with whoever
+  controls it).
+- Only a separate origin for tracked pages would isolate them completely;
+  that is future work.
+
+Open item: vendor pixel storage keys (for example TikTok's) may need
+allowlisting after the Preview pass. Nothing is allowlisted now.
 
 ## Deploy order
 
@@ -333,11 +388,14 @@ Preview mode:
 2. Feature branch `feature/tenant-gtm` from `dev`, one PR to `dev`.
 3. **Migration on EduEnroll-dev** (`fnfvwzwrdsnmwxunciti`): show the diff,
    then `supabase db push` with the owner's go-ahead.
-4. Merge to `dev`, then PR `dev` → `staging`; the owner applies the migration
-   on staging before the code reaches it.
-5. On staging, superadmin sets `GTM-K7N27G9J` on Sky Festival's tenant. Send
-   them the staging event page URL; they verify in GTM Preview and set up
-   their FB / TikTok pixels.
+4. Merge to `dev`, then PR `dev` → `staging`. Staging reads the **dev**
+   database, so the migration from step 3 already covers it: there is no
+   separate staging apply.
+5. On the staging Vercel deployment, set `GTM_ALLOW_NON_PRODUCTION=true`
+   (server-only; without it GTM stays off outside production) and redeploy.
+   Then superadmin sets `GTM-K7N27G9J` on Sky Festival's tenant. Send them the
+   staging event page URL; they verify in GTM Preview and set up their FB /
+   TikTok pixels.
 6. Sky Festival launches ads once staging checks out. Production follows the
    normal `staging` → `main` path. **In production GTM loads only on the
    tenant's custom domain**, so Sky Festival needs one mapped in
