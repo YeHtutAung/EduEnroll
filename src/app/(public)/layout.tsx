@@ -23,14 +23,22 @@ export default async function PublicLayout({ children }: { children: React.React
     const supabase = createAdminClient();
     const { data: tenant } = (await supabase
       .from("tenants")
-      .select("name, logo_url, org_type, gtm_container_id")
+      .select("name, logo_url, org_type")
       .eq("subdomain", slug)
-      .maybeSingle()) as { data: { name: string; logo_url: string | null; org_type: string; gtm_container_id: string | null } | null; error: unknown };
+      .maybeSingle()) as { data: { name: string; logo_url: string | null; org_type: string } | null; error: unknown };
 
     if (tenant?.name) schoolName = tenant.name;
     if (tenant?.logo_url) logoUrl = tenant.logo_url;
     if (tenant?.org_type) orgType = tenant.org_type;
-    gtmContainerId = tenant?.gtm_container_id ?? null;
+
+    // Separate query: if the column is missing or the read fails, GTM is
+    // simply off and the header above is unaffected.
+    const { data: gtm, error: gtmError } = (await supabase
+      .from("tenants")
+      .select("gtm_container_id")
+      .eq("subdomain", slug)
+      .maybeSingle()) as { data: { gtm_container_id: string | null } | null; error: unknown };
+    gtmContainerId = gtmError ? null : (gtm?.gtm_container_id ?? null);
   }
 
   // Org-type specific tagline for header (only shown for language_school)
