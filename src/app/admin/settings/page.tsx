@@ -568,7 +568,7 @@ function SettingsContent() {
       // Fetch tenant name + logo + org labels
       const { data: tenant } = await supabase
         .from("tenants")
-        .select("name, logo_url, org_type, currency, label_intake, label_class, label_student, label_seat, label_fee, auto_cancel_hours, email_on_enroll, sms_on_payment, payment_mode, mmqr_provider, platform_fee_mode, platform_fee_amount, gtm_container_id")
+        .select("name, logo_url, org_type, currency, label_intake, label_class, label_student, label_seat, label_fee, auto_cancel_hours, email_on_enroll, sms_on_payment, payment_mode, mmqr_provider, platform_fee_mode, platform_fee_amount")
         .eq("id", profile.tenant_id)
         .single() as {
         data: {
@@ -588,7 +588,6 @@ function SettingsContent() {
           mmqr_provider: string;
           platform_fee_mode: string | null;
           platform_fee_amount: number | null;
-          gtm_container_id: string | null;
         } | null;
         error: unknown;
       };
@@ -613,8 +612,16 @@ function SettingsContent() {
           (tenant.platform_fee_mode as "none" | "per_transaction" | "per_ticket") ?? "none",
         );
         setPlatformFeeAmount(String(tenant.platform_fee_amount ?? 0));
-        setGtmContainerId(tenant.gtm_container_id ?? null);
       }
+
+      // Separate query: if the column is missing or the read fails, the GTM
+      // line is hidden and every other setting above keeps its loaded value.
+      const { data: gtm, error: gtmError } = await supabase
+        .from("tenants")
+        .select("gtm_container_id")
+        .eq("id", profile.tenant_id)
+        .single() as { data: { gtm_container_id: string | null } | null; error: unknown };
+      setGtmContainerId(gtmError ? null : (gtm?.gtm_container_id ?? null));
     } catch {
       // non-critical; keep defaults
     } finally {
