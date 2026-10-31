@@ -55,7 +55,9 @@ organisations.
    - Trust line: "Free to set up — a small fee only when you sell online."
      (EN + MM).
    - Right side: glowing **QR e-ticket mockup** (event name placeholder,
-     tier "VIP", quantity "×2", QR block, "Scan at gate").
+     tier "VIP", "Admit one", QR block, "Scan at gate"). Not "×2": one QR
+     for two people would contradict "each QR works once" (the scanner
+     returns 409 on a re-scan).
 3. **How it works (dark), `#how`.** Four numbered steps:
    1. Fan picks a ticket tier
    2. Pays with KBZPay, MMQR or card
