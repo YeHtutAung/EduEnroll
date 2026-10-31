@@ -69,8 +69,11 @@ organisations.
      Visa / Mastercard for fans overseas. Payment is confirmed automatically.
    - **Ticket tiers & sell-out control**: Early Bird / GA / VIP, per-tier
      limits, and a priority window before public sale.
-   - **Your brand**: your own domain, sponsor logos on e-tickets, and ad
-     tracking for your promoters.
+   - **Your brand**: your own domain, sponsor logos on e-tickets, and
+     your own ad pixels (Meta, TikTok, Google) connected through Google Tag
+     Manager. This is per-tenant GTM, not built-in promoter or affiliate
+     tracking, so the copy must not suggest "see which promoter sold which
+     ticket".
 5. **Payments strip (light).** "Accepted payments" with four badges:
    KBZPay (`/kbzpay-logo.png`), CB Bank (`/cbmmqr/cb-bank-logo.png`),
    MMQR (`/mmqr-logo.png`), Visa + Mastercard (`/visa.svg`,
@@ -92,7 +95,14 @@ school-first Industries grid, the "Built for Myanmar" section, and the
 
 - **Dark sections** (hero, how it works, CTA): `#0f1225` (already used on the
   page), purple `#6d28d9` / `#a78bfa` glow, soft diagonal "stage light"
-  beams made with blurred gradients. Text is white or slate-300/400.
+  beams made with blurred gradients.
+- **Text contrast on `#0f1225`** (WCAG ratios computed 2026-11-01):
+  slate-300 is 12.5:1, slate-400 is 7.2:1, slate-500 is **3.9:1**.
+  - Body text and small text use slate-300. Slate-400 is the floor and is
+    for de-emphasised lines only.
+  - Slate-500 or darker is **not used for text on dark sections**. It fails
+    AA (4.5:1) for small text, and today's page uses it for the "Supported
+    Banks" label and the Myanmar step titles.
 - **Light sections** (features, payments, also works for): `#faf9f7`, the
   current card style. Alternating dark and light keeps the page from being
   one long dark scroll.
@@ -128,8 +138,23 @@ school-first Industries grid, the "Built for Myanmar" section, and the
 - Images use `next/image` with explicit width and height.
 - **Unchanged behaviour:** `src/middleware.ts` still redirects `/` to
   `/enroll` on a tenant's custom domain, so clients' own domains never show
-  this page. Tenant subdomains (`<slug>.kuunyi.com/`) render this page today,
-  and that stays as it is; it's out of scope here.
+  this page.
+- **Tenant subdomains also get this page and its metadata (accepted).**
+  The middleware passes `/` through on every host (`src/middleware.ts:127`),
+  so `<slug>.kuunyi.com/` renders this page. The page's static `metadata`
+  also overrides the tenant-aware `generateMetadata` in `src/app/layout.tsx`
+  for that route, so a school's subdomain root will show the festival
+  title and description in search and social previews.
+  - This isn't new: today the same root shows the school-first platform
+    title, not the tenant's name.
+  - The pivot makes it more visible, and that is accepted for this change.
+  - **Follow-up (separate PR):** redirect `/` → `/enroll` on tenant
+    subdomains, the same way custom domains already work. That gives tenant
+    roots tenant pages and tenant metadata.
+- **Anchors:** `#mmqr` and `#features` are removed, and `#how` is added.
+  `git grep` finds no reference to `#mmqr`, `#features` or `kuunyi.com/#`
+  outside `src/app/page.tsx`. An external link to `kuunyi.com/#mmqr` still
+  loads, just at the top of the page. No alias ids are added.
 
 ## Copy that needs review before `main`
 
@@ -141,6 +166,31 @@ school-first Industries grid, the "Built for Myanmar" section, and the
     mention.
   - "Visa / Mastercard": card checkout is enabled per tenant. This line
     describes a capability, not a promise for every event.
+
+## Release gate: claims vs. what `main` has
+
+The homepage goes live from `main`, so every capability it names has to be
+live in production by then. Code presence was checked on `origin/main` and
+`origin/dev` on 2026-11-01. Production database state was **not** checked
+(it's off limits), and project notes say several of these migrations are
+on the dev database only.
+
+| Claim on the page | Code on `main` | Production DB | Status |
+|---|---|---|---|
+| QR e-tickets + gate scanner | yes | yes, per notes | OK |
+| Visa / Mastercard (Stripe, HitPay) | yes | — | OK |
+| Tiers, per-tier caps, priority window | yes | unverified | owner confirms |
+| Custom domain | yes (`tenantForCustomHost`) | — | OK (operational gates per tenant) |
+| Sponsor logos on e-tickets | yes | unverified | owner confirms |
+| **KBZPay MMQR** | yes | **notes say migration not on prod** | owner confirms |
+| **CB Bank MMQR** | **no**, dev only | no | **blocked** |
+| **Ad pixels via GTM** | **no**, dev only | no | **blocked** |
+
+**Rule:** this page may merge to `dev` and go to staging as designed. It may
+not be promoted to `main` while any claim above is "blocked" or
+unconfirmed. Before that promotion, either those features reach production
+first, or the copy and badges for them are removed in the PR that promotes
+to `main`.
 
 ## Verification
 
