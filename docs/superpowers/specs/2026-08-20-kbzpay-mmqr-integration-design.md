@@ -676,6 +676,12 @@ usefully do. Everything transient stays non-`success` to buy the two retries.
 
 ## 9. Configuration
 
+> **Superseded in part (2026-10-30).** Merchant credentials and the notify origin are now per
+> merchant (`KBZPAY_<ID>_APPID`, `_MERCH_CODE`, `_APP_KEY`, `_NOTIFY_ORIGIN`) and an invalid
+> notify origin is an error, not a fallback. See
+> `2026-10-30-kbzpay-per-tenant-merchants-design.md` §3. `KBZPAY_MODE` and `KBZPAY_PROXY_URL`
+> below are unchanged.
+
 ```
 KBZPAY_APPID=          # 32-char application id
 KBZPAY_MERCH_CODE=     # merchant short code

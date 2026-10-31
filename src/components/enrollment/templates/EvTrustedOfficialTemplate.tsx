@@ -1,7 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import type { TenantAppearance } from "@/types/database";
 import type { TemplateClass, TemplateIntake, TemplateLabels } from "./types";
 import { cartTicketCount, getCardState } from "./types";
@@ -13,7 +12,7 @@ import {
 import { resolveSponsorPlacements } from "@/lib/sponsors";
 import TermsConsent from "@/components/enrollment/TermsConsent";
 import { TERMS_VERSION } from "@/lib/legal/terms";
-import { randomId } from "@/lib/randomId";
+import { beginCheckoutPayload, claimNavigation, hardNavigate } from "@/lib/tagManager";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -211,7 +210,6 @@ export default function EvTrustedOfficialTemplate({
   organiserTerms = null,
   organiserTermsSha256 = null,
 }: EvTrustedOfficialTemplateProps) {
-  const router = useRouter();
   const logoUrl = appearance.logo_url;
   const brand = appearance.primary_color || "#0f1f42";
   const tagline = appearance.tagline ?? null;
@@ -222,15 +220,24 @@ export default function EvTrustedOfficialTemplate({
   const [cart, setCart] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // One idempotency key per cart: a retry of the same cart (say, after a lost
-  // response) gets back the order it already created instead of a second one
-  // — or, on a priority link, instead of "link already in use". A different
-  // cart is a different order, so it gets a fresh key.
-  const checkoutKeyRef = useRef<{ cart: string; key: string } | null>(null);
   // This template creates the order (and holds seats) on "Buy Ticket", before
   // personal details are collected, so consent is taken here.
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [termsError, setTermsError] = useState(false);
+  // One checkout navigation per page view: a fast double click must push one
+  // begin_checkout and write one stash (state updates are too late for that).
+  const navigatingRef = useRef(false);
+  // A back/forward cache restore brings the page back mid-"Processing...":
+  // release the guard and the button so the buyer can try again.
+  useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (!e.persisted) return;
+      navigatingRef.current = false;
+      setLoading(false);
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
 
   const cartCount = Object.values(cart).reduce((s, q) => s + q, 0);
   const cartTickets = cartTicketCount(classes, Object.entries(cart));
@@ -251,49 +258,58 @@ export default function EvTrustedOfficialTemplate({
     });
   }
 
-  async function handleCheckout() {
+  // Buy: validate, stash the cart, then a full page load to /checkout/new, which
+  // is untracked and is where the order is created. This page is tracked (GTM may
+  // run here), so it never POSTs the order and never sees a ref or an
+  // idempotency key. The stash holds no ref, key, personal data or priority token.
+  function handleCheckout() {
     if (cartCount === 0 || loading) return;
     if (!termsAccepted) {
       setTermsError(true);
       return;
     }
+    if (!claimNavigation(navigatingRef)) return;
     setLoading(true);
     setError(null);
 
-    const items = classes
-      .filter((cls) => (cart[cls.id] ?? 0) > 0)
-      .map((cls) => ({ class_id: cls.id, quantity: cart[cls.id] }));
+    const chosen = classes.filter((cls) => (cart[cls.id] ?? 0) > 0);
+    const items = chosen.map((cls) => ({ class_id: cls.id, quantity: cart[cls.id] }));
 
-    // Priority-access token captured earlier from the URL fragment (see
-    // `[slug]/page.tsx`) and stashed in sessionStorage, keyed per slug. Sent
-    // only in this POST body — never as a query param or link href.
-    const priorityToken = sessionStorage.getItem(`pa_${slug}`);
-
-    const cartSignature = JSON.stringify(items);
-    if (checkoutKeyRef.current?.cart !== cartSignature) {
-      checkoutKeyRef.current = { cart: cartSignature, key: randomId() };
-    }
-
+    const cartKey = String(Date.now());
     try {
-      const res = await fetch("/api/public/enroll", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      sessionStorage.setItem(
+        `cart_${cartKey}`,
+        JSON.stringify({
+          slug,
           items,
           terms_accepted: termsAccepted,
           terms_version: TERMS_VERSION,
           organiser_terms_sha256: organiserTermsSha256,
-          idempotency_key: checkoutKeyRef.current.key,
-          ...(priorityToken ? { priority_token: priorityToken } : {}),
         }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message ?? "Enrollment failed.");
-      router.push(`/enroll/${slug}/checkout/?ref=${data.enrollment_ref}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+      );
+    } catch {
+      setError("Your browser blocked storage. Please enable it and try again.");
       setLoading(false);
+      navigatingRef.current = false;
+      return;
     }
+
+    hardNavigate(`/enroll/${slug}/checkout/new?cart_key=${cartKey}`, {
+      afterEvent: {
+        name: "begin_checkout",
+        payload: beginCheckoutPayload({
+          slug,
+          eventName: intake.name,
+          currency,
+          lines: chosen.map((cls) => ({
+            id: cls.id,
+            name: cls.level,
+            price: cls.fee_amount,
+            quantity: cart[cls.id],
+          })),
+        }),
+      },
+    });
   }
 
   return (

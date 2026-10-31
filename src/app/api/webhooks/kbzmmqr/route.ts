@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { verifySign, queryOrder, type KbzField, type CallBudget } from "@/lib/kbzpay";
+import {
+  verifySign,
+  queryOrder,
+  getKbzMerchant,
+  type KbzField,
+  type CallBudget,
+  type KbzMerchant,
+} from "@/lib/kbzpay";
 import { settleMmqrPayment } from "@/server/payments/settleMmqrPayment";
 
 // Same 10s platform cap as the creation route. Declared rather than
@@ -67,43 +74,75 @@ export async function POST(request: NextRequest) {
 
   const merchOrderId = typeof fields.merch_order_id === "string" ? fields.merch_order_id : "";
 
-  // ── 2. Verify the signature ────────────────────────────────
-  // Over whatever keys arrived, never a fixed list, so a future KBZPay field
-  // cannot silently break verification.
-  const appKey = process.env.KBZPAY_APP_KEY;
-  if (!appKey || !verifySign(fields, appKey)) {
-    console.warn(`[kbzpay-webhook] invalid signature for ${merchOrderId || "<no ref>"}`);
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-
-  if (!merchOrderId) {
+  // The payment lookup below runs BEFORE authentication, so this value is
+  // attacker-controlled. Bound it to the shape buildMerchOrderId produces: it
+  // caps unauthenticated DB reads and keeps CR/LF out of the log lines.
+  if (!/^[A-Za-z0-9_]{1,64}$/.test(merchOrderId)) {
     return NextResponse.json({ error: "Bad Request" }, { status: 400 });
   }
 
   const supabase = createAdminClient();
 
-  // ── 3. Locate the payment ──────────────────────────────────
+  // ── 2. Locate the payment ──────────────────────────────────
+  // Before authentication, because the key depends on the order (spec
+  // 2026-10-30 §5.3). Read-only. KBZPay rows only, and the CHECK on payments
+  // guarantees every match carries a pin.
   // 404 rather than success: a genuine race between order creation and this
   // callback resolves on KBZPay's retry.
-  const { data: payment } = (await supabase
+  const { data: payment, error: lookupError } = (await supabase
     .from("payments")
-    .select("id, enrollment_id, status")
+    .select("id, enrollment_id, status, kbzpay_merchant")
     .eq("payment_ref", merchOrderId)
-    .maybeSingle()) as { data: { id: string } | null; error: unknown };
+    .eq("payment_method", "kbzpay_mmqr")
+    .maybeSingle()) as {
+    data: { id: string; kbzpay_merchant: string | null } | null;
+    error: { message: string } | null;
+  };
+
+  // A failed read is not "no such payment". 500 so KBZPay retries, rather than
+  // a 404 that would read as a creation race.
+  if (lookupError) {
+    console.error(`[kbzpay-webhook] payment lookup failed for ${merchOrderId}: ${lookupError.message}`);
+    return NextResponse.json({ error: "Lookup Failed" }, { status: 500 });
+  }
 
   if (!payment) {
     console.warn(`[kbzpay-webhook] no payment row for ${merchOrderId}`);
     return NextResponse.json({ error: "Not Found" }, { status: 404 });
   }
 
-  // ── 4. Confirm server-to-server (§7) ───────────────────────
+  // ── 3. Resolve the pinned merchant ─────────────────────────
+  // Missing config is OUR fault, not the caller's: the callback may be
+  // genuine, and a retry after the operator fixes it should settle. So 500,
+  // which KBZPay retries, not 403.
+  let merchant: KbzMerchant;
+  try {
+    merchant = getKbzMerchant(payment.kbzpay_merchant);
+  } catch (err) {
+    console.error(
+      `[kbzpay-webhook] merchant config error for ${merchOrderId}: ${err instanceof Error ? err.message : err}`,
+    );
+    return NextResponse.json({ error: "Configuration Error" }, { status: 500 });
+  }
+
+  // ── 4. Verify the signature ────────────────────────────────
+  // Against EXACTLY ONE key, the pinned merchant's. Never "try each merchant's
+  // key until one verifies": that would make every merchant's key valid for
+  // every order. Over whatever keys arrived, never a fixed list, so a future
+  // KBZPay field cannot silently break verification.
+  if (!verifySign(fields, merchant.appKey) || fields.merch_code !== merchant.merchCode) {
+    console.warn(`[kbzpay-webhook] invalid signature or merchant for ${merchOrderId}`);
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  // ── 5. Confirm server-to-server (§7) ───────────────────────
   // A valid signature proves the message is authentic, not that money arrived.
   // The signature check is our own code and the flatten/sort/exclude rules have
   // several ways to be subtly wrong; confirming through an authenticated
   // outbound call makes a signature bug a nuisance rather than a route to free
   // enrollments. Settlement therefore uses the QUERY's values, never the
   // callback's.
-  const confirmed = await queryOrder(merchOrderId, budget);
+  const confirmed = await queryOrder(merchant, merchOrderId, budget);
 
   if (!confirmed.ok) {
     console.error(`[kbzpay-webhook] queryOrder unreachable for ${merchOrderId}`);
@@ -118,7 +157,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Not Settled" }, { status: 500 });
   }
 
-  // ── 5. Settle ──────────────────────────────────────────────
+  // ── 6. Settle ──────────────────────────────────────────────
   const outcome = await settleMmqrPayment({
     paymentRef: merchOrderId,
     observedAmount: confirmed.totalAmount === undefined ? null : Number(confirmed.totalAmount),
@@ -128,7 +167,7 @@ export async function POST(request: NextRequest) {
     source: "callback",
   });
 
-  // ── 6. Respond per §8 ──────────────────────────────────────
+  // ── 7. Respond per §8 ──────────────────────────────────────
   switch (outcome.kind) {
     case "settled":
     case "already_settled":

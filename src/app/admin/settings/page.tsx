@@ -10,6 +10,7 @@ import ConfirmModal from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
 import { createClient } from "@/lib/supabase/client";
 import SettingsTabs from "@/components/admin/SettingsTabs";
+import type { MmqrProvider } from "@/lib/mmqrProvider";
 import type { BankAccount, MenuButton } from "@/types/database";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -514,6 +515,8 @@ function SettingsContent() {
 
   // ── Organization type + labels ────────────────────────────────────────────
   const [orgType, setOrgType] = useState("language_school");
+  // Read-only: only a superadmin can change it (a DB trigger rejects other writers).
+  const [gtmContainerId, setGtmContainerId] = useState<string | null>(null);
   const [orgLabels, setOrgLabels] = useState({
     intake: "Intake",
     class: "Level",
@@ -536,7 +539,7 @@ function SettingsContent() {
   // ── Currency & Payment mode ──────────────────────────────────────────────
   const [currency, setCurrency] = useState("MMK");
   const [paymentMode, setPaymentMode] = useState<"bank_transfer" | "mmqr" | "stripe" | "paypay" | "hitpay">("bank_transfer");
-  const [mmqrProvider, setMmqrProvider] = useState<"abank" | "mmpay" | "kbzpay">("abank");
+  const [mmqrProvider, setMmqrProvider] = useState<MmqrProvider>("abank");
   const [platformFeeMode, setPlatformFeeMode] = useState<"none" | "per_transaction" | "per_ticket">("none");
   // Held as a string so the field can be cleared while typing without
   // snapping back to 0.
@@ -604,12 +607,21 @@ function SettingsContent() {
         setSmsOnPayment(tenant.sms_on_payment ?? true);
         setCurrency(tenant.currency || "MMK");
         setPaymentMode((tenant.payment_mode as "bank_transfer" | "mmqr" | "stripe" | "paypay" | "hitpay") ?? "bank_transfer");
-        setMmqrProvider((tenant.mmqr_provider as "abank" | "mmpay" | "kbzpay") ?? "abank");
+        setMmqrProvider((tenant.mmqr_provider as MmqrProvider) ?? "abank");
         setPlatformFeeMode(
           (tenant.platform_fee_mode as "none" | "per_transaction" | "per_ticket") ?? "none",
         );
         setPlatformFeeAmount(String(tenant.platform_fee_amount ?? 0));
       }
+
+      // Separate query: if the column is missing or the read fails, the GTM
+      // line is hidden and every other setting above keeps its loaded value.
+      const { data: gtm, error: gtmError } = await supabase
+        .from("tenants")
+        .select("gtm_container_id")
+        .eq("id", profile.tenant_id)
+        .single() as { data: { gtm_container_id: string | null } | null; error: unknown };
+      setGtmContainerId(gtmError ? null : (gtm?.gtm_container_id ?? null));
     } catch {
       // non-critical; keep defaults
     } finally {
@@ -1396,12 +1408,13 @@ function SettingsContent() {
               <label className="block text-sm font-medium text-gray-700 mb-1.5">MMQR Provider</label>
               <select
                 value={mmqrProvider}
-                onChange={(e) => setMmqrProvider(e.target.value as "abank" | "mmpay" | "kbzpay")}
+                onChange={(e) => setMmqrProvider(e.target.value as MmqrProvider)}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
               >
                 <option value="abank">ABank (A+ Wallet)</option>
                 <option value="mmpay">MyanMyanPay</option>
                 <option value="kbzpay">KBZPay (MMQR &mdash; any Myanmar bank app)</option>
+                <option value="cbmmqr">CB Bank (MMQR &mdash; any Myanmar bank app)</option>
               </select>
             </div>
           )}
@@ -1992,6 +2005,15 @@ function SettingsContent() {
                   Contact support to change your login email.
                 </p>
               </div>
+
+              {gtmContainerId && (
+                <p className="text-xs text-gray-400">
+                  <span className="font-semibold text-gray-500">Google Tag Manager:</span>{" "}
+                  <span className="font-mono">{gtmContainerId}</span> is configured for your event
+                  list and event pages. It runs only on your custom domain. Contact KuuNyi to
+                  change it.
+                </p>
+              )}
 
               <div className="pt-2">
                 <button

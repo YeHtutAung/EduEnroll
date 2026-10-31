@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import type { ClassStatus, TenantAppearance } from "@/types/database";
 import { DEFAULT_APPEARANCE } from "@/types/database";
@@ -15,6 +15,7 @@ import {
 import type { TemplateProps, EventTemplateProps } from "@/components/enrollment/templates";
 import { applyPriorityUnlock, capturePriorityToken } from "@/lib/interest/priorityUnlock";
 import { readableTextColor } from "@/lib/readableText";
+import { beginCheckoutPayload, claimNavigation, hardNavigate, pushDataLayer, viewItemPayload } from "@/lib/tagManager";
 
 // Shell wrapper for non-template states (loading, error, coming-soon, etc.)
 function PageShell({ children }: { children: React.ReactNode }) {
@@ -327,19 +328,81 @@ function IntakeLandingContent() {
     fetchIntake();
   }, [params.slug]);
 
+  // view_item once per slug. The ref stops React StrictMode's double effect
+  // from pushing twice. A Trusted Official event redirects to /tickets, which
+  // pushes its own view_item, so it is counted once there.
+  const viewItemSlugRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!data || viewItemSlugRef.current === params.slug) return;
+    if (data.appearance?.template_id === "ev-trusted-official") return;
+    viewItemSlugRef.current = params.slug;
+    pushDataLayer(
+      "view_item",
+      viewItemPayload({
+        slug: params.slug,
+        eventName: data.intake.name,
+        currency: (data.labels ?? DEFAULT_LABELS).currency,
+        tiers: data.classes.map((c) => ({ id: c.id, name: c.level, price: c.fee_amount })),
+      }),
+    );
+  }, [data, params.slug]);
+
   const psid = searchParams.get("psid");
 
+  // One checkout navigation per page view: a fast double click must push one
+  // begin_checkout and write one stash. Released if the page comes back from
+  // the back/forward cache, so Buy works again there.
+  const navigatingRef = useRef(false);
+  useEffect(() => {
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) navigatingRef.current = false;
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
+
+  // Full page load, not router.push: /enroll/form is untracked, and a soft
+  // navigation would carry the GTM script into it. begin_checkout is pushed
+  // first. See docs/superpowers/specs/2026-10-30-tenant-gtm-design.md.
+  function checkoutEvent(lines: { id: string; name: string; price: number; quantity: number }[]) {
+    return {
+      name: "begin_checkout",
+      payload: beginCheckoutPayload({
+        slug: params.slug,
+        eventName: data?.intake.name ?? "",
+        currency: (data?.labels ?? DEFAULT_LABELS).currency,
+        lines,
+      }),
+    };
+  }
+
   function handleSelectClass(classId: string, quantity: number = 1) {
+    if (!claimNavigation(navigatingRef)) return;
     const qParam = quantity > 1 ? `&quantity=${quantity}` : "";
     const psidParam = psid ? `&psid=${psid}` : "";
-    router.push(`/enroll/form?class_id=${classId}&slug=${params.slug}${qParam}${psidParam}`);
+    const cls = data?.classes.find((c) => c.id === classId);
+    hardNavigate(`/enroll/form?class_id=${classId}&slug=${params.slug}${qParam}${psidParam}`, {
+      afterEvent: checkoutEvent(
+        cls ? [{ id: cls.id, name: cls.level, price: cls.fee_amount, quantity }] : [],
+      ),
+    });
   }
 
   function handleCartCheckout(cartItems: { class_id: string; level: string; quantity: number; fee_amount: number; image_url: string | null }[]) {
+    if (!claimNavigation(navigatingRef)) return;
     const cartKey = `cart_${Date.now()}`;
-    sessionStorage.setItem(cartKey, JSON.stringify(cartItems));
+    try {
+      sessionStorage.setItem(cartKey, JSON.stringify(cartItems));
+    } catch {
+      navigatingRef.current = false;
+      return;
+    }
     const psidParam = psid ? `&psid=${psid}` : "";
-    router.push(`/enroll/form?slug=${params.slug}&cart_key=${cartKey}${psidParam}`);
+    hardNavigate(`/enroll/form?slug=${params.slug}&cart_key=${cartKey}${psidParam}`, {
+      afterEvent: checkoutEvent(
+        cartItems.map((i) => ({ id: i.class_id, name: i.level, price: i.fee_amount, quantity: i.quantity })),
+      ),
+    });
   }
 
   if (loading) return <PageShell><LoadingSkeleton /></PageShell>;
