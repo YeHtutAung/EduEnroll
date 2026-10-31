@@ -26,7 +26,7 @@ describe("tenant gtm_container_id migration", () => {
 
   it("pins the container id format with the exact regex", () => {
     expect(SQL).toContain("tenants_gtm_container_id_format");
-    expect(SQL).toContain("'^GTM-[A-Z0-9]{4,12}$'");
+    expect(SQL).toContain("'^GTM-[0-9A-Z]{4,12}$'");
   });
 
   it("guards changes with a BEFORE UPDATE OF gtm_container_id trigger", () => {
