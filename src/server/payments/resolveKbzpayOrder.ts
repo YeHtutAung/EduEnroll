@@ -18,7 +18,7 @@
 // This module decides; it does not write. complete_kbzpay_supersede performs
 // the local transition, and only for a reason produced here.
 
-import { queryOrder, closeOrder, type TradeStatus } from "@/lib/kbzpay";
+import { queryOrder, closeOrder, type TradeStatus, type KbzMerchant } from "@/lib/kbzpay";
 import { settleMmqrPayment, type SettleMmqrSource } from "@/server/payments/settleMmqrPayment";
 import type { CallBudget } from "@/lib/kbzpay";
 
@@ -37,6 +37,12 @@ export type ResolveOutcome =
 export type ResolveInput = {
   /** payment_ref of the live row we could not serve. */
   oldRef: string;
+  /**
+   * The merchant pinned on the OLD row. The old order lives under that
+   * merchant at KBZPay, whatever the tenant's assignment is now — querying it
+   * under another merchant reads as "not found" and would retire a live order.
+   */
+  merchant: KbzMerchant;
   source: SettleMmqrSource;
   /**
    * Absolute epoch ms by which the caller must be done.
@@ -60,7 +66,7 @@ export async function resolveKbzpayOrder(input: ResolveInput): Promise<ResolveOu
   // ── a. Ask the provider ───────────────────────────────────────────────────
   // Before any close: "not found" means precreate never landed (FAILED), and a
   // terminal status means the order died on its own (EXPIRED).
-  const first = await queryOrder(oldRef, input.budget);
+  const first = await queryOrder(input.merchant, oldRef, input.budget);
   const firstOutcome = await classify(first, "initial query", {
     notFound: "FAILED",
     terminal: "EXPIRED",
@@ -74,7 +80,7 @@ export async function resolveKbzpayOrder(input: ResolveInput): Promise<ResolveOu
   // (a) and this call, and the settling callback need not have arrived yet — so
   // the local row still reads PENDING and looks perfectly retirable. Trusting
   // the close code here re-opens the over-collection R5 exists to prevent.
-  const closed = await closeOrder(oldRef, input.budget);
+  const closed = await closeOrder(input.merchant, oldRef, input.budget);
   if (!closed.ok) {
     return {
       kind: "blocked",
@@ -84,7 +90,7 @@ export async function resolveKbzpayOrder(input: ResolveInput): Promise<ResolveOu
 
   // After a close we performed, any dead-or-absent answer means WE retired it,
   // so the recorded reason is SUPERSEDED rather than EXPIRED or FAILED.
-  const second = await queryOrder(oldRef, input.budget);
+  const second = await queryOrder(input.merchant, oldRef, input.budget);
   const secondOutcome = await classify(second, "re-query after close", {
     notFound: "SUPERSEDED",
     terminal: "SUPERSEDED",
