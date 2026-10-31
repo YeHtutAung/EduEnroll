@@ -174,3 +174,58 @@ export function hardNavigate(
   w.dataLayer.push({ ecommerce: null });
   w.dataLayer.push({ event: name, ecommerce: payload, eventCallback: go });
 }
+
+// ─── GA4 ecommerce payloads ─────────────────────────────────────────────────
+//
+// Pure builders for the two events the tracked pages push. Payloads carry only
+// public event data: ids, names, prices, quantities. No personal data, no ref.
+
+export interface TicketTier {
+  id: string;
+  name: string;
+  price: number;
+}
+
+export interface TicketLine extends TicketTier {
+  quantity: number;
+}
+
+/** `view_item`: one item per ticket tier. */
+export function viewItemPayload(args: {
+  slug: string;
+  eventName: string;
+  currency: string;
+  tiers: TicketTier[];
+}): Record<string, unknown> {
+  return {
+    event_slug: args.slug,
+    event_name: args.eventName,
+    currency: args.currency,
+    items: args.tiers.map((t) => ({
+      item_id: t.id,
+      item_name: t.name,
+      price: t.price,
+    })),
+  };
+}
+
+/** `begin_checkout`: `value` is the sum of price x quantity over the lines. */
+export function beginCheckoutPayload(args: {
+  slug: string;
+  eventName: string;
+  currency: string;
+  lines: TicketLine[];
+}): Record<string, unknown> {
+  return {
+    event_slug: args.slug,
+    event_name: args.eventName,
+    currency: args.currency,
+    value: args.lines.reduce((sum, l) => sum + l.price * l.quantity, 0),
+    items: args.lines.map((l) => ({
+      item_id: l.id,
+      item_name: l.name,
+      price: l.price,
+      quantity: l.quantity,
+    })),
+  };
+}
