@@ -130,6 +130,7 @@ export interface Tenant {
   payment_mode: "bank_transfer" | "mmqr" | "stripe";
   mmqr_provider: "abank" | "mmpay" | "kbzpay" | "cbmmqr";
   telegram_auto_send_invite: boolean;
+  gtm_container_id: string | null; // platform-set only (trigger-guarded)
   created_at: string;
 }
 
