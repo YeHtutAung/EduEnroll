@@ -31,8 +31,22 @@ describe("tenant gtm_container_id migration", () => {
 
   it("guards changes with a BEFORE UPDATE OF gtm_container_id trigger", () => {
     expect(SQL).toMatch(
-      /CREATE TRIGGER trg_tenants_guard_gtm\s+BEFORE UPDATE OF gtm_container_id ON public\.tenants/,
+      /CREATE TRIGGER trg_tenants_guard_gtm\s+BEFORE INSERT OR UPDATE OF gtm_container_id ON public\.tenants/,
     );
+  });
+
+  it("covers insert as well as update", () => {
+    expect(SQL).toContain("TG_OP = 'INSERT'");
+    expect(SQL).toContain("TG_OP = 'UPDATE'");
+  });
+
+  it("pins the function search_path", () => {
+    expect(SQL).toMatch(/SET search_path = ''/);
+  });
+
+  it("no longer trusts current_user alone", () => {
+    expect(SQL).not.toContain("current_user NOT IN");
+    expect(SQL).toMatch(/current_user IN \('postgres', 'supabase_admin'\)/);
   });
 
   it("rejects non-platform changes with errcode 42501", () => {
