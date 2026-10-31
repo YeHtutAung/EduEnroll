@@ -102,7 +102,8 @@ describe("gtmAllowedOnHost", () => {
   });
 });
 
-function store(entries: Record<string, string> = {}) {
+type TestStore = { readonly length: number; key(i: number): string | null };
+function store(entries: Record<string, string> = {}): TestStore {
   const keys = Object.keys(entries);
   return {
     length: keys.length,
@@ -118,8 +119,8 @@ const ORIGIN = "https://sky.example.com";
 function state(
   over: {
     location?: { search: string; hash: string };
-    sessionStorage?: ReturnType<typeof store>;
-    localStorage?: ReturnType<typeof store>;
+    sessionStorage?: TestStore;
+    localStorage?: TestStore;
     cookie?: string;
     referrer?: string;
   } = {},

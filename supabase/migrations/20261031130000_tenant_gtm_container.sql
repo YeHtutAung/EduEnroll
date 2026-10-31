@@ -24,7 +24,7 @@ ALTER TABLE public.tenants
   DROP CONSTRAINT IF EXISTS tenants_gtm_container_id_format;
 ALTER TABLE public.tenants
   ADD CONSTRAINT tenants_gtm_container_id_format
-  CHECK (gtm_container_id IS NULL OR gtm_container_id ~ '^GTM-[A-Z0-9]{4,12}$');
+  CHECK (gtm_container_id IS NULL OR gtm_container_id ~ '^GTM-[0-9A-Z]{4,12}$');
 
 -- Only the platform may set it, including on insert. Owners can UPDATE their
 -- own tenants row through RLS (tenants_update), so a policy alone cannot

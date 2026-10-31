@@ -10,7 +10,8 @@
 
 import { tenantForCustomHost } from "@/lib/tenant";
 
-export const GTM_CONTAINER_ID_RE = /^GTM-[A-Z0-9]{4,12}$/;
+// Class order is digits first on purpose: the ref-shape tests treat the other order as an enrollment ref.
+export const GTM_CONTAINER_ID_RE = /^GTM-[0-9A-Z]{4,12}$/;
 
 /** Trims and uppercases. Blank or null becomes null; anything malformed is "invalid". */
 export function normalizeGtmContainerId(input: unknown): string | null | "invalid" {
@@ -149,11 +150,15 @@ type DataLayerWindow = Window & {
  * events pushed before GTM starts are kept and replayed by GTM. The leading
  * { ecommerce: null } is the GA4 convention so ecommerce objects don't merge.
  */
-export function pushDataLayer(event: string, payload: Record<string, unknown>): void {
+export function pushDataLayer(
+  event: string,
+  payload: Record<string, unknown>,
+  extra?: { eventCallback?: () => void },
+): void {
   const w = window as DataLayerWindow;
   w.dataLayer = w.dataLayer || [];
   w.dataLayer.push({ ecommerce: null });
-  w.dataLayer.push({ event, ecommerce: payload });
+  w.dataLayer.push({ event, ecommerce: payload, ...extra });
 }
 
 const NAVIGATE_FALLBACK_MS = 300;
@@ -189,9 +194,7 @@ export function hardNavigate(
   };
   const timer = setTimeout(go, NAVIGATE_FALLBACK_MS);
 
-  w.dataLayer = w.dataLayer || [];
-  w.dataLayer.push({ ecommerce: null });
-  w.dataLayer.push({ event: name, ecommerce: payload, eventCallback: go });
+  pushDataLayer(name, payload, { eventCallback: go });
 }
 
 // ─── GA4 ecommerce payloads ─────────────────────────────────────────────────
