@@ -25,100 +25,125 @@ organisations.
 
 | Question | Decision |
 |---|---|
-| How far to pivot | **Events-first.** Festivals lead; other org types stay as one small "Also works for" strip. |
+| How far to pivot | **Events-first.** Festivals lead; other org types stay as one "Built for every event" photo grid. |
 | Features to sell | All four: QR e-tickets + scanner, local + card payments, ticket tiers & sell-out control, organiser branding. |
 | Client names / logos | **None for now.** Generic proof only, until each client agrees in writing. |
-| Visual direction | **Night-stage dark**: dark navy with purple stage glow and a glowing QR e-ticket mockup. |
+| Visual direction | **Revised:** white page with full-width real photos, following the pattern of Ticketmelon's organiser page. (The first "night-stage dark" build was rejected.) |
 | Pricing line | **"Free to start"**: free to set up, small fee only when selling online. No number quoted. |
 | Payment badges | KBZPay, CB Bank MMQR, MMQR (generic), Visa / Mastercard. |
+| Photos | **Free stock (Unsplash)**, swappable for client photos later. |
+| Stats band | **None.** No numbers that can be wrong. |
 
 ### Non-goals
 
 - No pricing page, blog, or other new routes.
 - No database, API, or middleware changes.
 - No client names, logos, testimonials or sales numbers.
-- No new images or dependencies. The mockups are CSS, and the badges reuse files already in `/public`.
+- No new dependencies. New images are only the 12 Unsplash photos in `public/marketing/`; the payment badges reuse files already in `/public`.
 - No changes to tenant pages, `/enroll`, `/admin`, or the scanner.
 
 ## Page structure (top to bottom)
 
-1. **Navbar.** Logo, **Sign In** (`/login`), **Get Started** (`/register`).
-   Same links as today, restyled as a dark glass bar so it sits on the dark
-   hero.
-2. **Hero (dark).**
-   - Headline: **"Sell out your festival."**
-   - Myanmar subline with the same meaning (festival ticketing in one place).
-   - Subtext: "Tickets, payments and gate scanning — one platform for Myanmar
-     music festivals."
-   - Primary CTA **Start selling tickets** → `/register`; secondary
-     **See how it works** → `#how`.
+**Revised 2026-11-01.** The owner rejected the first, dark "night-stage" build.
+The reference is Ticketmelon's organiser page (`organizer.ticketmelon.com`):
+a white page with full-width real photos. KuuNyi follows that *pattern*
+(photo hero, white sections, photo cards, industries grid) with its own
+brand, copy and photos. It doesn't copy their images, text or layout.
+
+1. **Hero (full-width photo).** `hero.jpg` (festival crowd and confetti) with
+   a left-to-right dark gradient so the white text stays readable.
+   - The **navbar** sits on top of the photo, transparent: logo, **Sign In**
+     (`/login`), and **Get Started** (`/register`) as a white button.
+   - Eyebrow "Festival & event ticketing", headline **"Sell out your
+     festival."**, Myanmar subline, and the subtext.
+   - CTAs: **Start selling tickets** → `/register` and **See how it works**
+     → `#how`.
    - Trust line: "Free to set up — a small fee only when you sell online."
      (EN + MM).
-   - Right side: glowing **QR e-ticket mockup** (event name placeholder,
-     tier "VIP", "Admit one", QR block, "Scan at gate"). Not "×2": one QR
-     for two people would contradict "each QR works once" (the scanner
-     returns 409 on a re-scan).
-3. **How it works (dark), `#how`.** Four numbered steps:
-   1. Fan picks a ticket tier
-   2. Pays with KBZPay, MMQR or card
-   3. Gets a QR e-ticket (payment page + email)
-   4. Staff scan it at the gate
-4. **Features (light).** Four cards, EN title + MM title + one-line
+2. **Accepted payments strip (white).** Sits where Ticketmelon has its
+   organiser-logo strip. KBZPay, CB Bank, MMQR, Visa and Mastercard logos.
+3. **Solutions (white).** "Everything your festival needs", with four large
+   cards in a 2×2 grid, each with a photo, label, title, Myanmar title and
    description:
-   - **QR e-tickets + gate scanner**: every ticket has a unique QR, and staff
-     scan it at entry to stop duplicates.
-   - **Local + card payments**: KBZPay and CB MMQR for Myanmar fans,
-     Visa / Mastercard for fans overseas. Payment is confirmed automatically.
-   - **Ticket tiers & sell-out control**: Early Bird / GA / VIP, per-tier
-     limits, and a priority window before public sale.
-   - **Your brand**: your own domain, sponsor logos on e-tickets, and
-     your own ad pixels (Meta, TikTok, Google) connected through Google Tag
-     Manager. This is per-tenant GTM, not built-in promoter or affiliate
-     tracking, so the copy must not suggest "see which promoter sold which
-     ticket".
-5. **Payments strip (light).** "Accepted payments" with four badges:
-   KBZPay (`/kbzpay-logo.png`), CB Bank (`/cbmmqr/cb-bank-logo.png`),
-   MMQR (`/mmqr-logo.png`), Visa + Mastercard (`/visa.svg`,
-   `/mastercard.svg`).
-6. **Also works for (light).** One row of small pills: Runs & sports events,
-   Concerts, Language schools, Training centres, Fitness, Custom. Short line:
-   "One platform — labels adapt to your organisation type."
-7. **CTA banner (dark).** **"Ready for your next festival?"** (EN + MM),
-   buttons **Start selling tickets** → `/register` and **Sign In** →
-   `/login`.
-8. **Footer.** Unchanged (logo, Privacy, © KuuNyi — Myanmar).
+   - **QR e-tickets & gate scanning** (`scan.jpg`, phone-to-phone QR):
+     unique QR on the payment page and by email, scanned at the gate, each
+     QR works once.
+   - **Local + card payments.** No photo: a purple panel with the real
+     payment logos in a 2×2 grid. Copy: KBZPay and CB MMQR for fans in
+     Myanmar, Visa and Mastercard overseas, confirmed automatically.
+   - **Ticket tiers & sell-out control** (`tiers.jpg`): Early Bird / GA / VIP,
+     a limit per tier, and a priority window.
+   - **Your event, your brand** (`brand.jpg`): your own domain, sponsor logos
+     on e-tickets, and Meta / TikTok / Google pixels via Google Tag Manager.
+     This is per-tenant GTM, not promoter or affiliate tracking.
+4. **How it works, `#how`.** Sits where Ticketmelon has its stats band.
+   `how.jpg` (purple laser lines) under an 80% navy overlay, with four big
+   numbered steps: tier → pay → QR e-ticket → scan at the gate.
+5. **Built for every event (light grey).** A 2-column grid (3 columns from
+   `lg`) of photo tiles with EN + MM labels: Music festivals, Concerts,
+   Runs & sports, Conferences & shows, Schools & training, Custom events.
+   This replaces the "Also works for" pill strip, so schools still feel
+   included.
+6. **CTA.** A rounded photo panel (`cta.jpg`) with a purple overlay:
+   **"Ready for your next festival?"**, with **Start selling tickets** and
+   **Sign In**.
+7. **Footer (navy).** Logo and a one-line description, then three columns:
+   Product (How it works), Organisers (Get Started, Sign In), Legal
+   (Privacy). © line.
 
-**Removed from today's page:** the Student Records card, the Telegram &
-Messenger cards, the enrollment-fee MMQR phone mockup and steps, the
-school-first Industries grid, the "Built for Myanmar" section, and the
-"Free for Myanmar organizations" claim.
+**Not included:** stats band (no reliable numbers, by owner decision),
+client logo strip and case studies (no client names), the e-ticket
+mockup, and the dark night-stage design.
+
+## Photos
+
+Twelve photos in `public/marketing/`, from Unsplash under the Unsplash
+License (free for commercial use, no attribution required). They were
+resized at download: hero, how and cta at 2000px wide, the rest at
+1000px, JPEG quality 70, about 2.6 MB in total. Each was checked by eye for
+brand logos, readable text and real people's names. Rejected candidates:
+a festival logo on stage, ferry tickets with passenger names, a Thai telco
+app, a named conference speaker, song lyrics on screens, a Nike logo, and
+an Alipay screen.
+
+| File | Unsplash photo |
+|---|---|
+| `hero.jpg` (16:9 crop) | https://unsplash.com/photos/people-watching-concert-during-night-time-h81eW06xr7Y |
+| `how.jpg` | https://unsplash.com/photos/white-and-black-line-illustration-r4qdM8iD5WY |
+| `cta.jpg` | https://unsplash.com/photos/crowd-facing-lighted-stage-eXVd7gDPO9A |
+| `scan.jpg` | https://unsplash.com/photos/two-persons-hands-holding-turned-on-phones-QiPe0UpC0_U |
+| `tiers.jpg` | https://unsplash.com/photos/stage-light-front-of-audience-NYrVisodQ2M |
+| `brand.jpg` | https://unsplash.com/photos/people-watching-concert-during-night-time-TVV49SQuQ_c |
+| `festival.jpg` | https://unsplash.com/photos/group-of-people-in-front-of-stage-ZhQCZjr9fHo |
+| `concert.jpg` | https://unsplash.com/photos/woman-in-white-and-black-plaid-shirt-holding-microphone-Ol0wJhWu3-s |
+| `run.jpg` | https://unsplash.com/photos/hundreds-of-runners-participate-in-a-city-marathon-race-WivYzpzTJEQ |
+| `conference.jpg` | https://unsplash.com/photos/photography-of-people-sitting-on-theater-during-nighttime-nz-UtZz81fI |
+| `school.jpg` | https://unsplash.com/photos/teacher-instructing-students-in-a-classroom-lecture-u6OsIM1ZEnk |
+| `custom.jpg` | https://unsplash.com/photos/person-holding-yellow-sticky-notes-MDu-53qRVr4 |
+
+`run.jpg` shows race bibs, but their sponsor marks aren't readable at tile
+size. Swap any photo for a client's own photo once they give written
+permission.
 
 ## Visual design
 
-- **Dark sections** (hero, how it works, CTA): `#0f1225` (already used on the
-  page), purple `#6d28d9` / `#a78bfa` glow, soft diagonal "stage light"
-  beams made with blurred gradients.
-- **Text contrast on `#0f1225`** (WCAG ratios computed 2026-11-01):
-  slate-300 is 12.5:1, slate-400 is 7.2:1, slate-500 is **3.9:1**.
-  - Body text and small text use slate-300. Slate-400 is the floor and is
-    for de-emphasised lines only.
-  - Slate-500 or darker is **not used for text on dark sections**. It fails
-    AA (4.5:1) for small text, and today's page uses it for the "Supported
-    Banks" label and the Myanmar step titles.
-- **Light sections** (features, payments, also works for): `#faf9f7`, the
-  current card style. Alternating dark and light keeps the page from being
-  one long dark scroll.
-- **E-ticket mockup:** CSS only. A ticket shape with a notched edge, a
-  purple-to-dark gradient header, and a QR block. The QR uses a **fixed
-  pattern constant**, not `Math.random()`. The current page calls
-  `Math.random()` during render, so the server and the browser draw
-  different patterns: a hydration mismatch.
-- **Motion:** keep the existing CSS keyframes (`fadeUp`, `float`, scan line).
-  No JS animation libraries.
-- **Mobile:** single column. The ticket mockup stacks under the hero copy.
-  Buttons are full width below `sm`, as today.
-- **Bilingual:** every section heading and card title has a Myanmar line,
-  in the existing `font-myanmar` style.
+- **Base:** a white page (`bg-white`) with slate-900 text and KuuNyi purple
+  `#6d28d9` as the accent (eyebrows, primary buttons, payments panel).
+  Light grey `slate-50` is used for the industries section.
+- **Text on photos:** always over a dark overlay. Hero: `black/85` → `black/20`
+  gradient, with the text kept on the dark left side. How it works:
+  `#0f1225` at 80%. Tiles: `black/85` from the bottom. CTA: `#1e1b4b`
+  at 55–95%. Text is white or `white/75`+ (≥ 4.5:1 on those overlays).
+- **Navy sections** (how it works, footer) follow the earlier contrast rule:
+  slate-300 for body text, no slate-500.
+- **Images:** `next/image`. `fill` + `sizes` for photos and `priority` on
+  the hero; explicit width/height for logos. Decorative photos have
+  `alt=""`.
+- **Motion:** a single `fadeUp` on the hero copy, turned off under
+  `prefers-reduced-motion`. Photos zoom slightly on hover in cards and tiles.
+- **Mobile:** hero CTAs stack full width, solutions go to one column, and
+  industry tiles are square 2-up so the labels have room.
+
 
 ## SEO metadata
 
@@ -130,14 +155,17 @@ school-first Industries grid, the "Built for Myanmar" section, and the
 
 ## Code
 
-- **One file changes:** `src/app/page.tsx`. It stays a server component
-  (no `"use client"`), using Tailwind and the existing inline `<style>`
-  keyframes.
-- Section content lives in typed constants at the top (`STEPS`,
-  `FEATURES`, `PAYMENT_METHODS`, `ALSO_FOR`), the same pattern as today's
-  `FEATURES` / `INDUSTRIES` / `MMQR_STEPS`.
+- **Code changes:** `src/app/page.tsx`, plus the photos in
+  `public/marketing/`. The page stays a server component (no
+  `"use client"`), using Tailwind and one inline `<style>` keyframe. The
+  navbar sits inside the hero instead of being fixed, so it needs no
+  scroll JS.
+- Section content lives in typed constants at the top (`PAYMENT_LOGOS`,
+  `SOLUTIONS`, `STEPS`, `INDUSTRIES`), the same pattern the old page used.
 - The component is still named `LandingPage`.
-- Images use `next/image` with explicit width and height.
+- The old QR mockup (and its `Math.random()` hydration bug) is gone, along
+  with the rest of the old page.
+- **Tenant subdomain follow-up:** this is now YeHtutAung/EduEnroll#335.
 - **Unchanged behaviour:** `src/middleware.ts` still redirects `/` to
   `/enroll` on a tenant's custom domain, so clients' own domains never show
   this page.
