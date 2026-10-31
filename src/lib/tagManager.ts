@@ -101,8 +101,10 @@ function hasSensitiveParam(params: URLSearchParams): boolean {
  * only allowlisted storage keys, no Supabase auth cookie, and no same-origin
  * referrer that is an untracked page or carries a sensitive param (GA4 records
  * page_referrer, and the site's referrer policy sends the full same-origin
- * URL). Storages are passed as getters because merely reading
- * window.sessionStorage can throw. Any error counts as not clean.
+ * URL). The document's initial URL must also be a same-origin tracked page
+ * with no sensitive param: a document that started anywhere else is not
+ * clean, whatever it shows now. Storages are passed as getters because merely
+ * reading window.sessionStorage can throw. Any error counts as not clean.
  */
 export function isBrowserStateClean(args: {
   location: { search: string; hash: string; origin: string };
@@ -110,11 +112,21 @@ export function isBrowserStateClean(args: {
   sessionStorage: () => KeyedStorage;
   localStorage: () => KeyedStorage;
   cookie: string;
+  /** URL of the document's first navigation (see initialDocumentUrl). Missing fails closed. */
+  initialUrl: string | undefined;
 }): boolean {
   try {
     const query = new URLSearchParams(args.location.search);
     const hash = new URLSearchParams(args.location.hash.replace(/^#/, ""));
     if (hasSensitiveParam(query) || hasSensitiveParam(hash) || hash.has("pa")) return false;
+
+    if (!args.initialUrl) return false;
+    const initial = new URL(args.initialUrl);
+    if (initial.origin !== args.location.origin) return false;
+    if (!isTrackedPath(initial.pathname)) return false;
+    if (hasSensitiveParam(initial.searchParams)) return false;
+    const initialHash = new URLSearchParams(initial.hash.replace(/^#/, ""));
+    if (hasSensitiveParam(initialHash) || initialHash.has("pa")) return false;
 
     if (args.referrer) {
       const ref = new URL(args.referrer);
@@ -138,6 +150,69 @@ export function isBrowserStateClean(args: {
   } catch {
     return false;
   }
+}
+
+/**
+ * The URL the current document was first loaded at: the name of its
+ * navigation timing entry. Soft navigations do not change it. Undefined when
+ * the API is missing, has no entry, or throws.
+ */
+export function initialDocumentUrl(
+  perf: { getEntriesByType(type: string): ArrayLike<{ name: string }> } | undefined,
+): string | undefined {
+  try {
+    const entry = perf?.getEntriesByType("navigation")[0];
+    return typeof entry?.name === "string" ? entry.name : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// ─── Per-document latch ─────────────────────────────────────────────────────
+//
+// Module state lives as long as the document's JS realm, so it is per document.
+// Only the FIRST evaluation in a document may turn GTM on. A document whose
+// first evaluation was not clean keeps GTM off until a full page load. Once on,
+// later clean evaluations (soft moves between tracked pages) keep it on; any
+// evaluation that is not clean turns it off for the rest of the document. A
+// container that already started cannot be unloaded; full page loads at every
+// exit handle that.
+
+let documentLatch: "unset" | "on" | "off" = "unset";
+
+/** Feeds one evaluation into the latch and returns whether GTM may render now. */
+export function decideGtmForDocument(cleanNow: boolean): boolean {
+  if (!cleanNow) documentLatch = "off";
+  else if (documentLatch === "unset") documentLatch = "on";
+  return documentLatch === "on";
+}
+
+/** Test-only: start a fresh "document". */
+export function resetGtmDocumentLatchForTests(): void {
+  documentLatch = "unset";
+}
+
+/**
+ * pageshow handler: a page restored from the back/forward cache keeps its old
+ * JS state, including a running container, so it is reloaded instead and goes
+ * through every check again.
+ */
+export function reloadIfRestoredFromCache(
+  event: { persisted?: boolean },
+  reload: () => void = () => window.location.reload(),
+): void {
+  if (event.persisted) reload();
+}
+
+/**
+ * One navigation per click: returns true for the first caller and false for
+ * any later one until the ref is reset, so a double click pushes one event and
+ * writes one stash.
+ */
+export function claimNavigation(ref: { current: boolean }): boolean {
+  if (ref.current) return false;
+  ref.current = true;
+  return true;
 }
 
 type DataLayerWindow = Window & {

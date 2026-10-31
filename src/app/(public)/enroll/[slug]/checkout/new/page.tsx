@@ -23,7 +23,8 @@ function CheckoutNew() {
     if (started.current) return;
     started.current = true;
     createTrustedOfficialOrder({ slug, cartKey }).then((result) => {
-      if (result.kind === "redirect-tickets") router.replace(`/enroll/${slug}/tickets/`);
+      // /tickets is tracked: enter it with a full page load, never a soft move.
+      if (result.kind === "redirect-tickets") window.location.replace(`/enroll/${slug}/tickets/`);
       else if (result.kind === "created") router.replace(`/enroll/${slug}/checkout/?ref=${result.ref}`);
       else setError(result.message);
     });

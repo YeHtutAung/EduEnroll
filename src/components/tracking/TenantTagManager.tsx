@@ -5,34 +5,49 @@ import { usePathname } from "next/navigation";
 import Script from "next/script";
 import {
   GTM_CONTAINER_ID_RE,
+  decideGtmForDocument,
+  initialDocumentUrl,
   isBrowserStateClean,
   isTrackedPath,
+  reloadIfRestoredFromCache,
 } from "@/lib/tagManager";
 
 // Loads the tenant's own Google Tag Manager container on tracked pages only.
 // The first render is always null (so hydration matches); the guard runs in an
-// effect because it reads browser state. It does not unload a running
-// container: leaving tracked pages is always a full page load.
+// effect because it reads browser state. Only the first evaluation in a
+// document may turn GTM on (decideGtmForDocument); a later evaluation that is
+// not clean stops rendering. It does not unload a running container: leaving
+// tracked pages is always a full page load, and a back/forward cache restore
+// reloads the page.
 // See docs/superpowers/specs/2026-10-30-tenant-gtm-design.md.
 
 export default function TenantTagManager({ containerId }: { containerId: string | null }) {
   const pathname = usePathname();
   const [enabled, setEnabled] = useState(false);
+  const validId = containerId !== null && GTM_CONTAINER_ID_RE.test(containerId);
 
   useEffect(() => {
-    setEnabled(
-      containerId !== null &&
-        GTM_CONTAINER_ID_RE.test(containerId) &&
-        isTrackedPath(pathname ?? "") &&
-        isBrowserStateClean({
-          location: window.location,
-          referrer: document.referrer,
-          sessionStorage: () => window.sessionStorage,
-          localStorage: () => window.localStorage,
-          cookie: document.cookie,
-        }),
-    );
-  }, [containerId, pathname]);
+    const clean =
+      validId &&
+      isTrackedPath(pathname ?? "") &&
+      isBrowserStateClean({
+        location: window.location,
+        referrer: document.referrer,
+        sessionStorage: () => window.sessionStorage,
+        localStorage: () => window.localStorage,
+        cookie: document.cookie,
+        initialUrl: initialDocumentUrl(window.performance),
+      });
+    setEnabled(decideGtmForDocument(clean));
+  }, [validId, pathname]);
+
+  // Only where a container is configured: a restored page re-runs every check.
+  useEffect(() => {
+    if (!validId) return;
+    const onPageShow = (e: PageTransitionEvent) => reloadIfRestoredFromCache(e);
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, [validId]);
 
   // Re-checked at render so only a regex-checked ID is ever interpolated.
   if (!enabled || containerId === null || !GTM_CONTAINER_ID_RE.test(containerId)) return null;
