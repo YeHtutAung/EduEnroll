@@ -91,15 +91,32 @@ function readItem(key: string): string | null {
 }
 
 /**
- * Reads the stash, POSTs it once and reports what to do next. Reads sessionStorage
- * and fetch from the environment, so callers (and tests) can stub the globals.
+ * One order attempt, prepared once per document: the stash body plus the
+ * idempotency key minted (or, on a reload, reused) for it. The page keeps it
+ * in memory so "Try again" re-sends exactly this body and key.
  */
-export async function createTrustedOfficialOrder(args: {
+export interface OrderAttempt {
+  slug: string;
+  cartKey: string;
+  idempotencyKey: string;
+  body: Record<string, unknown>;
+}
+
+export type PrepareResult =
+  | { kind: "redirect-tickets" }
+  | { kind: "error"; message: string }
+  | { kind: "ready"; attempt: OrderAttempt };
+
+/**
+ * Reads and validates the stash and settles the idempotency key. Does not POST.
+ * Reads sessionStorage from the environment, so tests can stub the global.
+ */
+export function prepareTrustedOfficialOrder(args: {
   slug: string;
   cartKey: string | null;
   /** See currentNavigationType. Only "reload" may reuse a stored key. */
   navigationType: string | undefined;
-}): Promise<CheckoutNewResult> {
+}): PrepareResult {
   const { slug, cartKey } = args;
   if (!cartKey || !/^\d+$/.test(cartKey)) return { kind: "redirect-tickets" };
 
@@ -125,26 +142,43 @@ export async function createTrustedOfficialOrder(args: {
   // only in this POST body.
   const priorityToken = readItem(`pa_${slug}`);
 
-  try {
-    const res = await fetch("/api/public/enroll", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+  return {
+    kind: "ready",
+    attempt: {
+      slug,
+      cartKey,
+      idempotencyKey,
+      body: {
         items: stash.items,
         terms_accepted: stash.terms_accepted,
         terms_version: stash.terms_version,
         organiser_terms_sha256: stash.organiser_terms_sha256,
         idempotency_key: idempotencyKey,
         ...(priorityToken ? { priority_token: priorityToken } : {}),
-      }),
+      },
+    },
+  };
+}
+
+/**
+ * POSTs a prepared attempt. Safe to call again with the same attempt after an
+ * error: the same key makes the server return the same order rather than a
+ * second one. On success the stash and ck_ are removed; on any error they stay.
+ */
+export async function submitTrustedOfficialOrder(attempt: OrderAttempt): Promise<CheckoutNewResult> {
+  try {
+    const res = await fetch("/api/public/enroll", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(attempt.body),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.message ?? "Enrollment failed.");
     if (!data.enrollment_ref) throw new Error("Enrollment failed.");
     // ck_ stays on every error path: the order may exist with a lost response.
     try {
-      sessionStorage.removeItem(cartStashKey(cartKey));
-      sessionStorage.removeItem(ckKey);
+      sessionStorage.removeItem(cartStashKey(attempt.cartKey));
+      sessionStorage.removeItem(idempotencyStorageKey(attempt.cartKey));
     } catch {
       // Nothing more to do; the redirect proceeds.
     }
@@ -155,4 +189,15 @@ export async function createTrustedOfficialOrder(args: {
       message: err instanceof Error ? err.message : "Something went wrong. Please try again.",
     };
   }
+}
+
+/** Prepare and submit in one step: the first attempt in a document. */
+export async function createTrustedOfficialOrder(args: {
+  slug: string;
+  cartKey: string | null;
+  navigationType: string | undefined;
+}): Promise<CheckoutNewResult> {
+  const prepared = prepareTrustedOfficialOrder(args);
+  if (prepared.kind !== "ready") return prepared;
+  return submitTrustedOfficialOrder(prepared.attempt);
 }
