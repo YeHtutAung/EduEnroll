@@ -10,6 +10,7 @@ import ConfirmModal from "@/components/ui/ConfirmModal";
 import { useToast } from "@/components/ui/Toast";
 import { createClient } from "@/lib/supabase/client";
 import SettingsTabs from "@/components/admin/SettingsTabs";
+import type { MmqrProvider } from "@/lib/mmqrProvider";
 import type { BankAccount, MenuButton } from "@/types/database";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -536,7 +537,7 @@ function SettingsContent() {
   // ── Currency & Payment mode ──────────────────────────────────────────────
   const [currency, setCurrency] = useState("MMK");
   const [paymentMode, setPaymentMode] = useState<"bank_transfer" | "mmqr" | "stripe" | "paypay" | "hitpay">("bank_transfer");
-  const [mmqrProvider, setMmqrProvider] = useState<"abank" | "mmpay" | "kbzpay">("abank");
+  const [mmqrProvider, setMmqrProvider] = useState<MmqrProvider>("abank");
   const [platformFeeMode, setPlatformFeeMode] = useState<"none" | "per_transaction" | "per_ticket">("none");
   // Held as a string so the field can be cleared while typing without
   // snapping back to 0.
@@ -604,7 +605,7 @@ function SettingsContent() {
         setSmsOnPayment(tenant.sms_on_payment ?? true);
         setCurrency(tenant.currency || "MMK");
         setPaymentMode((tenant.payment_mode as "bank_transfer" | "mmqr" | "stripe" | "paypay" | "hitpay") ?? "bank_transfer");
-        setMmqrProvider((tenant.mmqr_provider as "abank" | "mmpay" | "kbzpay") ?? "abank");
+        setMmqrProvider((tenant.mmqr_provider as MmqrProvider) ?? "abank");
         setPlatformFeeMode(
           (tenant.platform_fee_mode as "none" | "per_transaction" | "per_ticket") ?? "none",
         );
@@ -1396,12 +1397,13 @@ function SettingsContent() {
               <label className="block text-sm font-medium text-gray-700 mb-1.5">MMQR Provider</label>
               <select
                 value={mmqrProvider}
-                onChange={(e) => setMmqrProvider(e.target.value as "abank" | "mmpay" | "kbzpay")}
+                onChange={(e) => setMmqrProvider(e.target.value as MmqrProvider)}
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
               >
                 <option value="abank">ABank (A+ Wallet)</option>
                 <option value="mmpay">MyanMyanPay</option>
                 <option value="kbzpay">KBZPay (MMQR &mdash; any Myanmar bank app)</option>
+                <option value="cbmmqr">CB Bank (MMQR &mdash; any Myanmar bank app)</option>
               </select>
             </div>
           )}
