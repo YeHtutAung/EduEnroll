@@ -18,7 +18,7 @@ import {
 // document may turn GTM on (decideGtmForDocument); a later evaluation that is
 // not clean stops rendering. It does not unload a running container: leaving
 // tracked pages is always a full page load, and a back/forward cache restore
-// reloads the page.
+// of a document where GTM started reloads the page.
 // See docs/superpowers/specs/2026-10-30-tenant-gtm-design.md.
 
 export default function TenantTagManager({ containerId }: { containerId: string | null }) {
@@ -41,7 +41,8 @@ export default function TenantTagManager({ containerId }: { containerId: string 
     setEnabled(decideGtmForDocument(clean));
   }, [validId, pathname]);
 
-  // Only where a container is configured: a restored page re-runs every check.
+  // Only where a container is configured. The handler reloads a restored page
+  // only if GTM started in this document; elsewhere the restore is kept.
   useEffect(() => {
     if (!validId) return;
     const onPageShow = (e: PageTransitionEvent) => reloadIfRestoredFromCache(e);

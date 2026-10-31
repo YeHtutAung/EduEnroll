@@ -256,6 +256,20 @@ describe("TenantTagManager", () => {
       expect(reload).toHaveBeenCalledTimes(1);
     });
 
+    it("does not reload a restored page where GTM never ran (e.g. the form)", () => {
+      mount(GOOD, "/enroll/form");
+      const fns = Array.from(listeners.get("pageshow") ?? []);
+      expect(fns).toHaveLength(1);
+      fns[0]({ persisted: true });
+      expect(reload).not.toHaveBeenCalled();
+    });
+
+    it("does not reload a restored tracked page whose document started dirty", () => {
+      mount(GOOD, "/enroll/x", { search: "?psid=1" });
+      Array.from(listeners.get("pageshow") ?? [])[0]({ persisted: true });
+      expect(reload).not.toHaveBeenCalled();
+    });
+
     it("removes the listener on unmount", () => {
       mount(GOOD, "/enroll/x");
       expect(listeners.get("pageshow")?.size).toBe(1);
