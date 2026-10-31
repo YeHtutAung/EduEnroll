@@ -465,12 +465,35 @@ describe("decideGtmForDocument (per-document latch)", () => {
 });
 
 describe("reloadIfRestoredFromCache", () => {
-  it("reloads on a back/forward cache restore", () => {
+  beforeEach(() => resetGtmDocumentLatchForTests());
+
+  it("reloads on a restore when GTM started in this document (latch on)", () => {
+    decideGtmForDocument(true);
     const reload = vi.fn();
     reloadIfRestoredFromCache({ persisted: true }, reload);
     expect(reload).toHaveBeenCalledTimes(1);
   });
-  it("does nothing on a normal page show", () => {
+  it("does not reload on a restore when the latch is off", () => {
+    decideGtmForDocument(false);
+    const reload = vi.fn();
+    reloadIfRestoredFromCache({ persisted: true }, reload);
+    expect(reload).not.toHaveBeenCalled();
+  });
+  it("does not reload on a restore when the latch was never set", () => {
+    const reload = vi.fn();
+    reloadIfRestoredFromCache({ persisted: true }, reload);
+    expect(reload).not.toHaveBeenCalled();
+  });
+  it("still reloads when GTM started and a later evaluation turned the latch off", () => {
+    // The container cannot be unloaded, so "started" outlives the latch.
+    decideGtmForDocument(true);
+    decideGtmForDocument(false);
+    const reload = vi.fn();
+    reloadIfRestoredFromCache({ persisted: true }, reload);
+    expect(reload).toHaveBeenCalledTimes(1);
+  });
+  it("does nothing on a normal page show, even with the latch on", () => {
+    decideGtmForDocument(true);
     const reload = vi.fn();
     reloadIfRestoredFromCache({ persisted: false }, reload);
     expect(reload).not.toHaveBeenCalled();

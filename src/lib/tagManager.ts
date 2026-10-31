@@ -183,29 +183,44 @@ export function initialDocumentUrl(
 // exit handle that.
 
 let documentLatch: "unset" | "on" | "off" = "unset";
+// Sticky: set when the latch first turns on and never cleared in this
+// document, because a started container cannot be unloaded.
+let gtmStarted = false;
 
 /** Feeds one evaluation into the latch and returns whether GTM may render now. */
 export function decideGtmForDocument(cleanNow: boolean): boolean {
   if (!cleanNow) documentLatch = "off";
   else if (documentLatch === "unset") documentLatch = "on";
+  if (documentLatch === "on") gtmStarted = true;
   return documentLatch === "on";
 }
 
 /** Test-only: start a fresh "document". */
 export function resetGtmDocumentLatchForTests(): void {
   documentLatch = "unset";
+  gtmStarted = false;
+}
+
+/**
+ * True when the latch turned GTM on at any point in this document, even if a
+ * later evaluation has since turned it off.
+ */
+export function gtmStartedInDocument(): boolean {
+  return gtmStarted;
 }
 
 /**
  * pageshow handler: a page restored from the back/forward cache keeps its old
- * JS state, including a running container, so it is reloaded instead and goes
- * through every check again.
+ * JS state. Where GTM started in this document, that includes a running
+ * container, so the page is reloaded and goes through every check again.
+ * Where GTM never ran (the form, checkout, or a document that started dirty)
+ * the restore is left alone, so restored form input is kept.
  */
 export function reloadIfRestoredFromCache(
   event: { persisted?: boolean },
   reload: () => void = () => window.location.reload(),
 ): void {
-  if (event.persisted) reload();
+  if (event.persisted && gtmStartedInDocument()) reload();
 }
 
 /**
