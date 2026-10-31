@@ -61,13 +61,36 @@ The design goal is: **organisers get ad attribution and a purchase
 conversion, and no third-party script ever runs on a page that shows PII,
 payment details or tickets.**
 
+### What is guaranteed, and what is not
+
+Stated precisely, the guarantee is:
+
+1. **No passive collection.** On tracked pages, nothing a tag reads by
+   default (page URL, referrer, DOM, storage, cookies, `dataLayer`) holds an
+   order ref, personal data, payment data, a ticket, a priority token, a
+   Stripe client secret or a cart idempotency key. GTM only starts in a
+   document that is clean from its first evaluation (see Isolation), and
+   leaving a tracked page is always a full page load.
+2. **Nothing exchangeable for a ref is exposed to tracked pages.** No tracked
+   page receives a ref, or a value the API would trade for one, in a
+   response, a URL, storage or the DOM.
+3. **Container vetting is the control against a malicious container.** The
+   rules above stop a normal container from collecting what it must not. They
+   do not make the origin safe against a container written to attack it:
+   container code runs with the page's full privileges. That risk is managed
+   by who may set a container (superadmin only) and by the platform vetting
+   the organiser's container and who controls it (Open questions 3).
+4. **Complete isolation needs a separate origin.** Only serving tracked pages
+   from an origin that holds no buyer or staff state would isolate them
+   fully. That is future work, not part of v1.
+
 ## Decisions
 
 | Question | Decision |
 |---|---|
 | Who sets a tenant's GTM ID | **Superadmin only** in v1. Organisers request it; we enable it. |
 | Where GTM loads | An explicit **allowlist** of browse pages. Everything else is off by default. |
-| Which origin | **Production: the tenant's custom domain only.** The kuunyi subdomain shares an origin with staff sessions. Dev / staging (UAT) may use the subdomain, behind the guard. |
+| Which origin | **Production: the tenant's custom domain only.** The kuunyi subdomain shares an origin with staff sessions. Outside production GTM is **off** unless the deployment sets `GTM_ALLOW_NON_PRODUCTION=true`; staging (UAT) sets it so the tenant can verify, behind the guard. |
 | Credentials already in the browser | **Fail closed**: GTM loads only if browser storage holds nothing but known-safe keys and no Supabase session cookie exists. |
 | Forms and checkout | **No GTM**, including the buyer-details form. |
 | Purchase conversion | Sent **server-side** after payment is confirmed (phase 2), not from the success page. |
@@ -131,8 +154,9 @@ ALTER TABLE tenants
   with the container ID, Save and Clear. Writes go through a superadmin-only
   API route.
 - **Tenant admin**: read-only line in `/admin/settings`: "Google Tag Manager:
-  GTM-XXXX is active on your event list and event pages. Contact KuuNyi to
-  change it." This makes it clear to the organiser what is running.
+  GTM-XXXX is configured for your event list and event pages. It runs only on
+  your custom domain. Contact KuuNyi to change it." This makes it clear to the
+  organiser what is running, and where.
 - Changing the ID is logged (who, when, old → new) in the server logs, without
   any other tenant data.
 
@@ -147,8 +171,11 @@ tenants want it.
 
 The public layout (`src/app/(public)/layout.tsx`) already looks up the tenant
 on the server (`x-tenant-slug`, then `extractSubdomainFromHost`, which also
-covers custom domains). It adds `gtm_container_id` to that query and passes it
-to a small client component, `TenantTagManager`.
+covers custom domains). It reads `gtm_container_id` in a **separate** small
+query (so a database without the column, or a failed read, means GTM off and
+leaves the tenant name, logo and org type alone) and passes it to a small
+client component, `TenantTagManager`. The settings page reads it the same
+way, so a missing column never resets its other fields to defaults.
 
 `TenantTagManager` decides on the client, from `usePathname()`, whether the
 current page is on the allowlist (`/enroll`, `/enroll/<slug>` where the
@@ -177,8 +204,11 @@ only what is on the page. All of them must pass, every page view.
 **1. Origin (server).** In production (`VERCEL_ENV === "production"`), the
 layout passes the ID only when the request host is the tenant's custom domain
 (`tenantForCustomHost(host)` returns this tenant). On the kuunyi subdomain it
-passes `null`. Outside production the subdomain is allowed, so UAT works
-without a custom domain; staging staff accounts are test accounts.
+passes `null`. Outside production (local, Vercel previews, staging) it passes
+`null` unless the server env var `GTM_ALLOW_NON_PRODUCTION` is exactly
+`"true"`; with it, any host is allowed, so UAT works without a custom domain
+(staging staff accounts are test accounts). The default is off because those
+hosts share an origin with `/admin`.
 
 A tenant that wants GTM in production therefore needs a custom domain first.
 This is the only rule that fully separates GTM from staff sessions: a cookie
@@ -215,14 +245,47 @@ Effect order makes this work for the priority token: the event page's
 capture effect (child) moves `#pa=` into `sessionStorage` before the layout's
 effect (parent) runs the check.
 
-**Residual risk.** On the subdomain outside production, a staff session
-created in another tab *after* GTM loaded is readable. Accepted for UAT only;
-rule 1 removes it in production.
+**4. Clean from the start of the document (client).**
+
+- The document's initial URL (its navigation timing entry) must be
+  same-origin, a tracked path, and free of sensitive query or hash params.
+  If it is unavailable or malformed, GTM stays off.
+- Only the **first** evaluation in a document can turn GTM on (a
+  per-document latch). If it is not clean, GTM stays off until a full page
+  load, even if a later soft navigation looks clean. Once on, soft moves
+  between tracked pages keep it; any later evaluation that is not clean stops
+  rendering it for the rest of the document. A container that has started
+  cannot be unloaded, which is why exits are full page loads.
+- A page restored from the back/forward cache (`pageshow` with `persisted`)
+  reloads, so every rule runs again on fresh state.
+- Every entry into a tracked page from an untracked one is a full page load
+  as well (for example "Back to tickets", the form's back action, and the
+  header link).
+
+**Residual risk.** On the subdomain outside production, where the opt-in is
+set, a staff session created in another tab *after* GTM loaded is readable.
+Accepted for UAT only, with test staff accounts; rule 1 removes it in
+production, and the opt-in keeps it off every other non-production
+deployment.
 
 Ad parameters are **not** on this list: `fbclid`, `ttclid` and `utm_*` are
 how Meta and TikTok attribute a landing to an ad, so they must reach the
 pixels unchanged. Ad links should point straight at `/enroll/[slug]` with
 these parameters and nothing else.
+
+### Intended fail-closed behaviours
+
+These look like lost tracking but are the rules working:
+
+- **After a failed checkout POST, or after a Stripe payment, GTM stays off
+  for the rest of the tab.** `ck_<cart_key>` stays after a failed POST, and
+  Stripe leaves a `cs_` key; neither is on the storage allowlist.
+- **A tracked page reached from an untracked one does not load GTM.**
+  Untracked routes send `Referrer-Policy: strict-origin`, so the referrer is
+  the bare origin, whose path `/` is not a tracked page.
+- **A document that started dirty keeps GTM off** (a sensitive param, an
+  untracked first page, or a dirty first evaluation), until a full page load
+  of a clean tracked URL.
 
 ### Leaving a tracked page
 
@@ -258,7 +321,9 @@ creation therefore moves to a new untracked page,
 terms acceptance (no ref, no idempotency key, no personal data) under a
 `cart_<digits>` key and does a full page load there. The new page creates the
 idempotency key, keeps it under `ck_<cart_key>` (not on the GTM storage
-allowlist), creates the order and moves on to `/checkout/?ref=…`. Details in the phase 1 plan, task 4b.
+allowlist), creates the order and moves on to `/checkout/?ref=…`. A stored
+key is reused only when the page is reloaded; any other arrival mints a new
+one. Details in the phase 1 plan, task 4b.
 
 The other buy flow already complies: the event page sends the buyer to
 `/enroll/form`, which creates the order and is untracked. The only other API
@@ -272,9 +337,12 @@ Navigating between allowlisted pages can stay client-side.
 
 ### Referrer
 
-The existing `Referrer-Policy: strict-origin-when-cross-origin` in
-`next.config.mjs` already limits what the next page sends to third parties to
-the origin. No change.
+The global `Referrer-Policy: strict-origin-when-cross-origin` in
+`next.config.mjs` limits what the next page sends to third parties to the
+origin. Untracked routes (checkout, form, payment, status, success, interest)
+override it with `strict-origin`, so they never hand a full same-origin URL
+to the next page either. The `source` patterns are written without a trailing
+slash and rely on `trailingSlash` staying unset; a test pins that.
 
 ### Content Security Policy
 
@@ -360,12 +428,14 @@ traffic, ad landing and `begin_checkout`.
 
 ## Rollout
 
-1. Migration (column + CHECK) on EduEnroll-dev, then staging.
+1. Migration (column + CHECK + trigger) on EduEnroll-dev. Staging reads the
+   dev database, so there is no separate staging apply.
 2. Ship the component, routes, superadmin field and settings line behind the
    column. With no IDs set there is no visible change.
 3. Sky Festival sends their container ID (received 2026-10-30:
-   `GTM-K7N27G9J`). We set it on staging first, they verify with GTM Preview,
-   then we set it on production.
+   `GTM-K7N27G9J`). We set `GTM_ALLOW_NON_PRODUCTION=true` on the staging
+   deployment and the ID on staging first, they verify with GTM Preview, then
+   we set it on production.
 
    Sky Festival starts its ads once our UAT (staging) environment has GTM
    running for them (2026-10-30). So phase 1 on staging, with their container
@@ -400,3 +470,9 @@ Turning it off is clearing the field. No deploy needed.
    the tenant's settings, with owner-only access and an audit log?
 6. **Terms / privacy page.** Does `/privacy` need a line that organisers may
    use analytics on event pages?
+7. **Vendor pixel storage keys.** The storage allowlist holds only
+   `cart_<digits>`. Pixels loaded by the container (for example TikTok's)
+   may write their own `localStorage` keys, which would then keep GTM off on
+   the next page load. Check which keys appear after the GTM Preview pass,
+   and allowlist a key only once it is confirmed to hold nothing sensitive.
+   Nothing is allowlisted for this yet.
