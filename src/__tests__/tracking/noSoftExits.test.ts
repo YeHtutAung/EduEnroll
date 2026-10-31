@@ -34,16 +34,6 @@ const ALLOWED_SOFT_TARGETS: RegExp[] = [
   /^`\/enroll\/\$\{[^}]+\}\/tickets\/?`$/,
 ];
 
-/**
- * TEMPORARY, per file. EvTrustedOfficialTemplate still creates the order on
- * /tickets and then moves softly to the untracked checkout page.
- * TODO(4b): task 4b moves order creation to /checkout/new and replaces this
- * exit with hardNavigate. Delete this entry in that change.
- */
-const TEMPORARY_FILE_EXCEPTIONS: Record<string, RegExp[]> = {
-  "EvTrustedOfficialTemplate.tsx": [/^`\/enroll\/\$\{slug\}\/checkout\/\?ref=\$\{data\.enrollment_ref\}`$/],
-};
-
 function stripComments(src: string): string {
   return src
     .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
@@ -92,7 +82,7 @@ function files(): { label: string; path: string; allowed: RegExp[] }[] {
     out.push({
       label: `${TEMPLATES_DIR}/${f}`,
       path: join(ROOT, TEMPLATES_DIR, f),
-      allowed: TEMPORARY_FILE_EXCEPTIONS[f] ?? [],
+      allowed: [] as RegExp[],
     });
   }
   return out;
