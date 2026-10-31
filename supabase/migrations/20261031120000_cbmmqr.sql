@@ -471,7 +471,8 @@ GRANT EXECUTE ON FUNCTION public.complete_cbmmqr_replace(uuid, uuid, text, text,
 -- ── 7. bind_cbmmqr_settlement ───────────────────────────────────────────────
 -- Spec §5.5 step 1. Binds CB's qrReferenceNo and transactionId to this payment
 -- under a row lock, BEFORE settleMmqrPayment() transitions it. A replay with
--- the same values is 'bound'; anything different is refused.
+-- the same values is 'bound'; anything different is refused, and so is a
+-- row that is no longer the live order ('not_live').
 CREATE FUNCTION public.bind_cbmmqr_settlement(
   p_payment_ref     text,
   p_qr_reference_no text,
@@ -503,6 +504,18 @@ BEGIN
      OR (v_pay.bank_reference IS NOT NULL AND v_pay.bank_reference <> p_transaction_id)
   THEN
     RETURN 'mismatch';
+  END IF;
+
+  -- Only the live order binds. A row retired by complete_cbmmqr_replace or
+  -- marked FAILED stays awaiting_payment, and settleMmqrPayment() would
+  -- otherwise settle it beside its replacement. A replay of the transaction
+  -- already bound here, or a row already verified, still binds.
+  IF NOT (
+       (v_pay.status = 'awaiting_payment' AND v_pay.mmqr_status IS NOT DISTINCT FROM 'PENDING')
+    OR v_pay.status = 'verified'
+    OR v_pay.bank_reference IS NOT DISTINCT FROM p_transaction_id
+  ) THEN
+    RETURN 'not_live';
   END IF;
 
   BEGIN

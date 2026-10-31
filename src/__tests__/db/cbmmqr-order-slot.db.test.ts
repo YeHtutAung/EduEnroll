@@ -394,6 +394,31 @@ describe("bind_cbmmqr_settlement", () => {
   it("not_found for a reference that is not a CB payment", async () => {
     expect(await bind("KBZ_none", "QR-1", "TXN-1")).toBe("not_found");
   });
+
+  it("not_live for a row retired by a replacement; nothing is bound, the replacement still binds", async () => {
+    const { tenantId, enrollmentId } = await makeWorld();
+    await seedLive(enrollmentId, tenantId, REF(1), { orderRef: "QR-1" });
+    expect((await replace(enrollmentId, tenantId, REF(1), "EXPIRED", REF(2)))[0].outcome).toBe("replaced");
+    expect(await bind(REF(1), "QR-1", "TXN-1")).toBe("not_live");
+    const [old] = await sql(`SELECT bank_reference, status FROM payments WHERE payment_ref=$1`, [REF(1)]);
+    expect(old).toEqual({ bank_reference: null, status: "awaiting_payment" });
+    expect(await bind(REF(2), "QR-2", "TXN-2")).toBe("bound");
+  });
+
+  it("not_live for a row marked FAILED", async () => {
+    const { tenantId, enrollmentId } = await makeWorld();
+    await seedLive(enrollmentId, tenantId, REF(1), { orderRef: "QR-1" });
+    await sql(`UPDATE payments SET mmqr_status='FAILED' WHERE payment_ref=$1`, [REF(1)]);
+    expect(await bind(REF(1), "QR-1", "TXN-1")).toBe("not_live");
+  });
+
+  it("a replay after settlement is still bound", async () => {
+    const { tenantId, enrollmentId } = await makeWorld();
+    await seedLive(enrollmentId, tenantId, REF(1), { orderRef: "QR-1" });
+    expect(await bind(REF(1), "QR-1", "TXN-1")).toBe("bound");
+    await sql(`UPDATE payments SET status='verified', mmqr_status='SUCCESS' WHERE payment_ref=$1`, [REF(1)]);
+    expect(await bind(REF(1), "QR-1", "TXN-1")).toBe("bound");
+  });
 });
 
 describe("trg_protect_payment_cbmmqr_fields and the CHECK", () => {
