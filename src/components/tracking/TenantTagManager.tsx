@@ -26,8 +26,9 @@ export default function TenantTagManager({ containerId }: { containerId: string 
         isTrackedPath(pathname ?? "") &&
         isBrowserStateClean({
           location: window.location,
-          sessionStorage: window.sessionStorage,
-          localStorage: window.localStorage,
+          referrer: document.referrer,
+          sessionStorage: () => window.sessionStorage,
+          localStorage: () => window.localStorage,
           cookie: document.cookie,
         }),
     );

@@ -41,17 +41,22 @@ function stubBrowser(opts: {
   session?: string[];
   local?: string[];
   cookie?: string;
+  referrer?: string;
+  throwingSession?: boolean;
 }) {
   const storage = (keys: string[] = []) => ({
     length: keys.length,
     key: (i: number) => keys[i] ?? null,
   });
   vi.stubGlobal("window", {
-    location: { search: opts.search ?? "", hash: opts.hash ?? "" },
-    sessionStorage: storage(opts.session),
+    location: { search: opts.search ?? "", hash: opts.hash ?? "", origin: "https://sky.example.com" },
+    get sessionStorage() {
+      if (opts.throwingSession) throw new Error("SecurityError");
+      return storage(opts.session);
+    },
     localStorage: storage(opts.local),
   });
-  vi.stubGlobal("document", { cookie: opts.cookie ?? "" });
+  vi.stubGlobal("document", { cookie: opts.cookie ?? "", referrer: opts.referrer ?? "" });
 }
 
 type El = { props: { id?: string; strategy?: string; children?: unknown } } | null;
@@ -130,6 +135,24 @@ describe("TenantTagManager", () => {
 
   it("renders nothing with an sb- cookie", () => {
     expect(mount(GOOD, "/enroll/x", { cookie: "sb-abc-auth-token=1" }).second).toBeNull();
+  });
+
+  it.each([
+    ["same-origin payment", "https://sky.example.com/enroll/payment/X", false],
+    ["same-origin checkout with ref", "https://sky.example.com/enroll/x/checkout?ref=A", false],
+    ["malformed", "not a url", false],
+    ["same-origin event page", "https://sky.example.com/enroll/x", true],
+    ["cross-origin", "https://facebook.com/l.php?u=1", true],
+  ])("referrer: %s", (_n, referrer, ok) => {
+    expect(renders(mount(GOOD, "/enroll/x", { referrer }).second)).toBe(ok);
+  });
+
+  it("renders nothing when reading sessionStorage throws", () => {
+    expect(mount(GOOD, "/enroll/x", { throwingSession: true }).second).toBeNull();
+  });
+
+  it("renders nothing with ?REF=", () => {
+    expect(mount(GOOD, "/enroll/x", { search: "?REF=1" }).second).toBeNull();
   });
 
   it("renders with ?fbclid=", () => {
