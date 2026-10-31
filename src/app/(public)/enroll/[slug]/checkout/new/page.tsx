@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { createTrustedOfficialOrder } from "@/lib/enrollment/trustedOfficialCheckout";
+import { createTrustedOfficialOrder, currentNavigationType } from "@/lib/enrollment/trustedOfficialCheckout";
 
 // Untracked (under checkout/**): creates the order from the stash left by
 // /tickets so that no tracked page ever sees an enrollment ref or its
@@ -22,7 +22,11 @@ function CheckoutNew() {
   useEffect(() => {
     if (started.current) return;
     started.current = true;
-    createTrustedOfficialOrder({ slug, cartKey }).then((result) => {
+    createTrustedOfficialOrder({
+      slug,
+      cartKey,
+      navigationType: currentNavigationType(window.performance),
+    }).then((result) => {
       // /tickets is tracked: enter it with a full page load, never a soft move.
       if (result.kind === "redirect-tickets") window.location.replace(`/enroll/${slug}/tickets/`);
       else if (result.kind === "created") router.replace(`/enroll/${slug}/checkout/?ref=${result.ref}`);

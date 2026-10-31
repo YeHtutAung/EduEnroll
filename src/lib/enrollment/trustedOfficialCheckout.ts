@@ -65,6 +65,23 @@ export function parseCartStash(raw: string | null, slug: string): CartStash | nu
   };
 }
 
+/**
+ * The current document's navigation type ("navigate", "reload",
+ * "back_forward", "prerender"). Undefined when the API is missing, has no
+ * entry, or throws.
+ */
+export function currentNavigationType(
+  perf: { getEntriesByType(type: string): ArrayLike<object> } | undefined,
+): string | undefined {
+  try {
+    const entry = perf?.getEntriesByType("navigation")[0] as { type?: unknown } | undefined;
+    const t = entry?.type;
+    return typeof t === "string" ? t : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function readItem(key: string): string | null {
   try {
     return sessionStorage.getItem(key);
@@ -80,6 +97,8 @@ function readItem(key: string): string | null {
 export async function createTrustedOfficialOrder(args: {
   slug: string;
   cartKey: string | null;
+  /** See currentNavigationType. Only "reload" may reuse a stored key. */
+  navigationType: string | undefined;
 }): Promise<CheckoutNewResult> {
   const { slug, cartKey } = args;
   if (!cartKey || !/^\d+$/.test(cartKey)) return { kind: "redirect-tickets" };
@@ -89,8 +108,10 @@ export async function createTrustedOfficialOrder(args: {
 
   // The key lives only in ck_<cart_key>, never in the stash. It is written BEFORE
   // the POST so a reload mid-request re-sends the same key and gets the same order.
+  // A stored key is reused only on a reload of this same page; any other arrival
+  // (including an unknown navigation type) mints a fresh key and overwrites it.
   const ckKey = idempotencyStorageKey(cartKey);
-  let idempotencyKey = readItem(ckKey);
+  let idempotencyKey = args.navigationType === "reload" ? readItem(ckKey) : null;
   if (!idempotencyKey) {
     idempotencyKey = randomId();
     try {
