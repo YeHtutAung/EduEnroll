@@ -9,11 +9,20 @@ import { isTrackedPath } from "@/lib/tagManager";
 // page must be a full page load: a plain <a href> or hardNavigate().
 // Design: docs/superpowers/specs/2026-10-30-tenant-gtm-design.md
 //
+// These scans are TRIPWIRES, NOT PROOFS. They read source as text and catch the
+// usual ways a soft navigation gets written; code written to dodge them would
+// pass. Review still matters.
+//
 // This test reads files as text. It flags:
 //   - router.push / router.replace whose target is not allowlisted
+//   - useRouter() bound to any name but `router`, destructured, or used inline
+//     (so the router.* check above cannot be sidestepped by renaming)
 //   - <Link href> whose target is not allowlisted
-//   - window.location / location.href assignments and location.assign/replace
-//     used directly (hardNavigate in tagManager.ts is the one sanctioned way)
+//   - next/link imported under any name but `Link`
+//   - any assignment to location (window.location =, document.location =,
+//     location.href =, ...) and location.assign/replace used directly.
+//     hardNavigate in src/lib/tagManager.ts is the one sanctioned way, and that
+//     file is not in the scanned set.
 // Plain <a href> is always a full page load and is not flagged.
 
 const ROOT = process.cwd();
@@ -71,11 +80,29 @@ export function scanSource(src: string, extraAllowed: RegExp[] = []): Finding[] 
   }
 
   for (const m of code.matchAll(
-    /\b(?:window\s*\.\s*)?location\s*(?:\.\s*href\s*=|\.\s*(?:assign|replace)\s*\()/g,
+    /\b(?:(?:window|document|self|globalThis)\s*\.\s*)?location\s*(?:\.\s*(?:href|pathname|search|host|hostname|origin|port|protocol)\s*)?=(?!=)|\blocation\s*\.\s*(?:assign|replace)\s*\(/g,
   )) {
     findings.push({ kind: "location assignment", target: m[0] });
   }
 
+  findings.push(...routerAliasFindings(code));
+
+  // next/link under another name would escape the <Link> check.
+  for (const m of code.matchAll(/import\s+([^;]*?)\s+from\s+["']next\/link["']/g)) {
+    if (m[1].trim() !== "Link") findings.push({ kind: "aliased next/link import", target: m[1].trim() });
+  }
+
+  return findings;
+}
+
+/** useRouter() bound to anything but `const router`, so router.* checks cannot be renamed around. */
+function routerAliasFindings(code: string): Finding[] {
+  const findings: Finding[] = [];
+  for (const m of code.matchAll(/(?:\b(const|let|var)\s+([^=;]+?)\s*=\s*)?\buseRouter\s*\(\s*\)(\s*\.\s*\w+)?/g)) {
+    const binding = m[2]?.trim();
+    if (m[3]) findings.push({ kind: "useRouter() used inline", target: m[0] });
+    else if (binding !== "router") findings.push({ kind: "useRouter alias", target: m[0] });
+  }
   return findings;
 }
 
@@ -131,6 +158,35 @@ describe("the scanner itself", () => {
   it("flags direct location assignment", () => {
     expect(scanSource('window.location.href = "/x";')).toHaveLength(1);
     expect(scanSource('location.assign("/x");')).toHaveLength(1);
+  });
+
+  it("flags every kind of location assignment", () => {
+    expect(scanSource('window.location = "/x";')).toHaveLength(1);
+    expect(scanSource('document.location = "/x";')).toHaveLength(1);
+    expect(scanSource('location.href = "/x";')).toHaveLength(1);
+    expect(scanSource('location = "/x";')).toHaveLength(1);
+    expect(scanSource('window.location.pathname = "/x";')).toHaveLength(1);
+    expect(scanSource('location.replace("/x");')).toHaveLength(1);
+    expect(scanSource('if (window.location.href === "/x") {}')).toEqual([]);
+    expect(scanSource("const p = window.location.pathname;")).toEqual([]);
+  });
+
+  it("allows the canonical router binding", () => {
+    expect(scanSource("const router = useRouter();\nrouter.push(`/enroll/${s}`);")).toEqual([]);
+    expect(scanSource('import { useRouter } from "next/navigation";')).toEqual([]);
+  });
+
+  it("flags useRouter aliasing, destructuring and inline use", () => {
+    expect(scanSource("const r = useRouter();\nr.push(`/enroll/form`);")).toHaveLength(1);
+    expect(scanSource("const { push } = useRouter();\npush(`/enroll/form`);")).toHaveLength(1);
+    expect(scanSource("let nav = useRouter();")).toHaveLength(1);
+    expect(scanSource("useRouter().push(`/enroll/form`);")).toHaveLength(1);
+  });
+
+  it("flags an aliased next/link import", () => {
+    expect(scanSource('import A from "next/link";\n<A href="/enroll/form">x</A>')).toHaveLength(1);
+    expect(scanSource('import { default as A } from "next/link";')).toHaveLength(1);
+    expect(scanSource('import Link from "next/link";')).toEqual([]);
   });
 
   it("ignores commented-out code and plain anchors", () => {

@@ -8,6 +8,10 @@ import { describe, expect, it } from "vitest";
 // therefore lives on the untracked /checkout/new page. This fails if order creation
 // or its key ever moves back.
 // Design: docs/superpowers/specs/2026-10-30-tenant-gtm-design.md
+//
+// This scan is a TRIPWIRE, NOT A PROOF. It reads source as text and catches the
+// usual ways order creation or its key could come back; code written to dodge
+// it would pass. Review still matters.
 
 const ROOT = process.cwd();
 const TRACKED_PAGES = [
@@ -33,6 +37,10 @@ export function scanSource(src: string): string[] {
   if (/enrollment_ref/.test(code)) findings.push("enrollment_ref");
   if (/idempotency_key/.test(code)) findings.push("idempotency_key");
   if (/\brandomId\b/.test(code)) findings.push("randomId");
+  // The order-creation module belongs to /checkout/new only.
+  if (/from\s+["'][^"']*\/trustedOfficialCheckout["']|import\s*\(\s*["'][^"']*\/trustedOfficialCheckout["']/.test(code)) {
+    findings.push("imports trustedOfficialCheckout");
+  }
   return findings;
 }
 
@@ -73,6 +81,19 @@ describe("the scanner itself", () => {
     expect(scanSource("const r = data.enrollment_ref;")).toEqual(["enrollment_ref"]);
     expect(scanSource("body = { idempotency_key: k }")).toEqual(["idempotency_key"]);
     expect(scanSource('import { randomId } from "@/lib/randomId";\nrandomId();')).toEqual(["randomId"]);
+  });
+
+  it("flags importing the order-creation module", () => {
+    expect(
+      scanSource('import { parseCartStash } from "@/lib/enrollment/trustedOfficialCheckout";'),
+    ).toEqual(["imports trustedOfficialCheckout"]);
+    expect(scanSource('import x from "../../lib/enrollment/trustedOfficialCheckout";')).toEqual([
+      "imports trustedOfficialCheckout",
+    ]);
+    expect(scanSource('const m = await import("@/lib/enrollment/trustedOfficialCheckout");')).toEqual([
+      "imports trustedOfficialCheckout",
+    ]);
+    expect(scanSource('import { x } from "@/lib/enrollment/other";')).toEqual([]);
   });
 
   it("ignores commented-out code and prose comments", () => {

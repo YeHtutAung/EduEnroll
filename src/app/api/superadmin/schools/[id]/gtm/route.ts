@@ -8,12 +8,20 @@ import { normalizeGtmContainerId } from "@/lib/tagManager";
 // lets the service role change tenants.gtm_container_id, so this writes
 // through the admin client after the superadmin check.
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } },
 ) {
   const auth = await requireSuperadmin();
-  if ("error" in auth && auth.error) return auth.error;
+  if ("error" in auth) return auth.error;
+  const superadminId = auth.profile.id;
+
+  // tenants.id is a uuid: anything else is a bad request, not a database error.
+  if (!UUID_RE.test(params.id)) {
+    return NextResponse.json({ error: "Invalid school id" }, { status: 400 });
+  }
 
   let body: unknown;
   try {
@@ -75,7 +83,7 @@ export async function PUT(
   }
 
   console.log(
-    `[gtm] tenant=${params.id} changed by superadmin=${auth.profile!.id}: ${existing.gtm_container_id ?? "null"} -> ${next ?? "null"}`,
+    `[gtm] tenant=${params.id} changed by superadmin=${superadminId}: ${existing.gtm_container_id ?? "null"} -> ${next ?? "null"}`,
   );
 
   return NextResponse.json({ gtm_container_id: next });

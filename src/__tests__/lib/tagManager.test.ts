@@ -1,4 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   GTM_CONTAINER_ID_RE,
   normalizeGtmContainerId,
@@ -82,28 +84,38 @@ describe("gtmAllowedOnHost", () => {
     else process.env.TENANT_CUSTOM_DOMAINS = saved;
   });
 
+  const allowed = (host: string, tenantSlug: string, isProduction: boolean, allowNonProduction: boolean) =>
+    gtmAllowedOnHost({ host, tenantSlug, isProduction, allowNonProduction });
+
   it("production: custom domain of the tenant is allowed", () => {
-    expect(
-      gtmAllowedOnHost({ host: "tickets.skyfest.com", tenantSlug: "skyfestival", isProduction: true }),
-    ).toBe(true);
+    expect(allowed("tickets.skyfest.com", "skyfestival", true, false)).toBe(true);
   });
   it("production: the tenant subdomain is not allowed", () => {
-    expect(
-      gtmAllowedOnHost({ host: "skyfestival.kuunyi.com", tenantSlug: "skyfestival", isProduction: true }),
-    ).toBe(false);
+    expect(allowed("skyfestival.kuunyi.com", "skyfestival", true, false)).toBe(false);
   });
   it("production: another tenant's custom domain is not allowed", () => {
-    expect(
-      gtmAllowedOnHost({ host: "tickets.skyfest.com", tenantSlug: "other", isProduction: true }),
-    ).toBe(false);
+    expect(allowed("tickets.skyfest.com", "other", true, false)).toBe(false);
   });
-  it("non-production: any host is allowed", () => {
-    expect(
-      gtmAllowedOnHost({ host: "skyfestival.kuunyi.com", tenantSlug: "skyfestival", isProduction: false }),
-    ).toBe(true);
-    expect(
-      gtmAllowedOnHost({ host: "tickets.skyfest.com", tenantSlug: "skyfestival", isProduction: false }),
-    ).toBe(true);
+  it("production: the non-production opt-in changes nothing", () => {
+    expect(allowed("skyfestival.kuunyi.com", "skyfestival", true, true)).toBe(false);
+    expect(allowed("tickets.skyfest.com", "skyfestival", true, true)).toBe(true);
+  });
+  it("non-production: off by default, on any host", () => {
+    expect(allowed("skyfestival.kuunyi.com", "skyfestival", false, false)).toBe(false);
+    expect(allowed("tickets.skyfest.com", "skyfestival", false, false)).toBe(false);
+    expect(allowed("my-branch.vercel.app", "skyfestival", false, false)).toBe(false);
+  });
+  it("non-production: any host with the explicit opt-in", () => {
+    expect(allowed("skyfestival.kuunyi.com", "skyfestival", false, true)).toBe(true);
+    expect(allowed("tickets.skyfest.com", "skyfestival", false, true)).toBe(true);
+  });
+  it("the public layout passes the opt-in only for the exact string \"true\"", () => {
+    const src = readFileSync(join(process.cwd(), "src/app/(public)/layout.tsx"), "utf8");
+    expect(src).toMatch(/allowNonProduction:\s*process\.env\.GTM_ALLOW_NON_PRODUCTION\s*===\s*"true"/);
+  });
+  it(".env.local.example documents the opt-in, off", () => {
+    const src = readFileSync(join(process.cwd(), ".env.local.example"), "utf8");
+    expect(src).toMatch(/^GTM_ALLOW_NON_PRODUCTION=\s*$/m);
   });
 });
 
@@ -316,6 +328,15 @@ describe("pushDataLayer", () => {
     pushDataLayer("view_item", {});
     expect(win.dataLayer).toBe(existing);
     expect(existing).toHaveLength(3);
+  });
+});
+
+describe("next.config trailingSlash", () => {
+  // The Referrer-Policy sources below are written without a trailing slash;
+  // turning trailingSlash on would change which paths they match.
+  it("is not set", async () => {
+    const cfg = (await import("../../../next.config.mjs")).default as Record<string, unknown>;
+    expect("trailingSlash" in cfg).toBe(false);
   });
 });
 

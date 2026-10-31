@@ -43,14 +43,16 @@ export default async function PublicLayout({ children }: { children: React.React
   // Org-type specific tagline for header (only shown for language_school)
   const isLanguageSchool = orgType === "language_school";
 
-  // GTM runs in production only on the tenant's own custom domain. Computed
-  // here because gtmAllowedOnHost reads TENANT_CUSTOM_DOMAINS (server-only).
+  // GTM runs in production only on the tenant's own custom domain, and outside
+  // production only when the deployment opts in. Computed here because
+  // gtmAllowedOnHost reads TENANT_CUSTOM_DOMAINS and the opt-in is server-only.
   const gtmAllowed =
     !!slug &&
     gtmAllowedOnHost({
       host: headersList.get("host") ?? "",
       tenantSlug: slug,
       isProduction: process.env.VERCEL_ENV === "production",
+      allowNonProduction: process.env.GTM_ALLOW_NON_PRODUCTION === "true",
     });
 
   return (
