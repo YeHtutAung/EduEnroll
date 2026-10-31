@@ -14,6 +14,7 @@ interface Tenant {
   subdomain: string;
   plan: string;
   currency: string;
+  gtm_container_id: string | null;
   created_at: string;
 }
 
@@ -53,12 +54,19 @@ export default function SchoolDetailPage() {
   const [loading, setLoading] = useState(true);
   const [showSuspend, setShowSuspend] = useState(false);
   const [toggling, setToggling] = useState(false);
+  const [gtmInput, setGtmInput] = useState("");
+  const [gtmSaving, setGtmSaving] = useState(false);
+  const [gtmMessage, setGtmMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     async function load() {
       try {
         const res = await fetch(`/api/superadmin/schools/${id}`);
-        if (res.ok) setData(await res.json());
+        if (res.ok) {
+          const detail: SchoolDetail = await res.json();
+          setData(detail);
+          setGtmInput(detail.tenant.gtm_container_id ?? "");
+        }
       } catch {
         /* ignore */
       } finally {
@@ -89,6 +97,33 @@ export default function SchoolDetailPage() {
     } finally {
       setToggling(false);
       setShowSuspend(false);
+    }
+  }
+
+  async function saveGtm(value: string | null) {
+    setGtmSaving(true);
+    setGtmMessage(null);
+    try {
+      const res = await fetch(`/api/superadmin/schools/${id}/gtm`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ gtm_container_id: value }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setGtmMessage({ ok: false, text: json.error ?? "Failed to save" });
+        return;
+      }
+      const saved: string | null = json.gtm_container_id ?? null;
+      setData((prev) =>
+        prev ? { ...prev, tenant: { ...prev.tenant, gtm_container_id: saved } } : prev
+      );
+      setGtmInput(saved ?? "");
+      setGtmMessage({ ok: true, text: saved ? `Saved ${saved}` : "Cleared" });
+    } catch {
+      setGtmMessage({ ok: false, text: "Failed to save" });
+    } finally {
+      setGtmSaving(false);
     }
   }
 
@@ -211,6 +246,51 @@ export default function SchoolDetailPage() {
               : "None"}
           </p>
         </div>
+      </div>
+
+      {/* Google Tag Manager */}
+      <div className="bg-white rounded-xl border border-gray-200 p-6">
+        <h2 className="text-base font-bold text-gray-900">Google Tag Manager</h2>
+        <p className="text-sm text-gray-600 mt-2">
+          Current:{" "}
+          {tenant.gtm_container_id ? (
+            <span className="font-mono font-semibold text-gray-900">{tenant.gtm_container_id}</span>
+          ) : (
+            <span className="text-gray-400">None</span>
+          )}
+        </p>
+        <div className="flex flex-wrap items-center gap-2 mt-3">
+          <input
+            type="text"
+            value={gtmInput}
+            onChange={(e) => setGtmInput(e.target.value)}
+            placeholder="GTM-XXXXXXX"
+            disabled={gtmSaving}
+            className="w-56 px-3 py-2 text-sm font-mono border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#4c1d95]/30"
+          />
+          <button
+            onClick={() => saveGtm(gtmInput)}
+            disabled={gtmSaving}
+            className="px-4 py-2 text-sm font-medium text-white bg-[#4c1d95] rounded-lg hover:bg-[#3b1677] transition-colors disabled:opacity-50"
+          >
+            {gtmSaving ? "Saving..." : "Save"}
+          </button>
+          <button
+            onClick={() => saveGtm(null)}
+            disabled={gtmSaving || !tenant.gtm_container_id}
+            className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-lg hover:bg-gray-200 transition-colors disabled:opacity-50"
+          >
+            Clear
+          </button>
+        </div>
+        {gtmMessage && (
+          <p className={`text-sm mt-2 ${gtmMessage.ok ? "text-emerald-700" : "text-red-600"}`}>
+            {gtmMessage.text}
+          </p>
+        )}
+        <p className="text-xs text-gray-400 mt-3">
+          Loads on the tenant&apos;s event list and event pages only.
+        </p>
       </div>
 
       {/* Intakes table */}
