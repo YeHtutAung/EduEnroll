@@ -1,7 +1,8 @@
 import { headers } from "next/headers";
-import Link from "next/link";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { extractSubdomainFromHost } from "@/lib/tenant";
+import { gtmAllowedOnHost } from "@/lib/tagManager";
+import TenantTagManager from "@/components/tracking/TenantTagManager";
 
 // ─── Server component: resolve tenant name for public pages ─────────────────
 
@@ -15,6 +16,7 @@ export default async function PublicLayout({ children }: { children: React.React
   const schoolNameMm: string | null = null;
   let logoUrl: string | null = null;
   let orgType = "language_school";
+  let gtmContainerId: string | null = null;
 
   if (slug) {
     const supabase = createAdminClient();
@@ -27,17 +29,40 @@ export default async function PublicLayout({ children }: { children: React.React
     if (tenant?.name) schoolName = tenant.name;
     if (tenant?.logo_url) logoUrl = tenant.logo_url;
     if (tenant?.org_type) orgType = tenant.org_type;
+
+    // Separate query: if the column is missing or the read fails, GTM is
+    // simply off and the header above is unaffected.
+    const { data: gtm, error: gtmError } = (await supabase
+      .from("tenants")
+      .select("gtm_container_id")
+      .eq("subdomain", slug)
+      .maybeSingle()) as { data: { gtm_container_id: string | null } | null; error: unknown };
+    gtmContainerId = gtmError ? null : (gtm?.gtm_container_id ?? null);
   }
 
   // Org-type specific tagline for header (only shown for language_school)
   const isLanguageSchool = orgType === "language_school";
 
+  // GTM runs in production only on the tenant's own custom domain, and outside
+  // production only when the deployment opts in. Computed here because
+  // gtmAllowedOnHost reads TENANT_CUSTOM_DOMAINS and the opt-in is server-only.
+  const gtmAllowed =
+    !!slug &&
+    gtmAllowedOnHost({
+      host: headersList.get("host") ?? "",
+      tenantSlug: slug,
+      isProduction: process.env.VERCEL_ENV === "production",
+      allowNonProduction: process.env.GTM_ALLOW_NON_PRODUCTION === "true",
+    });
+
   return (
     <div className="flex min-h-screen flex-col bg-white">
+      <TenantTagManager containerId={gtmAllowed ? gtmContainerId : null} />
       {/* ─── Header ──────────────────────────────────────────────── */}
       <header className="border-b border-gray-200 bg-white">
         <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-4 sm:px-6">
-          <Link href="/" className="flex items-center gap-3">
+          {/* Plain <a>: a full page load, so GTM never carries across documents. */}
+          <a href="/" className="flex items-center gap-3">
             {logoUrl && (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={logoUrl} alt="" className="w-10 h-10 rounded-lg object-contain shrink-0" />
@@ -48,7 +73,7 @@ export default async function PublicLayout({ children }: { children: React.React
                 <span className="font-myanmar text-sm text-[#1a6b3c]">{schoolNameMm}</span>
               )}
             </span>
-          </Link>
+          </a>
           {isLanguageSchool && (
             <p className="hidden text-right text-xs text-gray-500 sm:block">
               Japanese Language School

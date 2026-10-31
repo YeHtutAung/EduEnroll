@@ -515,6 +515,8 @@ function SettingsContent() {
 
   // ── Organization type + labels ────────────────────────────────────────────
   const [orgType, setOrgType] = useState("language_school");
+  // Read-only: only a superadmin can change it (a DB trigger rejects other writers).
+  const [gtmContainerId, setGtmContainerId] = useState<string | null>(null);
   const [orgLabels, setOrgLabels] = useState({
     intake: "Intake",
     class: "Level",
@@ -611,6 +613,15 @@ function SettingsContent() {
         );
         setPlatformFeeAmount(String(tenant.platform_fee_amount ?? 0));
       }
+
+      // Separate query: if the column is missing or the read fails, the GTM
+      // line is hidden and every other setting above keeps its loaded value.
+      const { data: gtm, error: gtmError } = await supabase
+        .from("tenants")
+        .select("gtm_container_id")
+        .eq("id", profile.tenant_id)
+        .single() as { data: { gtm_container_id: string | null } | null; error: unknown };
+      setGtmContainerId(gtmError ? null : (gtm?.gtm_container_id ?? null));
     } catch {
       // non-critical; keep defaults
     } finally {
@@ -1994,6 +2005,15 @@ function SettingsContent() {
                   Contact support to change your login email.
                 </p>
               </div>
+
+              {gtmContainerId && (
+                <p className="text-xs text-gray-400">
+                  <span className="font-semibold text-gray-500">Google Tag Manager:</span>{" "}
+                  <span className="font-mono">{gtmContainerId}</span> is configured for your event
+                  list and event pages. It runs only on your custom domain. Contact KuuNyi to
+                  change it.
+                </p>
+              )}
 
               <div className="pt-2">
                 <button
