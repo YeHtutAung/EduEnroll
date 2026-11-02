@@ -28,6 +28,8 @@ function orFilterToPredicate(expr: string): (r: Row) => boolean {
 function fakeTable(table: string) {
   const predicates: ((r: Row) => boolean)[] = [];
   let patch: Row | null = null;
+  let sortBy: { column: string; ascending: boolean } | null = null;
+  let maxRows: number | null = null;
 
   const execute = async () => {
     const kind: Kind = !patch ? "read" : "attempts" in patch ? "claim" : "finish";
@@ -36,7 +38,12 @@ function fakeTable(table: string) {
     const failure = fail(table, kind, patch);
     if (failure === "throw") throw new Error("socket hang up tok-meta-secret");
     if (failure) return { data: null, error: failure };
-    const rows = (db[table] ?? []).filter((r) => predicates.every((p) => p(r)));
+    let rows = (db[table] ?? []).filter((r) => predicates.every((p) => p(r)));
+    if (sortBy) {
+      const { column, ascending } = sortBy;
+      rows = [...rows].sort((a, b) => String(a[column]).localeCompare(String(b[column])) * (ascending ? 1 : -1));
+    }
+    if (maxRows !== null) rows = rows.slice(0, maxRows);
     if (patch) {
       for (const r of rows) Object.assign(r, patch);
       writes.push({ kind, patch, matched: rows.length });
@@ -62,6 +69,14 @@ function fakeTable(table: string) {
       predicates.push(orFilterToPredicate(expr));
       return builder;
     },
+    order(column: string, options: { ascending: boolean }) {
+      sortBy = { column, ascending: options.ascending };
+      return builder;
+    },
+    limit(n: number) {
+      maxRows = n;
+      return builder;
+    },
     async maybeSingle() {
       const { data, error } = await execute();
       return { data: data?.[0] ?? null, error };
@@ -73,12 +88,17 @@ function fakeTable(table: string) {
   return builder;
 }
 
-const mockCreateAdminClient = vi.fn(() => ({ from: (table: string) => fakeTable(table) }));
+const mockCreateAdminClient = vi.fn(() => ({
+  from: (table: string) => fakeTable(table),
+  // Only the cron's clean-up calls this.
+  rpc: async () => ({ data: [{ expired: 0, context_deleted: 0 }], error: null }),
+}));
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => mockCreateAdminClient(),
 }));
 
 const { decideRow, sendPendingConversions } = await import("@/server/conversions/sendPendingConversions");
+const { sweepConversions } = await import("@/server/conversions/sweep");
 
 // ─── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -673,6 +693,47 @@ describe("sendPendingConversions status writes", () => {
     expect(mockFetch).toHaveBeenCalledTimes(2);
     expect(fetchedBody(1).data[0].event_id).toBe(fetchedBody(0).data[0].event_id);
     expect(metaRow()).toMatchObject({ status: "sent", attempts: 2 });
+  });
+});
+
+// ─── A cron run goes through the same environment rules ─────────────────────
+
+describe("sweepConversions through the real sender", () => {
+  it("honours test codes on a non-production deployment", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("CONVERSIONS_SKY_META_TEST_CODE", "TEST123");
+
+    const counts = await sweepConversions();
+
+    expect(counts.processed).toBe(1);
+    expect(fetchedUrls()).toHaveLength(1);
+    expect(fetchedUrls()[0]).toContain("facebook");
+    expect(fetchedBody().test_event_code).toBe("TEST123");
+    expect(metaRow()).toMatchObject({ status: "sent", attempts: 1 });
+    // No test code for TikTok here, so that row is held, not sent live.
+    expect(tiktokRow()).toMatchObject({ status: "pending", attempts: 0, last_attempt_at: null });
+  });
+
+  it("sends nothing on a non-production deployment with no test code", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+
+    const counts = await sweepConversions();
+
+    expect(counts.processed).toBe(1);
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(writes).toEqual([]);
+    expect(metaRow()).toMatchObject({ status: "pending", attempts: 0 });
+    expect(tiktokRow()).toMatchObject({ status: "pending", attempts: 0 });
+  });
+
+  it("sends live, with no test code, in production even if one is set", async () => {
+    vi.stubEnv("CONVERSIONS_SKY_META_TEST_CODE", "TEST123");
+
+    await sweepConversions();
+
+    expect(fetchedUrls()).toHaveLength(2);
+    expect(fetchedBody(fetchedUrls().findIndex((u) => u.includes("facebook"))).test_event_code).toBeUndefined();
+    expect(metaRow()).toMatchObject({ status: "sent" });
   });
 });
 
