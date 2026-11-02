@@ -108,7 +108,10 @@ export default function MarketingEditor() {
     if (!window.confirm("Publish this draft to the live homepage?")) return;
     const data = await send("/publish", "POST", { expectedRevision: state!.revision });
     if (!data) return;
+    // The reload replaces the content, so fields stay locked until it's done.
+    setBusy(true);
     await load();
+    setBusy(false);
     setNotice({ kind: "ok", text: "Published." });
   }
 
@@ -165,10 +168,10 @@ export default function MarketingEditor() {
         <div className="flex flex-wrap items-center gap-2">
           <RestorePanel versions={state.versions} disabled={blocked || dirty} onRestore={restore} />
           <button type="button" className={buttonClass} disabled={blocked || !dirty} onClick={save}>Save draft</button>
-          {saved ? (
+          {saved && !blocked ? (
             <a href="/superadmin/marketing/preview" target="_blank" rel="noopener" className={buttonClass}>Preview</a>
           ) : (
-            <button type="button" className={buttonClass} disabled title="Save the draft first">Preview</button>
+            <button type="button" className={buttonClass} disabled title={saved ? undefined : "Save the draft first"}>Preview</button>
           )}
           <button
             type="button"
@@ -194,7 +197,7 @@ export default function MarketingEditor() {
             </ul>
           )}
           {notice.stale && (
-            <button type="button" className={`${buttonClass} mt-2`} onClick={() => { setNotice(null); load(); }}>
+            <button type="button" className={`${buttonClass} mt-2`} disabled={blocked} onClick={() => { setNotice(null); load(); }}>
               Reload (discards your unsaved changes)
             </button>
           )}
