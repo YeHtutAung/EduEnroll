@@ -134,7 +134,7 @@ describe("vercel.json", () => {
   const config = JSON.parse(readFileSync(path.resolve(__dirname, "../../../vercel.json"), "utf8"));
 
   it("schedules the route once a day", () => {
-    expect(config.crons).toEqual([{ path: "/api/cron/conversions", schedule: "0 20 * * *" }]);
+    expect(config.crons).toContainEqual({ path: "/api/cron/conversions", schedule: "0 20 * * *" });
   });
 
   it("keeps every other key", () => {

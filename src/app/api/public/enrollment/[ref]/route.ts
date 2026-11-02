@@ -12,6 +12,7 @@ import {
   selectOrderPayment,
 } from "@/server/payments/platformFee";
 import { summarisePartialPayment } from "@/server/payments/partialPayment";
+import { repairInterruptedFulfilment } from "@/server/payments/repairFulfilment";
 
 // "Not found" and "the query failed" are different answers, and only the first
 // is an enumeration signal.
@@ -178,9 +179,9 @@ export async function GET(
       .single() as unknown as Promise<{ data: { logo_url: string | null; primary_color: string | null; sponsor_config: unknown } | null; error: unknown }>,
     supabase
       .from("tenants")
-      .select("payment_mode, mmqr_provider, platform_fee_mode, platform_fee_amount")
+      .select("org_type, payment_mode, mmqr_provider, platform_fee_mode, platform_fee_amount")
       .eq("id", tenantId)
-      .single() as unknown as Promise<{ data: { payment_mode: string | null; mmqr_provider: string | null; platform_fee_mode: string | null; platform_fee_amount: number | null } | null; error: unknown }>,
+      .single() as unknown as Promise<{ data: { org_type: string | null; payment_mode: string | null; mmqr_provider: string | null; platform_fee_mode: string | null; platform_fee_amount: number | null } | null; error: unknown }>,
     supabase
       .from("bank_accounts")
       .select("bank_name, account_number, account_holder, qr_code_url")
@@ -207,13 +208,23 @@ export async function GET(
   // Build signed ticket JWTs for confirmed enrollments only.
   let tickets: { jti: string; tier: string; admits: number; jwt: string; qr: string }[] = [];
   if (enrollment.status === "confirmed") {
-    const { data: ticketRows } = (await supabase
-      .from("tickets")
-      .select("id, intake_id, tier, admits, exp, status")
-      .eq("enrollment_id", enrollment.id)) as unknown as {
-      data: TicketRow[] | null;
-      error: unknown;
-    };
+    const loadTicketRows = async () =>
+      ((await supabase
+        .from("tickets")
+        .select("id, intake_id, tier, admits, exp, status")
+        .eq("enrollment_id", enrollment.id)) as unknown as {
+        data: TicketRow[] | null;
+        error: unknown;
+      }).data;
+
+    let ticketRows = await loadTicketRows();
+
+    // The settlement may have been cut off before the ticket, and a buyer who
+    // left the page has no status poll left to repair it.
+    if (ticketRows?.length === 0 && tenant?.org_type === "event") {
+      await repairInterruptedFulfilment(enrollment.id);
+      ticketRows = await loadTicketRows();
+    }
 
     const validRows = (ticketRows ?? []).filter((t) => t.status === "valid");
 

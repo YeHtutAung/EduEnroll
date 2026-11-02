@@ -8,6 +8,7 @@ import {
   type CallBudget,
 } from "@/lib/kbzpay";
 import { settleMmqrPayment } from "@/server/payments/settleMmqrPayment";
+import { repairInterruptedFulfilment } from "@/server/payments/repairFulfilment";
 
 // Same 10s platform cap as the creation route. Declared rather than
 // inherited so the limit is visible next to the gateway call it bounds.
@@ -100,6 +101,8 @@ export async function GET(request: NextRequest) {
 
   // ── Already final locally — no provider call needed ────────
   if (payment.status === "verified" || payment.mmqr_status === "SUCCESS") {
+    // The request that wrote this may have been cut off before the ticket.
+    await repairInterruptedFulfilment(payment.enrollment_id);
     return NextResponse.json({ mmqr_status: "SUCCESS" });
   }
   if (payment.mmqr_status === "FAILED") {
