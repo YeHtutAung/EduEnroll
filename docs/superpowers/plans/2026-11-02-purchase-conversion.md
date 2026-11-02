@@ -119,7 +119,7 @@ SET LOCAL lock_timeout = '5s';
 
 CREATE TABLE public.tenant_conversion_settings (
   tenant_id         uuid PRIMARY KEY REFERENCES public.tenants(id) ON DELETE CASCADE,
-  config_id         text NOT NULL CHECK (config_id ~ '^[A-Z0-9_]+$'),
+  config_id         text NOT NULL UNIQUE CHECK (config_id ~ '^[A-Z0-9_]+$'),
   meta_pixel_id     text,
   tiktok_pixel_code text,
   report_currency   text NOT NULL DEFAULT 'USD' CHECK (report_currency ~ '^[A-Z]{3}$'),

@@ -187,6 +187,30 @@ afterAll(async () => {
   await pool.end();
 });
 
+// ─── Settings ───────────────────────────────────────────────────────────────
+
+describe("tenant_conversion_settings", () => {
+  it("does not let two tenants share a config_id (they would share one token)", async () => {
+    const first = await makeWorld();
+    const [{ config_id }] = await sql<{ config_id: string }>(
+      `SELECT config_id FROM tenant_conversion_settings WHERE tenant_id = $1`,
+      [first.tenantId],
+    );
+    const slug = uniq();
+    const [t] = await sql<{ id: string }>(
+      `INSERT INTO tenants (name, subdomain, org_type) VALUES ($1,$2,'event') RETURNING id`,
+      [`PCV ${slug}`, slug],
+    );
+    made.tenants.push(t.id);
+    await expect(
+      sql(
+        `INSERT INTO tenant_conversion_settings (tenant_id, config_id, report_rate) VALUES ($1,$2,0.0005)`,
+        [t.id, config_id],
+      ),
+    ).rejects.toMatchObject({ code: "23505" });
+  });
+});
+
 // ─── The enqueue trigger ────────────────────────────────────────────────────
 
 describe("enqueue trigger", () => {
