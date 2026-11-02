@@ -5,6 +5,7 @@ import {
   nextClickCookie,
   parseClickCookie,
   buildFbc,
+  forwardedClickQuery,
 } from "@/lib/conversions/clickData";
 
 describe("cleanClickValue", () => {
@@ -52,3 +53,48 @@ describe("buildFbc", () => {
 });
 
 it("has a stable cookie name", () => expect(AD_CLICK_COOKIE).toBe("kn_ad_click"));
+
+describe("capture time", () => {
+  const t0 = 1_700_000_000_000;
+  it("does not move the fbclid time when only a ttclid lands", () => {
+    const existing = nextClickCookie("?fbclid=F1", null, t0);
+    expect(parseClickCookie(nextClickCookie("?ttclid=T1", existing, t0 + 5))).toEqual({ fbclid: "F1", ttclid: "T1", at: t0 });
+  });
+  it("does not move the time on a reload of the same fbclid", () => {
+    const existing = nextClickCookie("?fbclid=F1", null, t0);
+    expect(parseClickCookie(nextClickCookie("?fbclid=F1", existing, t0 + 9)).at).toBe(t0);
+  });
+  it("moves the time when the fbclid changes", () => {
+    const existing = nextClickCookie("?fbclid=F1", null, t0);
+    expect(parseClickCookie(nextClickCookie("?fbclid=F2", existing, t0 + 9))).toMatchObject({ fbclid: "F2", at: t0 + 9 });
+  });
+});
+
+describe("parseClickCookie timestamps and encoding", () => {
+  const enc = (o: unknown) => encodeURIComponent(JSON.stringify(o));
+  it("rejects a non-positive, fractional or unsafe time", () => {
+    for (const at of [0, -5, 1.5, Number.MAX_SAFE_INTEGER + 2, "5", null]) {
+      expect(parseClickCookie(enc({ fbclid: "F1", ttclid: null, at })).at, String(at)).toBeNull();
+    }
+  });
+  it("accepts a plain JSON value, as Next's cookie parser hands over", () => {
+    expect(parseClickCookie(JSON.stringify({ fbclid: "F1", ttclid: "T1", at: 7 }))).toEqual({ fbclid: "F1", ttclid: "T1", at: 7 });
+  });
+});
+
+describe("forwardedClickQuery", () => {
+  it("forwards only fbclid and ttclid", () => {
+    expect(forwardedClickQuery(new URLSearchParams("fbclid=F1&ttclid=T1&ref=X&utm_source=a"))).toBe("?fbclid=F1&ttclid=T1");
+  });
+  it("forwards one ID alone", () => expect(forwardedClickQuery(new URLSearchParams("ttclid=T1"))).toBe("?ttclid=T1"));
+  it("drops invalid values", () => {
+    expect(forwardedClickQuery(new URLSearchParams("fbclid=%3Cx%3E&ttclid=T1"))).toBe("?ttclid=T1");
+  });
+  it("returns an empty string when there is nothing to forward", () => {
+    expect(forwardedClickQuery(new URLSearchParams("ref=X"))).toBe("");
+    expect(forwardedClickQuery(new URLSearchParams(""))).toBe("");
+  });
+  it("encodes what it forwards", () => {
+    expect(forwardedClickQuery(new URLSearchParams("fbclid=a%2Bb/c=d"))).toBe("?fbclid=a%2Bb%2Fc%3Dd");
+  });
+});

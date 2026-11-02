@@ -27,7 +27,7 @@ export function parseClickCookie(raw: string | null | undefined): ClickData {
     return {
       fbclid: cleanClickValue(parsed.fbclid),
       ttclid: cleanClickValue(parsed.ttclid),
-      at: typeof parsed.at === "number" && Number.isFinite(parsed.at) ? parsed.at : null,
+      at: typeof parsed.at === "number" && Number.isSafeInteger(parsed.at) && parsed.at > 0 ? parsed.at : null,
     };
   } catch {
     return empty;
@@ -42,10 +42,31 @@ export function nextClickCookie(search: string, existing: string | null | undefi
   if (!fbclid && !ttclid) return null;
   const current = parseClickCookie(existing);
   return encodeURIComponent(
-    JSON.stringify({ fbclid: fbclid ?? current.fbclid, ttclid: ttclid ?? current.ttclid, at: now }),
+    JSON.stringify({
+      fbclid: fbclid ?? current.fbclid,
+      ttclid: ttclid ?? current.ttclid,
+      // Only a new fbclid restarts its clock: fbc embeds this time, so a reload
+      // or a ttclid landing must not move it.
+      at: fbclid && fbclid !== current.fbclid ? now : (current.at ?? now),
+    }),
   );
 }
 
 export function buildFbc(fbclid: string, capturedAtMs: number): string {
   return `fb.1.${capturedAtMs}.${fbclid}`;
+}
+
+/**
+ * The query to carry across a redirect that would otherwise drop it: the two
+ * click IDs, validated, and nothing else. The rest of the query can hold
+ * sensitive params and must never be forwarded. Returns "" or "?a=b".
+ */
+export function forwardedClickQuery(params: URLSearchParams): string {
+  const out = new URLSearchParams();
+  const fbclid = cleanClickValue(params.get("fbclid"));
+  const ttclid = cleanClickValue(params.get("ttclid"));
+  if (fbclid) out.set("fbclid", fbclid);
+  if (ttclid) out.set("ttclid", ttclid);
+  const q = out.toString();
+  return q ? `?${q}` : "";
 }
