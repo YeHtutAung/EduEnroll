@@ -72,12 +72,19 @@ export const SENSITIVE_PARAMS = [
  *
  * - cart_<timestamp>: the ticket cart stash (class ids, quantities, fees,
  *   image URLs). No ref, token, secret or personal data.
+ * - lastExternalReferrer, lastExternalReferrerTime: written by Meta's pixel on
+ *   the first page load. The first is only ever empty, fb, ig or other, the
+ *   second a timestamp. Blocking them keeps GTM off on every later page load.
  *
  * Deliberately NOT here: pa_<slug> (priority-access token), cs_<ref> (Stripe
  * client secret), ck_<cart_key> (cart idempotency key, which can be exchanged
  * for an enrollment ref).
  */
-export const SAFE_STORAGE_KEYS: RegExp[] = [/^cart_\d+$/];
+export const SAFE_STORAGE_KEYS: RegExp[] = [
+  /^cart_\d+$/,
+  /^lastExternalReferrer$/,
+  /^lastExternalReferrerTime$/,
+];
 
 interface KeyedStorage {
   readonly length: number;
@@ -243,6 +250,8 @@ type DataLayerWindow = Window & {
  * Queues an event on window.dataLayer, creating it if needed. Never a no-op:
  * events pushed before GTM starts are kept and replayed by GTM. The leading
  * { ecommerce: null } is the GA4 convention so ecommerce objects don't merge.
+ * The payload also goes in eventModel, because the common Meta pixel tag template
+ * reads currency, value and items from there in GA4 mode, not from ecommerce.
  */
 export function pushDataLayer(
   event: string,
@@ -251,8 +260,8 @@ export function pushDataLayer(
 ): void {
   const w = window as DataLayerWindow;
   w.dataLayer = w.dataLayer || [];
-  w.dataLayer.push({ ecommerce: null });
-  w.dataLayer.push({ event, ecommerce: payload, ...extra });
+  w.dataLayer.push({ ecommerce: null, eventModel: null });
+  w.dataLayer.push({ event, ecommerce: payload, eventModel: payload, ...extra });
 }
 
 const NAVIGATE_FALLBACK_MS = 300;
