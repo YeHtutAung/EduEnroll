@@ -2,7 +2,7 @@
 // Only active for language_school tenants with telegram_auto_send_invite = true.
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { decryptToken } from "@/lib/messenger/crypto";
+import { getEnrollmentBotToken } from "./enrollment-bot";
 import { sendMessageWithButtons, getChat } from "./send";
 
 interface SendInviteParams {
@@ -27,26 +27,23 @@ export async function sendChannelInviteIfEligible(
   const supabase = createAdminClient();
 
   // Check tenant settings
-  const [{ data: tenant }, { data: tgConfig }] = (await Promise.all([
-    supabase
-      .from("tenants")
-      .select("org_type, telegram_auto_send_invite")
-      .eq("id", tenantId)
-      .single(),
-    supabase
-      .from("tenant_telegram_configs")
-      .select("bot_token, enabled")
-      .eq("tenant_id", tenantId)
-      .single(),
-  ])) as unknown as [
-    { data: { org_type: string; telegram_auto_send_invite: boolean } | null; error: unknown },
-    { data: { bot_token: string | null; enabled: boolean } | null; error: unknown },
-  ];
+  const { data: tenant } = (await supabase
+    .from("tenants")
+    .select("org_type, telegram_auto_send_invite")
+    .eq("id", tenantId)
+    .single()) as {
+    data: { org_type: string; telegram_auto_send_invite: boolean } | null;
+    error: unknown;
+  };
 
   if (!tenant) return false;
   if (tenant.org_type !== "language_school") return false;
   if (!tenant.telegram_auto_send_invite) return false;
-  if (!tgConfig?.enabled || !tgConfig.bot_token) return false;
+
+  const bot = await getEnrollmentBotToken(supabase, tenantId, "channel-invite");
+  if (bot.status !== "ready") return false;
+
+  const { botToken } = bot;
 
   // Find channel for this class
   const { data: channel } = (await supabase
@@ -64,15 +61,6 @@ export async function sendChannelInviteIfEligible(
   };
 
   if (!channel?.telegram_invite_link) return false;
-
-  // Decrypt bot token and send invite
-  let botToken: string;
-  try {
-    botToken = decryptToken(tgConfig.bot_token);
-  } catch {
-    console.error("[channel-invite] Failed to decrypt bot token");
-    return false;
-  }
 
   // Fetch live channel name from Telegram (falls back to DB name)
   let channelName = channel.telegram_channel_name ?? "Class Channel";

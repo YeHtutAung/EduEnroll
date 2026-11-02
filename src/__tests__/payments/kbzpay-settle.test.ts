@@ -14,10 +14,12 @@ let state: {
   enrollment: Row | null;
   updateRows: { id: string }[];
   updateError: { message: string } | null;
+  claimRows: { id: string }[];
 };
 
 let paymentUpdates: Row[];
 let enrollmentUpdates: Row[];
+let claimFilters: string[];
 
 const mockFrom = vi.fn();
 vi.mock("@/lib/supabase/admin", () => ({
@@ -64,7 +66,9 @@ beforeEach(() => {
     enrollment: { id: "enr-1", status: "confirmed" },
     updateRows: [{ id: "pay-1" }],
     updateError: null,
+    claimRows: [{ id: "enr-1" }],
   };
+  claimFilters = [];
   mockIssueTickets.mockResolvedValue(undefined);
   mockNotify.mockResolvedValue(undefined);
 
@@ -98,7 +102,14 @@ beforeEach(() => {
         }),
         update: (payload: Row) => {
           enrollmentUpdates.push(payload);
-          return { eq: async () => ({ data: null, error: null }) };
+          return {
+            eq: () => ({
+              or: (filter: string) => {
+                claimFilters.push(filter);
+                return { select: async () => ({ data: state.claimRows, error: null }) };
+              },
+            }),
+          };
         },
       };
     }
@@ -175,7 +186,26 @@ describe("settlement", () => {
   // unsynchronised source of truth.
   it("NEVER writes enrollments.status", async () => {
     await settle();
-    expect(enrollmentUpdates).toHaveLength(0);
+    expect(enrollmentUpdates.filter((u) => "status" in u)).toHaveLength(0);
+  });
+
+  // A status poll can reach a verified order while the winner is still working,
+  // repair it, and send the email first.
+  it("sends no second email when a repair already claimed it", async () => {
+    state.claimRows = [];
+
+    const outcome = await settle();
+
+    expect(outcome.kind).toBe("settled");
+    expect(mockIssueTickets).toHaveBeenCalledWith("enr-1");
+    expect(mockNotify).not.toHaveBeenCalled();
+  });
+
+  it("claims the email against this settlement's paid_at", async () => {
+    await settle();
+
+    expect(enrollmentUpdates[0]).toHaveProperty("status_notified_at");
+    expect(claimFilters[0]).toBe(`status_notified_at.is.null,status_notified_at.lt."${paymentUpdates[0].paid_at}"`);
   });
 
   it("returns already_settled when the conditional update affects zero rows", async () => {

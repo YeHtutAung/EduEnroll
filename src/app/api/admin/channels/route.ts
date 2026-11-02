@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireOwner, badRequest } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { decryptToken } from "@/lib/messenger/crypto";
+import { getEnrollmentBotToken } from "@/lib/telegram/enrollment-bot";
 import {
   getChat,
   getMe,
@@ -78,20 +78,20 @@ export async function POST(request: NextRequest) {
 
   const supabase = createAdminClient();
 
-  // Get tenant info and telegram config
-  const [{ data: tenant }, { data: tgConfig }] = (await Promise.all([
+  // Get tenant info and the enrollment bot
+  const [{ data: tenant }, bot] = (await Promise.all([
     supabase.from("tenants").select("org_type").eq("id", tenantId).single(),
-    supabase
-      .from("tenant_telegram_configs")
-      .select("bot_token, enabled")
-      .eq("tenant_id", tenantId)
-      .single(),
+    getEnrollmentBotToken(supabase, tenantId, "admin-channels"),
   ])) as unknown as [
     { data: { org_type: string } | null; error: unknown },
-    { data: { bot_token: string | null; enabled: boolean } | null; error: unknown },
+    Awaited<ReturnType<typeof getEnrollmentBotToken>>,
   ];
 
-  if (!tgConfig?.bot_token || !tgConfig.enabled) {
+  if (bot.status === "failed") {
+    return NextResponse.json({ error: "Could not load the Telegram bot." }, { status: 500 });
+  }
+
+  if (bot.status !== "ready") {
     return badRequest("Telegram bot is not connected or not enabled.");
   }
 
@@ -99,12 +99,7 @@ export async function POST(request: NextRequest) {
     return badRequest("Channel management is only available for language schools.");
   }
 
-  let botToken: string;
-  try {
-    botToken = decryptToken(tgConfig.bot_token);
-  } catch {
-    return NextResponse.json({ error: "Failed to decrypt bot token." }, { status: 500 });
-  }
+  const { botToken } = bot;
 
   // Validate bot is admin of the channel
   const meResult = await getMe(botToken);

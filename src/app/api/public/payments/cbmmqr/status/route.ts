@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { CB_SUCCESS, REFERENCE_PATTERN, checkStatus, getCbMerchant, type CallBudget, type CbMerchant, type StatusResult } from "@/lib/cbmmqr";
 import { settleCbmmqrPayment } from "@/server/payments/settleCbmmqrPayment";
+import { repairInterruptedFulfilment } from "@/server/payments/repairFulfilment";
 
 export const maxDuration = 10;
 /** Smaller than the create route's: settlement runs after the call (as KBZPay). */
@@ -13,6 +14,7 @@ const GATEWAY_BUDGET_MS = 6_000;
 // retired row simply stays PENDING here while the modal's retry path takes over.
 
 type PaymentRow = {
+  enrollment_id: string;
   payment_ref: string;
   payment_method: string | null;
   cbmmqr_merchant: string | null;
@@ -35,7 +37,7 @@ export async function GET(request: NextRequest) {
 
   const { data: payment, error } = (await createAdminClient()
     .from("payments")
-    .select("payment_ref, payment_method, cbmmqr_merchant, status, mmqr_status, provider_order_ref, provider_order_expires_at")
+    .select("enrollment_id, payment_ref, payment_method, cbmmqr_merchant, status, mmqr_status, provider_order_ref, provider_order_expires_at")
     .eq("payment_ref", ref)
     .eq("payment_method", "cb_mmqr")
     .maybeSingle()) as { data: PaymentRow | null; error: { message: string } | null };
@@ -43,7 +45,11 @@ export async function GET(request: NextRequest) {
   if (error) console.error(`[cbmmqr-status] lookup failed for ${ref}: ${error.message}`);
   if (!payment) return NextResponse.json({ mmqr_status: "PENDING" });
 
-  if (payment.status === "verified") return NextResponse.json({ mmqr_status: "SUCCESS" });
+  if (payment.status === "verified") {
+    // The request that wrote this may have been cut off before the ticket.
+    await repairInterruptedFulfilment(payment.enrollment_id);
+    return NextResponse.json({ mmqr_status: "SUCCESS" });
+  }
 
   const pending = () =>
     NextResponse.json({ mmqr_status: "PENDING", expiresAt: payment.provider_order_expires_at });
