@@ -258,6 +258,17 @@ async function unlinkTelegram() {
   expect(res.status).toBe(200);
 }
 
+async function deliverToWebhook(update: Row) {
+  const { POST } = await import("@/app/api/telegram/webhook/[secret]/route");
+  const res = await POST(new NextRequest("https://t.kuunyi.com/api/telegram/webhook/hook-1", {
+    method: "POST",
+    body: JSON.stringify(update),
+  }), { params: Promise.resolve({ secret: "hook-1" }) });
+  expect(res.status).toBe(200);
+}
+
+const startMessage = { message: { chat: { id: 501 }, text: "/start" } };
+
 const dispatchRecorded = () =>
   writes.some((w) => w.table === "announcements" && w.op === "update" && w.values?.dispatched_at);
 
@@ -401,6 +412,46 @@ describe("POST /api/admin/announcements/[id]/dispatch", () => {
     tables.tenant_bots = [enrollmentBot({ bot_token: "not-a-real-ciphertext" })];
     expect((await dispatchAnnouncement()).status).toBe(500);
     expect(dispatchRecorded()).toBe(false);
+  });
+});
+
+describe("POST /api/telegram/webhook/[secret]", () => {
+  beforeEach(() => {
+    tables.tenant_telegram_configs = [{
+      tenant_id: "ten-1",
+      enabled: true,
+      enable_phone_flow: true,
+      enable_join_requests: true,
+    }];
+  });
+
+  it.each([
+    ["the current format", () => currentFormat(ENROLLMENT_TOKEN)],
+    ["a format carried over from before tenant_bots", () => legacyFormat(ENROLLMENT_TOKEN)],
+  ])("answers a buyer when the token is in %s", async (_label, stored) => {
+    tables.tenant_bots = [enrollmentBot({ webhook_secret: "hook-1", bot_token: stored() })];
+    await deliverToWebhook(startMessage);
+    expect(sends()).toHaveLength(1);
+    expect(sends()[0].token).toBe(ENROLLMENT_TOKEN);
+    expect(sends()[0].body.chat_id).toBe("501");
+  });
+
+  it("handles a join request on an old-format bot", async () => {
+    tables.tenant_bots = [enrollmentBot({ webhook_secret: "hook-1", bot_token: legacyFormat(ENROLLMENT_TOKEN) })];
+    tables.enrollments[0].status = "confirmed";
+    await deliverToWebhook({
+      chat_join_request: { chat: { id: -100 }, from: { id: 501 }, date: 1 },
+    });
+    expect(telegramCalls[0]).toMatchObject({ method: "approveChatJoinRequest", token: ENROLLMENT_TOKEN });
+  });
+
+  it("logs a token it cannot decrypt, without printing it, and calls nothing", async () => {
+    const stored = "not-a-real-ciphertext";
+    tables.tenant_bots = [enrollmentBot({ webhook_secret: "hook-1", bot_token: stored })];
+    await deliverToWebhook(startMessage);
+    expect(consoleError).toHaveBeenCalled();
+    expect(JSON.stringify(consoleError.mock.calls)).not.toContain(stored);
+    expect(telegramCalls).toHaveLength(0);
   });
 });
 
