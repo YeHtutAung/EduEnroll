@@ -450,6 +450,18 @@ export interface BankAccount {
   created_at: string;
 }
 
+export interface MarketingPageVersion {
+  id: string;
+  status: "draft" | "published" | "archived";
+  content: unknown;
+  revision: number;
+  created_by: string | null;
+  published_by: string | null;
+  created_at: string;
+  updated_at: string;
+  published_at: string | null;
+}
+
 // ─── Supabase Database shape ──────────────────────────────────────────────────
 
 export interface Database {
@@ -498,9 +510,22 @@ export interface Database {
         Insert: Omit<EnrollmentItem, "id" | "created_at">;
         Update: Partial<Omit<EnrollmentItem, "id" | "created_at">>;
       };
+      marketing_page_versions: {
+        Row: MarketingPageVersion;
+        Insert: Partial<MarketingPageVersion> & { status: MarketingPageVersion["status"]; content: unknown };
+        Update: Partial<MarketingPageVersion>;
+      };
     };
     Views: Record<string, never>;
     Functions: {
+      create_marketing_draft: {
+        Args: { p_base_published_id: string | null; p_content: unknown; p_user_id: string };
+        Returns: string;
+      };
+      publish_marketing_draft: {
+        Args: { p_expected_revision: number; p_user_id: string };
+        Returns: string;
+      };
       get_my_tenant_id: {
         Args: Record<string, never>;
         Returns: string;

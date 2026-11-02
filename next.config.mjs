@@ -1,5 +1,13 @@
+import { marketingRemotePatterns } from "./src/lib/marketing/imageHost.mjs";
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  images: {
+    remotePatterns: marketingRemotePatterns(
+      process.env.NEXT_PUBLIC_SUPABASE_URL,
+      process.argv.includes("build"),
+    ),
+  },
   async headers() {
     return [
       {
