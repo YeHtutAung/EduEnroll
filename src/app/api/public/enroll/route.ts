@@ -6,6 +6,7 @@ import { tenantLinkOrigin } from "@/lib/origin";
 import { createEnrollment } from "@/server/enrollment/createEnrollment";
 import { createCartEnrollment } from "@/server/enrollment/createCartEnrollment";
 import { hashPriorityToken } from "@/lib/interest/token";
+import { captureAdContext } from "@/server/conversions/captureAdContext";
 import { sendEnrollmentConfirmationEmail } from "@/server/enrollment/enrollmentEmails";
 import { checkTermsAcceptance, type TermsEvidence } from "@/server/legal/organiserRules";
 import type { BankAccount } from "@/types/database";
@@ -82,6 +83,14 @@ export async function POST(request: NextRequest) {
     const { result } = outcome;
     await recordTermsEvidence(supabase, result.enrollment_id, terms.evidence);
     const tenantInfo = await fetchTenantInfo(supabase, result.tenant_id);
+    await captureAdContext({
+      cookie: (name) => request.cookies.get(name)?.value,
+      headers: request.headers,
+      enrollmentId: result.enrollment_id,
+      tenantId: result.tenant_id,
+      subdomain: tenantInfo?.subdomain,
+      classId: (items as { class_id?: unknown }[])[0]?.class_id,
+    });
     const currency = tenantInfo?.currency ?? "MMK";
 
     sendEnrollmentConfirmationEmail({
@@ -141,6 +150,14 @@ export async function POST(request: NextRequest) {
   const { result } = outcome;
   await recordTermsEvidence(supabase, result.enrollment_id, terms.evidence);
   const tenantInfo = await fetchTenantInfo(supabase, result.tenant_id);
+  await captureAdContext({
+    cookie: (name) => request.cookies.get(name)?.value,
+    headers: request.headers,
+    enrollmentId: result.enrollment_id,
+    tenantId: result.tenant_id,
+    subdomain: tenantInfo?.subdomain,
+    classId: class_id,
+  });
   const currency = tenantInfo?.currency ?? "MMK";
 
   sendEnrollmentConfirmationEmail({
