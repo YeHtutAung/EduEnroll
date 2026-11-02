@@ -7,6 +7,8 @@ import EmptyState from "@/components/ui/EmptyState";
 import type { AnnouncementRow } from "@/app/api/admin/announcements/route";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
 import { mm } from "@/lib/mm-labels";
+import { telegramBotIsReady } from "@/lib/telegram/telegramBotIsReady";
+import { saveAndSendAnnouncement } from "@/lib/announcements/saveAndSendAnnouncement";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -85,9 +87,7 @@ export default function AnnouncementsPage() {
 
     fetch("/api/telegram/settings")
       .then((r) => r.json())
-      .then((data: { connected?: boolean; enabled?: boolean }) => {
-        setTgConnected(!!(data.connected && data.enabled));
-      })
+      .then((data: unknown) => setTgConnected(telegramBotIsReady(data)))
       .catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -131,7 +131,7 @@ export default function AnnouncementsPage() {
     const params = new URLSearchParams({ intake_id: selectedIntakeId });
     if (selectedLevel) params.set("class_level", selectedLevel);
     fetch(`/api/admin/announcements/recipients?${params}`)
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("count failed"))))
       .then((data: { count: number }) => setRecipientCount(data.count))
       .catch(() => setRecipientCount(null))
       .finally(() => setRecipientLoading(false));
@@ -156,36 +156,39 @@ export default function AnnouncementsPage() {
       const body: Record<string, unknown> = {
         intake_id: selectedIntakeId,
         message: message.trim(),
-        dispatch_telegram: dispatchTelegram,
       };
       if (selectedLevel) body.class_level = selectedLevel;
 
-      const res = await fetch("/api/admin/announcements", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      const result = await saveAndSendAnnouncement(body, dispatchTelegram);
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        toast.error((err as { message?: string }).message ?? "Failed to send announcement.");
+      if (!result.saved) {
+        toast.error(result.reason);
         return;
       }
 
-      const created = (await res.json()) as AnnouncementRow;
-      if (created.dispatched_at) {
-        const total = created.telegram_sent_count + created.telegram_failed_count;
+      const { send } = result;
+      if (send.state === "not_requested") {
+        toast.success("Announcement saved successfully.");
+      } else if (send.state === "refused") {
+        toast.error(`Announcement saved but not sent: ${send.reason}`);
+      } else if (send.state === "unknown") {
+        toast.error("Announcement saved, but the send could not be confirmed. Check the history before sending it again.");
+      } else if (send.completed) {
+        const total = send.sent + send.failed;
         toast.success(
-          `Announcement sent to ${created.telegram_sent_count}/${total} student${total !== 1 ? "s" : ""} via Telegram.`,
+          `Announcement sent to ${send.sent}/${total} student${total !== 1 ? "s" : ""} via Telegram.`,
         );
       } else {
-        toast.success("Announcement saved successfully.");
+        toast.error(
+          `Sent to ${send.sent} of ${send.sent + send.failed + send.unsent} students, then stopped. ${send.unsent} did not receive it, and it will not be resent automatically.`,
+        );
       }
+      // The form clears even after a failed send, so pressing Send again cannot
+      // create a second announcement and message everyone twice by accident.
       setMessage("");
       setSelectedLevel("");
       setDispatchTelegram(false);
-      // Prepend to history
-      setHistory((prev) => [created, ...prev]);
+      loadHistory();
     } catch {
       toast.error("Network error. Please try again.");
     } finally {
@@ -483,9 +486,18 @@ function HistoryRow({ row }: { row: AnnouncementRow }) {
             <svg className="w-3.5 h-3.5 text-sky-500 shrink-0" viewBox="0 0 24 24" fill="currentColor">
               <path d="M11.944 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.056 0zm4.962 7.224c.1-.002.321.023.465.14a.506.506 0 0 1 .171.325c.016.093.036.306.02.472-.18 1.898-.962 6.502-1.36 8.627-.168.9-.499 1.201-.82 1.23-.696.065-1.225-.46-1.9-.902-1.056-.693-1.653-1.124-2.678-1.8-1.185-.78-.417-1.21.258-1.91.177-.184 3.247-2.977 3.307-3.23.007-.032.014-.15-.056-.212s-.174-.041-.249-.024c-.106.024-1.793 1.14-5.061 3.345-.48.33-.913.49-1.302.48-.428-.008-1.252-.241-1.865-.44-.752-.245-1.349-.374-1.297-.789.027-.216.325-.437.893-.663 3.498-1.524 5.83-2.529 6.998-3.014 3.332-1.386 4.025-1.627 4.476-1.635z" />
             </svg>
-            <span className="text-emerald-700 font-medium">
-              {row.telegram_sent_count}/{row.telegram_sent_count + row.telegram_failed_count}
-            </span>
+            {row.dispatch_completed_at ? (
+              <span className="text-emerald-700 font-medium">
+                {row.telegram_sent_count}/{row.telegram_sent_count + row.telegram_failed_count}
+              </span>
+            ) : (
+              <span
+                className="text-amber-700 font-medium"
+                title="This send stopped early or is still running. It will not be resent automatically."
+              >
+                {row.telegram_sent_count}/{row.telegram_recipient_count} · not finished
+              </span>
+            )}
           </span>
         ) : (
           <span className="text-xs text-gray-400">Saved only</span>

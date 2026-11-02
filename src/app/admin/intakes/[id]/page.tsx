@@ -16,6 +16,7 @@ import { useRole } from "@/components/admin/RoleContext";
 import { createClient } from "@/lib/supabase/client";
 import { mm } from "@/lib/mm-labels";
 import { ORGANISER_TERMS_MAX } from "@/lib/legal/terms";
+import { telegramBotIsReady } from "@/lib/telegram/telegramBotIsReady";
 import type { Class, ClassChannel, ClassMode, ClassStatus, Intake, IntakeStatus } from "@/types/database";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -1051,7 +1052,7 @@ export default function IntakeDetailPage({
         }
         if (results[3].ok) {
           const tgData = await results[3].json();
-          setTgConnected(tgData.connected);
+          setTgConnected(telegramBotIsReady(tgData));
         }
       }
     } catch (err) {
