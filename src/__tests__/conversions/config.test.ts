@@ -26,4 +26,20 @@ describe("resolveSendMode", () => {
   it("holds when VERCEL_ENV is unset", () => {
     expect(resolveSendMode("SKY", "meta", env({ CONVERSIONS_SKY_META_TOKEN: "T" }))).toEqual({ kind: "hold", reason: "no_test_code" });
   });
+  it("treats a whitespace-only token as missing", () => {
+    expect(resolveSendMode("SKY", "meta", env({ VERCEL_ENV: "production", CONVERSIONS_SKY_META_TOKEN: "   " }))).toEqual({
+      kind: "hold",
+      reason: "missing CONVERSIONS_SKY_META_TOKEN",
+    });
+  });
+  it("treats a whitespace-only test code as none", () => {
+    expect(
+      resolveSendMode("SKY", "meta", env({ VERCEL_ENV: "preview", CONVERSIONS_SKY_META_TOKEN: "T", CONVERSIONS_SKY_META_TEST_CODE: " 	 " })),
+    ).toEqual({ kind: "hold", reason: "no_test_code" });
+  });
+  it("trims the token and test code it uses", () => {
+    expect(
+      resolveSendMode("SKY", "meta", env({ VERCEL_ENV: "preview", CONVERSIONS_SKY_META_TOKEN: " T ", CONVERSIONS_SKY_META_TEST_CODE: " C " })),
+    ).toEqual({ kind: "send", token: "T", testCode: "C" });
+  });
 });
