@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, badRequest, notFound } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { loadPartialPayment } from "@/server/payments/partialPayment";
 import { tenantLinkOrigin } from "@/lib/origin";
 import {
   sendEmail,
@@ -150,12 +151,17 @@ export async function POST(
       .limit(1)
       .single() as PaymentResult;
 
-    const receivedAmount = (payment as unknown as Record<string, unknown>)?.received_amount as number | null;
+    // The latest row can be a top-up with nothing recorded, so read the whole history.
+    const partial = await loadPartialPayment(createAdminClient(), enrollment.id);
+    const latestReceived = (payment as unknown as Record<string, unknown>)?.received_amount as number | null;
+    const receivedAmount = partial?.orderTotal != null ? partial.received : latestReceived;
     const adminNote = (payment as unknown as Record<string, unknown>)?.admin_note as string | null;
     const remainingAmount =
-      receivedAmount != null && payment?.amount != null
-        ? payment.amount - receivedAmount
-        : null;
+      partial?.orderTotal != null
+        ? partial.remaining
+        : receivedAmount != null && payment?.amount != null
+          ? payment.amount - receivedAmount
+          : null;
 
     emailContent = partialPaymentEmail({
       studentName: enrollment.student_name_en,
