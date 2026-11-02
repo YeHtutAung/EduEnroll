@@ -456,12 +456,42 @@ describe("hardNavigate", () => {
     expect((win.dataLayer as unknown[]).length).toBeGreaterThan(0);
   });
 
-  it("with GTM present, waits for eventCallback and navigates once", () => {
+  // eventCallback fires when the tags have run, which is when Meta's image request
+  // has only just started. Leaving at that moment can cancel it.
+  it("with GTM present, waits 250 ms after eventCallback so the tag's request can finish", () => {
     win.google_tag_manager = {};
     hardNavigate("/x", { afterEvent: { name: "begin_checkout", payload: {} } });
     expect(assign).not.toHaveBeenCalled();
     const evt = (win.dataLayer as Record<string, unknown>[]).find((e) => e.event === "begin_checkout")!;
     (evt.eventCallback as () => void)();
+    vi.advanceTimersByTime(249);
+    expect(assign).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(assign).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(1000);
+    expect(assign).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives the full 250 ms when eventCallback arrives just before the fallback", () => {
+    win.google_tag_manager = {};
+    hardNavigate("/x", { afterEvent: { name: "begin_checkout", payload: {} } });
+    const evt = (win.dataLayer as Record<string, unknown>[]).find((e) => e.event === "begin_checkout")!;
+    vi.advanceTimersByTime(299);
+    (evt.eventCallback as () => void)();
+    vi.advanceTimersByTime(249);
+    expect(assign).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(assign).toHaveBeenCalledTimes(1);
+  });
+
+  it("navigates once when eventCallback fires twice, without extending the wait", () => {
+    win.google_tag_manager = {};
+    hardNavigate("/x", { afterEvent: { name: "begin_checkout", payload: {} } });
+    const evt = (win.dataLayer as Record<string, unknown>[]).find((e) => e.event === "begin_checkout")!;
+    (evt.eventCallback as () => void)();
+    vi.advanceTimersByTime(200);
+    (evt.eventCallback as () => void)();
+    vi.advanceTimersByTime(50);
     expect(assign).toHaveBeenCalledTimes(1);
     vi.advanceTimersByTime(1000);
     expect(assign).toHaveBeenCalledTimes(1);
