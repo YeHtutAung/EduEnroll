@@ -94,7 +94,7 @@ function storageIsClean(s: KeyedStorage): boolean {
   return true;
 }
 
-function hasSensitiveParam(params: URLSearchParams): boolean {
+export function hasSensitiveParam(params: URLSearchParams): boolean {
   const names = new Set(Array.from(params.keys()).map((k) => k.toLowerCase()));
   return SENSITIVE_PARAMS.some((p) => names.has(p));
 }
