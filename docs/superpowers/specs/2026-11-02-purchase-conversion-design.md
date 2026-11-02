@@ -31,7 +31,8 @@ never affect a payment, a ticket or a notification.
 | Who gets an event | Only buyers with click data for that platform. Organic buyers send nothing, and their IP is not stored. |
 | Platforms | Meta Conversions API and TikTok Events API. GA4 only if a tenant asks. |
 | Delivery | A queue table filled by a database trigger, a non-blocking send attempt, and a daily retry. |
-| Value | The ticket total, without our fee. See Value and currency. |
+| Value | The ticket total, without our fee, converted to the tenant's reporting currency. See Value and currency. |
+| Reporting currency | **USD at a rate set per tenant.** Owner's decision, 2026-11-02, because TikTok's supported list omits MMK and Meta's docs don't confirm it. Our own reports stay in MMK. |
 | Who enables a tenant | Superadmin only, by SQL, like KBZPay merchant assignments. No UI in v1. |
 | Where tokens live | Vercel env vars only. Never in the database, source or logs. |
 | Test orders | Only production sends live events. Every other environment needs a test code, or sends nothing. |
@@ -105,6 +106,8 @@ New table `tenant_conversion_settings`, **service role only**:
 | `tenant_id` | Primary key |
 | `config_id` | Used in env var names, such as `SKYFESTIVAL`. CHECK `^[A-Z0-9_]+$`. |
 | `meta_pixel_id`, `tiktok_pixel_code` | Nullable. Null means that platform is off. |
+| `report_currency` | Three uppercase letters. Defaults to `USD`. |
+| `report_rate` | Required, greater than 0. One unit of the tenant's currency in the reporting currency, such as USD per 1 MMK. Set with the organiser. |
 | `enabled` | Clearing it stops new and queued events, with no deploy |
 
 Env vars, per `config_id`:
@@ -147,9 +150,12 @@ included.
   example through the KBZPay route. So if the enrollment has an earlier payment with
   `received_amount` set, the value comes from that earlier row's
   `amount - platform_fee`, which is the full ticket total.
-- Currency is `tenants.currency`, uppercase. If the payment has a `provider_currency`
-  that differs from it, as a HitPay charge could, no row is added, because the value
-  would be mislabelled.
+- That amount is multiplied by `report_rate` and rounded to 2 decimals. If the
+  result is zero or less, no row is added.
+- The event's currency is `report_currency`. The rate in force at the moment of
+  payment is the one used, so a later rate change doesn't alter queued rows.
+- If the payment has a `provider_currency` that differs from `tenants.currency`, as
+  a HitPay charge could, no row is added, because the rate wouldn't apply.
 
 ### 5. Sender
 
@@ -180,9 +186,11 @@ throws to its caller, and the whole run has a 6-second deadline.
 | Timeout, 5xx, or a rate-limit, auth or permission error | stays `pending`, so a replaced token recovers within 7 days |
 | Any other rejection | `failed` |
 
-TikTok is believed to return HTTP 200 with a non-zero `code` on errors, and Meta to
-use 4xx with a body code for both throttling and expired tokens, so the status alone
-is not enough. Exact codes are confirmed under section 6.
+TikTok is judged only by the body `code`. Its docs conflict on HTTP status: the
+return codes page says codes take precedence, with HTTP 200 and an error code as its
+example, while the Events pages describe 4xx and 5xx, and list rate limiting (40100)
+as HTTP 401. So a 401 can't be treated as an auth failure. Meta uses 4xx with a body
+code for both throttling and expired tokens.
 
 **Where it is called.** `issueTicketsForEnrollment` is already called on nearly every
 path, but it has early returns, for example for non-event tenants, and it can throw.
@@ -215,30 +223,37 @@ body, never the query string.
     "action_source": "website",
     "event_source_url": "<source_url>",
     "user_data": { "client_ip_address": "", "client_user_agent": "", "fbp": "", "fbc": "" },
-    "custom_data": { "value": 0, "currency": "MMK" }
+    "custom_data": { "value": 0, "currency": "USD" }
 }] }
 ```
 
 TikTok: `POST https://business-api.tiktok.com/open_api/v1.3/event/track/`, token in
 the `Access-Token` header, `event_source: "web"`, `event_source_id: <pixel code>`,
-event `CompletePayment`, with `ip`, `user_agent`, `ttclid`, `ttp`, `value` and
-`currency`.
+event `Purchase`, with `ip`, `user_agent`, `ttclid`, `ttp`, `value` and `currency`.
 
 The payload builders are pure functions that take an explicit list of fields, so
 buyer data cannot reach them by accident.
 
-**To confirm against official docs and test tools during the plan.** This design
-relied partly on third-party guides, because the official references could not be
-read in full:
+**Confirmed from the official docs on 2026-11-02.** This is reading only: nothing has
+been sent to either API.
 
-- Whether Meta accepts an event with no hashed email or phone. One guide lists a
-  hashed field as core. If Meta rejects these events, this design needs to go back
-  to the owner: hashed contact data was explicitly ruled out.
-- TikTok's current event name. One guide says `CompletePayment` has been removed
-  from its documentation.
-- Whether both platforms accept `MMK`.
-- The current API versions and exact field names.
-- Each platform's error format, and which codes mean rate limit, auth or permission.
+- **No contact data needed.** Meta needs at least one customer parameter, and
+  `client_user_agent` for website events. Its rejected sets don't include `fbp`,
+  `fbc` or `client_ip_address`. An event with only a user agent would be rejected,
+  which the per-row rule in section 5 already prevents. TikTok marks email and phone
+  as recommended, not required.
+- **Lower match quality is the cost.** Meta says unmatched events can't be used for
+  attribution or delivery optimisation, and gives no figure for our field set. The
+  staging test should record Event Match Quality.
+- **TikTok's event name is `Purchase`.** `CompletePayment` is the old name.
+- **MMK is why we report in USD.** TikTok's supported list omits it. Meta asks for a
+  valid currency code and gives no list for events.
+- **Versions:** Meta `v26.0`. TikTok's endpoint is unchanged.
+- **Meta rejects a whole request** if any event is more than 7 days old. Each request
+  here holds one event.
+- **Not found:** TikTok's limit on event age, and any minimum set of `user` fields.
+- **Not named by either platform:** which rate-limit code a conversion call returns,
+  so the retry lists include every documented one.
 
 ### 7. Retry and clean-up
 
@@ -270,8 +285,14 @@ the sender decides from the deployment, not the row:
 | Deployment | Behaviour |
 |---|---|
 | Production (`VERCEL_ENV=production`) | Sends live, with no test code. |
-| Anything else, test code set | Sends with the test code. Shown only in the platform's test tool. |
+| Anything else, test code set | Sends with the test code. |
 | Anything else, no test code | Sends nothing. The row stays `pending`. |
+
+**Test events are not isolated.** Meta's docs say events with a test code still flow
+into Events Manager and are used for targeting and measurement. So staging must use a
+separate test pixel, never the organiser's live one. Meta may also discard a test
+event that doesn't match an account, so a made-up `fbp` showing nothing proves
+nothing: test from a real browser.
 
 ## Privacy and logging
 
@@ -292,6 +313,9 @@ the sender decides from the deployment, not the row:
 - An order verified more than 8 days after it was created, such as a slow manual
   verification, has lost its ad context and is `skipped`.
 - A later refund or rejection does not retract the event.
+- Reported value is approximate, because it uses a set rate. Official and market rates
+  for MMK can differ a lot, so ROAS is only as good as the rate chosen. It lines up
+  with ad spend only if the ad accounts use the same currency.
 - Production still needs the tenant's custom domain, because GTM, and so the pixel
   cookies, only load there.
 
@@ -312,16 +336,16 @@ the sender decides from the deployment, not the row:
 - **Database, on the dev database:** `has_table_privilege` and RLS state for the new
   tables. The local stack can't prove this, because it returns 42501 for every public
   table. The owner runs the same check on production after the migration.
-- **Staging, by hand:** a real paid order from a URL with test click IDs, with test
-  codes set, seen in Meta's Test Events and TikTok's test tool. This is also where
-  the open API points are settled.
+- **Staging, by hand:** a real paid order from a real browser, on separate test
+  pixels with test codes set, seen in Meta's Test Events and TikTok's test tool, with
+  Event Match Quality recorded.
 
 ## Rollout
 
 1. Migration on the dev database, with the owner's yes. Staging reads the same one.
 2. Ship the code to staging. With no settings row, nothing changes.
-3. Add Sky Festival's settings row, and staging tokens, test codes and `CRON_SECRET`
-   scoped to `staging`. Redeploy, then run the staging test.
+3. Add a settings row using the test pixels, and staging tokens, test codes and
+   `CRON_SECRET` scoped to `staging`. Redeploy, then run the staging test.
 4. **Production: migration before code,** as with every recent change. No CI applies
    migrations.
 5. Add `CRON_SECRET` and the production tokens in Vercel before the code reaches
@@ -334,7 +358,8 @@ Turning it off is clearing `enabled`.
 
 ## Needed from Sky Festival
 
-- Meta Pixel ID and TikTok Pixel Code.
+- Meta Pixel ID and TikTok Pixel Code, plus a separate test pixel on each for staging.
+- The reporting rate, and what currency their ad accounts use.
 - Meta Conversions API and TikTok Events API access tokens, entered directly into
   Vercel or handed over securely. Never sent through chat.
 - Test codes from Meta Events Manager and TikTok Events Manager.
@@ -342,7 +367,8 @@ Turning it off is clearing `enabled`.
 
 ## Open questions
 
-1. **Does Meta accept these events without hashed contact data?** See section 6.
+1. ~~**Does Meta accept these events without hashed contact data?**~~ Yes, by its
+   docs (section 6). Not yet tested against the live API.
 2. **Privacy wording.** Does `/privacy` need a line, and who approves it? This
    continues open question 6 in the phase 1 design.
 3. **Consent banner.** Open question 2 in the phase 1 design still applies.

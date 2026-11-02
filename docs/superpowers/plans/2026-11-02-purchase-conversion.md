@@ -46,6 +46,8 @@
 
 ### Task 1: Confirm the platform facts (gate)
 
+**Done 2026-11-02.** The answers are in spec section 6 and the code below is updated. MMK failed the gate, and the owner chose USD at a set per-tenant rate. Start at Task 2.
+
 No code. The spec relied partly on third-party guides. Everything else depends on this task.
 
 **Files:**
@@ -113,6 +115,8 @@ CREATE TABLE public.tenant_conversion_settings (
   config_id         text NOT NULL CHECK (config_id ~ '^[A-Z0-9_]+$'),
   meta_pixel_id     text,
   tiktok_pixel_code text,
+  report_currency   text NOT NULL DEFAULT 'USD' CHECK (report_currency ~ '^[A-Z]{3}$'),
+  report_rate       numeric NOT NULL CHECK (report_rate > 0),
   enabled           boolean NOT NULL DEFAULT true,
   created_at        timestamptz NOT NULL DEFAULT now(),
   updated_at        timestamptz NOT NULL DEFAULT now()
@@ -179,7 +183,7 @@ SET search_path = public
 AS $$
 DECLARE
   v_settings public.tenant_conversion_settings%ROWTYPE;
-  v_currency text;
+  v_tenant_currency text;
   v_value    numeric;
   v_event_id text;
 BEGIN
@@ -189,10 +193,10 @@ BEGIN
      WHERE tenant_id = NEW.tenant_id AND enabled;
     IF NOT FOUND THEN RETURN NEW; END IF;
 
-    SELECT upper(currency) INTO v_currency FROM public.tenants WHERE id = NEW.tenant_id;
+    SELECT upper(currency) INTO v_tenant_currency FROM public.tenants WHERE id = NEW.tenant_id;
 
-    -- A charge in another currency would mislabel the value.
-    IF NEW.provider_currency IS NOT NULL AND upper(NEW.provider_currency) <> v_currency THEN
+    -- The rate is for the tenant's currency, so it can't apply to another one.
+    IF NEW.provider_currency IS NOT NULL AND upper(NEW.provider_currency) <> v_tenant_currency THEN
       RETURN NEW;
     END IF;
 
@@ -205,19 +209,19 @@ BEGIN
        AND p.received_amount IS NOT NULL
      ORDER BY p.created_at DESC
      LIMIT 1;
-    v_value := COALESCE(v_value, NEW.amount - NEW.platform_fee);
+    v_value := round(COALESCE(v_value, NEW.amount - NEW.platform_fee) * v_settings.report_rate, 2);
     IF v_value <= 0 THEN RETURN NEW; END IF;
 
     v_event_id := encode(sha256(convert_to('purchase:' || NEW.enrollment_id::text, 'UTF8')), 'hex');
 
     IF v_settings.meta_pixel_id IS NOT NULL THEN
       INSERT INTO public.conversion_events (enrollment_id, tenant_id, platform, event_id, value, currency)
-      VALUES (NEW.enrollment_id, NEW.tenant_id, 'meta', v_event_id, v_value, v_currency)
+      VALUES (NEW.enrollment_id, NEW.tenant_id, 'meta', v_event_id, v_value, v_settings.report_currency)
       ON CONFLICT (enrollment_id, platform) DO NOTHING;
     END IF;
     IF v_settings.tiktok_pixel_code IS NOT NULL THEN
       INSERT INTO public.conversion_events (enrollment_id, tenant_id, platform, event_id, value, currency)
-      VALUES (NEW.enrollment_id, NEW.tenant_id, 'tiktok', v_event_id, v_value, v_currency)
+      VALUES (NEW.enrollment_id, NEW.tenant_id, 'tiktok', v_event_id, v_value, v_settings.report_currency)
       ON CONFLICT (enrollment_id, platform) DO NOTHING;
     END IF;
   EXCEPTION WHEN OTHERS THEN
@@ -281,8 +285,9 @@ Copy the fixture approach from `src/__tests__/db/kbzpay-order-slot.db.test.ts` (
 ```ts
 describe("enqueue trigger", () => {
   it("adds one row per configured platform when a payment becomes verified", async () => {
-    // settings: both pixels. Expect rows for meta and tiktok, status pending,
-    // value = amount - platform_fee, currency uppercase.
+    // settings: both pixels, report_rate 0.0005, report_currency USD.
+    // amount 50000, platform_fee 0. Expect rows for meta and tiktok, status
+    // pending, value 25.00, currency USD.
   });
   it("adds only the configured platform when one pixel is null", async () => {});
   it("adds nothing on a second transition to verified", async () => {
@@ -293,12 +298,21 @@ describe("enqueue trigger", () => {
   it("adds nothing when the value is zero", async () => {
     // amount 100, platform_fee 100.
   });
+  it("adds nothing when the converted value rounds to zero", async () => {
+    // amount 1, report_rate 0.0005.
+  });
+  it("keeps the queued value when the rate changes later", async () => {
+    // Verify, change report_rate, confirm the row's value is unchanged.
+  });
+  it("requires a rate", async () => {
+    // Inserting settings with no report_rate, or with 0, is rejected.
+  });
   it("skips a charge in another currency", async () => {
-    // provider_currency 'sgd' on an MMK tenant.
+    // provider_currency 'sgd' on an MMK tenant. No row added.
   });
   it("reports the full total for a top-up", async () => {
     // Row A: amount 1000, received_amount 600, status pending.
-    // Row B: amount 400, then verified. Expect value 1000.
+    // Row B: amount 400, then verified. With report_rate 1, expect value 1000.
   });
   it("stores an event id that is the hash of the enrollment id", async () => {
     // createHash("sha256").update(`purchase:${enrollmentId}`).digest("hex")
@@ -622,7 +636,7 @@ git commit -m "feat(conversions): capture ad click IDs on tracked pages"
 - Create: `src/lib/conversions/payloads.ts`
 - Test: `src/__tests__/conversions/payloads.test.ts`
 
-Use the answers from Task 1 for the version, the event name and the error codes. The values below are what the spec assumed.
+The version, event name and codes below come from the official docs (Task 1). Neither platform says which rate-limit code a conversion call returns, so the lists include every documented one.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -633,8 +647,8 @@ import { buildMetaRequest, buildTiktokRequest, classifyResponse } from "@/lib/co
 const event = {
   eventId: "hash123",
   occurredAt: "2026-11-02T00:00:00.000Z",
-  value: 50000,
-  currency: "MMK",
+  value: 25,
+  currency: "USD",
   sourceUrl: "https://tickets.example.com/enroll/event",
   clientIp: "203.0.113.1",
   userAgent: "UA",
@@ -656,7 +670,7 @@ describe("buildMetaRequest", () => {
       event_time: 1793577600,
       action_source: "website",
       event_source_url: event.sourceUrl,
-      custom_data: { value: 50000, currency: "MMK" },
+      custom_data: { value: 25, currency: "USD" },
     });
     expect(body.test_event_code).toBeUndefined();
   });
@@ -666,14 +680,14 @@ describe("buildMetaRequest", () => {
 });
 
 describe("buildTiktokRequest", () => {
-  it("sends a completed payment with the token only in the header", () => {
+  it("sends a Purchase with the token only in the header", () => {
     const r = buildTiktokRequest({ pixelCode: "PX", token: "TOKEN", testCode: null, event });
     expect(r.headers["Access-Token"]).toBe("TOKEN");
     expect(r.body).not.toContain("TOKEN");
     const body = JSON.parse(r.body);
     expect(body.event_source).toBe("web");
     expect(body.event_source_id).toBe("PX");
-    expect(body.data[0].event).toBe("CompletePayment");
+    expect(body.data[0].event).toBe("Purchase");
   });
 });
 
@@ -705,6 +719,22 @@ describe("classifyResponse", () => {
   it("does not treat TikTok 200 with an error code as sent", () => {
     expect(classifyResponse("tiktok", 200, { code: 40002 }).status).toBe("failed");
     expect(classifyResponse("tiktok", 200, { code: 40100 }).status).toBe("pending");
+  });
+  it("judges TikTok by the body code, whatever the HTTP status", () => {
+    // Its Events page lists rate limiting as HTTP 401.
+    expect(classifyResponse("tiktok", 401, { code: 40100 })).toEqual({ status: "pending", code: "tiktok_40100" });
+    expect(classifyResponse("tiktok", 400, { code: 40002 }).status).toBe("failed");
+    expect(classifyResponse("tiktok", 400, { code: 0 }).status).toBe("sent");
+  });
+  it("retries TikTok auth and permission errors", () => {
+    for (const code of [40102, 40105, 40001, 40125]) {
+      expect(classifyResponse("tiktok", 200, { code }).status).toBe("pending");
+    }
+  });
+  it("retries Meta's other documented limit and permission codes", () => {
+    for (const code of [341, 80004, 102, 10, 294]) {
+      expect(classifyResponse("meta", 400, { error: { code } }).status).toBe("pending");
+    }
   });
   it("retries 5xx on both", () => {
     expect(classifyResponse("meta", 503, null).status).toBe("pending");
@@ -752,14 +782,18 @@ export interface PlatformRequest {
   body: string;
 }
 
-const META_API_VERSION = "v21.0"; // Confirm in Task 1.
-const TIKTOK_URL = "https://business-api.tiktok.com/open_api/v1.3/event/track/"; // Confirm in Task 1.
-const TIKTOK_EVENT = "CompletePayment"; // Confirm in Task 1.
+const META_API_VERSION = "v26.0";
+const TIKTOK_URL = "https://business-api.tiktok.com/open_api/v1.3/event/track/";
+const TIKTOK_EVENT = "Purchase";
 
-// Confirm all four sets in Task 1. These stay pending, so a replaced token or a
-// passing limit recovers within the 7-day window.
-const META_RETRY_CODES = new Set([1, 2, 4, 10, 17, 32, 190, 200, 613, 80004]);
-const TIKTOK_RETRY_CODES = new Set([40100, 40105]);
+// These stay pending, so a replaced token or a passing limit recovers within the
+// 7-day window. Meta's 200-299 permission range is handled in classifyResponse.
+const META_RETRY_CODES = new Set([1, 2, 4, 10, 17, 102, 190, 341, 80004]);
+const TIKTOK_RETRY_CODES = new Set([
+  40100, 40016, 40132, 40133, // rate limit
+  40101, 40102, 40104, 40105, 40106, // auth
+  40001, 40118, 40125, // permission
+]);
 
 const eventTime = (iso: string) => Math.floor(new Date(iso).getTime() / 1000);
 
@@ -836,22 +870,27 @@ export interface SendOutcome {
 }
 
 export function classifyResponse(platform: ConversionPlatform, httpStatus: number, body: unknown): SendOutcome {
-  if (httpStatus >= 500) return { status: "pending", code: `http_${httpStatus}` };
   const b = (body ?? {}) as { code?: unknown; error?: { code?: unknown } };
 
-  if (platform === "meta") {
-    if (httpStatus >= 200 && httpStatus < 300) return { status: "sent", code: null };
-    const code = typeof b.error?.code === "number" ? b.error.code : null;
-    if (code === null) return { status: "failed", code: `http_${httpStatus}` };
-    const retry = META_RETRY_CODES.has(code) || (code >= 200 && code <= 299);
-    return { status: retry ? "pending" : "failed", code: `meta_${code}` };
+  if (platform === "tiktok") {
+    // Judged by the body code first. TikTok's docs conflict on HTTP status, and
+    // its rate limit can arrive as a 401.
+    if (typeof b.code === "number") {
+      if (b.code === 0) return { status: "sent", code: null };
+      const retry = TIKTOK_RETRY_CODES.has(b.code) || b.code >= 50000;
+      return { status: retry ? "pending" : "failed", code: `tiktok_${b.code}` };
+    }
+    return httpStatus >= 500
+      ? { status: "pending", code: `http_${httpStatus}` }
+      : { status: "failed", code: `http_${httpStatus}` };
   }
 
-  // TikTok reports errors in the body, with HTTP 200.
-  if (b.code === 0 && httpStatus >= 200 && httpStatus < 300) return { status: "sent", code: null };
-  if (typeof b.code !== "number") return { status: "failed", code: `http_${httpStatus}` };
-  const retry = TIKTOK_RETRY_CODES.has(b.code) || b.code >= 50000;
-  return { status: retry ? "pending" : "failed", code: `tiktok_${b.code}` };
+  if (httpStatus >= 200 && httpStatus < 300) return { status: "sent", code: null };
+  if (httpStatus >= 500) return { status: "pending", code: `http_${httpStatus}` };
+  const code = typeof b.error?.code === "number" ? b.error.code : null;
+  if (code === null) return { status: "failed", code: `http_${httpStatus}` };
+  const retry = META_RETRY_CODES.has(code) || (code >= 200 && code <= 299);
+  return { status: retry ? "pending" : "failed", code: `meta_${code}` };
 }
 ```
 
@@ -1640,21 +1679,22 @@ Not code. Each step that changes a shared system needs the owner's yes.
 
 - [ ] **Step 2: Promote to staging.** The owner merges `dev` → `staging`. Confirm the deploy.
 
-- [ ] **Step 3: The owner adds Vercel vars, scoped to `staging`, then redeploys:** `CONVERSIONS_SKYFESTIVAL_META_TOKEN`, `_META_TEST_CODE`, `_TIKTOK_TOKEN`, `_TIKTOK_TEST_CODE`, `CRON_SECRET`. Never through chat.
+- [ ] **Step 3: The owner adds Vercel vars, scoped to `staging`, then redeploys:** `CONVERSIONS_SKYFESTIVAL_META_TOKEN`, `_META_TEST_CODE`, `_TIKTOK_TOKEN`, `_TIKTOK_TEST_CODE`, `CRON_SECRET`. Never through chat. Tokens and test codes must be for **separate test pixels**, not Sky Festival's live ones, because Meta test events still flow into Events Manager.
 
 - [ ] **Step 4: Add the settings row on the dev DB.** Show the SQL first:
 
 ```sql
-INSERT INTO public.tenant_conversion_settings (tenant_id, config_id, meta_pixel_id, tiktok_pixel_code)
-SELECT id, 'SKYFESTIVAL', '<meta pixel id>', '<tiktok pixel code>'
+INSERT INTO public.tenant_conversion_settings (tenant_id, config_id, meta_pixel_id, tiktok_pixel_code, report_rate)
+SELECT id, 'SKYFESTIVAL', '<meta test pixel id>', '<tiktok test pixel code>', <agreed USD per 1 MMK>
 FROM public.tenants WHERE subdomain = 'skyfestival';
 ```
 
 - [ ] **Step 5: Run a real paid test order.**
-  - Open `https://skyfestival.staging.kuunyi.com/enroll/<event>?fbclid=TESTF1&ttclid=TESTT1`.
+  - Open `https://skyfestival.staging.kuunyi.com/enroll/<event>?fbclid=TESTF1&ttclid=TESTT1` in a real browser with the test pixels active.
   - Check that `kn_ad_click` is set, and that GTM still behaves as in phase 1.
   - Buy with a real KBZPay UAT payment.
-  - Check that the event appears in Meta's Test Events and TikTok's test tool, with the right value, and with no email or phone.
+  - Check that the event appears in Meta's Test Events and TikTok's test tool, with the value in USD at the set rate, and with no email or phone.
+  - Record Meta's Event Match Quality and report it to the owner. Unmatched events can't be used for attribution or delivery optimisation.
   - Check the row is `sent`.
   - Check that the buyer's confirmation arrived.
 
@@ -1665,7 +1705,7 @@ FROM public.tenants WHERE subdomain = 'skyfestival';
 
 - [ ] **Step 7: Clean up.** Call the cron route by hand with the secret, and confirm the ad context is deleted. Archive the test orders, with the owner's yes.
 
-- [ ] **Step 8: Hand production to the owner.** They apply the migration before the code, run the privilege check, add `CRON_SECRET` and live tokens, promote, add the settings row, and confirm the first cron log line.
+- [ ] **Step 8: Hand production to the owner.** They apply the migration before the code, run the privilege check, add `CRON_SECRET` and live tokens, promote, add the settings row with the live pixels and agreed rate, and confirm the first cron log line.
 
 ---
 
