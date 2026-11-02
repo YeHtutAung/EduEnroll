@@ -477,4 +477,6 @@ Turning it off is clearing the field. No deploy needed.
    may write their own `localStorage` keys, which would then keep GTM off on
    the next page load. Check which keys appear after the GTM Preview pass,
    and allowlist a key only once it is confirmed to hold nothing sensitive.
-   Nothing is allowlisted for this yet.
+   Meta's `lastExternalReferrer` and `lastExternalReferrerTime` were found on
+   staging on 2026-11-03 and allowlisted: the first is only ever `empty`, `fb`,
+   `ig` or `other`, the second a timestamp. TikTok's keys are still unchecked.

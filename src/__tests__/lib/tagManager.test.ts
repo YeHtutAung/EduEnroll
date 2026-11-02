@@ -10,6 +10,7 @@ import {
   SAFE_STORAGE_KEYS,
   isBrowserStateClean,
   pushDataLayer,
+  beginCheckoutPayload,
   hardNavigate,
   decideGtmForDocument,
   resetGtmDocumentLatchForTests,
@@ -299,9 +300,32 @@ describe("isBrowserStateClean", () => {
     });
   });
 
-  it("SAFE_STORAGE_KEYS allows only cart_<digits>", () => {
+  it("SAFE_STORAGE_KEYS allows cart_<digits>, not other cart keys", () => {
     expect(SAFE_STORAGE_KEYS.some((re) => re.test("cart_1730000000000"))).toBe(true);
     expect(SAFE_STORAGE_KEYS.some((re) => re.test("ck_cart_1730000000000"))).toBe(false);
+  });
+
+  // Meta's pixel writes these on the first load. Blocking them kept GTM off on
+  // every later page load in that browser.
+  it.each(["lastExternalReferrer", "lastExternalReferrerTime"])(
+    "SAFE_STORAGE_KEYS allows Meta's %s by exact name",
+    (key) => {
+      expect(SAFE_STORAGE_KEYS.some((re) => re.test(key))).toBe(true);
+      expect(SAFE_STORAGE_KEYS.some((re) => re.test(`${key}_x`))).toBe(false);
+      expect(SAFE_STORAGE_KEYS.some((re) => re.test(`x_${key}`))).toBe(false);
+    },
+  );
+});
+
+describe("isBrowserStateClean with Meta's pixel keys", () => {
+  const metaKeys = { lastExternalReferrer: "fb", lastExternalReferrerTime: "1793654222976" };
+
+  it("stays clean on the next page load", () => {
+    expect(isBrowserStateClean(state({ localStorage: store(metaKeys) }))).toBe(true);
+  });
+
+  it("still blocks an unknown key beside them", () => {
+    expect(isBrowserStateClean(state({ localStorage: store({ ...metaKeys, cs_secret: "x" }) }))).toBe(false);
   });
 });
 
@@ -314,11 +338,48 @@ describe("pushDataLayer", () => {
     pushDataLayer("view_item", { currency: "MMK" });
     pushDataLayer("begin_checkout", { value: 5 });
     expect(win.dataLayer).toEqual([
-      { ecommerce: null },
-      { event: "view_item", ecommerce: { currency: "MMK" } },
-      { ecommerce: null },
-      { event: "begin_checkout", ecommerce: { value: 5 } },
+      { ecommerce: null, eventModel: null },
+      { event: "view_item", ecommerce: { currency: "MMK" }, eventModel: { currency: "MMK" } },
+      { ecommerce: null, eventModel: null },
+      { event: "begin_checkout", ecommerce: { value: 5 }, eventModel: { value: 5 } },
     ]);
+  });
+
+  // Sky Festival's Meta tag reads currency, value and items from eventModel in
+  // the same push. With ecommerce alone, Meta got the event with no parameters.
+  it("gives Meta's tag the value, currency and items in the event's own push", () => {
+    const win: Record<string, unknown> = {};
+    vi.stubGlobal("window", win);
+    const payload = beginCheckoutPayload({
+      slug: "s",
+      eventName: "E",
+      currency: "MMK",
+      lines: [{ id: "t1", name: "Day 1", price: 45000, quantity: 2 }],
+    });
+    pushDataLayer("begin_checkout", payload);
+
+    const pushed = (win.dataLayer as Record<string, Record<string, unknown>>[])[1];
+    expect(pushed.eventModel).toMatchObject({
+      currency: "MMK",
+      value: 90000,
+      items: [{ item_id: "t1", price: 45000, quantity: 2 }],
+    });
+  });
+
+  it("gives Meta's tag no buyer data to send", () => {
+    const win: Record<string, unknown> = {};
+    vi.stubGlobal("window", win);
+    pushDataLayer("begin_checkout", beginCheckoutPayload({
+      slug: "s",
+      eventName: "E",
+      currency: "MMK",
+      lines: [{ id: "t1", name: "Day 1", price: 1, quantity: 1 }],
+    }));
+
+    const pushed = (win.dataLayer as Record<string, Record<string, unknown>>[])[1];
+    for (const key of ["user_data", "transaction_id", "search_term"]) {
+      expect(pushed.eventModel).not.toHaveProperty(key);
+    }
   });
 
   it("appends to an existing dataLayer", () => {
