@@ -4,6 +4,7 @@ import { clientIpFrom } from "@/lib/rateLimit";
 import { AD_CLICK_COOKIE, buildFbc, cleanClickValue, parseClickCookie } from "@/lib/conversions/clickData";
 
 const USER_AGENT_MAX = 1000;
+const CAPTURE_TIMEOUT_MS = 1500;
 
 export interface AdContext {
   fbp: string | null;
@@ -44,8 +45,11 @@ export function adContextFromRequest(
 
 /**
  * Never throws: a tracking failure must not fail an order that already holds
- * its seats. The cookie check comes first, so organic orders cost no query.
- * Logs carry only an error code or name, never a cookie, IP or click ID.
+ * its seats. All its queries share one time limit, so a stalled database cannot
+ * hold the order response. The cookie check comes first, so only a buyer with no
+ * pixel cookie or click ID costs no query; pixels set _fbp for every visitor, so
+ * most orders from a tracked page do run them. Logs carry only an error code or
+ * name, never a cookie, IP or click ID.
  */
 export async function captureAdContext(args: {
   cookie: (name: string) => string | undefined;
@@ -59,16 +63,21 @@ export async function captureAdContext(args: {
     const context = adContextFromRequest(args.cookie, args.headers);
     if (!context) return;
 
+    const signal = AbortSignal.timeout(CAPTURE_TIMEOUT_MS);
+    const logTimeout = () => console.error("[conversions] ad context timed out:", "TimeoutError");
+
     const supabase = createAdminClient();
     const { data: settings, error: settingsError } = (await supabase
       .from("tenant_conversion_settings" as never)
       .select("tenant_id")
       .eq("tenant_id", args.tenantId)
       .eq("enabled", true)
+      .abortSignal(signal)
       .maybeSingle()) as { data: { tenant_id: string } | null; error: { code?: string } | null };
     if (settingsError) {
       // A failed read is not "disabled": say so, then skip. The order stands.
-      console.error("[conversions] settings read failed:", settingsError.code ?? "unknown");
+      if (signal.aborted) logTimeout();
+      else console.error("[conversions] settings read failed:", settingsError.code ?? "unknown");
       return;
     }
     if (!settings) return;
@@ -80,10 +89,15 @@ export async function captureAdContext(args: {
         .from("classes")
         .select("intakes(slug)")
         .eq("id", args.classId)
+        .abortSignal(signal)
         .maybeSingle()) as {
         data: { intakes: { slug: string | null } | null } | null;
         error: { code?: string } | null;
       };
+      if (clsError && signal.aborted) {
+        logTimeout();
+        return;
+      }
       if (clsError) console.error("[conversions] class lookup failed:", clsError.code ?? "unknown");
       if (cls?.intakes?.slug) path = `/enroll/${encodeURIComponent(cls.intakes.slug)}`;
     }
@@ -93,8 +107,10 @@ export async function captureAdContext(args: {
       .upsert(
         { enrollment_id: args.enrollmentId, ...context, source_url: `${tenantLinkOrigin(args.subdomain)}${path}` } as never,
         { onConflict: "enrollment_id", ignoreDuplicates: true },
-      )) as { error: { code?: string } | null };
-    if (error) console.error("[conversions] ad context not stored:", error.code ?? "unknown");
+      )
+      .abortSignal(signal)) as { error: { code?: string } | null };
+    if (error && signal.aborted) logTimeout();
+    else if (error) console.error("[conversions] ad context not stored:", error.code ?? "unknown");
   } catch (err) {
     console.error("[conversions] ad context failed:", err instanceof Error ? err.name : "unknown");
   }

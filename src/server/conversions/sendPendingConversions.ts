@@ -62,6 +62,8 @@ async function post(request: PlatformRequest, platform: ConversionPlatform): Pro
       method: "POST",
       headers: request.headers,
       body: request.body,
+      // Next 14 can cache a POST fetch when the route has touched no dynamic data.
+      cache: "no-store",
       signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
     });
     const body = await res.json().catch(() => null);
@@ -80,7 +82,7 @@ async function run(enrollmentId: string, pastDeadline: () => boolean): Promise<v
     .select("id, tenant_id, platform, event_id, value, currency, occurred_at, attempts")
     .eq("enrollment_id", enrollmentId)
     .eq("status", "pending")
-    .or(`last_attempt_at.is.null,last_attempt_at.lt.${staleBefore}`)) as unknown as {
+    .or(`last_attempt_at.is.null,last_attempt_at.lt."${staleBefore}"`)) as unknown as {
     data: QueueRow[] | null;
     error: DbError;
   };

@@ -445,6 +445,68 @@ describe("POST /api/public/enroll: ad context capture", () => {
     });
   });
 
+  describe("what the route passes", () => {
+    const clickJson = JSON.stringify({ ttclid: "T1", at: 1700 });
+    const trackedRequest = (body: object) =>
+      new NextRequest("http://localhost/api/public/enroll", {
+        method: "POST",
+        body: JSON.stringify({ ...TERMS_OK, ...body }),
+        headers: {
+          "content-type": "application/json",
+          "x-real-ip": "203.0.113.9",
+          cookie: `_fbp=fb.1.1.1; kn_ad_click=${encodeURIComponent(clickJson)}`,
+        },
+      });
+
+    const expectWiring = () => {
+      const passed = mockCapture.mock.calls[0][0] as {
+        cookie: (name: string) => string | undefined;
+        headers: Headers;
+        subdomain: unknown;
+      };
+      expect(passed.cookie("_fbp")).toBe("fb.1.1.1");
+      expect(passed.cookie("absent")).toBeUndefined();
+      // Next has already decoded it, so captureAdContext receives plain JSON.
+      expect(passed.cookie("kn_ad_click")).toBe(clickJson);
+      expect(passed.headers.get("x-real-ip")).toBe("203.0.113.9");
+      expect(passed.subdomain).toBe("skyfestival");
+    };
+
+    beforeEach(() => {
+      const tables = mockFrom.getMockImplementation()!;
+      mockFrom.mockImplementation((table: string) =>
+        table === "tenants"
+          ? makeChain({ data: { ...TENANT_ROW.data, subdomain: "skyfestival" }, error: null })
+          : tables(table),
+      );
+    });
+
+    it("passes cookie, headers and subdomain on the single-class branch", async () => {
+      mockRpcSuccess();
+      const res = await POST(trackedRequest({ class_id: CLASS_ID }));
+      expect(res.status).toBe(201);
+      expectWiring();
+    });
+
+    it("passes cookie, headers and subdomain on the cart branch", async () => {
+      mockRpc.mockResolvedValue({
+        data: {
+          success: true,
+          enrollment_id: "enroll-2",
+          enrollment_ref: "NM-2026-0002",
+          quantity: 1,
+          total_fee: 50000,
+          tenant_id: "tenant-abc",
+          items: [{ class_id: CLASS_ID, class_level: "N5", quantity: 1, fee_amount: 50000 }],
+        },
+        error: null,
+      });
+      const res = await POST(trackedRequest({ items: [{ class_id: CLASS_ID, quantity: 1 }], form_data: {} }));
+      expect(res.status).toBe(201);
+      expectWiring();
+    });
+  });
+
   it("does not capture on a filled honeypot", async () => {
     const res = await POST(makeRequest({ class_id: CLASS_ID, __hp: "bot" }));
     expect(res.status).toBe(200);

@@ -295,6 +295,11 @@ the sender decides from the deployment, not the row:
 | Anything else, test code set | Sends with the test code. |
 | Anything else, no test code | Sends nothing. The row stays `pending`. |
 
+**One exception: a disabled tenant.** The disabled check deliberately runs before this
+environment check, so turning a tenant off stops its queued rows even when their token
+has already been removed. A disabled tenant's rows, or rows with no settings row, become
+`skipped` on any deployment, including one that can't send.
+
 **Test events are not isolated.** Meta's docs say events with a test code still flow
 into Events Manager and are used for targeting and measurement. So staging must use a
 separate test pixel, never the organiser's live one. Meta may also discard a test

@@ -382,6 +382,41 @@ describe("sendPendingConversions", () => {
     expect(JSON.stringify(writes)).not.toContain(BODY_SENTINEL);
   });
 
+  it("asks Next not to cache the request", async () => {
+    await sendPendingConversions(ENROLLMENT);
+
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    for (const [, init] of mockFetch.mock.calls) expect(init.cache).toBe("no-store");
+  });
+
+  it("gives each send 2.5 seconds", async () => {
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+
+    await sendPendingConversions(ENROLLMENT);
+
+    expect(timeoutSpy).toHaveBeenCalledTimes(2);
+    expect(timeoutSpy).toHaveBeenCalledWith(2500);
+  });
+
+  it("sends a number when PostgREST returns value as a string", async () => {
+    db.conversion_events = [queueRow("meta", { value: "12.50" }), queueRow("tiktok", { value: "12.50" })];
+
+    await sendPendingConversions(ENROLLMENT);
+
+    const meta = JSON.parse(mockFetch.mock.calls.find(([url]) => url.includes("facebook"))![1].body as string);
+    const tiktok = JSON.parse(mockFetch.mock.calls.find(([url]) => url.includes("tiktok"))![1].body as string);
+    expect(meta.data[0].custom_data.value).toBe(12.5);
+    expect(tiktok.data[0].properties.value).toBe(12.5);
+  });
+
+  it("reads occurred_at in PostgREST form, with +00:00 and microseconds", async () => {
+    db.conversion_events = [queueRow("meta", { occurred_at: "2026-11-02T10:00:00.123456+00:00" })];
+
+    await sendPendingConversions(ENROLLMENT);
+
+    expect(fetchedBody().data[0].event_time).toBe(Date.UTC(2026, 10, 2, 10, 0, 0) / 1000);
+  });
+
   it("copies the queue row and ad context into the request, and nothing about the buyer", async () => {
     await sendPendingConversions(ENROLLMENT);
 
@@ -447,6 +482,15 @@ describe("sendPendingConversions", () => {
 // ─── Point: the claim ───────────────────────────────────────────────────────
 
 describe("sendPendingConversions claims", () => {
+  it("quotes the timestamp in the stale filter", async () => {
+    await sendPendingConversions(ENROLLMENT);
+
+    expect(orFilters).toHaveLength(1);
+    expect(orFilters[0]).toMatch(
+      /^last_attempt_at\.is\.null,last_attempt_at\.lt\."\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z"$/,
+    );
+  });
+
   it("re-claims a stale claim older than 5 minutes", async () => {
     db.conversion_events = [queueRow("meta", { attempts: 2, last_attempt_at: minutesAgo(5.1) })];
 

@@ -7,26 +7,39 @@ interface Call {
   filters: [string, unknown][];
   select?: string;
   upsert?: { row: Record<string, unknown>; options: Record<string, unknown> };
+  signal?: AbortSignal;
 }
 let calls: Call[] = [];
 let results: Record<string, { data?: unknown; error?: unknown }> = {};
 let throwOn: string | null = null;
+// A stalled query: it answers only when its signal aborts, the way a real fetch
+// does, and never if no signal was passed.
+let stallOn: string | null = null;
 
 function builder(table: string) {
   const call: Call = { table, filters: [] };
   calls.push(call);
   const settle = () => {
     if (throwOn === table) throw new Error("client exploded with SECRET-VALUE");
+    if (stallOn === table) {
+      return new Promise<{ data: null; error: { code: string; message: string } }>((resolve) => {
+        call.signal?.addEventListener("abort", () =>
+          resolve({ data: null, error: { code: "", message: "TimeoutError: SECRET-VALUE" } }),
+        );
+      });
+    }
     return Promise.resolve({ data: null, error: null, ...(results[table] ?? {}) });
   };
   const b: Record<string, unknown> = {
     select: (cols: string) => ((call.select = cols), b),
     eq: (k: string, v: unknown) => (call.filters.push([k, v]), b),
+    abortSignal: (signal: AbortSignal) => ((call.signal = signal), b),
     maybeSingle: () => settle(),
     upsert: (row: Record<string, unknown>, options: Record<string, unknown>) => {
       call.upsert = { row, options };
-      return settle();
+      return b;
     },
+    then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) => settle().then(resolve, reject),
   };
   return b;
 }
@@ -109,6 +122,7 @@ describe("captureAdContext", () => {
       classes: { data: { intakes: { slug: "sky-2026" } } },
     };
     throwOn = null;
+    stallOn = null;
     errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -219,6 +233,51 @@ describe("captureAdContext", () => {
     await expect(captureAdContext(args())).resolves.toBeUndefined();
     expect(logged()).toContain("23503");
     expect(logged()).not.toContain("SECRET-VALUE");
+  });
+
+  it("reads the click cookie as plain JSON, since Next has already decoded it", async () => {
+    const plain = JSON.stringify({ fbclid: "F1", ttclid: "T1", at: 1700 });
+    await captureAdContext(args({ cookie: cookies({ kn_ad_click: plain }) }));
+    expect(calls.find((c) => c.upsert)!.upsert!.row).toMatchObject({ fbc: "fb.1.1700.F1", ttclid: "T1" });
+  });
+
+  describe("time limit", () => {
+    const WAITING = "still waiting";
+    const outcomeOf = (p: Promise<unknown>) =>
+      Promise.race([
+        p.then(() => "resolved"),
+        new Promise((resolve) => setTimeout(() => resolve(WAITING), 2500)),
+      ]);
+
+    it("shares one 1.5-second signal across every query", async () => {
+      const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+      await captureAdContext(args());
+
+      expect(timeoutSpy).toHaveBeenCalledExactlyOnceWith(1500);
+      expect(calls.map((c) => c.table)).toEqual(["tenant_conversion_settings", "classes", "enrollment_ad_context"]);
+      for (const c of calls) expect(c.signal).toBe(timeoutSpy.mock.results[0].value);
+    });
+
+    it("spends no signal on a buyer with no click data", async () => {
+      const timeoutSpy = vi.spyOn(AbortSignal, "timeout");
+      await captureAdContext(args({ cookie: cookies({}) }));
+      expect(timeoutSpy).not.toHaveBeenCalled();
+    });
+
+    it.each(["tenant_conversion_settings", "classes", "enrollment_ad_context"])(
+      "stops at the limit when %s stalls, and logs a name only",
+      async (table) => {
+        stallOn = table;
+        const started = Date.now();
+
+        await expect(outcomeOf(captureAdContext(args()))).resolves.toBe("resolved");
+
+        expect(Date.now() - started).toBeGreaterThanOrEqual(1400);
+        expect(calls.filter((c) => c.upsert).length).toBe(table === "enrollment_ad_context" ? 1 : 0);
+        expect(errorSpy).toHaveBeenCalledExactlyOnceWith("[conversions] ad context timed out:", "TimeoutError");
+        expect(logged()).not.toContain("SECRET-VALUE");
+      },
+    );
   });
 
   it("logs no IP, cookie value or click ID on any failure path", async () => {
