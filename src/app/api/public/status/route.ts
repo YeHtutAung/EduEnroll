@@ -220,12 +220,18 @@ export async function GET(request: NextRequest) {
     console.error("[status] tenant lookup failed for", tenantId, tenantError ?? "no row");
   }
 
-  // Telegram config lives in tenant_telegram_configs (moved in migration 068)
-  const { data: tgConfig } = await supabase
-    .from("tenant_telegram_configs")
+  // Bots live in tenant_bots (moved in migration 071). Buyers link to the
+  // enrollment bot, and a tenant without one is normal, hence maybeSingle.
+  const { data: enrollmentBot, error: botError } = await supabase
+    .from("tenant_bots")
     .select("bot_username, enabled")
     .eq("tenant_id", tenantId)
-    .single() as { data: { bot_username: string | null; enabled: boolean } | null; error: unknown };
+    .eq("bot_type", "enrollment")
+    .maybeSingle() as { data: { bot_username: string | null; enabled: boolean } | null; error: unknown };
+
+  if (botError) {
+    console.error("[status] enrollment bot lookup failed for", tenantId, botError);
+  }
 
   return NextResponse.json({
     enrollment_ref:   enrollment.enrollment_ref,
@@ -256,7 +262,7 @@ export async function GET(request: NextRequest) {
     org_type:         tenantInfo?.org_type ?? null,
     enrolled_at:      enrollment.enrolled_at,
     auto_cancel_minutes: tenantInfo?.auto_cancel_hours ?? 4320,
-    telegram_bot_username: tgConfig?.enabled ? (tgConfig.bot_username ?? null) : null,
+    telegram_bot_username: enrollmentBot?.enabled ? (enrollmentBot.bot_username ?? null) : null,
     payment_mode: tenantInfo?.payment_mode ?? "bank_transfer",
     // Fee settings, so the payment and confirmation screens can show the split
     // rather than a single figure the buyer cannot account for.
