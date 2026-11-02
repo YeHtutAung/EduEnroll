@@ -32,7 +32,7 @@ const TIKTOK_EVENT = "Purchase";
 
 // These stay pending, so a replaced token or a passing limit recovers within the
 // 7-day window. Meta's 200-299 permission range is handled in classifyResponse.
-const META_RETRY_CODES = new Set([1, 2, 4, 10, 17, 102, 190, 341, 80004]);
+const META_RETRY_CODES = new Set([1, 2, 4, 10, 17, 102, 190, 341, 613, 80004]);
 const TIKTOK_RETRY_CODES = new Set([
   40100, 40016, 40132, 40133, // rate limit
   40101, 40102, 40104, 40105, 40106, // auth
@@ -113,26 +113,38 @@ export interface SendOutcome {
   code: string | null;
 }
 
+// With no code to read, these statuses are about the caller or the moment, not
+// the event, so they recover: auth, timeout, rate limit, and any server error.
+const isRetryableStatus = (httpStatus: number) =>
+  httpStatus >= 500 || httpStatus === 401 || httpStatus === 403 || httpStatus === 408 || httpStatus === 429;
+
 export function classifyResponse(platform: ConversionPlatform, httpStatus: number, body: unknown): SendOutcome {
-  const b = (body ?? {}) as { code?: unknown; error?: { code?: unknown } };
+  const b = (typeof body === "object" && body !== null ? body : {}) as {
+    code?: unknown;
+    error?: { code?: unknown; error_subcode?: unknown };
+  };
+  const noCode: SendOutcome = {
+    status: isRetryableStatus(httpStatus) ? "pending" : "failed",
+    code: `http_${httpStatus}`,
+  };
 
   if (platform === "tiktok") {
     // Judged by the body code first. TikTok's docs conflict on HTTP status, and
-    // its rate limit can arrive as a 401.
+    // its rate limit can arrive as a 401. A 2xx with no code is never "sent".
     if (typeof b.code === "number") {
       if (b.code === 0) return { status: "sent", code: null };
       const retry = TIKTOK_RETRY_CODES.has(b.code) || b.code >= 50000;
       return { status: retry ? "pending" : "failed", code: `tiktok_${b.code}` };
     }
-    return httpStatus >= 500
-      ? { status: "pending", code: `http_${httpStatus}` }
-      : { status: "failed", code: `http_${httpStatus}` };
+    return noCode;
   }
 
-  if (httpStatus >= 200 && httpStatus < 300) return { status: "sent", code: null };
-  if (httpStatus >= 500) return { status: "pending", code: `http_${httpStatus}` };
+  if (httpStatus >= 200 && httpStatus < 300 && !b.error) return { status: "sent", code: null };
   const code = typeof b.error?.code === "number" ? b.error.code : null;
-  if (code === null) return { status: "failed", code: `http_${httpStatus}` };
+  if (code === null) return noCode;
+  // Code 100 / subcode 33: the token cannot see the pixel. A setup mistake the
+  // owner can fix, so it stays pending. Plain 100 is a bad request and fails.
+  if (code === 100 && b.error?.error_subcode === 33) return { status: "pending", code: "meta_100_33" };
   const retry = META_RETRY_CODES.has(code) || (code >= 200 && code <= 299);
   return { status: retry ? "pending" : "failed", code: `meta_${code}` };
 }

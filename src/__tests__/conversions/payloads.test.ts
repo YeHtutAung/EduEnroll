@@ -101,3 +101,101 @@ describe("classifyResponse", () => {
     expect(JSON.stringify(classifyResponse("meta", 400, { error: { code: 100, message: "secret detail" } }))).not.toContain("secret");
   });
 });
+
+describe("classifyResponse without a usable body code", () => {
+  const bodies: [string, unknown][] = [["null", null], ["empty object", {}], ["a string", "<html>"], ["a number", 5], ["an array", []]];
+  for (const platform of ["meta", "tiktok"] as const) {
+    for (const status of [401, 403, 408, 429, 500, 503]) {
+      for (const [label, body] of bodies) {
+        it(`${platform} ${status} with ${label} is pending`, () => {
+          expect(classifyResponse(platform, status, body).status).toBe("pending");
+        });
+      }
+    }
+    it(`${platform} fails other client errors with no code`, () => {
+      for (const status of [400, 404, 422]) expect(classifyResponse(platform, status, {}).status).toBe("failed");
+    });
+  }
+  it("never treats a TikTok 2xx with no code as sent", () => {
+    for (const body of [null, {}, "ok", 5, []]) expect(classifyResponse("tiktok", 200, body).status).not.toBe("sent");
+  });
+  it("does not treat a Meta 2xx that carries an error as sent", () => {
+    expect(classifyResponse("meta", 200, { error: { code: 100 } }).status).toBe("failed");
+  });
+});
+
+describe("classifyResponse Meta setup mistakes", () => {
+  it("retries code 613", () => expect(classifyResponse("meta", 400, { error: { code: 613 } }).status).toBe("pending"));
+  it("retries code 100 with subcode 33 (no access to the pixel)", () => {
+    expect(classifyResponse("meta", 400, { error: { code: 100, error_subcode: 33 } }).status).toBe("pending");
+  });
+  it("still fails plain code 100 and other subcodes", () => {
+    expect(classifyResponse("meta", 400, { error: { code: 100 } })).toEqual({ status: "failed", code: "meta_100" });
+    expect(classifyResponse("meta", 400, { error: { code: 100, error_subcode: 2804003 } }).status).toBe("failed");
+  });
+});
+
+// Exact shapes, so any new key (an external_id, say) fails here.
+describe("exact payload shape", () => {
+  const nulls = { ...event, clientIp: null, userAgent: null, fbp: null, fbc: null, ttp: null, ttclid: null };
+
+  it("Meta, full", () => {
+    expect(JSON.parse(buildMetaRequest({ pixelId: "1", token: "T", testCode: "TC", event }).body)).toEqual({
+      access_token: "T",
+      test_event_code: "TC",
+      data: [
+        {
+          event_name: "Purchase",
+          event_time: 1793577600,
+          event_id: "hash123",
+          action_source: "website",
+          event_source_url: event.sourceUrl,
+          user_data: { client_ip_address: "203.0.113.1", client_user_agent: "UA", fbp: "fb.1.1.1", fbc: "fb.1.1.abc" },
+          custom_data: { value: 25, currency: "USD" },
+        },
+      ],
+    });
+  });
+  it("Meta, null fields are omitted", () => {
+    expect(JSON.parse(buildMetaRequest({ pixelId: "1", token: "T", testCode: null, event: nulls }).body).data[0]).toEqual({
+      event_name: "Purchase",
+      event_time: 1793577600,
+      event_id: "hash123",
+      action_source: "website",
+      event_source_url: event.sourceUrl,
+      user_data: {},
+      custom_data: { value: 25, currency: "USD" },
+    });
+  });
+  it("TikTok, full, with the test code at the top level", () => {
+    const body = JSON.parse(buildTiktokRequest({ pixelCode: "PX", token: "T", testCode: "TC", event }).body);
+    expect(body.test_event_code).toBe("TC");
+    expect(body).toEqual({
+      event_source: "web",
+      event_source_id: "PX",
+      test_event_code: "TC",
+      data: [
+        {
+          event: "Purchase",
+          event_time: 1793577600,
+          event_id: "hash123",
+          user: { ttclid: "tt1", ttp: "ttp1", ip: "203.0.113.1", user_agent: "UA" },
+          page: { url: event.sourceUrl },
+          properties: { value: 25, currency: "USD" },
+        },
+      ],
+    });
+  });
+  it("TikTok, null fields are omitted and there is no test code", () => {
+    const body = JSON.parse(buildTiktokRequest({ pixelCode: "PX", token: "T", testCode: null, event: nulls }).body);
+    expect(body.test_event_code).toBeUndefined();
+    expect(body.data[0]).toEqual({
+      event: "Purchase",
+      event_time: 1793577600,
+      event_id: "hash123",
+      user: {},
+      page: { url: event.sourceUrl },
+      properties: { value: 25, currency: "USD" },
+    });
+  });
+});
