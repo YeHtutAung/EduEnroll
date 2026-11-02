@@ -22,7 +22,8 @@ let rpcResults: Record<string, { data: unknown; error: { message: string } | nul
 let rpcCalls: { name: string; args: Row }[];
 let paymentUpdates: { payload: Row; filters: [string, unknown][] }[];
 let events: string[];
-let latestPayment: Row | null;
+let paymentRows: Row[];
+let paymentRowsError: { message: string } | null;
 let claimErrorsLeft: number;
 
 vi.mock("@/lib/api", () => ({ resolveTenantId: async () => "ten-1" }));
@@ -76,7 +77,8 @@ beforeEach(() => {
   rpcCalls = [];
   paymentUpdates = [];
   events = [];
-  latestPayment = null;
+  paymentRows = [];
+  paymentRowsError = null;
   claimErrorsLeft = 0;
   rpcResults = {
     claim_cbmmqr_order_slot: { data: [claimRow()], error: null },
@@ -112,7 +114,7 @@ beforeEach(() => {
     }
     if (table === "payments") {
       return {
-        select: () => ({ eq: () => ({ order: () => ({ limit: () => ({ single: async () => ({ data: latestPayment, error: latestPayment ? null : { message: "none" } }) }) }) }) }),
+        select: () => ({ eq: () => ({ order: async () => ({ data: paymentRows, error: paymentRowsError }) }) }),
         update: (payload: Row) => {
           const entry = { payload, filters: [] as [string, unknown][] };
           paymentUpdates.push(entry);
@@ -220,11 +222,38 @@ describe("created", () => {
 
   it("partial_payment: charges the remainder and records no platform fee", async () => {
     enrollment = { ...ENROLLMENT, status: "partial_payment" };
-    latestPayment = { received_amount: 15000 };
+    paymentRows = [{ amount: 40000, received_amount: 15000 }];
     const body = await (await POST(req())).json();
     expect(called("claim_cbmmqr_order_slot")[0].args).toMatchObject({ p_amount: 25000, p_platform_fee: 0 });
     expect(mockCreate.mock.calls[0][1]).toMatchObject({ amount: 25000 });
     expect(body).toMatchObject({ status: "created", amount: 25000 });
+  });
+
+  it("partial_payment: still charges the remainder after an abandoned top-up", async () => {
+    enrollment = { ...ENROLLMENT, status: "partial_payment" };
+    paymentRows = [
+      { amount: 40000, received_amount: 15000 },
+      { amount: 25000, received_amount: null },
+    ];
+    await POST(req());
+    expect(called("claim_cbmmqr_order_slot")[0].args).toMatchObject({ p_amount: 25000, p_platform_fee: 0 });
+    expect(mockCreate.mock.calls[0][1]).toMatchObject({ amount: 25000 });
+  });
+
+  it("partial_payment: charges nothing when the payment history can't be read", async () => {
+    enrollment = { ...ENROLLMENT, status: "partial_payment" };
+    paymentRowsError = { message: "down" };
+    expect((await POST(req())).status).toBe(500);
+    expect(called("claim_cbmmqr_order_slot")).toHaveLength(0);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("partial_payment: charges nothing when no balance is left", async () => {
+    enrollment = { ...ENROLLMENT, status: "partial_payment" };
+    paymentRows = [{ amount: 40000, received_amount: 40000 }];
+    expect((await POST(req())).status).toBe(409);
+    expect(called("claim_cbmmqr_order_slot")).toHaveLength(0);
+    expect(mockCreate).not.toHaveBeenCalled();
   });
 
   it("reuse: returns the stored QR without calling CB", async () => {

@@ -5,6 +5,7 @@ import { formatCurrency } from "@/lib/utils";
 import { statusTicketAmounts } from "@/lib/payments/statusTicketAmounts";
 import type { Enrollment, Class, Intake, Payment } from "@/types/database";
 import type { EnrollmentStatus, PaymentStatus } from "@/types/database";
+import { loadPartialPayment } from "@/server/payments/partialPayment";
 
 // ─── Bilingual status labels ──────────────────────────────────────────────────
 
@@ -163,6 +164,13 @@ export async function GET(request: NextRequest) {
   // ── Build response ────────────────────────────────────────────────
   const enrollmentLabel = ENROLLMENT_STATUS_LABELS[enrollment.status];
 
+  // Display only, so an unreadable history falls back to the latest row. That row
+  // is often a top-up holding only the remainder, or one with nothing recorded.
+  const partial = enrollment.status === "partial_payment"
+    ? await loadPartialPayment(supabase, enrollment.id)
+    : null;
+  const recordedPartial = partial && partial.orderTotal !== null ? partial : null;
+
   const paymentBlock = payment
     ? {
         id:                  payment.id,
@@ -171,13 +179,15 @@ export async function GET(request: NextRequest) {
         status_label_mm:     PAYMENT_STATUS_LABELS[payment.status].mm,
         submitted_at:        payment.created_at,
         admin_note:          payment.admin_note ?? null,
-        received_amount: payment.received_amount ?? null,
-        total_amount:    payment.amount,
+        received_amount: recordedPartial?.received ?? payment.received_amount ?? null,
+        total_amount:    recordedPartial?.orderTotal ?? payment.amount,
         // The fee inside total_amount, as recorded when the row was created.
-        platform_fee:    payment.platform_fee ?? 0,
-        remaining_amount: payment.received_amount != null
-          ? payment.amount - payment.received_amount
-          : null,
+        platform_fee:    recordedPartial?.orderFee ?? payment.platform_fee ?? 0,
+        remaining_amount: recordedPartial
+          ? recordedPartial.remaining
+          : payment.received_amount != null
+            ? payment.amount - payment.received_amount
+            : null,
       }
     : null;
 

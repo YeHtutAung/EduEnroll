@@ -188,7 +188,7 @@ describe("eligibility (§3b-2) — refused BEFORE Stripe", () => {
   it("checkout accepts partial_payment and charges the remaining balance", async () => {
     queue("enrollments", { data: { ...ENROLLMENT, status: "partial_payment" }, error: null });
     queue("tenants", { data: { currency: "SGD", name: "T" }, error: null });
-    queue("payments", { data: { received_amount: 40 }, error: null }); // partial history
+    queue("payments", { data: [{ amount: 100, received_amount: 40 }, { amount: 60, received_amount: null }], error: null }); // partial history, then an abandoned top-up
     queue("payments", { data: [], error: null }); // attempt context
     const res = await postCheckout();
     expect(res.status).toBe(200);
