@@ -6,7 +6,7 @@ import {
   processLanguageSchoolContact,
 } from "@/lib/telegram/language-school-processor";
 import { handleChatJoinRequest } from "@/lib/telegram/join-request-handler";
-import { decryptToken } from "@/lib/telegram/crypto";
+import { decryptBotToken } from "@/lib/telegram/enrollment-bot";
 
 // ─── POST /api/telegram/webhook/[secret] ─────────────────────────────────────
 // Enrollment bot webhook. The [secret] path segment identifies the tenant bot.
@@ -65,7 +65,7 @@ export async function POST(
 
   let botToken: string;
   try {
-    botToken = decryptToken(bot.bot_token);
+    botToken = decryptBotToken(bot.bot_token);
   } catch {
     console.error("[enrollment-webhook] Failed to decrypt bot token");
     return NextResponse.json({ status: "ok" }, { status: 200 });

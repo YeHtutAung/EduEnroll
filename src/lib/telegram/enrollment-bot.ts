@@ -16,7 +16,7 @@ export type EnrollmentBotToken =
 // tenant_bots holds two formats. Rows carried over by migration 071 were written
 // with the Messenger helper (base64, no colons), later ones with the Telegram
 // helper (iv:authTag:ciphertext).
-function decryptBotToken(stored: string): string {
+export function decryptBotToken(stored: string): string {
   return stored.includes(":") ? decryptToken(stored) : decryptLegacyToken(stored);
 }
 
