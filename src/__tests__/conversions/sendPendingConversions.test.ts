@@ -394,6 +394,15 @@ describe("sendPendingConversions", () => {
       json: () => Promise.reject(error),
     });
 
+    it("keeps a 200 pending when the connection breaks while reading the body", async () => {
+      mockFetch.mockImplementation(async () => unreadable(200, new TypeError("terminated")));
+
+      await sendPendingConversions(ENROLLMENT);
+
+      expect(metaRow()).toMatchObject({ status: "pending", last_error: "transport", attempts: 1 });
+      expect(tiktokRow()).toMatchObject({ status: "pending", last_error: "transport", attempts: 1 });
+    });
+
     it.each(["TimeoutError", "AbortError"])(
       "keeps a 200 pending when reading the body ends in %s",
       async (name) => {
