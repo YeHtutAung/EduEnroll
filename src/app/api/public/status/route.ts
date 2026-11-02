@@ -166,10 +166,13 @@ export async function GET(request: NextRequest) {
 
   // Display only, so an unreadable history falls back to the latest row. That row
   // is often a top-up holding only the remainder, or one with nothing recorded.
-  const partial = enrollment.status === "partial_payment"
+  // A confirmed order reads it too: its latest row can be a settled top-up, which
+  // is a remainder and says nothing about the order total or its fee.
+  const partial = enrollment.status === "partial_payment" || enrollment.status === "confirmed"
     ? await loadPartialPayment(supabase, enrollment.id)
     : null;
   const recordedPartial = partial && partial.orderTotal !== null ? partial : null;
+  const owingPartial = enrollment.status === "partial_payment" ? recordedPartial : null;
 
   const paymentBlock = payment
     ? {
@@ -179,12 +182,12 @@ export async function GET(request: NextRequest) {
         status_label_mm:     PAYMENT_STATUS_LABELS[payment.status].mm,
         submitted_at:        payment.created_at,
         admin_note:          payment.admin_note ?? null,
-        received_amount: recordedPartial?.received ?? payment.received_amount ?? null,
+        received_amount: owingPartial?.received ?? payment.received_amount ?? null,
         total_amount:    recordedPartial?.orderTotal ?? payment.amount,
         // The fee inside total_amount, as recorded when the row was created.
         platform_fee:    recordedPartial?.orderFee ?? payment.platform_fee ?? 0,
-        remaining_amount: recordedPartial
-          ? recordedPartial.remaining
+        remaining_amount: owingPartial
+          ? owingPartial.remaining
           : payment.received_amount != null
             ? payment.amount - payment.received_amount
             : null,

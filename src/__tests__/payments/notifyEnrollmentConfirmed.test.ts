@@ -37,7 +37,9 @@ type Payment = {
   created_at: string;
 };
 
-function setup(payments: Payment[]) {
+type HistoryRow = { amount: number; platform_fee: number; received_amount: number | null };
+
+function setup(payments: Payment[], history: HistoryRow[] = []) {
   mockFrom.mockImplementation((table: string) => {
     if (table === "enrollments") {
       return { select: vi.fn().mockReturnThis(), eq: vi.fn().mockReturnThis(), single: vi.fn().mockResolvedValue({ data: enrollment, error: null }) };
@@ -72,6 +74,8 @@ function setup(payments: Payment[]) {
         })[0] ?? null;
         return Promise.resolve({ data: selected, error: null });
       }),
+      // The whole-history read awaits the chain itself.
+      then: (resolve: (v: unknown) => unknown) => Promise.resolve({ data: history, error: null }).then(resolve),
     };
     return paymentQuery;
   });
@@ -130,6 +134,40 @@ describe("notifyEnrollmentConfirmed email totals", () => {
         platformFeeFormatted: "2,000 MMK",
         totalPaidFormatted: "4,000 MMK",
       }),
+    );
+  });
+
+  // A top-up row holds only the remainder and records no fee, so reading it
+  // told the buyer their whole order cost what the last payment did.
+  it("reports the saved order total and fee when the settled row is a top-up", async () => {
+    setup(
+      [{ amount: 1_300, platform_fee: 0, paid_at: "2026-09-05T10:00:00Z", created_at: "2026-09-05T09:00:00Z" }],
+      [
+        { amount: 3_300, platform_fee: 300, received_amount: 2_000 },
+        { amount: 1_300, platform_fee: 0, received_amount: null },
+      ],
+    );
+
+    await notifyEnrollmentConfirmed("enrollment-1");
+
+    expect(mockEnrollmentApprovedEmail).toHaveBeenCalledWith(
+      expect.objectContaining({
+        platformFeeFormatted: "300 MMK",
+        totalPaidFormatted: "3,300 MMK",
+      }),
+    );
+  });
+
+  it("keeps the settled row when it covers the saved order total", async () => {
+    setup(
+      [{ amount: 4_000, platform_fee: 2_000, paid_at: "2026-09-05T10:00:00Z", created_at: "2026-09-05T09:00:00Z" }],
+      [{ amount: 4_000, platform_fee: 2_000, received_amount: 4_000 }],
+    );
+
+    await notifyEnrollmentConfirmed("enrollment-1");
+
+    expect(mockEnrollmentApprovedEmail).toHaveBeenCalledWith(
+      expect.objectContaining({ platformFeeFormatted: "2,000 MMK", totalPaidFormatted: "4,000 MMK" }),
     );
   });
 });
