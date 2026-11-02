@@ -11,6 +11,11 @@ vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({ rpc: mockRpc, from: mockFrom }),
 }));
 
+const mockCapture = vi.fn().mockResolvedValue(undefined);
+vi.mock("@/server/conversions/captureAdContext", () => ({
+  captureAdContext: (...args: unknown[]) => mockCapture(...args),
+}));
+
 vi.mock("@/lib/api", () => ({
   resolveTenantId: vi.fn().mockResolvedValue("tenant-abc"),
 }));
@@ -389,5 +394,75 @@ describe("POST /api/public/enroll — terms acceptance", () => {
     const res = await POST(makeRequest({ class_id: CLASS_ID, __hp: "bot" }, { terms: false }));
     expect(res.status).toBe(200);
     expect(mockRpc).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Ad context capture ─────────────────────────────────────────────────────
+//
+// captureAdContext is mocked here; its own behaviour is covered in
+// src/__tests__/conversions/captureAdContext.test.ts. These tests pin only
+// where the route calls it.
+
+describe("POST /api/public/enroll: ad context capture", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCapture.mockResolvedValue(undefined);
+    setupFromSuccess();
+  });
+
+  it("captures once on the single-class branch, with the class id", async () => {
+    mockRpcSuccess();
+    const res = await POST(makeRequest({ class_id: CLASS_ID }));
+    expect(res.status).toBe(201);
+    expect(mockCapture).toHaveBeenCalledTimes(1);
+    expect(mockCapture.mock.calls[0][0]).toMatchObject({
+      enrollmentId: "enroll-1",
+      tenantId: "tenant-abc",
+      classId: CLASS_ID,
+    });
+  });
+
+  it("captures once on the cart branch, with the first item's class id", async () => {
+    mockRpc.mockResolvedValue({
+      data: {
+        success: true,
+        enrollment_id: "enroll-2",
+        enrollment_ref: "NM-2026-0002",
+        quantity: 2,
+        total_fee: 100000,
+        tenant_id: "tenant-abc",
+        items: [{ class_id: CLASS_ID, class_level: "N5", quantity: 2, fee_amount: 50000 }],
+      },
+      error: null,
+    });
+    const res = await POST(makeRequest({ items: [{ class_id: CLASS_ID, quantity: 2 }], form_data: {} }));
+    expect(res.status).toBe(201);
+    expect(mockCapture).toHaveBeenCalledTimes(1);
+    expect(mockCapture.mock.calls[0][0]).toMatchObject({
+      enrollmentId: "enroll-2",
+      tenantId: "tenant-abc",
+      classId: CLASS_ID,
+    });
+  });
+
+  it("does not capture on a filled honeypot", async () => {
+    const res = await POST(makeRequest({ class_id: CLASS_ID, __hp: "bot" }));
+    expect(res.status).toBe(200);
+    expect(mockCapture).not.toHaveBeenCalled();
+  });
+
+  it("does not capture when terms are not accepted", async () => {
+    const res = await POST(makeRequest({ class_id: CLASS_ID }, { terms: false }));
+    expect(res.status).toBe(400);
+    expect(mockCapture).not.toHaveBeenCalled();
+  });
+
+  it("does not capture when the order fails (single and cart)", async () => {
+    mockRpc.mockResolvedValue({ data: null, error: { message: "boom" } });
+    const single = await POST(makeRequest({ class_id: CLASS_ID }));
+    expect(single.status).toBeGreaterThanOrEqual(400);
+    const cart = await POST(makeRequest({ items: [{ class_id: CLASS_ID, quantity: 1 }], form_data: {} }));
+    expect(cart.status).toBeGreaterThanOrEqual(400);
+    expect(mockCapture).not.toHaveBeenCalled();
   });
 });
