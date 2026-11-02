@@ -98,6 +98,31 @@ async function seedPayment(
 const setStatus = (paymentId: string, status: string) =>
   sql(`UPDATE payments SET status = $2::payment_status WHERE id = $1`, [paymentId, status]);
 
+/**
+ * Change a payment's status on a dedicated connection and return the server
+ * notices it raised. The trigger body swallows its own errors into a WARNING,
+ * so "no row was added" cannot tell a working guard from a swallowed error:
+ * the tests that expect no row also assert that no such warning was raised.
+ */
+const FAILED_WARNING = /enqueue failed/;
+async function setStatusWithNotices(paymentId: string, status: string) {
+  const notices: string[] = [];
+  const client = new Client({ connectionString: process.env.DATABASE_URL });
+  client.on("notice", (n) => notices.push(n.message ?? ""));
+  await client.connect();
+  try {
+    await client.query(`UPDATE payments SET status = $2::payment_status WHERE id = $1`, [
+      paymentId,
+      status,
+    ]);
+  } finally {
+    await client.end();
+  }
+  return notices;
+}
+const expectNoFailureWarning = (notices: string[]) =>
+  expect(notices.filter((m) => FAILED_WARNING.test(m))).toEqual([]);
+
 type EventRow = {
   platform: string;
   status: string;
@@ -206,35 +231,42 @@ describe("enqueue trigger", () => {
     expect(await eventsOf(enrollmentId)).toHaveLength(2);
 
     await setStatus(pid, "pending");
-    await setStatus(pid, "verified");
+    const notices = await setStatusWithNotices(pid, "verified");
 
     expect(await eventsOf(enrollmentId)).toHaveLength(2);
+    expectNoFailureWarning(notices);
   });
 
   it("adds nothing for an unconfigured tenant", async () => {
     const { tenantId, enrollmentId } = await makeWorld({ settings: null });
-    await setStatus(await seedPayment(enrollmentId, tenantId), "verified");
+    const pid = await seedPayment(enrollmentId, tenantId);
+    const notices = await setStatusWithNotices(pid, "verified");
     expect(await eventsOf(enrollmentId)).toEqual([]);
+    expectNoFailureWarning(notices);
   });
 
   it("adds nothing for a disabled tenant", async () => {
     const { tenantId, enrollmentId } = await makeWorld({ settings: { enabled: false } });
-    await setStatus(await seedPayment(enrollmentId, tenantId), "verified");
+    const pid = await seedPayment(enrollmentId, tenantId);
+    const notices = await setStatusWithNotices(pid, "verified");
     expect(await eventsOf(enrollmentId)).toEqual([]);
+    expectNoFailureWarning(notices);
   });
 
   it("adds nothing when the value is zero", async () => {
     const { tenantId, enrollmentId } = await makeWorld({ settings: { rate: 1 } });
     const pid = await seedPayment(enrollmentId, tenantId, { amount: 100, fee: 100 });
-    await setStatus(pid, "verified");
+    const notices = await setStatusWithNotices(pid, "verified");
     expect(await eventsOf(enrollmentId)).toEqual([]);
+    expectNoFailureWarning(notices);
   });
 
   it("adds nothing when the converted value rounds to zero", async () => {
     const { tenantId, enrollmentId } = await makeWorld({ settings: { rate: 0.0005 } });
     const pid = await seedPayment(enrollmentId, tenantId, { amount: 1, fee: 0 });
-    await setStatus(pid, "verified");
+    const notices = await setStatusWithNotices(pid, "verified");
     expect(await eventsOf(enrollmentId)).toEqual([]);
+    expectNoFailureWarning(notices);
   });
 
   it("keeps the queued value when the rate changes later", async () => {
@@ -267,8 +299,9 @@ describe("enqueue trigger", () => {
   it("skips a charge in another currency", async () => {
     const { tenantId, enrollmentId } = await makeWorld();
     const pid = await seedPayment(enrollmentId, tenantId, { providerCurrency: "sgd" });
-    await setStatus(pid, "verified");
+    const notices = await setStatusWithNotices(pid, "verified");
     expect(await eventsOf(enrollmentId)).toEqual([]);
+    expectNoFailureWarning(notices);
   });
 
   it("still queues a charge in the tenant's own currency, whatever the case", async () => {
@@ -285,6 +318,38 @@ describe("enqueue trigger", () => {
     // Row B is the top-up: only the remainder.
     const b = await seedPayment(enrollmentId, tenantId, { amount: 400 });
     await setStatus(b, "verified");
+
+    expect((await eventsOf(enrollmentId)).map((r) => Number(r.value))).toEqual([1000, 1000]);
+  });
+
+  it("removes the platform fee from a top-up's full total", async () => {
+    const { tenantId, enrollmentId } = await makeWorld({ settings: { rate: 1 } });
+    await seedPayment(enrollmentId, tenantId, { amount: 1030, fee: 30, received: 600 });
+    const b = await seedPayment(enrollmentId, tenantId, { amount: 430 });
+    await setStatus(b, "verified");
+
+    expect((await eventsOf(enrollmentId)).map((r) => Number(r.value))).toEqual([1000, 1000]);
+  });
+
+  // The FIRST partial row holds the full total. A later partial row holds a
+  // smaller remainder and must not be picked.
+  it("takes the value from the first partial row when there are repeated partials", async () => {
+    const { tenantId, enrollmentId } = await makeWorld({ settings: { rate: 1 } });
+    await seedPayment(enrollmentId, tenantId, { amount: 1000, received: 600 }); // A
+    await seedPayment(enrollmentId, tenantId, { amount: 400, received: 150 }); // B, also partial
+    const c = await seedPayment(enrollmentId, tenantId, { amount: 250 }); // C, the final top-up
+    await setStatus(c, "verified");
+
+    expect((await eventsOf(enrollmentId)).map((r) => Number(r.value))).toEqual([1000, 1000]);
+  });
+
+  // Approving the first partial row itself: a newer partial row must not
+  // replace its own full value.
+  it("uses the rows own total when it is approved while a newer partial row exists", async () => {
+    const { tenantId, enrollmentId } = await makeWorld({ settings: { rate: 1 } });
+    const a = await seedPayment(enrollmentId, tenantId, { amount: 1000, received: 600 });
+    await seedPayment(enrollmentId, tenantId, { amount: 400, received: 150 });
+    await setStatus(a, "verified");
 
     expect((await eventsOf(enrollmentId)).map((r) => Number(r.value))).toEqual([1000, 1000]);
   });
@@ -312,12 +377,15 @@ describe("enqueue trigger", () => {
     const pid = await seedPayment(enrollmentId, tenantId);
 
     const client = new Client({ connectionString: process.env.DATABASE_URL });
+    const notices: string[] = [];
+    client.on("notice", (n) => notices.push(n.message ?? ""));
     await client.connect();
     try {
       await client.query("BEGIN");
       await client.query("SET LOCAL lock_timeout = '5s'");
       await client.query(
-        `ALTER TABLE conversion_events ADD CONSTRAINT tmp_force_trigger_failure CHECK (false)`,
+        `ALTER TABLE conversion_events
+           ADD CONSTRAINT tmp_force_trigger_failure CHECK (false) NOT VALID`,
       );
 
       // The CHECK really is in force: a direct insert fails.
@@ -343,6 +411,8 @@ describe("enqueue trigger", () => {
         [enrollmentId],
       );
       expect(ev.rows[0].n).toBe(0);
+      // The error was swallowed into a warning, not silently skipped.
+      expect(notices.filter((m) => FAILED_WARNING.test(m))).toHaveLength(1);
     } finally {
       await client.query("ROLLBACK").catch(() => {});
       await client.end();
@@ -429,6 +499,17 @@ describe("cleanup_conversion_data", () => {
     await cleanup();
 
     expect(await hasContext(enrollmentId)).toBe(false);
+  });
+
+  it("keeps context older than 8 days while a queue row is still pending", async () => {
+    const { tenantId, enrollmentId } = await makeWorld({ settings: null });
+    await seedContext(enrollmentId, daysAgo(9));
+    await seedEvent(enrollmentId, tenantId, "meta", "pending");
+
+    await cleanup();
+
+    expect((await statusOf(enrollmentId, "meta")).status).toBe("pending");
+    expect(await hasContext(enrollmentId)).toBe(true);
   });
 
   it("keeps context younger than 8 days with no queue rows", async () => {
@@ -532,6 +613,26 @@ describe("privileges", () => {
       expect(r).toEqual({ anon: false, authed: false, pub: false });
     },
   );
+
+  it("defines both functions as SECURITY DEFINER with a pinned search_path", async () => {
+    const rows = await sql<{ proname: string; prosecdef: boolean; proconfig: string[] | null }>(
+      `SELECT proname, prosecdef, proconfig FROM pg_proc
+        WHERE pronamespace = 'public'::regnamespace
+          AND proname IN ('fn_payments_enqueue_conversions','cleanup_conversion_data')
+        ORDER BY proname`,
+    );
+    const byName = Object.fromEntries(rows.map((r) => [r.proname, r]));
+    expect(Object.keys(byName).sort()).toEqual([
+      "cleanup_conversion_data",
+      "fn_payments_enqueue_conversions",
+    ]);
+    for (const r of rows) expect(r.prosecdef).toBe(true);
+    expect(byName.cleanup_conversion_data.proconfig).toEqual(["search_path=public, pg_temp"]);
+    expect([...(byName.fn_payments_enqueue_conversions.proconfig ?? [])].sort()).toEqual([
+      "lock_timeout=1s",
+      "search_path=public, pg_temp",
+    ]);
+  });
 
   it("lets service_role run the clean-up function", async () => {
     const [r] = await sql<{ ok: boolean }>(

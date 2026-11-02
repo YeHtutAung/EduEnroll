@@ -102,13 +102,20 @@ Before starting, check the highest number in `supabase/migrations/` and use a la
 --
 -- DEPLOY ORDER: apply this BEFORE the code that reads it.
 --
--- ROLLBACK:
+-- ROLLBACK (dropping the tables loses every queued event and every settings
+-- row. Copy the settings out first if you will re-apply):
 --   DROP TRIGGER IF EXISTS trg_payments_enqueue_conversions ON public.payments;
 --   DROP FUNCTION IF EXISTS public.fn_payments_enqueue_conversions();
 --   DROP FUNCTION IF EXISTS public.cleanup_conversion_data();
 --   DROP TABLE IF EXISTS public.conversion_events;
 --   DROP TABLE IF EXISTS public.enrollment_ad_context;
 --   DROP TABLE IF EXISTS public.tenant_conversion_settings;
+
+BEGIN;
+
+-- Fail fast rather than queue payment writes behind this migration:
+-- CREATE TRIGGER takes a lock on payments.
+SET LOCAL lock_timeout = '5s';
 
 CREATE TABLE public.tenant_conversion_settings (
   tenant_id         uuid PRIMARY KEY REFERENCES public.tenants(id) ON DELETE CASCADE,
@@ -179,10 +186,11 @@ CREATE FUNCTION public.fn_payments_enqueue_conversions()
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, pg_temp
+SET lock_timeout = '1s'
 AS $$
 DECLARE
-  v_settings public.tenant_conversion_settings%ROWTYPE;
+  v_settings record;
   v_tenant_currency text;
   v_value    numeric;
   v_event_id text;
@@ -200,14 +208,15 @@ BEGIN
       RETURN NEW;
     END IF;
 
-    -- A top-up row holds only the remainder. The earlier row that recorded the
-    -- partial payment holds the full ticket total.
+    -- A top-up row holds only the remainder. The FIRST row that recorded a
+    -- partial payment holds the full ticket total; later partial rows hold less.
     SELECT p.amount - p.platform_fee INTO v_value
       FROM public.payments p
      WHERE p.enrollment_id = NEW.enrollment_id
        AND p.id <> NEW.id
        AND p.received_amount IS NOT NULL
-     ORDER BY p.created_at DESC
+       AND p.created_at < NEW.created_at
+     ORDER BY p.created_at ASC, p.id ASC
      LIMIT 1;
     v_value := round(COALESCE(v_value, NEW.amount - NEW.platform_fee) * v_settings.report_rate, 2);
     IF v_value <= 0 THEN RETURN NEW; END IF;
@@ -245,7 +254,7 @@ CREATE FUNCTION public.cleanup_conversion_data()
 RETURNS TABLE (expired integer, context_deleted integer)
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_expired integer;
@@ -276,6 +285,8 @@ $$;
 
 REVOKE ALL ON FUNCTION public.cleanup_conversion_data() FROM public, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.cleanup_conversion_data() TO service_role;
+
+COMMIT;
 ```
 
 - [ ] **Step 2: Write the database tests**

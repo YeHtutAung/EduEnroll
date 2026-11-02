@@ -128,7 +128,7 @@ New table `conversion_events`, **service role only**, with
 | `event_id` | SHA-256 of `purchase:<enrollment_id>`. Stable across retries. Not the order ref. |
 | `value`, `currency`, `occurred_at` | Snapshot at the moment of payment |
 | `status` | `pending`, `sent`, `failed`, `skipped` |
-| `attempts`, `last_attempt_at`, `last_error` | `last_error` holds a status code or platform error code only, never a response body |
+| `attempts`, `last_attempt_at`, `last_error` | `last_error` holds a status code, a platform error code or a short internal reason such as `expired`, never a response body |
 
 A new `AFTER UPDATE OF status` trigger on `payments`, separate from
 `trg_payments_sync_enrollment`, adds rows when a payment changes to `verified`:
@@ -148,14 +148,18 @@ included.
 - Normally `payments.amount - payments.platform_fee`.
 - A top-up after a partial payment gets its own row holding only the remainder, for
   example through the KBZPay route. So if the enrollment has an earlier payment with
-  `received_amount` set, the value comes from that earlier row's
-  `amount - platform_fee`, which is the full ticket total.
+  `received_amount` set, the value comes from the first such row's
+  `amount - platform_fee`, which is the full ticket total. Later partial rows hold
+  smaller remainders, so they are not used.
 - That amount is multiplied by `report_rate` and rounded to 2 decimals. If the
   result is zero or less, no row is added.
 - The event's currency is `report_currency`. The rate in force at the moment of
   payment is the one used, so a later rate change doesn't alter queued rows.
-- If the payment has a `provider_currency` that differs from `tenants.currency`, as
-  a HitPay charge could, no row is added, because the rate wouldn't apply.
+- If the payment has a `provider_currency` that differs from `tenants.currency`, no
+  row is added, because the rate wouldn't apply. Only Stripe rows write
+  `provider_currency` today. HitPay charges in SGD without setting it, so this check
+  doesn't catch it, and conversions don't support a HitPay tenant whose currency
+  isn't SGD.
 
 ### 5. Sender
 
