@@ -1,20 +1,26 @@
-﻿import { createAdminClient } from "@/lib/supabase/admin";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { sendPendingConversions } from "@/server/conversions/sendPendingConversions";
 
-// 40 enrollments, 5 at a time, 6 seconds each: at most 48 seconds, inside the
-// route's 60. Rows not reached wait for the next run.
-const BATCH_ENROLLMENTS = 40;
+// A time budget, not a fixed batch: a lapsed token during an on-sale can leave
+// hundreds of orders pending, which would expire unsent at a few dozen a day. A
+// chunk can start just inside 45 seconds and takes at most 6, inside the route's
+// 60. Rows not reached wait for the next run.
+const BATCH_ROWS = 1000;
+const SWEEP_BUDGET_MS = 45_000;
 const CONCURRENCY = 5;
 
 export interface SweepCounts {
   expired: number;
   contextDeleted: number;
   processed: number;
+  /** IP data is not being deleted. The route reports this as a failed run. */
+  cleanupFailed: boolean;
 }
 
 export async function sweepConversions(): Promise<SweepCounts> {
+  const started = Date.now();
   const supabase = createAdminClient();
-  const counts: SweepCounts = { expired: 0, contextDeleted: 0, processed: 0 };
+  const counts: SweepCounts = { expired: 0, contextDeleted: 0, processed: 0, cleanupFailed: false };
 
   // First, so a sending backlog can't stop IP data being deleted.
   const { data: cleaned, error: cleanupError } = (await supabase.rpc(
@@ -22,6 +28,7 @@ export async function sweepConversions(): Promise<SweepCounts> {
   )) as unknown as { data: { expired: number; context_deleted: number }[] | null; error: { code?: string } | null };
   if (cleanupError) {
     console.error("[conversions] clean-up failed:", cleanupError.code ?? "unknown");
+    counts.cleanupFailed = true;
   } else if (cleaned?.[0]) {
     counts.expired = cleaned[0].expired;
     counts.contextDeleted = cleaned[0].context_deleted;
@@ -32,7 +39,7 @@ export async function sweepConversions(): Promise<SweepCounts> {
     .select("enrollment_id")
     .eq("status", "pending")
     .order("occurred_at", { ascending: true })
-    .limit(BATCH_ENROLLMENTS * 2)) as unknown as {
+    .limit(BATCH_ROWS)) as unknown as {
     data: { enrollment_id: string }[] | null;
     error: { code?: string } | null;
   };
@@ -42,10 +49,11 @@ export async function sweepConversions(): Promise<SweepCounts> {
     return counts;
   }
 
-  const ids = Array.from(new Set((rows ?? []).map((r) => r.enrollment_id))).slice(0, BATCH_ENROLLMENTS);
-  for (let i = 0; i < ids.length; i += CONCURRENCY) {
-    await Promise.all(ids.slice(i, i + CONCURRENCY).map((id) => sendPendingConversions(id)));
+  const ids = Array.from(new Set((rows ?? []).map((r) => r.enrollment_id)));
+  for (let i = 0; i < ids.length && Date.now() - started < SWEEP_BUDGET_MS; i += CONCURRENCY) {
+    const chunk = ids.slice(i, i + CONCURRENCY);
+    await Promise.all(chunk.map((id) => sendPendingConversions(id)));
+    counts.processed += chunk.length;
   }
-  counts.processed = ids.length;
   return counts;
 }

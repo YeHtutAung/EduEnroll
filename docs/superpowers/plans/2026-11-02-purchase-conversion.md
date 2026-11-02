@@ -1247,6 +1247,8 @@ Expected: FAIL, module not found.
 
 - [ ] **Step 3: Implement**
 
+Review changed this code. `src/server/conversions/sendPendingConversions.ts` in the repo is the source of truth, not the snippet below.
+
 ```ts
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
@@ -1556,6 +1558,8 @@ Expected: FAIL, module not found.
 
 - [ ] **Step 3: Implement**
 
+Review changed this code. `src/server/conversions/sweep.ts` and `src/app/api/cron/conversions/route.ts` in the repo are the source of truth, not the snippets below.
+
 `src/server/conversions/sweep.ts`:
 
 ```ts
@@ -1717,6 +1721,10 @@ FROM public.tenants WHERE subdomain = 'skyfestival';
 - [ ] **Step 7: Clean up.** Call the cron route by hand with the secret, and confirm the ad context is deleted. Archive the test orders, with the owner's yes.
 
 - [ ] **Step 8: Hand production to the owner.** They apply the migration before the code, run the privilege check, add `CRON_SECRET` and live tokens, promote, add the settings row with the live pixels and agreed rate, and confirm the first cron log line.
+  - Before the migration, confirm `payments.platform_fee`, `payments.provider_currency` and `enrollments.internal_test_at` exist on production. The trigger's body binds late, so without them the migration would apply cleanly but enqueue nothing.
+  - After launch, confirm the first real paid order has `conversion_events` rows that reach `sent`. The cron line alone can't prove it.
+  - Vercel's Node version must be 20 or later.
+  - After this merges, other checkouts must run `npm install`, because `issueTickets.ts` imports `@vercel/functions` statically.
 
 ---
 

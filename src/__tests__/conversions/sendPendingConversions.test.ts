@@ -388,6 +388,36 @@ describe("sendPendingConversions", () => {
     for (const [, init] of mockFetch.mock.calls) expect(init.signal).toBeInstanceOf(AbortSignal);
   });
 
+  describe("a response body that can't be read", () => {
+    const unreadable = (status: number, error: unknown): FakeResponse => ({
+      status,
+      json: () => Promise.reject(error),
+    });
+
+    it.each(["TimeoutError", "AbortError"])(
+      "keeps a 200 pending when reading the body ends in %s",
+      async (name) => {
+        // Each would be permanent or wrong if read as "no body": TikTok failed
+        // with http_200, and Meta sent.
+        mockFetch.mockImplementation(async () => unreadable(200, new DOMException("stalled", name)));
+
+        await sendPendingConversions(ENROLLMENT);
+
+        expect(metaRow()).toMatchObject({ status: "pending", last_error: "transport", attempts: 1 });
+        expect(tiktokRow()).toMatchObject({ status: "pending", last_error: "transport", attempts: 1 });
+      },
+    );
+
+    it("treats plain invalid JSON as no body", async () => {
+      mockFetch.mockImplementation(async () => unreadable(200, new SyntaxError("Unexpected token <")));
+
+      await sendPendingConversions(ENROLLMENT);
+
+      expect(metaRow()).toMatchObject({ status: "sent", last_error: null });
+      expect(tiktokRow()).toMatchObject({ status: "failed", last_error: "http_200" });
+    });
+  });
+
   it("records only a code in last_error", async () => {
     mockFetch.mockImplementation(async (url) =>
       url.includes("facebook")

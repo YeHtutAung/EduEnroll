@@ -19,7 +19,7 @@ const { GET, dynamic, maxDuration } = await import("@/app/api/cron/conversions/r
 const { middleware } = await import("@/middleware");
 
 const SECRET = "cron-secret-sentinel-value";
-const COUNTS = { expired: 1, contextDeleted: 2, processed: 3 };
+const COUNTS = { expired: 1, contextDeleted: 2, processed: 3, cleanupFailed: false };
 
 const request = (authorization?: string) =>
   new NextRequest("https://edu-enroll-xi.vercel.app/api/cron/conversions", {
@@ -110,6 +110,18 @@ describe("GET /api/cron/conversions", () => {
     expect(await res.json()).toEqual({ error: "Internal Server Error" });
     expect(errorSpy).toHaveBeenCalledWith("[conversions] sweep failed:", "Error");
     expect(logged()).not.toContain(SECRET);
+  });
+
+  it("returns 500 after the sweep has run when clean-up failed, with the counts logged", async () => {
+    const failed = { ...COUNTS, cleanupFailed: true };
+    mockSweep.mockResolvedValue(failed);
+
+    const res = await GET(request(`Bearer ${SECRET}`));
+
+    expect(mockSweep).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(500);
+    expect(await res.json()).toEqual({ error: "Internal Server Error" });
+    expect(logSpy).toHaveBeenCalledWith("[conversions] sweep", JSON.stringify(failed));
   });
 
   it("never caches, and has the time its batch needs", () => {

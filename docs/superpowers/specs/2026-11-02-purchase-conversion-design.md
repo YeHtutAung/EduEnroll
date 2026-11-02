@@ -1,6 +1,6 @@
 # Server-side purchase conversion (GTM phase 2)
 
-Status: design approved by the owner on 2026-11-02. Not built.
+Status: Design approved by the owner on 2026-11-02. Built on feature/purchase-conversion; not yet on staging.
 
 Phase 1 is `2026-10-30-tenant-gtm-design.md`. It sends `view_item` and
 `begin_checkout` from the browser and keeps GTM off every page that shows buyer
@@ -275,9 +275,14 @@ There is no existing cron to copy, so:
     removes data for unpaid orders.
   - Mark `pending` rows older than 7 days `failed`, because Meta rejects older events,
     then delete their context.
-- **Then a bounded batch** of `pending` rows, oldest first, with limited concurrency.
-  Rows not reached wait for the next run.
+- **Then a time budget** over `pending` rows, oldest first, with limited concurrency:
+  up to 1,000 rows are read, and no new group of sends starts after 45 seconds, counted
+  from the start of the run. A fixed daily batch would let a lapsed token during an
+  on-sale expire most rows unsent. Rows not reached wait for the next run.
 - **Logs counts only,** per run.
+- **A failed clean-up fails the run.** The sends still happen and the counts are still
+  logged, then the route returns 500, so a run can't look healthy while IP data isn't
+  being deleted.
 
 Daily is the assumption for the current Vercel plan, so a failed send can wait up to
 a day. Vercel crons run on production deployments only, so on staging the route is
@@ -362,12 +367,21 @@ nothing: test from a real browser.
 3. Add a settings row using the test pixels, and staging tokens, test codes and
    `CRON_SECRET` scoped to `staging`. Redeploy, then run the staging test.
 4. **Production: migration before code,** as with every recent change. No CI applies
-   migrations.
+   migrations. Before the migration, the owner confirms `payments.platform_fee`,
+   `payments.provider_currency` and `enrollments.internal_test_at` exist on production.
+   The trigger's body binds late, so without them the migration would apply cleanly but
+   enqueue nothing.
 5. Add `CRON_SECRET` and the production tokens in Vercel before the code reaches
    `main`, so the first cron run can authenticate.
 6. Add the production settings row.
 7. Confirm the first production cron run actually happened, by its log line. A redirect
    or a 401 would otherwise stop retries and IP deletion with nobody noticing.
+8. After launch, the owner confirms the first real paid order has `conversion_events`
+   rows that reach `sent`. The cron line alone can't prove it.
+
+Also before this merges: Vercel's Node version must be 20 or later. After it merges,
+other checkouts must run `npm install`, because `issueTickets.ts` imports
+`@vercel/functions` statically.
 
 Turning it off is clearing `enabled`.
 

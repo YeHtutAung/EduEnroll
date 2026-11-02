@@ -66,7 +66,13 @@ async function post(request: PlatformRequest, platform: ConversionPlatform): Pro
       cache: "no-store",
       signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
     });
-    const body = await res.json().catch(() => null);
+    // Invalid JSON counts as no body. A stalled body is a timeout, and must reach
+    // the catch below: read as no body, it would end a row on a status alone.
+    const body = await res.json().catch((err: unknown) => {
+      const name = (err as { name?: unknown } | null)?.name;
+      if (name === "TimeoutError" || name === "AbortError") throw err;
+      return null;
+    });
     return classifyResponse(platform, res.status, body);
   } catch {
     return { status: "pending", code: "transport" };
