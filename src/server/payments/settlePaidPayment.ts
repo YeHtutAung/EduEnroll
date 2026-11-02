@@ -19,7 +19,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { issueTicketsForEnrollment } from "@/server/tickets/issueTickets";
-import { notifyEnrollmentConfirmed } from "@/server/payments/notifyEnrollmentConfirmed";
+import { sendConfirmationOnce } from "@/server/payments/repairFulfilment";
 import { recordConflict, type ConflictSource, type ConflictType } from "./settlementConflicts";
 
 export type SettleInput = {
@@ -133,9 +133,10 @@ export async function settlePaidPayment(input: SettleInput): Promise<SettleOutco
   }
 
   // ── 2. Conditional settlement UPDATE ───────────────────────────────────────
+  const paidAt = new Date().toISOString();
   const updatePayload: Record<string, unknown> = {
     status: "verified",
-    paid_at: new Date().toISOString(),
+    paid_at: paidAt,
   };
   if (input.backfillPaymentIntentId) {
     updatePayload.stripe_payment_intent_id = input.backfillPaymentIntentId;
@@ -215,7 +216,7 @@ export async function settlePaidPayment(input: SettleInput): Promise<SettleOutco
     // same winner boundary so whichever caller wins sends it once.
     if (won) {
       try {
-        await notifyEnrollmentConfirmed(payment!.enrollment_id);
+        await sendConfirmationOnce(payment!.enrollment_id, paidAt);
       } catch (error) {
         // Notification transports are not part of the money/ticket commit.
         // Durable notification retry remains tracked separately; never make a

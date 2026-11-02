@@ -22,7 +22,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { issueTicketsForEnrollment } from "@/server/tickets/issueTickets";
-import { notifyEnrollmentConfirmed } from "@/server/payments/notifyEnrollmentConfirmed";
+import { sendConfirmationOnce } from "@/server/payments/repairFulfilment";
 
 export type SettleMmqrSource = "callback" | "status" | "create";
 
@@ -100,10 +100,11 @@ export async function settleMmqrPayment(input: SettleMmqrInput): Promise<SettleM
   // The .in() predicate elects exactly one winner across the callback, the
   // browser poller and the creation route, which is what makes KBZPay's 60s
   // and 600s retries idempotent.
+  const paidAt = new Date().toISOString();
   const updatePayload: Record<string, unknown> = {
     status: "verified",
     mmqr_status: "SUCCESS",
-    paid_at: new Date().toISOString(),
+    paid_at: paidAt,
   };
   if (input.mmOrderId) updatePayload.bank_reference = input.mmOrderId;
   if (input.walletIdentifier) updatePayload.payer_institution = input.walletIdentifier;
@@ -191,7 +192,7 @@ export async function settleMmqrPayment(input: SettleMmqrInput): Promise<SettleM
     // callback / poller / creation route wins sends it exactly once.
     if (won) {
       try {
-        await notifyEnrollmentConfirmed(payment!.enrollment_id);
+        await sendConfirmationOnce(payment!.enrollment_id, paidAt);
       } catch (error) {
         // Best-effort transports are not part of the money/ticket commit.
         console.error("[kbzpay-settle] notification failed:", error);
