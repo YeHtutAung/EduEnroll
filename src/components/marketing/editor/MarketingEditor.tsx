@@ -60,6 +60,16 @@ export default function MarketingEditor() {
     load();
   }, [load]);
 
+  // A reload replaces the content, so fields stay locked until it's done.
+  async function reload() {
+    setBusy(true);
+    try {
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
   // Warn before leaving with unsaved edits.
   useEffect(() => {
     if (!dirty) return;
@@ -108,10 +118,7 @@ export default function MarketingEditor() {
     if (!window.confirm("Publish this draft to the live homepage?")) return;
     const data = await send("/publish", "POST", { expectedRevision: state!.revision });
     if (!data) return;
-    // The reload replaces the content, so fields stay locked until it's done.
-    setBusy(true);
-    await load();
-    setBusy(false);
+    await reload();
     setNotice({ kind: "ok", text: "Published." });
   }
 
@@ -197,7 +204,7 @@ export default function MarketingEditor() {
             </ul>
           )}
           {notice.stale && (
-            <button type="button" className={`${buttonClass} mt-2`} disabled={blocked} onClick={() => { setNotice(null); load(); }}>
+            <button type="button" className={`${buttonClass} mt-2`} disabled={blocked} onClick={() => { setNotice(null); reload(); }}>
               Reload (discards your unsaved changes)
             </button>
           )}
