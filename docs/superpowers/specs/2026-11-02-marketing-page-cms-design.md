@@ -75,7 +75,7 @@ version**.
   `pos`, `howItWorks`, `industries`, `cta`). The hero and footer can't be hidden.
 - `hero`: image, nav and button labels, eyebrow, headline `{ en, mm }`, subtext,
   trust line `{ en, mm }`. The eyebrow and subtext are English only, as on today's
-  page (amended 2026-11-02, plan Decision 11; pending owner approval).
+  page (amended 2026-11-02, plan Decision 11; approved by the owner 2026-11-02).
 - `organizers`: heading text, then a list of `{ id, name, image, hidden }`
 - `payments`: heading text, then a list of `{ id, name, images[], hidden }`
 - `solutions`, `pos`, `howItWorks`, `industries`, `cta`, `footer`: text and
@@ -253,7 +253,7 @@ the bucket is created, so the database tests below also cover its configuration.
 `getPublishedMarketingContent()` returns `defaultContent` when the row is missing,
 the query fails, the table doesn't exist yet, or validation fails. It logs an error
 for the failures and a warning for a missing row, which is normal until the first
-publish (amended 2026-11-02, plan Decision 6; pending owner approval). The public page must never return a 500 or render blank because of this
+publish (amended 2026-11-02, plan Decision 6; approved by the owner 2026-11-02). The public page must never return a 500 or render blank because of this
 feature.
 
 Older published content may have a lower `schemaVersion` after a code change.
