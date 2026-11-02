@@ -2,11 +2,14 @@
 
 import { useState } from "react";
 import { SECTION_KEYS, type ImageRef, type MarketingContent, type SectionKey } from "@/lib/marketing/content";
-import { getAt, moveItem, removeAt, setAt } from "@/lib/marketing/editorOps";
+import { getAt, moveItem, removeAt, setAt, updateById } from "@/lib/marketing/editorOps";
 import { imageSlots, textGroups } from "@/lib/marketing/textFields";
+import { MAX_ORGANIZERS, MAX_PAYMENTS } from "@/lib/marketing/validate";
 import { buttonClass, inputClass, RowActions, TextInput, Thumb, UploadButton } from "./fields";
 
-export type TabProps = { content: MarketingContent; onChange: (next: MarketingContent) => void };
+// Upload callbacks pass an updater: they finish later, when `content` may be out of date.
+export type ContentUpdate = MarketingContent | ((current: MarketingContent) => MarketingContent);
+export type TabProps = { content: MarketingContent; onChange: (next: ContentUpdate) => void };
 
 const SECTION_LABELS: Record<SectionKey, string> = {
   organizers: "Trusted by",
@@ -72,7 +75,9 @@ export function LogosTab({ content, onChange }: TabProps) {
           <div className="min-w-[200px] flex-1">
             <TextInput label="Name" value={item.name} onChange={(v) => setItems(setAt(items, `${i}.name`, v))} />
           </div>
-          <UploadButton label="Replace logo" onUploaded={(image) => setItems(setAt(items, `${i}.image`, image))} />
+          <UploadButton label="Replace logo" onUploaded={(image) =>
+              onChange((c) => setAt(c, "organizers.items", updateById(c.organizers.items, item.id, (o) => ({ ...o, image }))))
+            } />
           <RowActions
             index={i}
             count={items.length}
@@ -83,22 +88,27 @@ export function LogosTab({ content, onChange }: TabProps) {
           />
         </div>
       ))}
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-dashed border-gray-300 bg-white p-4">
-        <div className="min-w-[200px] flex-1">
-          <TextInput label="New partner name" value={name} onChange={setName} />
+      {items.length >= MAX_ORGANIZERS ? (
+        <p className="text-sm text-gray-500">The page can show up to {MAX_ORGANIZERS} partners. Remove one to add another.</p>
+      ) : (
+        <div className="flex flex-wrap items-end gap-3 rounded-xl border border-dashed border-gray-300 bg-white p-4">
+          <div className="min-w-[200px] flex-1">
+            <TextInput label="New partner name" value={name} onChange={setName} />
+          </div>
+          {name.trim() ? (
+            <UploadButton
+              label="Upload logo and add"
+              onUploaded={(image: ImageRef) => {
+                const added = { id: newId(), name: name.trim(), image, hidden: false };
+                onChange((c) => setAt(c, "organizers.items", [...c.organizers.items, added]));
+                setName("");
+              }}
+            />
+          ) : (
+            <button type="button" className={buttonClass} disabled>Upload logo and add</button>
+          )}
         </div>
-        {name.trim() ? (
-          <UploadButton
-            label="Upload logo and add"
-            onUploaded={(image: ImageRef) => {
-              setItems([...items, { id: newId(), name: name.trim(), image, hidden: false }]);
-              setName("");
-            }}
-          />
-        ) : (
-          <button type="button" className={buttonClass} disabled>Upload logo and add</button>
-        )}
-      </div>
+      )}
     </div>
   );
 }
@@ -120,7 +130,7 @@ export function ImagesTab({ content, onChange }: TabProps) {
             <div className="min-w-0 flex-1">
               <p className="mb-2 truncate text-sm font-medium text-gray-800">{slot.label}</p>
               <div className="flex flex-wrap gap-2">
-                <UploadButton label="Replace" onUploaded={(next) => onChange(setAt(content, slot.path, next))} />
+                <UploadButton label="Replace" onUploaded={(next) => onChange((c) => setAt(c, slot.path, next))} />
                 {slot.canClear && image && (
                   <button type="button" className={buttonClass} onClick={() => onChange(setAt(content, slot.path, null))}>
                     Use payment logos
@@ -179,27 +189,36 @@ export function PaymentsTab({ content, onChange }: TabProps) {
               </span>
             ))}
             {item.images.length < 4 && (
-              <UploadButton label="Add image" onUploaded={(image) => setItems(setAt(items, `${i}.images`, [...item.images, image]))} />
+              <UploadButton label="Add image" onUploaded={(image) =>
+                  onChange((c) =>
+                    setAt(c, "payments.items", updateById(c.payments.items, item.id, (p) => ({ ...p, images: [...p.images, image] }))),
+                  )
+                } />
             )}
           </div>
         </div>
       ))}
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-dashed border-gray-300 bg-white p-4">
-        <div className="min-w-[200px] flex-1">
-          <TextInput label="New payment name" value={name} onChange={setName} />
+      {items.length >= MAX_PAYMENTS ? (
+        <p className="text-sm text-gray-500">The page can show up to {MAX_PAYMENTS} payment methods. Remove one to add another.</p>
+      ) : (
+        <div className="flex flex-wrap items-end gap-3 rounded-xl border border-dashed border-gray-300 bg-white p-4">
+          <div className="min-w-[200px] flex-1">
+            <TextInput label="New payment name" value={name} onChange={setName} />
+          </div>
+          {name.trim() ? (
+            <UploadButton
+              label="Upload logo and add"
+              onUploaded={(image) => {
+                const added = { id: newId(), name: name.trim(), images: [image], hidden: false };
+                onChange((c) => setAt(c, "payments.items", [...c.payments.items, added]));
+                setName("");
+              }}
+            />
+          ) : (
+            <button type="button" className={buttonClass} disabled>Upload logo and add</button>
+          )}
         </div>
-        {name.trim() ? (
-          <UploadButton
-            label="Upload logo and add"
-            onUploaded={(image) => {
-              setItems([...items, { id: newId(), name: name.trim(), images: [image], hidden: false }]);
-              setName("");
-            }}
-          />
-        ) : (
-          <button type="button" className={buttonClass} disabled>Upload logo and add</button>
-        )}
-      </div>
+      )}
     </div>
   );
 }

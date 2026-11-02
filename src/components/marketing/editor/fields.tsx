@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { createContext, useContext, useRef, useState } from "react";
 import Image from "next/image";
 import { marketingImageSrc, type ImageRef } from "@/lib/marketing/content";
 
@@ -44,6 +44,9 @@ export function Thumb({ image, alt }: { image: ImageRef; alt: string }) {
   );
 }
 
+/** Tells the editor when uploads start (+1) and finish (-1), so it can hold back saving. */
+export const UploadActivity = createContext<(delta: 1 | -1) => void>(() => {});
+
 export async function uploadMarketingImage(file: File): Promise<ImageRef> {
   const body = new FormData();
   body.append("file", file);
@@ -58,16 +61,19 @@ export function UploadButton({ label, onUploaded }: { label: string; onUploaded:
   const input = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const reportUpload = useContext(UploadActivity);
 
   async function onFile(file: File | undefined) {
     if (!file) return;
     setBusy(true);
     setError(null);
+    reportUpload(1);
     try {
       onUploaded(await uploadMarketingImage(file));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Upload failed.");
     } finally {
+      reportUpload(-1);
       setBusy(false);
       if (input.current) input.current.value = "";
     }

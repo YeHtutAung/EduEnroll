@@ -8,8 +8,8 @@ const SHORT = 120;
 const LONG = 600;
 const SEO_DESCRIPTION = 300;
 const NAME = 80;
-const MAX_ORGANIZERS = 24;
-const MAX_PAYMENTS = 12;
+export const MAX_ORGANIZERS = 24;
+export const MAX_PAYMENTS = 12;
 const MAX_PAYMENT_IMAGES = 4;
 const MAX_IMAGE_SIDE = 6000;
 

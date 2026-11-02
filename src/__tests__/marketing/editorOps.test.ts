@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getAt, setAt, moveItem, removeAt } from "@/lib/marketing/editorOps";
+import { getAt, setAt, moveItem, removeAt, updateById } from "@/lib/marketing/editorOps";
 import { textGroups } from "@/lib/marketing/textFields";
 import { defaultContent } from "@/lib/marketing/defaultContent";
 
@@ -22,6 +22,13 @@ describe("editorOps", () => {
 
   it("removes by index", () => {
     expect(removeAt(["a", "b", "c"], 1)).toEqual(["a", "c"]);
+  });
+
+  it("updates by id wherever the item moved, and ignores one that was removed", () => {
+    const items = [{ id: "a", n: 1 }, { id: "b", n: 2 }];
+    const bump = (x: { id: string; n: number }) => ({ ...x, n: x.n + 10 });
+    expect(updateById(items, "b", bump)).toEqual([{ id: "a", n: 1 }, { id: "b", n: 12 }]);
+    expect(updateById(items, "gone", bump)).toEqual(items);
   });
 });
 

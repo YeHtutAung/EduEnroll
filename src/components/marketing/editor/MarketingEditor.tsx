@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import type { MarketingContent } from "@/lib/marketing/content";
-import { buttonClass } from "./fields";
+import { buttonClass, UploadActivity } from "./fields";
 import { ImagesTab, LogosTab, PaymentsTab, RestorePanel, SectionsSeoTab, TextsTab } from "./tabs";
 
 const API = "/api/superadmin/marketing";
@@ -31,8 +31,11 @@ export default function MarketingEditor() {
   const [loadFailed, setLoadFailed] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [uploading, setUploading] = useState(0);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [tab, setTab] = useState<(typeof TABS)[number][0]>("texts");
+
+  const reportUpload = useCallback((delta: 1 | -1) => setUploading((n) => n + delta), []);
 
   const load = useCallback(async () => {
     setLoadFailed(false);
@@ -143,6 +146,10 @@ export default function MarketingEditor() {
 
   const Active = TABS.find(([key]) => key === tab)![2];
   const saved = state.revision > 0 && !dirty;
+  // Save, restore and publish replace or depend on the whole content, so nothing
+  // may change it meanwhile: fields lock during a request, and a request can't
+  // start during an upload.
+  const blocked = busy || uploading > 0;
 
   return (
     <div className="mx-auto max-w-7xl space-y-5 px-6 py-8">
@@ -150,14 +157,14 @@ export default function MarketingEditor() {
         <div>
           <h2 className="text-lg font-bold text-gray-900">Marketing page</h2>
           <p className="text-sm text-gray-500">
-            {dirty ? "Unsaved changes" : state.revision > 0 ? "Draft saved, not published" : "No draft yet"}
+            {uploading > 0 ? "Uploading image…" : dirty ? "Unsaved changes" : state.revision > 0 ? "Draft saved, not published" : "No draft yet"}
             {" · "}
             {state.publishedAt ? `Published ${new Date(state.publishedAt).toLocaleString()}` : "Showing default content"}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <RestorePanel versions={state.versions} disabled={busy || dirty} onRestore={restore} />
-          <button type="button" className={buttonClass} disabled={busy || !dirty} onClick={save}>Save draft</button>
+          <RestorePanel versions={state.versions} disabled={blocked || dirty} onRestore={restore} />
+          <button type="button" className={buttonClass} disabled={blocked || !dirty} onClick={save}>Save draft</button>
           {saved ? (
             <a href="/superadmin/marketing/preview" target="_blank" rel="noopener" className={buttonClass}>Preview</a>
           ) : (
@@ -166,7 +173,7 @@ export default function MarketingEditor() {
           <button
             type="button"
             className="rounded-lg bg-[#6d28d9] px-4 py-1.5 text-sm font-semibold text-white hover:bg-[#5b21b6] disabled:opacity-40"
-            disabled={busy || !saved}
+            disabled={blocked || !saved}
             title={saved ? undefined : "Save the draft first"}
             onClick={publish}
           >
@@ -194,13 +201,12 @@ export default function MarketingEditor() {
         </div>
       )}
 
-      <nav role="tablist" className="flex flex-wrap gap-1 border-b border-gray-200">
+      <nav aria-label="Editor sections" className="flex flex-wrap gap-1 border-b border-gray-200">
         {TABS.map(([key, label]) => (
           <button
             key={key}
             type="button"
-            role="tab"
-            aria-selected={tab === key}
+            aria-current={tab === key ? "true" : undefined}
             onClick={() => setTab(key)}
             className={`rounded-t-lg px-4 py-2 text-sm font-medium ${tab === key ? "border-b-2 border-[#6d28d9] text-[#6d28d9]" : "text-gray-500 hover:text-gray-800"}`}
           >
@@ -209,13 +215,17 @@ export default function MarketingEditor() {
         ))}
       </nav>
 
-      <Active
-        content={state.content}
-        onChange={(content) => {
-          setState((s) => (s ? { ...s, content } : s));
-          setDirty(true);
-        }}
-      />
+      <UploadActivity.Provider value={reportUpload}>
+        <fieldset disabled={busy} className="min-w-0 border-0 p-0">
+          <Active
+            content={state.content}
+            onChange={(next) => {
+              setState((s) => (s ? { ...s, content: typeof next === "function" ? next(s.content) : next } : s));
+              setDirty(true);
+            }}
+          />
+        </fieldset>
+      </UploadActivity.Provider>
     </div>
   );
 }
