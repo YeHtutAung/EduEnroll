@@ -180,6 +180,17 @@ describe("middleware — custom domain surface split", () => {
     expect(res.headers.get("location")).toBe("https://flashtic.com/enroll");
   });
 
+  it("carries only the click IDs across the root redirect", async () => {
+    const res = await get("https://flashtic.com/?fbclid=F1&ttclid=T1&ref=SECRET&utm_source=x");
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe("https://flashtic.com/enroll?fbclid=F1&ttclid=T1");
+  });
+
+  it("drops an invalid click ID on the root redirect", async () => {
+    const res = await get("https://flashtic.com/?fbclid=%3Cx%3E");
+    expect(res.headers.get("location")).toBe("https://flashtic.com/enroll");
+  });
+
   it("redirects tenant staff pages to the tenant subdomain", async () => {
     for (const path of ["/admin/dashboard", "/login", "/onboarding"]) {
       const res = await get(`https://flashtic.com${path}`);
@@ -247,6 +258,11 @@ describe("middleware — tenant subdomain root", () => {
       expect(res.status, host).toBe(307);
       expect(res.headers.get("location"), host).toBe(`https://${host}/enroll`);
     }
+  });
+
+  it("carries only the click IDs across a tenant subdomain root redirect", async () => {
+    const res = await get("https://nihon-moment.kuunyi.com/?ttclid=T1&ref=SECRET");
+    expect(res.headers.get("location")).toBe("https://nihon-moment.kuunyi.com/enroll?ttclid=T1");
   });
 
   // www and staging are reserved labels, not tenants.

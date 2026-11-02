@@ -78,6 +78,16 @@ vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({ from: mockAdminFrom }),
 }));
 
+const mockWaitUntil = vi.fn();
+vi.mock("@vercel/functions", () => ({
+  waitUntil: (...a: unknown[]) => mockWaitUntil(...a),
+}));
+
+const mockSendPending = vi.fn();
+vi.mock("@/server/conversions/sendPendingConversions", () => ({
+  sendPendingConversions: (...a: unknown[]) => mockSendPending(...a),
+}));
+
 const { issueTicketsForEnrollment, voidTicketsForEnrollment } =
   await import("@/server/tickets/issueTickets");
 
@@ -91,6 +101,9 @@ beforeAll(() => {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockWaitUntil.mockReset();
+  mockSendPending.mockReset();
+  mockSendPending.mockResolvedValue(undefined);
   ticketsCount = 0;
   enrollmentData = null;
   enrollmentError = null;
@@ -353,5 +366,108 @@ describe("issueTicketsForEnrollment — query failures and anomalies", () => {
     const { issueTicketsForEnrollment } = await import("@/server/tickets/issueTickets");
     await expect(issueTicketsForEnrollment("e1")).resolves.toBeUndefined();
     expect(mockUpsert).not.toHaveBeenCalled();
+  });
+});
+
+// ─── Purchase conversion hook ───────────────────────────────────────────────
+// The sender runs beside settlement, never in front of it. KBZPay and CB routes
+// are capped at 10 seconds and the buyer's confirmation is sent after this
+// function, for the settlement winner only, so it can't be re-sent on a replay.
+describe("purchase conversion hook", () => {
+  const WAITING = "still waiting";
+  /** Tells "finished" from "blocked" without leaning on the test timeout. */
+  const outcomeOf = (p: Promise<unknown>) =>
+    Promise.race([
+      p.then(() => "resolved"),
+      new Promise((resolve) => setTimeout(() => resolve(WAITING), 200)),
+    ]);
+
+  const confirmedEvent = () => {
+    enrollmentData = { id: "e1", tenant_id: "t1", class_id: "c1", quantity: 1, status: "confirmed" };
+    classesData = [{ id: "c1", level: "VIP", intake_id: "i1", event_date: null }];
+  };
+
+  it("schedules the sender with waitUntil, without awaiting it", async () => {
+    confirmedEvent();
+    const neverSettles = new Promise<void>(() => undefined);
+    mockSendPending.mockReturnValue(neverSettles);
+
+    await expect(outcomeOf(issueTicketsForEnrollment("e1"))).resolves.toBe("resolved");
+
+    expect(mockUpsert).toHaveBeenCalledTimes(1);
+    expect(mockSendPending).toHaveBeenCalledExactlyOnceWith("e1");
+    expect(mockWaitUntil).toHaveBeenCalledTimes(1);
+    expect(mockWaitUntil.mock.calls[0][0]).toBe(neverSettles);
+  });
+
+  it("starts the sender only after the tickets are written", async () => {
+    confirmedEvent();
+
+    await issueTicketsForEnrollment("e1");
+
+    expect(mockUpsert.mock.invocationCallOrder[0]).toBeLessThan(mockSendPending.mock.invocationCallOrder[0]);
+  });
+
+  it("still schedules on an early return", async () => {
+    // A non-event tenant returns early; the sender is still scheduled.
+    confirmedEvent();
+    tenantData = { org_type: "language_school" };
+
+    await expect(issueTicketsForEnrollment("e1")).resolves.toBeUndefined();
+
+    expect(mockUpsert).not.toHaveBeenCalled();
+    expect(mockWaitUntil).toHaveBeenCalledTimes(1);
+    expect(mockSendPending).toHaveBeenCalledExactlyOnceWith("e1");
+  });
+
+  it("still schedules, and rethrows, when issuance throws", async () => {
+    // Callers depend on this throw to return a retryable result.
+    enrollmentError = { message: "connection reset" };
+
+    await expect(issueTicketsForEnrollment("e1")).rejects.toThrow(/^issueTickets: enrollment load failed:/);
+
+    expect(mockWaitUntil).toHaveBeenCalledTimes(1);
+    expect(mockSendPending).toHaveBeenCalledExactlyOnceWith("e1");
+  });
+
+  it("does not change the outcome if scheduling itself throws", async () => {
+    confirmedEvent();
+    mockWaitUntil.mockImplementation(() => {
+      throw new TypeError("waitUntil can only be called with a Promise");
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await expect(issueTicketsForEnrollment("e1")).resolves.toBeUndefined();
+
+    expect(mockUpsert).toHaveBeenCalledTimes(1);
+    expect(errorSpy).toHaveBeenCalledWith("[conversions] schedule failed:", "TypeError");
+    errorSpy.mockRestore();
+  });
+
+  it("does not change the outcome if starting the sender throws", async () => {
+    confirmedEvent();
+    mockSendPending.mockImplementation(() => {
+      throw new Error("sender blew up");
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await expect(issueTicketsForEnrollment("e1")).resolves.toBeUndefined();
+
+    expect(errorSpy).toHaveBeenCalledWith("[conversions] schedule failed:", "Error");
+    errorSpy.mockRestore();
+  });
+
+  it("keeps the original throw when scheduling throws as well", async () => {
+    tenantError = { message: "connection reset" };
+    confirmedEvent();
+    mockWaitUntil.mockImplementation(() => {
+      throw new TypeError("waitUntil can only be called with a Promise");
+    });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await expect(issueTicketsForEnrollment("e1")).rejects.toThrow(/tenant load failed/);
+
+    expect(mockWaitUntil).toHaveBeenCalledTimes(1);
+    errorSpy.mockRestore();
   });
 });

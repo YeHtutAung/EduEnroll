@@ -54,7 +54,7 @@ vi.mock("@/lib/supabase/admin", () => ({
 const { default: EnrollPage } = await import("@/app/(public)/enroll/page");
 
 async function render() {
-  return renderToStaticMarkup(await EnrollPage());
+  return renderToStaticMarkup(await EnrollPage({}));
 }
 
 beforeEach(() => {
@@ -125,6 +125,18 @@ describe("enrollment index — successful queries", () => {
 
     await expect(render()).rejects.toThrow("NEXT_REDIRECT:/enroll/august-2026");
     expect(redirectMock).toHaveBeenCalledWith("/enroll/august-2026");
+  });
+
+  it("carries only the ad click IDs through the single-intake redirect", async () => {
+    intakeResult = {
+      data: [{ id: "i1", name: "August 2026 Event", year: 2026, slug: "august-2026" }],
+      error: null,
+    };
+
+    await expect(
+      EnrollPage({ searchParams: { fbclid: "F1", ttclid: ["T1", "T2"], ref: "SECRET" } }),
+    ).rejects.toThrow("NEXT_REDIRECT:/enroll/august-2026?fbclid=F1&ttclid=T1");
+    expect(redirectMock).toHaveBeenCalledWith("/enroll/august-2026?fbclid=F1&ttclid=T1");
   });
 
   it("lists every open intake when there is more than one", async () => {

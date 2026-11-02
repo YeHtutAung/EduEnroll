@@ -11,6 +11,7 @@ import {
   displayTotals,
   selectOrderPayment,
 } from "@/server/payments/platformFee";
+import { summarisePartialPayment } from "@/server/payments/partialPayment";
 
 // "Not found" and "the query failed" are different answers, and only the first
 // is an enumeration signal.
@@ -78,7 +79,7 @@ export async function GET(
       enrollment_items(quantity, fee_amount, classes(level, pack_size, intakes(id, name, slug))),
       classes(level, fee_amount, pack_size, intakes(id, name, slug)),
       quantity,
-      payments(stripe_payment_intent_id, status, payment_method, card_brand, card_last4, amount, platform_fee)
+      payments(stripe_payment_intent_id, status, payment_method, card_brand, card_last4, amount, platform_fee, received_amount, created_at)
     `)
     .eq("enrollment_ref", params.ref.trim())
     .eq("tenant_id", tenantId)
@@ -147,7 +148,20 @@ export async function GET(
   // partial-payment top-up is by definition a remainder. The embedded relation
   // has no ORDER BY, so `find` above returns whichever row the database
   // happened to hand back — fine for reading a card brand, not for money.
-  const orderPayment = selectOrderPayment(payments);
+  //
+  // A part-paid order's largest settled row can still be a top-up, which is only
+  // a remainder and records no fee. The row that recorded the first part-payment
+  // holds the order's saved total and fee, so that one speaks for the order.
+  const settledPayment = selectOrderPayment(payments);
+  const partial = summarisePartialPayment(
+    [...(payments ?? [])]
+      .map((p) => ({ ...p, amount: p.amount ?? 0 }))
+      .sort((a, b) => a.created_at.localeCompare(b.created_at)),
+  );
+  const orderPayment =
+    partial.orderTotal !== null && (settledPayment?.amount ?? 0) < partial.orderTotal
+      ? { amount: partial.orderTotal, platform_fee: partial.orderFee }
+      : settledPayment;
   // Fall back to any payment so the success page can show the method even before verification
   const anyPayment = payments?.[0];
 
@@ -398,6 +412,8 @@ interface PaymentRow {
   status: string;
   amount: number | null;
   platform_fee: number | null;
+  received_amount: number | null;
+  created_at: string;
   payment_method: string;
   card_brand: string | null;
   card_last4: string | null;

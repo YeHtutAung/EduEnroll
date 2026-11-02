@@ -6,6 +6,7 @@ import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
 import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils";
 import { sendSms } from "@/lib/sms";
 import { buildEticketEmailAttachment } from "@/server/tickets/eticketEmailAttachment";
+import { loadPartialPayment } from "@/server/payments/partialPayment";
 
 /**
  * Best-effort customer notifications for the single settlement-transition
@@ -155,11 +156,17 @@ export async function notifyEnrollmentConfirmed(enrollmentId: string): Promise<v
         console.error("[payment-notify] settled payment lookup failed:", paymentError.message);
       } else if (payment && payment.amount != null && payment.platform_fee != null && feeFormatted) {
         const currency = tenantInfo?.currency ?? "MMK";
+        // A settled top-up holds only the remainder and records no fee, so the
+        // row that recorded the part-payment speaks for the order instead.
+        const partial = await loadPartialPayment(supabase, enrollmentId);
+        const isTopUp = partial?.orderTotal != null && payment.amount < partial.orderTotal;
+        const totalPaid = isTopUp ? partial.orderTotal! : payment.amount;
+        const platformFee = isTopUp ? partial.orderFee ?? 0 : payment.platform_fee;
         ticketSubtotalFormatted = feeFormatted;
-        platformFeeFormatted = payment.platform_fee > 0
-          ? `${String(payment.platform_fee).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} ${currency}`
+        platformFeeFormatted = platformFee > 0
+          ? `${String(platformFee).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} ${currency}`
           : "No fee";
-        totalPaidFormatted = `${String(payment.amount).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} ${currency}`;
+        totalPaidFormatted = `${String(totalPaid).replace(/\B(?=(\d{3})+(?!\d))/g, ",")} ${currency}`;
       }
     } catch (error) {
       console.error("[payment-notify] settled payment lookup failed:", error);

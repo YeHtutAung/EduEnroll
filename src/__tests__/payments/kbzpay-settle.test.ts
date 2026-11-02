@@ -34,6 +34,16 @@ vi.mock("@/server/payments/notifyEnrollmentConfirmed", () => ({
   notifyEnrollmentConfirmed: (...a: unknown[]) => mockNotify(...a),
 }));
 
+const mockWaitUntil = vi.fn();
+vi.mock("@vercel/functions", () => ({
+  waitUntil: (...a: unknown[]) => mockWaitUntil(...a),
+}));
+
+const mockSendPending = vi.fn();
+vi.mock("@/server/conversions/sendPendingConversions", () => ({
+  sendPendingConversions: (...a: unknown[]) => mockSendPending(...a),
+}));
+
 const { settleMmqrPayment } = await import("@/server/payments/settleMmqrPayment");
 
 const PAYMENT = {
@@ -229,5 +239,52 @@ describe("failure modes", () => {
     const r = await settle();
     expect(r.kind).toBe("retryable");
     expect(mockIssueTickets).not.toHaveBeenCalled();
+  });
+});
+
+// The rest of this file replaces issueTickets, which is where the sender starts.
+// So these run the real one, over a tenant lookup that decides what it does.
+describe("purchase conversion sender", () => {
+  const useRealIssueTickets = async (tenant: { data: Row | null; error: { message: string } | null }) => {
+    const actual = await vi.importActual<typeof import("@/server/tickets/issueTickets")>(
+      "@/server/tickets/issueTickets",
+    );
+    mockIssueTickets.mockImplementation(actual.issueTicketsForEnrollment);
+    state.enrollment = { id: "enr-1", tenant_id: "ten-1", class_id: "c1", quantity: 1, status: "confirmed" };
+    const tablesBefore = mockFrom.getMockImplementation()!;
+    mockFrom.mockImplementation((table: string) =>
+      table === "tenants"
+        ? { select: () => ({ eq: () => ({ maybeSingle: async () => tenant }) }) }
+        : tablesBefore(table),
+    );
+  };
+  const neverSettles = new Promise<void>(() => undefined);
+  const WAITING = "still waiting";
+  const outcomeOf = <T,>(p: Promise<T>) =>
+    Promise.race([p, new Promise<typeof WAITING>((resolve) => setTimeout(() => resolve(WAITING), 200))]);
+
+  it("does not stop the buyer's confirmation when it never settles", async () => {
+    await useRealIssueTickets({ data: { org_type: "language_school" }, error: null });
+    mockSendPending.mockReturnValue(neverSettles);
+
+    const r = await outcomeOf(settle());
+
+    expect(r).toMatchObject({ kind: "settled", paymentId: "pay-1" });
+    expect(mockSendPending).toHaveBeenCalledExactlyOnceWith("enr-1");
+    expect(mockWaitUntil.mock.calls[0][0]).toBe(neverSettles);
+    expect(mockNotify).toHaveBeenCalledExactlyOnceWith("enr-1");
+  });
+
+  it("still returns retryable when fulfilment throws, with the sender running", async () => {
+    await useRealIssueTickets({ data: null, error: { message: "connection reset" } });
+    mockSendPending.mockReturnValue(neverSettles);
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const r = await outcomeOf(settle());
+
+    expect(r).toMatchObject({ kind: "retryable" });
+    expect(mockSendPending).toHaveBeenCalledExactlyOnceWith("enr-1");
+    expect(mockNotify).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
   });
 });

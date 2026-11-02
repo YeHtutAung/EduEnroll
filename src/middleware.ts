@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { forwardedClickQuery } from "@/lib/conversions/clickData";
 import {
   extractSubdomainFromHost,
   tenantForCustomHost,
@@ -98,7 +99,7 @@ export async function middleware(request: NextRequest) {
     // something to serve on a client's homepage. Send the root to their
     // enrollment index.
     if (pathname === "/") {
-      return NextResponse.redirect(new URL("/enroll", request.url));
+      return NextResponse.redirect(new URL(`/enroll${forwardedClickQuery(request.nextUrl.searchParams)}`, request.url));
     }
 
     // Root-platform surfaces: the platform's, not this tenant's.
@@ -125,7 +126,7 @@ export async function middleware(request: NextRequest) {
   // still show the homepage. The resolver already returns null for www and
   // staging, so the platform root keeps its landing page.
   if (pathname === "/" && extractSubdomainFromHost(host)) {
-    return NextResponse.redirect(new URL("/enroll", request.url));
+    return NextResponse.redirect(new URL(`/enroll${forwardedClickQuery(request.nextUrl.searchParams)}`, request.url));
   }
 
   // "/" is in the matcher only for the redirects above. The landing page needs no

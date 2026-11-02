@@ -1,4 +1,6 @@
+import { waitUntil } from "@vercel/functions";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { sendPendingConversions } from "@/server/conversions/sendPendingConversions";
 import { ticketExpiry } from "@/lib/tickets/exp";
 import { loadSigningKey } from "@/lib/tickets/keys";
 
@@ -18,6 +20,22 @@ const TZ = process.env.TICKET_TZ ?? "Asia/Yangon";
  * silently leaves a paying customer without entry.
  */
 export async function issueTicketsForEnrollment(enrollmentId: string): Promise<void> {
+  try {
+    await issueTicketsInner(enrollmentId);
+  } finally {
+    // Not awaited. KBZPay and CB routes are capped at 10 seconds, and the
+    // confirmation sent after this runs only for the settlement winner, so a
+    // blocking send could lose it for good. Anything cut off stays pending for
+    // the daily retry.
+    try {
+      waitUntil(sendPendingConversions(enrollmentId));
+    } catch (err) {
+      console.error("[conversions] schedule failed:", err instanceof Error ? err.name : "unknown");
+    }
+  }
+}
+
+async function issueTicketsInner(enrollmentId: string): Promise<void> {
   const supabase = createAdminClient();
 
   // maybeSingle(), not single(): single() reports zero rows as an ERROR, which

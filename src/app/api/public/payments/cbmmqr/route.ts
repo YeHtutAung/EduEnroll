@@ -16,6 +16,11 @@ import {
   provisionalExpiry,
 } from "@/server/payments/cbmmqrOrderWindow";
 import { attachPackSizes, computeOrderTotal } from "@/server/payments/platformFee";
+import {
+  loadPartialPayment,
+  noBalanceRemaining,
+  partialHistoryUnavailable,
+} from "@/server/payments/partialPayment";
 
 // Same 10s Vercel cap as the KBZPay route; declared so it is visible.
 export const maxDuration = 10;
@@ -175,15 +180,12 @@ export async function POST(request: NextRequest) {
   let recordedFee = order.platformFee;
 
   if (enrollment.status === "partial_payment") {
-    const { data: existingPayment } = (await supabase
-      .from("payments")
-      .select("received_amount")
-      .eq("enrollment_id", enrollment.id)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single()) as { data: { received_amount: number | null } | null; error: unknown };
-    if (existingPayment?.received_amount) {
-      totalFee = totalFee - existingPayment.received_amount;
+    const partial = await loadPartialPayment(supabase, enrollment.id);
+    if (!partial) return partialHistoryUnavailable();
+
+    if (partial.remaining !== null) {
+      totalFee = partial.remaining;
+      if (totalFee <= 0) return noBalanceRemaining();
       recordedFee = 0;
     }
   }

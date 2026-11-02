@@ -14,6 +14,11 @@ import {
 import { settlePaidPayment } from "@/server/payments/settlePaidPayment";
 import { recordConflict } from "@/server/payments/settlementConflicts";
 import { resolveOrderTotal } from "@/server/payments/platformFee";
+import {
+  loadPartialPayment,
+  noBalanceRemaining,
+  partialHistoryUnavailable,
+} from "@/server/payments/partialPayment";
 
 // ─── POST /api/public/payments/stripe ────────────────────────────────────────
 // Hosted Checkout creation (Plan v18 §3). Discriminated results (§3c);
@@ -191,21 +196,12 @@ export async function POST(request: NextRequest) {
 
     // ── Partial payment: single remaining-balance line ──────────────────────
     if (enrollment.status === "partial_payment") {
-      const { data: prevPayment, error: prevError } = (await supabase
-        .from("payments")
-        .select("received_amount")
-        .eq("enrollment_id", enrollment.id)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle()) as { data: { received_amount: number | null } | null; error: { message: string } | null };
-      if (prevError) {
-        return NextResponse.json(
-          { error: "Internal Server Error", message: "Could not load payment history." },
-          { status: 500 },
-        );
-      }
-      if (prevPayment?.received_amount) {
-        totalMajor = totalMajor - prevPayment.received_amount;
+      const partial = await loadPartialPayment(supabase, enrollment.id);
+      if (!partial) return partialHistoryUnavailable();
+
+      if (partial.remaining !== null) {
+        totalMajor = partial.remaining;
+        if (totalMajor <= 0) return noBalanceRemaining();
         // A remainder is not the order total, so this row records no fee — it
         // stays on the row that quoted the order.
         recordedFee = 0;
