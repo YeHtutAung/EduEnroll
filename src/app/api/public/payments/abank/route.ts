@@ -115,8 +115,8 @@ export async function POST(request: NextRequest) {
     const partial = await loadPartialPayment(supabase, enrollment.id);
     if (!partial) return partialHistoryUnavailable();
 
-    if (partial.received > 0) {
-      totalFee = totalFee - partial.received;
+    if (partial.remaining !== null) {
+      totalFee = partial.remaining;
       if (totalFee <= 0) return noBalanceRemaining();
       recordedFee = 0;
     }

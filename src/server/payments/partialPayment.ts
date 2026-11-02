@@ -7,6 +7,10 @@ import type { createAdminClient } from "@/lib/supabase/admin";
 // row of its own holding only the remainder. So the latest row says nothing
 // about what was received: an abandoned top-up leaves a newer row with a null
 // received_amount, and reading only that row charges the whole order again.
+//
+// `remaining` is what the buyer has been told, and it is what a gateway route
+// charges. It comes from the saved order amount, not the tenant's current fee or
+// the current ticket price: either can change after the buyer is told a figure.
 
 interface PaymentHistoryRow {
   amount: number;

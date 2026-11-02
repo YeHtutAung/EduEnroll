@@ -199,8 +199,8 @@ export async function POST(request: NextRequest) {
       const partial = await loadPartialPayment(supabase, enrollment.id);
       if (!partial) return partialHistoryUnavailable();
 
-      if (partial.received > 0) {
-        totalMajor = totalMajor - partial.received;
+      if (partial.remaining !== null) {
+        totalMajor = partial.remaining;
         if (totalMajor <= 0) return noBalanceRemaining();
         // A remainder is not the order total, so this row records no fee — it
         // stays on the row that quoted the order.
