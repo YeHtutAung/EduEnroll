@@ -19,8 +19,8 @@ confirmed.
 
 ## Goal
 
-When an order for a configured tenant is paid, and the buyer has ad-click data for
-a platform, send one purchase event to that platform. A failure or delay here must
+When an order for a configured tenant is paid, and the buyer has that platform's
+cookies or click ID, send one purchase event to that platform. A failure or delay here must
 never affect a payment, a ticket or a notification.
 
 ## Decisions
@@ -28,7 +28,7 @@ never affect a payment, a ticket or a notification.
 | Question | Decision |
 |---|---|
 | Buyer data sent | **Browser data only:** ad-click IDs and cookies, IP address, browser user agent, value and currency. **No email, phone, name or order ref**, hashed or otherwise. Owner's decision, 2026-11-02. |
-| Who gets an event | Only buyers with click data for that platform. Organic buyers send nothing, and their IP is not stored. |
+| Who gets an event | Any buyer with that platform's pixel cookie or click ID. This includes people who never clicked an ad, because pixels set `_fbp` and `_ttp` for every visitor. Owner's decision, 2026-11-02. A buyer with none of these sends nothing, and their IP is not stored. |
 | Platforms | Meta Conversions API and TikTok Events API. GA4 only if a tenant asks. |
 | Delivery | A queue table filled by a database trigger, a non-blocking send attempt, and a daily retry. |
 | Value | The ticket total, without our fee, converted to the tenant's reporting currency. See Value and currency. |
@@ -49,7 +49,7 @@ never affect a payment, a ticket or a notification.
 1. A buyer lands on a tracked event page from an ad.
 2. The page stores `fbclid` and `ttclid` in a first-party cookie.
 3. The buyer submits the order. `POST /api/public/enroll` stores the ad context if
-   there is any click data.
+   there is a pixel cookie or click ID.
 4. Payment becomes `verified`. A database trigger adds one queue row per platform.
 5. The server starts a send without waiting for it. Anything left is retried daily.
 6. The ad context is deleted once it is no longer needed.
@@ -64,6 +64,9 @@ A small client component, rendered beside `TenantTagManager`, reads `fbclid` and
 - Name `kn_ad_click`, `SameSite=Lax`, `Secure`, `Path=/`, 7-day expiry.
 - Holds the two IDs and the capture time. Nothing else.
 - Existing values are only replaced when the URL carries a new ID.
+
+Our redirects from the root and from `/enroll` forward only validated `fbclid` and
+`ttclid`, so an ad linking there keeps them. The rest of the query is never forwarded.
 
 It runs on a tracked path, for a tenant with a valid container ID, when the URL has
 no sensitive param. It deliberately does **not** use the rest of the phase 1 guard.
@@ -93,8 +96,8 @@ It is not on `enrollments` because staff screens and public APIs read that table
 | `created_at` | For retention |
 
 Written by the enroll route after the order exists, on both its single and cart
-branches, only for tenants with conversions enabled, and **only if at least one
-click ID is present**. It uses insert-if-absent so idempotent retries are harmless.
+branches, only for tenants with conversions enabled, and **only if at least one of
+`fbp`, `fbc`, `ttp` or `ttclid` is present**. It uses insert-if-absent so idempotent retries are harmless.
 A failure here is logged and never fails the order.
 
 ### 3. Tenant settings
@@ -301,8 +304,10 @@ nothing: test from a real browser.
 ## Privacy and logging
 
 - Nothing in this feature reads email, phone, name or the order ref into a payload.
-- IP and user agent are personal data. They are only stored when click data exists,
-  and are deleted as described above.
+- IP and user agent are personal data. They are only stored when a pixel cookie or
+  click ID exists, and are deleted as described above. The pixel on the event page
+  already sends the same visitors' IP and user agent to the platforms from the browser.
+  What this adds is that the visitor purchased, which the privacy wording should say.
 - Never log tokens, IPs, cookies, click IDs or platform response bodies.
 - The privacy page probably needs a line about sharing this data with ad platforms
   on the organiser's behalf. This is open question 2.
@@ -312,8 +317,9 @@ nothing: test from a real browser.
 - A purchase does not match if the buyer pays on a different browser or device. An
   ad click in an in-app browser followed by payment in another browser is the likely
   case.
-- Organic buyers send no event, so the platforms' purchase counts will be lower than
-  actual sales. Our own reports stay the source of truth.
+- Buyers whose browser never loaded the pixel send no event, for example with a
+  blocker or on a host where GTM is off, so the platforms' purchase counts can be lower
+  than actual sales. Our own reports stay the source of truth.
 - An order verified more than 8 days after it was created, such as a slow manual
   verification, has lost its ad context and is `skipped`.
 - A later refund or rejection does not retract the event.
