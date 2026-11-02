@@ -3,7 +3,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendMessageWithButtons } from "./send";
-import { decryptToken } from "@/lib/messenger/crypto";
+import { getEnrollmentBotToken } from "./enrollment-bot";
 import { formatCurrency } from "@/lib/utils";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -45,20 +45,12 @@ export async function sendTelegramStatusNotification(params: NotifyParams): Prom
 
   try {
     const supabase = createAdminClient();
-    const { data: tgConfig } = (await supabase
-      .from("tenant_telegram_configs")
-      .select("bot_token, enabled")
-      .eq("tenant_id", tenantId)
-      .single()) as {
-      data: { bot_token: string | null; enabled: boolean } | null;
-      error: unknown;
-    };
-
-    if (!tgConfig?.enabled || !tgConfig.bot_token) {
+    const bot = await getEnrollmentBotToken(supabase, tenantId, "telegram-notify");
+    if (bot.status !== "ready") {
       return false;
     }
 
-    const botToken = decryptToken(tgConfig.bot_token);
+    const { botToken } = bot;
 
     switch (action) {
       case "approve": {

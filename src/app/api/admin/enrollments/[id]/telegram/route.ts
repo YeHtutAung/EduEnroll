@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, notFound } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { decryptToken } from "@/lib/messenger/crypto";
+import { getEnrollmentBotToken } from "@/lib/telegram/enrollment-bot";
 import { banChatMember, unbanChatMember } from "@/lib/telegram/send";
 
 // ─── GET /api/admin/enrollments/[id]/telegram ───────────────────────────────
@@ -95,17 +95,10 @@ export async function DELETE(
   if (enrollment.telegram_chat_id && enrollment.class_id) {
     try {
       // Get bot token
-      const { data: tgConfig } = (await supabase
-        .from("tenant_telegram_configs")
-        .select("bot_token, enabled")
-        .eq("tenant_id", tenantId)
-        .single()) as {
-        data: { bot_token: string | null; enabled: boolean } | null;
-        error: unknown;
-      };
+      const bot = await getEnrollmentBotToken(supabase, tenantId, "telegram-unlink");
 
-      if (tgConfig?.enabled && tgConfig.bot_token) {
-        const botToken = decryptToken(tgConfig.bot_token);
+      if (bot.status === "ready") {
+        const { botToken } = bot;
 
         // Find all channels for this class
         const { data: channels } = (await supabase
