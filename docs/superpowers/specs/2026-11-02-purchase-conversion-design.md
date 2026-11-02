@@ -349,7 +349,7 @@ nothing: test from a real browser.
   limit, auth failure, 5xx and timeout.
 - **Unit:** a sender failure leaves `issueTicketsForEnrollment`'s result and throw
   unchanged, and a sender that hangs past its deadline does not stop the notification.
-- **Unit:** cron auth with the secret unset, bounded batches, and clean-up order.
+- **Unit:** cron auth with the secret unset, the sweep's time budget, and clean-up order.
 - **Database:** the trigger adds one row per platform; a second transition adds none;
   unconfigured tenants and zero values add none; a top-up reports the full value; a
   forced error inside the trigger does not roll back the payment update.
