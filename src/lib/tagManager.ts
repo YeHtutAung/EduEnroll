@@ -265,11 +265,14 @@ export function pushDataLayer(
 }
 
 const NAVIGATE_FALLBACK_MS = 300;
+const TAG_REQUEST_SETTLE_MS = 250;
 
 /**
  * Full page load to `url`. With `afterEvent`, pushes the event first; when GTM
  * is running, waits for its eventCallback (or 300 ms) and navigates exactly
- * once. Without GTM it navigates at once.
+ * once. Without GTM it navigates at once. eventCallback fires when the tags have
+ * run, which is when a pixel's image request has only just started, and leaving
+ * then can cancel it, so the navigation waits a little longer after it.
  */
 export function hardNavigate(
   url: string,
@@ -289,15 +292,21 @@ export function hardNavigate(
   }
 
   let done = false;
+  let settling = false;
   const go = () => {
     if (done) return;
     done = true;
-    clearTimeout(timer);
     w.location.assign(url);
   };
   const timer = setTimeout(go, NAVIGATE_FALLBACK_MS);
+  const settleThenGo = () => {
+    if (done || settling) return;
+    settling = true;
+    clearTimeout(timer);
+    setTimeout(go, TAG_REQUEST_SETTLE_MS);
+  };
 
-  pushDataLayer(name, payload, { eventCallback: go });
+  pushDataLayer(name, payload, { eventCallback: settleThenGo });
 }
 
 // ─── GA4 ecommerce payloads ─────────────────────────────────────────────────
