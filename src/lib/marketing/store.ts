@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import type { MarketingPageVersion } from "@/types/database";
 import type { MarketingContent } from "./content";
@@ -90,4 +91,38 @@ export async function writeDraft(
   if (error) return failure(error);
   if (!data?.length) return { ok: false, reason: "stale" };
   return { ok: true, revision };
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const isUuid = (v: unknown): v is string => typeof v === "string" && UUID.test(v);
+
+export const notConfigured = () =>
+  NextResponse.json({ error: "Marketing isn't configured yet.", notConfigured: true }, { status: 503 });
+export const stale = () =>
+  NextResponse.json({ error: "Someone else changed this. Reload to get the latest version.", stale: true }, { status: 409 });
+export const serverError = () => NextResponse.json({ error: "Something went wrong." }, { status: 500 });
+
+/** Maps a failed read or write to the response the route sends. */
+export function errorResponse(reason: "stale" | "not_configured" | "error") {
+  if (reason === "stale") return stale();
+  if (reason === "not_configured") return notConfigured();
+  return serverError();
+}
+
+/** The concurrency fields shared by save and restore. Returns null if malformed. */
+export function parseWriteTarget(body: Record<string, unknown>) {
+  const expectedRevision = body.expectedRevision;
+  if (typeof expectedRevision !== "number" || !Number.isInteger(expectedRevision) || expectedRevision < 0) return null;
+  let basePublishedId: string | null = null;
+  if (expectedRevision === 0) {
+    // Required, including an explicit null: "I saw nothing published".
+    if (body.basePublishedId !== null && !isUuid(body.basePublishedId)) return null;
+    basePublishedId = body.basePublishedId;
+  }
+  return { expectedRevision, basePublishedId };
+}
+
+export async function readJsonObject(request: Request): Promise<Record<string, unknown> | null> {
+  const body = await request.json().catch(() => null);
+  return body && typeof body === "object" && !Array.isArray(body) ? (body as Record<string, unknown>) : null;
 }
