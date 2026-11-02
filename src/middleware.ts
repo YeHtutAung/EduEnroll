@@ -118,7 +118,17 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // "/" is in the matcher only for the redirect above. The landing page needs no
+  // A tenant's kuunyi subdomain gets the same treatment: app/page.tsx is the
+  // platform's homepage, and its static metadata would also replace the
+  // tenant-aware title from app/layout.tsx. Only the host resolver counts here,
+  // not the dev fallback — bare localhost with NEXT_PUBLIC_DEV_TENANT set must
+  // still show the homepage. The resolver already returns null for www and
+  // staging, so the platform root keeps its landing page.
+  if (pathname === "/" && extractSubdomainFromHost(host)) {
+    return NextResponse.redirect(new URL("/enroll", request.url));
+  }
+
+  // "/" is in the matcher only for the redirects above. The landing page needs no
   // session, so skip the Supabase round-trip the rest of this middleware does.
   // Must forward the sanitized headers: a bare NextResponse.next() carries the
   // ORIGINAL request headers, so a forged slug would still reach app/layout.tsx

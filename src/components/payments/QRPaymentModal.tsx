@@ -5,6 +5,7 @@ import QRCode from "qrcode";
 import { formatCurrencySimple } from "@/lib/utils";
 import MmqrCard from "@/components/payments/MmqrCard";
 import CbMmqrCard from "@/components/payments/CbMmqrCard";
+import { renderCardPng } from "@/components/payments/mmqrCardImage";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -129,6 +130,8 @@ export default function QRPaymentModal({
   // once a second while it is shown so the countdown and expiry view update.
   const [qrExpiresAtMs, setQrExpiresAtMs] = useState<number | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [saveFailed, setSaveFailed] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const slowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -453,7 +456,7 @@ export default function QRPaymentModal({
           unreachable. The MMQR card is roughly twice the height of the bare QR
           it replaced, which turns that latent bug into a routine one on short
           phones. */}
-      <div className="relative max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+      <div ref={panelRef} className="relative max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
         {/* Close button */}
         <button
           onClick={onClose}
@@ -575,11 +578,29 @@ export default function QRPaymentModal({
               <button
                 onClick={async () => {
                   const fileName = `MMQR-${orderId ?? "payment"}.png`;
-                  const byteString = atob(qrImageUrl.split(",")[1]);
-                  const ab = new ArrayBuffer(byteString.length);
-                  const ia = new Uint8Array(ab);
-                  for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
-                  const blob = new Blob([ab], { type: "image/png" });
+                  setSaveFailed(false);
+
+                  let blob: Blob;
+                  if (provider === "paypay") {
+                    const byteString = atob(qrImageUrl.split(",")[1]);
+                    const ab = new ArrayBuffer(byteString.length);
+                    const ia = new Uint8Array(ab);
+                    for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+                    blob = new Blob([ab], { type: "image/png" });
+                  } else {
+                    // An MMQR code must stay inside its frame, so there is no
+                    // fallback to the bare code if the card cannot be exported.
+                    const card = panelRef.current?.querySelector<SVGSVGElement>('svg[data-testid$="mmqr-card"]');
+                    try {
+                      if (!card) throw new Error("Card is not on screen");
+                      blob = await renderCardPng(card);
+                    } catch (err) {
+                      console.error("[QRPaymentModal] Card export failed", err);
+                      setSaveFailed(true);
+                      return;
+                    }
+                  }
+
                   const file = new File([blob], fileName, { type: "image/png" });
 
                   // Mobile: use Web Share API (triggers native share sheet → Save to Photos)
@@ -611,6 +632,12 @@ export default function QRPaymentModal({
                 </svg>
                 Save QR / <span className="font-myanmar">QR သိမ်းမည်</span>
               </button>
+            )}
+            {saveFailed && (
+              <p role="alert" className="mt-2 text-center text-xs text-amber-700">
+                Could not save the QR. Please take a screenshot instead.{" "}
+                <span className="font-myanmar">QR သိမ်း၍ မရပါ။ Screenshot ရိုက်ယူပါ။</span>
+              </p>
             )}
 
             {/* Open in PayPay app (mobile) */}
