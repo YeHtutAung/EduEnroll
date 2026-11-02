@@ -53,7 +53,7 @@ describe("card shape", () => {
   it("uses the four brand colours", () => {
     const html = render();
     expect(html).toContain("#FBD913"); // rules
-    expect(html).toContain("#17479E"); // MMQR wording
+    expect(html).toContain("#17479E"); // footer rule
     expect(html).toContain("#ffffff"); // card
     expect(html).toContain("#000000"); // text
   });
@@ -113,13 +113,38 @@ describe("proportions", () => {
   });
 });
 
-// The reference card KBZPay signed off: mark on the rule, receiver and amount
-// centred ABOVE the QR, dotted separator, MMQR wording, then the QR. An
-// earlier version put the text left-aligned below the QR and was rejected.
-describe("approved reference layout", () => {
-  it("centres the receiver name, the amount and the MMQR wording", () => {
-    // Three centred texts, not one.
-    expect(render().split('text-anchor="middle"').length - 1).toBeGreaterThanOrEqual(3);
+// The framed reference KBZPay sent on 2026-11-02 (Option 1): the MMQR code must
+// sit inside a frame. An earlier version put the text below the QR and was
+// rejected, so the receiver and amount stay above it.
+describe("framed reference layout", () => {
+  it("draws a border round the whole card", () => {
+    const html = render();
+    expect(html).toContain('data-testid="mmqr-frame"');
+    expect(html).toContain('stroke="#000000"');
+    expect(html).toContain(`width="${VB_W - 2}" height="${VB_H - 2}"`);
+  });
+
+  it("closes the frame with a solid blue footer rule below the QR", () => {
+    const html = render();
+    const qrBottom = VB_H - VB_H * 0.05;
+    expect(html).toMatch(/data-testid="mmqr-footer"[^>]*fill="#17479E"/);
+    expect(html).toContain(`y="${VB_H - 12}"`);
+    expect(VB_H - 12).toBeGreaterThan(qrBottom);
+  });
+
+  it("uses the full-width MyanmarPay banner as the header", () => {
+    const html = render();
+    expect(html).toContain("/cbmmqr/myanmarpay-banner.png");
+    expect(html).toContain(`width="${VB_W}"`);
+    expect(html).not.toContain("/mmqr-logo.png");
+  });
+
+  it("centres the receiver, the amount and the MMQR wording", () => {
+    const html = render();
+    expect(html).toMatch(/x="250"[^>]*text-anchor="middle"[^>]*>Louder Myanmar/);
+    expect(html).toMatch(/x="250"[^>]*text-anchor="middle"[^>]*>150,000/);
+    expect(html).not.toContain('text-anchor="start"');
+    expect(html).toMatch(/text-anchor="middle"[^>]*fill="#000000">MMQR/);
   });
 
   it("puts the receiver and amount above the QR", () => {
@@ -131,17 +156,10 @@ describe("approved reference layout", () => {
     expect(html).toContain(`y="${VB_H * 0.285}"`);
   });
 
-  it("draws the dotted separator", () => {
-    expect(render()).toContain('stroke-dasharray="2 6"');
-  });
-
-  // The mark carries its own "MMQR" wordmark, which the card already shows
-  // above the QR. Cropping the source removes the duplicate.
-  it("crops the wordmark off the MyanmarPay mark", () => {
+  it("draws the dotted separator across the full width", () => {
     const html = render();
-    expect(html).toContain("/mmqr-logo.png");
-    // A nested viewBox shorter than the source height is what does the crop.
-    expect(html).toContain(`viewBox="0 0 1920 ${Math.round(2943 * 0.817)}"`);
+    expect(html).toContain('stroke-dasharray="2 6"');
+    expect(html).toContain(`x1="0" y1="${VB_H * 0.405}" x2="${VB_W}"`);
   });
 });
 
