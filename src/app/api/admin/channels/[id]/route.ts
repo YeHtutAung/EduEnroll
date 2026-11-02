@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireOwner, notFound } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { decryptToken } from "@/lib/messenger/crypto";
+import { getEnrollmentBotToken } from "@/lib/telegram/enrollment-bot";
 import { getChatMemberCount } from "@/lib/telegram/send";
 
 // ─── GET /api/admin/channels/[id] ──────────────────────────────────────────
@@ -40,16 +40,11 @@ export async function GET(
 
   // Get member count from Telegram
   let memberCount: number | null = null;
-  const { data: tenant } = (await supabase
-    .from("tenants")
-    .select("telegram_bot_token")
-    .eq("id", tenantId)
-    .single()) as { data: { telegram_bot_token: string | null } | null; error: unknown };
+  const bot = await getEnrollmentBotToken(supabase, tenantId, "admin-channel");
 
-  if (tenant?.telegram_bot_token) {
+  if (bot.status === "ready") {
     try {
-      const botToken = decryptToken(tenant.telegram_bot_token);
-      const countResult = await getChatMemberCount(botToken, channel.telegram_channel_id);
+      const countResult = await getChatMemberCount(bot.botToken, channel.telegram_channel_id);
       if (countResult.ok && countResult.result !== undefined) {
         memberCount = countResult.result;
       }

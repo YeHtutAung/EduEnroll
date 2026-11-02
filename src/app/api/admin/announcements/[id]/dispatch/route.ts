@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { decryptToken } from "@/lib/messenger/crypto";
+import { getEnrollmentBotToken } from "@/lib/telegram/enrollment-bot";
 // ─── POST /api/admin/announcements/[id]/dispatch ──────────────────────────────
 // Dispatches an announcement to students via Telegram.
 // Finds all enrollments with telegram_chat_id matching the announcement's
@@ -48,23 +48,23 @@ export async function POST(
   }
 
   // ── Check tenant has Telegram configured ───────────────────────────────────
-  const { data: tgConfig } = (await supabase
-    .from("tenant_telegram_configs")
-    .select("enabled, bot_token")
-    .eq("tenant_id", tenantId)
-    .single()) as {
-    data: { enabled: boolean; bot_token: string | null } | null;
-    error: unknown;
-  };
+  const bot = await getEnrollmentBotToken(supabase, tenantId, "announcement-dispatch");
 
-  if (!tgConfig?.enabled || !tgConfig.bot_token) {
+  if (bot.status === "failed") {
+    return NextResponse.json(
+      { error: "Could not load the Telegram bot." },
+      { status: 500 },
+    );
+  }
+
+  if (bot.status !== "ready") {
     return NextResponse.json(
       { error: "Telegram bot is not connected or enabled." },
       { status: 400 },
     );
   }
 
-  const botToken = decryptToken(tgConfig.bot_token);
+  const { botToken } = bot;
 
   // ── Find target enrollments with telegram_chat_id ──────────────────────────
   let query = supabase
