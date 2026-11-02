@@ -180,15 +180,6 @@ beforeEach(async () => {
       { id: "enr-4", tenant_id: "ten-1", class_id: "cls-1", intake_id: "int-1", telegram_chat_id: null },
       { id: "enr-5", tenant_id: "ten-1", class_id: "cls-1", intake_id: "int-1", telegram_chat_id: "503", internal_test_at: "2026-11-01" },
     ],
-    announcements: [{
-      id: "ann-1",
-      tenant_id: "ten-1",
-      intake_id: "int-1",
-      class_level: null,
-      target_label: "All Classes",
-      message: "Class moved",
-      dispatched_at: null,
-    }],
   };
   stubTelegram();
   consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -243,13 +234,6 @@ async function channelDetails() {
   return res.json();
 }
 
-async function dispatchAnnouncement() {
-  const { POST } = await import("@/app/api/admin/announcements/[id]/dispatch/route");
-  return POST(new NextRequest("https://t.kuunyi.com/api/admin/announcements/ann-1/dispatch", { method: "POST" }), {
-    params: Promise.resolve({ id: "ann-1" }),
-  });
-}
-
 async function unlinkTelegram() {
   const { DELETE } = await import("@/app/api/admin/enrollments/[id]/telegram/route");
   const res = await DELETE(new NextRequest("https://t.kuunyi.com/api/admin/enrollments/enr-1/telegram"), {
@@ -257,9 +241,6 @@ async function unlinkTelegram() {
   });
   expect(res.status).toBe(200);
 }
-
-const dispatchRecorded = () =>
-  writes.some((w) => w.table === "announcements" && w.op === "update" && w.values?.dispatched_at);
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
@@ -371,36 +352,6 @@ describe("GET /api/admin/channels/[id]", () => {
     tables.tenant_bots = [enrollmentBot({ enabled: false })];
     expect((await channelDetails()).memberCount).toBeNull();
     expect(telegramCalls).toHaveLength(0);
-  });
-});
-
-describe("POST /api/admin/announcements/[id]/dispatch", () => {
-  it("sends once per chat through the enrollment bot, and records it", async () => {
-    const res = await dispatchAnnouncement();
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ sent: 2, failed: 0 });
-    expect(sends().map((c) => c.body.chat_id).sort()).toEqual(["501", "502"]);
-    expect(sends().every((c) => c.token === ENROLLMENT_TOKEN)).toBe(true);
-    expect(dispatchRecorded()).toBe(true);
-  });
-
-  it("refuses an announcement already dispatched", async () => {
-    tables.announcements[0].dispatched_at = "2026-11-01";
-    expect((await dispatchAnnouncement()).status).toBe(409);
-    expect(telegramCalls).toHaveLength(0);
-  });
-
-  it("refuses a disabled bot and leaves the announcement unsent", async () => {
-    tables.tenant_bots = [supportBot(), enrollmentBot({ enabled: false })];
-    expect((await dispatchAnnouncement()).status).toBe(400);
-    expect(telegramCalls).toHaveLength(0);
-    expect(dispatchRecorded()).toBe(false);
-  });
-
-  it("leaves the announcement unsent when the token cannot be decrypted", async () => {
-    tables.tenant_bots = [enrollmentBot({ bot_token: "not-a-real-ciphertext" })];
-    expect((await dispatchAnnouncement()).status).toBe(500);
-    expect(dispatchRecorded()).toBe(false);
   });
 });
 

@@ -15,7 +15,9 @@ export interface AnnouncementRow {
   created_at:            string;
   telegram_sent_count:   number;
   telegram_failed_count: number;
+  telegram_recipient_count: number;
   dispatched_at:         string | null;
+  dispatch_completed_at: string | null;
 }
 
 // ─── GET /api/admin/announcements ────────────────────────────────────────────
@@ -43,7 +45,8 @@ export async function GET() {
 }
 
 // ─── POST /api/admin/announcements ───────────────────────────────────────────
-// Create a new announcement (saves for history; Sprint 4 wires dispatch).
+// Create a new announcement. Sending is a separate request to /[id]/dispatch, so
+// that retrying a send cannot create a second announcement and send it again.
 //
 // Body: { intake_id, class_level?: JlptLevel | null, message }
 
@@ -87,8 +90,6 @@ export async function POST(request: NextRequest) {
     ? `${class_level} — ${intake.name}`
     : `All Classes — ${intake.name}`;
 
-  const { dispatch_telegram } = body as Record<string, unknown>;
-
   const { data, error } = await supabase
     .from("announcements")
     .insert({
@@ -105,31 +106,6 @@ export async function POST(request: NextRequest) {
 
   if (error) {
     return NextResponse.json({ error: (error as Error).message }, { status: 500 });
-  }
-
-  // Auto-dispatch via Telegram if requested
-  if (dispatch_telegram && data) {
-    try {
-      const origin = request.headers.get("origin") ?? `https://${request.headers.get("host")}`;
-      const dispatchRes = await fetch(
-        `${origin}/api/admin/announcements/${data.id}/dispatch`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            cookie: request.headers.get("cookie") ?? "",
-          },
-        },
-      );
-      if (dispatchRes.ok) {
-        const result = await dispatchRes.json();
-        data.telegram_sent_count = result.sent;
-        data.telegram_failed_count = result.failed;
-        data.dispatched_at = new Date().toISOString();
-      }
-    } catch {
-      // Dispatch failed but announcement was saved — don't block
-    }
   }
 
   return NextResponse.json(data, { status: 201 });
