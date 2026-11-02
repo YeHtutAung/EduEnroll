@@ -62,12 +62,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // ── Fetch bot username from tenant_telegram_configs ────────────
-  const { data: tgConfig } = (await supabase
-    .from("tenant_telegram_configs")
+  // ── Fetch the enrollment bot's username from tenant_bots ───────
+  const { data: enrollmentBot, error: botError } = (await supabase
+    .from("tenant_bots")
     .select("enabled, bot_username")
     .eq("tenant_id", enrollment.tenant_id)
-    .single()) as {
+    .eq("bot_type", "enrollment")
+    .maybeSingle()) as {
     data: {
       enabled: boolean;
       bot_username: string | null;
@@ -75,7 +76,11 @@ export async function POST(request: NextRequest) {
     error: unknown;
   };
 
-  if (!tgConfig?.enabled || !tgConfig.bot_username) {
+  if (botError) {
+    console.error("[telegram-link-token] enrollment bot lookup failed for", enrollment.tenant_id, botError);
+  }
+
+  if (!enrollmentBot?.enabled || !enrollmentBot.bot_username) {
     return NextResponse.json(
       { error: "Telegram is not configured for this school." },
       { status: 400 },
@@ -94,7 +99,7 @@ export async function POST(request: NextRequest) {
     } as never)
     .eq("id", enrollment.id);
 
-  const deepLink = `https://t.me/${tgConfig.bot_username}?start=${token}`;
+  const deepLink = `https://t.me/${enrollmentBot.bot_username}?start=${token}`;
 
   return NextResponse.json({ deepLink, expiresIn: TOKEN_EXPIRY_MINUTES * 60 });
 }
