@@ -10,6 +10,8 @@ Object.assign(process.env, {
   CBMMQR_YOUNGMONEY_API_KEY: "ym-api-key",
   CBMMQR_OTHER_USER_ID: "u2", CBMMQR_OTHER_PASSWORD: "p2", CBMMQR_OTHER_SOURCE_ID: "s2",
   CBMMQR_OTHER_MERCHANT_ID: "M0002", CBMMQR_OTHER_TERMINAL_ID: "T0002", CBMMQR_OTHER_API_KEY: "other-api-key",
+  CBMMQR_NOKEY_USER_ID: "u3", CBMMQR_NOKEY_PASSWORD: "p3", CBMMQR_NOKEY_SOURCE_ID: "s3",
+  CBMMQR_NOKEY_MERCHANT_ID: "M0003", CBMMQR_NOKEY_TERMINAL_ID: "T0003",
 });
 
 let payment: Record<string, unknown> | null;
@@ -105,7 +107,8 @@ describe("POST /api/webhooks/cbmmqr", () => {
     ["malformed JSON", "{nope"],
     ["a non-object", "[]"],
     ["a bad referenceNo", { ...BODY, referenceNo: "KBZ_x" }],
-    ["a missing apiKey", { ...BODY, apiKey: undefined }],
+    ["a non-string apiKey", { ...BODY, apiKey: 123 }],
+    ["an over-long apiKey", { ...BODY, apiKey: "k".repeat(151) }],
     ["an over-long qrReferenceNo", { ...BODY, qrReferenceNo: "Q".repeat(26) }],
     ["a body over 8 KB", { ...BODY, remark: "x".repeat(9000) }],
     ["an over-long transactionId", { ...BODY, transactionId: "T".repeat(36) }],
@@ -130,6 +133,68 @@ describe("POST /api/webhooks/cbmmqr", () => {
     expect((await post({ ...BODY, apiKey: "wrong" })).status).toBe(403);
     expect((await post({ ...BODY, apiKey: "other-api-key" })).status).toBe(403);
     expect(mockStatus).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["empty", ""],
+    ["null", null],
+    ["absent", undefined],
+  ])("403 for an %s key when the merchant has a key configured", async (_n, apiKey) => {
+    expect((await post({ ...BODY, apiKey })).status).toBe(403);
+    expect(mockStatus).not.toHaveBeenCalled();
+  });
+
+  // CB, 2026-11-03: the gateway does not use apiKey and it may be null or empty.
+  describe("a merchant with no key configured", () => {
+    beforeEach(() => {
+      payment = { ...payment, cbmmqr_merchant: "NOKEY" };
+    });
+
+    it.each([
+      ["empty", ""],
+      ["null", null],
+      ["absent", undefined],
+      ["any string", "anything"],
+    ])("accepts a callback whose key is %s, and still settles only through the status check", async (_n, apiKey) => {
+      const res = await post({ ...BODY, apiKey });
+      expect(res.status).toBe(200);
+      expect(mockStatus).toHaveBeenCalledWith(expect.objectContaining({ id: "NOKEY" }), "QR-1", undefined);
+      expect(mockSettle).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not settle when the status check says it is not paid", async () => {
+      mockStatus.mockResolvedValue({ ...PAID, code: "0006" });
+      expect((await post({ ...BODY, apiKey: "" })).status).toBe(500);
+      expect(mockSettle).not.toHaveBeenCalled();
+    });
+
+    it("does not settle when the status check answers about another QR", async () => {
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      mockStatus.mockResolvedValue({ ...PAID, qrReferenceNo: "QR-OTHER" });
+      expect((await post({ ...BODY, apiKey: "" })).status).toBe(200);
+      expect(mockSettle).not.toHaveBeenCalled();
+      spy.mockRestore();
+    });
+
+    it("still refuses a QR reference that is not the stored one, without calling CB", async () => {
+      const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+      payment = { ...payment, provider_order_ref: "QR-STORED" };
+      expect((await post({ ...BODY, apiKey: "" })).status).toBe(403);
+      expect(mockStatus).not.toHaveBeenCalled();
+      spy.mockRestore();
+    });
+
+    it("still answers 404 for an unknown reference", async () => {
+      payment = null;
+      expect((await post({ ...BODY, apiKey: "" })).status).toBe(404);
+      expect(mockStatus).not.toHaveBeenCalled();
+    });
+
+    it("still acknowledges FAIL without changing anything", async () => {
+      expect((await post({ ...BODY, apiKey: "", transStatusDescription: "FAIL" })).status).toBe(200);
+      expect(mockStatus).not.toHaveBeenCalled();
+      expect(mockSettle).not.toHaveBeenCalled();
+    });
   });
 
   it("403 without calling CB when the callback's QR reference is not the stored one", async () => {

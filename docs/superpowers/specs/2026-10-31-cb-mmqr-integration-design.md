@@ -49,10 +49,12 @@ Source: CB's PDF (not in the repo) and CB's email of 2026-10-29.
 - Timestamps look like `20201117 10:14:14`, with no timezone. The spec's example expiry is
   3 minutes after issue.
 - **Callback:** CB POSTs to the URL we register, exactly as given (confirmed 2026-10-29). Body:
-  `apiKey` (a static shared secret), `referenceNo`, `transactionId`, `transCurrency`,
+  `apiKey` (see below), `referenceNo`, `transactionId`, `transCurrency`,
   `transAmount`, `transDateTime`, `transStatusCode`, `transStatusDescription`
   (`SUCCESS` | `FAIL`), `qrReferenceNo`, `institutionId`, `institutionName`, `merchantId`,
   `remark`, `terminalId`. **No signature.** We reply `qrReferenceNo`, `returnCode`, `message`.
+  CB on `apiKey` (2026-11-03): documented, but "the gateway does not validate this field" and
+  it "can be left null or empty". CB issued no value, so the callback carries no secret.
 - **Return codes** (§4.2; the duplicates are in CB's spec): `0000` succeeded; `0003`
   reference already exists; `0006` both "Invalid Reference No." and "Waiting for payment";
   `0007` failed; `0008` in progress; `0009` refunded; `0012` token expired; `0017` and `0018`
@@ -315,8 +317,9 @@ logged loudly and one is refunded by hand.
 ### 5.3 Callback — `POST /api/webhooks/cbmmqr`
 
 1. Body ≤ 8 KB and a JSON object. Required, with type and length: `referenceNo` (our
-   `CB…` format), `qrReferenceNo` (1–25 printable ASCII characters), `apiKey` (1–150),
-   `transStatusDescription` (≤ 250). CB's other fields may be absent — a `FAIL` callback need
+   `CB…` format), `qrReferenceNo` (1–25 printable ASCII characters),
+   `transStatusDescription` (≤ 250). `apiKey` may be absent, null or empty; if present it must
+   be a string of ≤ 150. CB's other fields may be absent — a `FAIL` callback need
    not carry a transaction, and none of them moves money — but if present they must have
    CB's types and lengths (`transactionId` ≤ 35, `transCurrency` ≤ 3, `transDateTime` ≤ 17,
    `transStatusCode` ≤ 4, `institutionId` ≤ 4, `merchantId` ≤ 15, `terminalId` ≤ 8,
@@ -324,8 +327,8 @@ logged loudly and one is refunded by hand.
    any database read.
 2. Find the payment by `referenceNo` (with its stored `provider_order_ref`); it must be
    `cb_mmqr` → else 404; a failed lookup → 500.
-3. Compare `apiKey` in constant time with the API key of the merchant **pinned on that
-   payment** → else 403. That merchant's config missing → 500.
+3. If the merchant **pinned on that payment** has an API key configured, compare `apiKey` with
+   it in constant time → else 403. With no key configured, this step is skipped. That merchant's config missing → 500.
 4. If the row has a stored `provider_order_ref` and the callback's `qrReferenceNo` differs →
    403, logged as an error (references and the merchant id only), whatever the description
    says. CB is not called.
@@ -421,10 +424,11 @@ CBMMQR_<ID>_PASSWORD=        # secret
 CBMMQR_<ID>_SOURCE_ID=
 CBMMQR_<ID>_MERCHANT_ID=
 CBMMQR_<ID>_TERMINAL_ID=
-CBMMQR_<ID>_API_KEY=         # secret; expected on callbacks
+CBMMQR_<ID>_API_KEY=         # optional; leave empty (CB issues none). If set, callbacks must carry it
 ```
 
-- A missing or invalid value is a configuration error. There is no fallback to another
+- A missing or invalid value, other than the optional API key, is a configuration error.
+  There is no fallback to another
   merchant and no unprefixed set.
 - There is no notify-origin variable: CB's `/dynamicqr` takes no callback URL. The URL is
   registered with CB out of band, per merchant and environment (UAT: the tunnel host; Live:
@@ -556,6 +560,11 @@ Mirrors the KBZPay suites in `src/__tests__/payments/` and `src/__tests__/db/`:
 
 ## 11. Questions for CB
 
+CB's reply, 2026-11-03: it did not answer these. It asked us to test with the UAT credentials
+and to send request and response details if something looks wrong. So UAT answers them where
+it can, and G1's written confirmation may never come (G1 then stays closed as described in
+§10: `CB_CONFIRMED_DEAD_CODES` stays empty).
+
 To send with the office IP and the tunnel callback URL:
 
 1. Which status-check response proves an expired QR can never be paid? (G1)
@@ -646,3 +655,9 @@ columns; `store_cbmmqr_qr`; status `PENDING | SUCCESS` only. Codex reviewed the 
 | # | Finding | Outcome |
 |---|---|---|
 | 1 | P1 — a retired CB QR can still settle: replacement leaves the old row `awaiting_payment`, and neither the bind nor `settleMmqrPayment()` requires `mmqr_status = PENDING` | Accepted: `bind_cbmmqr_settlement` answers `not_live` for any row that is not the live order (a replay of the bound transaction or a `verified` row still binds). This reverses §5.4's earlier "a retired row settles through the callback": by G1 a retired displayed QR cannot be paid, and if CB reports one paid anyway, a refusal for an operator is safer than two settled payments for one enrollment. |
+
+**CB's reply on `apiKey`, 2026-11-03** — design change:
+
+| # | Finding | Outcome |
+|---|---|---|
+| 1 | CB issues no callback key and may send it null or empty, so requiring one would refuse every real callback, and a buyer who paid and closed the page would get no ticket | Key optional: enforced only when configured (§5.3, §6). This relies on review finding 3 above: no callback field moves money. Forged callbacks can now trigger status checks, which is accepted; CB's source IPs are to be observed in UAT. |
