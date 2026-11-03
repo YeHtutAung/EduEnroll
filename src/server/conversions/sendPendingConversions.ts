@@ -6,6 +6,7 @@ import {
   describeRequest,
   hashEmail,
   hashPhone,
+  hashCountryFromPhone,
   type ConversionPlatform,
   type PlatformRequest,
   type SendOutcome,
@@ -163,7 +164,7 @@ async function run(enrollmentId: string, pastDeadline: () => boolean): Promise<v
     supabase.from("enrollments").select("status, internal_test_at, email, phone").eq("id", enrollmentId).maybeSingle(),
     supabase
       .from("enrollment_ad_context" as never)
-      .select("fbp, fbc, ttp, ttclid, client_ip, user_agent, source_url")
+      .select("fbp, fbc, ttp, ttclid, client_ip, user_agent, source_url, referrer_url")
       .eq("enrollment_id", enrollmentId)
       .maybeSingle(),
   ])) as unknown as [
@@ -172,7 +173,14 @@ async function run(enrollmentId: string, pastDeadline: () => boolean): Promise<v
       error: DbError;
     },
     {
-      data: (ContextIds & { client_ip: string | null; user_agent: string | null; source_url: string }) | null;
+      data:
+        | (ContextIds & {
+            client_ip: string | null;
+            user_agent: string | null;
+            source_url: string;
+            referrer_url: string | null;
+          })
+        | null;
       error: DbError;
     },
   ];
@@ -210,6 +218,7 @@ async function run(enrollmentId: string, pastDeadline: () => boolean): Promise<v
         // Hashed here and never stored: a retry reads them from the order again.
         hashedEmail: hashEmail(enrollment?.email),
         hashedPhone: hashPhone(enrollment?.phone),
+        hashedCountry: hashCountryFromPhone(enrollment?.phone),
         eventId: row.event_id,
         occurredAt: row.occurred_at,
         value: Number(row.value),
@@ -221,6 +230,7 @@ async function run(enrollmentId: string, pastDeadline: () => boolean): Promise<v
         fbc: context.fbc,
         ttp: context.ttp,
         ttclid: context.ttclid,
+        referrerUrl: context.referrer_url,
       };
       const request =
         row.platform === "meta"

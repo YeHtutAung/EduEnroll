@@ -6,7 +6,24 @@ import {
   parseClickCookie,
   buildFbc,
   forwardedClickQuery,
+  cleanReferrerOrigin,
 } from "@/lib/conversions/clickData";
+
+describe("cleanReferrerOrigin", () => {
+  it("keeps only the scheme and host", () => {
+    expect(cleanReferrerOrigin("https://l.facebook.com/l.php?u=secret#x")).toBe("https://l.facebook.com/");
+  });
+  it("keeps a port", () => expect(cleanReferrerOrigin("http://a.example:8080/x")).toBe("http://a.example:8080/"));
+  it.each(["", "not a url", "javascript:alert(1)", "data:text/html,x", "android-app://com.facebook.katana/", null, undefined])(
+    "drops %j",
+    (value) => {
+      expect(cleanReferrerOrigin(value)).toBeNull();
+    },
+  );
+  it("drops an over-long value", () => {
+    expect(cleanReferrerOrigin(`https://${"a".repeat(300)}.example/`)).toBeNull();
+  });
+});
 
 describe("cleanClickValue", () => {
   it("accepts a normal value", () => expect(cleanClickValue("fb.1.1700000000.abc-DEF_1")).toBe("fb.1.1700000000.abc-DEF_1"));

@@ -50,17 +50,12 @@ describe("TermsConsent", () => {
     expect(html).toContain("&lt;script&gt;");
   });
 
-  // Owner's decision, 2026-11-03: purchase tracking can send Meta these details,
-  // so buyers see that before they pay, in both languages.
-  it("tells the buyer their email and phone may be shared with Meta in hashed form", () => {
+  // Owner's decision, 2026-11-04: the Meta disclosure lives in the Terms of Sale,
+  // which this box agrees to, not as a separate line on the form.
+  it("shows no separate advertising notice on the form", () => {
     const html = render();
-    expect(html).toContain("Your email and phone may be shared in hashed form with Meta to measure ads.");
-    expect(html).toContain("သင့်အီးမေးလ်နှင့် ဖုန်းနံပါတ်ကို ကြော်ငြာတိုင်းတာရန် hash ပြုလုပ်ထားသော ပုံစံဖြင့် Meta ထံ မျှဝေနိုင်ပါသည်။");
-  });
-
-  it("keeps that notice outside the label, so it is not part of what the box agrees to", () => {
-    const label = /<label[\s\S]*<\/label>/.exec(render())![0];
-    expect(label).not.toContain("shared in hashed form");
+    expect(html).not.toContain("hashed form");
+    expect(html).not.toContain("Meta");
   });
 
   it("reflects the checked state", () => {

@@ -6,6 +6,8 @@
 
 export const AD_CLICK_COOKIE = "kn_ad_click";
 export const AD_CLICK_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
+export const AD_REFERRER_COOKIE = "kn_ad_referrer";
+const REFERRER_ORIGIN_MAX = 255;
 
 const CLICK_VALUE_RE = /^[A-Za-z0-9._\-=+/]{1,500}$/;
 
@@ -50,6 +52,22 @@ export function nextClickCookie(search: string, existing: string | null | undefi
       at: fbclid && fbclid !== current.fbclid ? now : (current.at ?? now),
     }),
   );
+}
+
+/**
+ * The site a buyer arrived from, as scheme and host only. The path and query of
+ * another site can hold personal details, and Meta only needs to know the source.
+ * Null for anything that isn't a plain web address.
+ */
+export function cleanReferrerOrigin(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    return url.origin.length <= REFERRER_ORIGIN_MAX ? `${url.origin}/` : null;
+  } catch {
+    return null;
+  }
 }
 
 export function buildFbc(fbclid: string, capturedAtMs: number): string {

@@ -1,7 +1,14 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { tenantLinkOrigin } from "@/lib/origin";
 import { clientIpFrom } from "@/lib/rateLimit";
-import { AD_CLICK_COOKIE, buildFbc, cleanClickValue, parseClickCookie } from "@/lib/conversions/clickData";
+import {
+  AD_CLICK_COOKIE,
+  AD_REFERRER_COOKIE,
+  buildFbc,
+  cleanClickValue,
+  cleanReferrerOrigin,
+  parseClickCookie,
+} from "@/lib/conversions/clickData";
 
 const USER_AGENT_MAX = 1000;
 const CAPTURE_TIMEOUT_MS = 1500;
@@ -13,6 +20,17 @@ export interface AdContext {
   ttclid: string | null;
   client_ip: string | null;
   user_agent: string | null;
+  referrer_url: string | null;
+}
+
+/** Cookies can be edited by the browser, so this cleans it again. */
+function storedReferrer(raw: string | undefined): string | null {
+  if (!raw) return null;
+  try {
+    return cleanReferrerOrigin(decodeURIComponent(raw));
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -40,6 +58,7 @@ export function adContextFromRequest(
     ttclid,
     client_ip: ip === "unknown" ? null : ip,
     user_agent: headers.get("user-agent")?.slice(0, USER_AGENT_MAX) ?? null,
+    referrer_url: storedReferrer(cookie(AD_REFERRER_COOKIE)),
   };
 }
 
