@@ -89,6 +89,13 @@ export default function TermsConsent({
         </p>
       )}
 
+      <p className="mt-2 text-[11.5px] leading-snug text-gray-500">
+        Your email and phone may be shared in hashed form with Meta to measure ads.
+        <span className="font-myanmar mt-0.5 block">
+          သင့်အီးမေးလ်နှင့် ဖုန်းနံပါတ်ကို ကြော်ငြာတိုင်းတာရန် hash ပြုလုပ်ထားသော ပုံစံဖြင့် Meta ထံ မျှဝေနိုင်ပါသည်။
+        </span>
+      </p>
+
       {termsOpen && <LegalDocumentModal doc={TERMS_OF_SALE} fullPageHref="/terms" onClose={closeTerms} />}
     </div>
   );
