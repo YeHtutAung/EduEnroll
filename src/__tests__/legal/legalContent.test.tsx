@@ -55,6 +55,19 @@ describe("Terms of Sale", () => {
   it("shows the same version that orders record", () => {
     expect(TERMS_OF_SALE.subtitle.en).toContain(TERMS_VERSION);
   });
+
+  // Buyers agree to this wording, so it needs a version newer than the one they
+  // accepted before it was added.
+  it("discloses sharing with Meta, in a version newer than before it was added", () => {
+    const section = TERMS_OF_SALE.sections.find((s) => /Advertising/.test(s.title.en))!;
+    const text = section.items!.map((i) => i.en).join(" ");
+    expect(text).toMatch(/email/);
+    expect(text).toMatch(/phone/);
+    expect(text).toMatch(/hashed/);
+    expect(text).toMatch(/Meta/);
+    expect(section.items!.every((i) => MYANMAR.test(i.mm))).toBe(true);
+    expect(TERMS_VERSION > "2026-09-28").toBe(true);
+  });
 });
 
 describe("Privacy Policy", () => {
@@ -126,11 +139,12 @@ describe("Terms of Sale wording (owner review, 2026-09-21)", () => {
   // Trimmed to three sections at the owner's request (2026-09-28): the
   // refunds, lost-tickets, event-changes, your-information, your-order and
   // contact sections were dropped.
-  it("has exactly the three sections the owner kept", () => {
+  it("has the three sections the owner kept, plus advertising (2026-11-04)", () => {
     expect(TERMS_OF_SALE.sections.map((s) => s.title.en)).toEqual([
       "1. Verification",
       "2. Tickets and entry",
       "3. Resale and transfer",
+      "4. Advertising",
     ]);
   });
 

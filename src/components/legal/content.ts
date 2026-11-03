@@ -80,6 +80,15 @@ export const TERMS_OF_SALE: LegalDocumentData = {
         },
       ],
     },
+    {
+      title: { en: "4. Advertising", mm: "၄။ ကြော်ငြာ" },
+      items: [
+        {
+          en: "Your email and phone, and your country if you use a Myanmar phone number, may be shared in hashed form with Meta to measure ads and choose who sees them.",
+          mm: "သင့်အီးမေးလ်နှင့် ဖုန်းနံပါတ်၊ မြန်မာဖုန်းနံပါတ် အသုံးပြုပါက သင့်နိုင်ငံကို ကြော်ငြာတိုင်းတာရန်နှင့် ကြော်ငြာမြင်ရမည့်သူများကို ရွေးချယ်ရန် hash ပြုလုပ်ထားသော ပုံစံဖြင့် Meta ထံ မျှဝေနိုင်ပါသည်။",
+        },
+      ],
+    },
   ],
 };
 
