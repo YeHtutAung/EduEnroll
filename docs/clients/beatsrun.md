@@ -80,11 +80,12 @@
     only exists once the payment completes and to use the status check. Until
     UAT shows otherwise, treat `0006` from the status check as not paid yet:
     keep polling, and never fail the enrollment or release the seat on it.
-  - Callback: the request authenticates only with a static `apiKey` in the
-    body; there is no signature. The route must check the key and then
-    confirm with the status check (`PATCH /dynamicqr/{qrReferenceNo}/status`)
-    before marking the payment verified. The response body carries
-    `qrReferenceNo`, `returnCode` and `message`.
+  - Callback: it has no signature, and CB said on 2026-11-03 that its gateway
+    does not use the `apiKey` field, which may be null or empty. The callback
+    is only a wake-up: the route confirms with the status check
+    (`PATCH /dynamicqr/{qrReferenceNo}/status`) before marking the payment
+    verified. The response body carries `qrReferenceNo`, `returnCode` and
+    `message`.
   - Token: `/auth/token` returns `expiredDateTime`. Reuse the token until then
     and fetch a new one on `0012` (Token Expired).
   - QR display: CB require the WebFrame sample layout (CB's reply of

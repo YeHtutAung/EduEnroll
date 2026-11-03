@@ -41,7 +41,20 @@ describe("getCbMerchant", () => {
     expect(() => getCbMerchant(id as string)).toThrow(/missing or malformed/);
   });
 
-  it.each(Object.keys(YM))("fails closed when %s is missing, naming it and not its value", (name) => {
+  // CB, 2026-11-03: the gateway does not use the callback apiKey.
+  it.each([
+    ["unset", undefined],
+    ["empty", ""],
+    ["blank", "   "],
+  ])("has a null apiKey when CBMMQR_<ID>_API_KEY is %s", (_n, value) => {
+    if (value === undefined) delete process.env.CBMMQR_YOUNGMONEY_API_KEY;
+    else process.env.CBMMQR_YOUNGMONEY_API_KEY = value;
+    expect(getCbMerchant("YOUNGMONEY").apiKey).toBeNull();
+  });
+
+  const REQUIRED = Object.keys(YM).filter((name) => name !== "CBMMQR_YOUNGMONEY_API_KEY");
+
+  it.each(REQUIRED)("fails closed when %s is missing, naming it and not its value", (name) => {
     delete process.env[name];
     let message = "";
     try { getCbMerchant("YOUNGMONEY"); } catch (e) { message = (e as Error).message; }

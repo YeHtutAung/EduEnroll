@@ -21,8 +21,11 @@ export type CbMerchant = {
   sourceId: string;
   merchantId: string;
   terminalId: string;
-  /** The static key CB sends on callbacks. */
-  apiKey: string;
+  /**
+   * Checked on callbacks only when set. CB said on 2026-11-03 that its gateway
+   * does not use this field and it may be null or empty, so it is normally null.
+   */
+  apiKey: string | null;
 };
 // No notify origin: CB's /dynamicqr takes no callback URL. The URL is
 // registered with CB out of band, per merchant and environment.
@@ -53,7 +56,7 @@ export function getCbMerchant(id: string | null | undefined): CbMerchant {
     sourceId: read("SOURCE_ID"),
     merchantId: read("MERCHANT_ID"),
     terminalId: read("TERMINAL_ID"),
-    apiKey: read("API_KEY"),
+    apiKey: process.env[`CBMMQR_${id}_API_KEY`]?.trim() || null,
   };
 }
 
