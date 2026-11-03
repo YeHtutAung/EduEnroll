@@ -89,6 +89,11 @@
   - QR lifetime: 20 minutes in UAT (2026-11-03), not the 3 of CB's sample, and
     we cannot set it. A QR may not outlive its booking, so a 15-minute booking
     window can never show a CB QR.
+  - UAT status check, 2026-11-03: an unpaid QR returns `0006` "Waiting for
+    payment."; an expired QR returns `0005` "Dynamic QR time is expire!"; an
+    unknown QR returns `0026`. CB has not confirmed in writing that `0005` is
+    final, so it is not in `CB_CONFIRMED_DEAD_CODES` (gate G1). Not yet tested,
+    for lack of a UAT wallet: a paid QR, CB's real callback, settlement, ticket.
   - Token: `/auth/token` returns `expiredDateTime`. Reuse the token until then
     and fetch a new one on `0012` (Token Expired).
   - QR display: CB require the WebFrame sample layout (CB's reply of
