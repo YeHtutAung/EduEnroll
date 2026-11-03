@@ -88,8 +88,8 @@ export const TERMS_OF_SALE: LegalDocumentData = {
 export const PRIVACY_POLICY: LegalDocumentData = {
   title: { en: "Privacy Policy", mm: "ကိုယ်ရေးအချက်အလက် မူဝါဒ" },
   subtitle: {
-    en: "Last updated: September 2026 · Effective: September 2026",
-    mm: "နောက်ဆုံးပြင်ဆင်သည့်ရက် - ၂၀၂၆ ခုနှစ် စက်တင်ဘာလ · စတင်အသက်ဝင်သည့်ရက် - ၂၀၂၆ ခုနှစ် စက်တင်ဘာလ",
+    en: "Last updated: November 2026 · Effective: November 2026",
+    mm: "နောက်ဆုံးပြင်ဆင်သည့်ရက် - ၂၀၂၆ ခုနှစ် နိုဝင်ဘာလ · စတင်အသက်ဝင်သည့်ရက် - ၂၀၂၆ ခုနှစ် နိုဝင်ဘာလ",
   },
   intro: {
     en:
@@ -237,6 +237,10 @@ export const PRIVACY_POLICY: LegalDocumentData = {
           mm: "Messenger bot ကို အသုံးပြုပါက Facebook/Meta ထံ — Meta ၏ ကိုယ်ပိုင် ကိုယ်ရေးအချက်အလက်မူဝါဒဖြင့် ထိန်းချုပ်ပါသည်",
         },
         {
+          en: "With Meta when an event organiser uses purchase tracking: your email and phone number in hashed form, with your purchase value, browser details and IP address, so the organiser can measure its ads, avoid showing them to people who have already bought, and reach similar audiences. Your name and order reference are not included",
+          mm: "ပွဲစီစဉ်သူက ဝယ်ယူမှုခြေရာခံခြင်းကို အသုံးပြုပါက Meta ထံ — သင့်အီးမေးလ်နှင့် ဖုန်းနံပါတ်ကို hash ပြုလုပ်ထားသော ပုံစံဖြင့် ဝယ်ယူမှုတန်ဖိုး၊ browser အချက်အလက်နှင့် IP လိပ်စာတို့နှင့်အတူ ပေးပို့ပါသည်။ ၎င်းမှာ ပွဲစီစဉ်သူက ၎င်း၏ကြော်ငြာများကို တိုင်းတာနိုင်ရန်၊ ဝယ်ယူပြီးသူများထံ ကြော်ငြာမပြရန်နှင့် ဆင်တူသော ပရိသတ်များကို ရှာဖွေနိုင်ရန် ဖြစ်ပါသည်။ သင့်အမည်နှင့် မှာယူမှုအမှတ်ကို မပေးပို့ပါ",
+        },
+        {
           en: "When required by law, court order, or governmental authority",
           mm: "ဥပဒေ၊ တရားရုံးအမိန့် သို့မဟုတ် အစိုးရအာဏာပိုင်များက တောင်းဆိုသည့်အခါ",
         },
@@ -284,9 +288,9 @@ export const PRIVACY_POLICY: LegalDocumentData = {
       title: { en: "7. Cookies and Tracking", mm: "၇။ Cookie နှင့် ခြေရာခံခြင်း" },
       intro: {
         en:
-          "KuuNyi uses essential cookies to maintain your login session and platform functionality. We do not use advertising cookies or third-party tracking technologies. Session cookies are deleted when you close your browser.",
+          "KuuNyi uses essential cookies to maintain your login session and platform functionality. Session cookies are deleted when you close your browser. Some event organisers also use advertising and analytics tools on their event pages, through Google Tag Manager, such as Meta Pixel and Google Analytics. These tools can set their own cookies and collect your browsing activity on those pages. They do not run on the pages where you enter your details or pay.",
         mm:
-          "KuuNyi သည် အကောင့်ဝင်ထားမှုနှင့် ပလက်ဖောင်း လုပ်ဆောင်ချက်များအတွက် မရှိမဖြစ် cookie များကိုသာ အသုံးပြုပါသည်။ ကြော်ငြာ cookie များ သို့မဟုတ် ပြင်ပ ခြေရာခံနည်းပညာများကို မသုံးပါ။ Session cookie များသည် browser ကို ပိတ်လိုက်သည့်အခါ ပျက်သွားပါသည်။",
+          "KuuNyi သည် အကောင့်ဝင်ထားမှုနှင့် ပလက်ဖောင်း လုပ်ဆောင်ချက်များအတွက် မရှိမဖြစ် cookie များကို အသုံးပြုပါသည်။ Session cookie များသည် browser ကို ပိတ်လိုက်သည့်အခါ ပျက်သွားပါသည်။ ပွဲစီစဉ်သူအချို့သည် ၎င်းတို့၏ ပွဲစာမျက်နှာများတွင် Google Tag Manager မှတစ်ဆင့် Meta Pixel နှင့် Google Analytics ကဲ့သို့သော ကြော်ငြာနှင့် ခွဲခြမ်းစိတ်ဖြာရေးကိရိယာများကိုလည်း အသုံးပြုပါသည်။ ဤကိရိယာများသည် ၎င်းတို့၏ကိုယ်ပိုင် cookie များကို သတ်မှတ်ပြီး ထိုစာမျက်နှာများပေါ်ရှိ သင့်လုပ်ဆောင်မှုကို စုဆောင်းနိုင်ပါသည်။ သင့်အချက်အလက်ထည့်သွင်းသည့် သို့မဟုတ် ငွေပေးချေသည့် စာမျက်နှာများတွင် ၎င်းတို့ မလုပ်ဆောင်ပါ။",
       },
     },
     {

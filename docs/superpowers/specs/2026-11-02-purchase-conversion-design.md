@@ -27,7 +27,7 @@ never affect a payment, a ticket or a notification.
 
 | Question | Decision |
 |---|---|
-| Buyer data sent | **Browser data only:** ad-click IDs and cookies, IP address, browser user agent, value and currency. **No email, phone, name or order ref**, hashed or otherwise. Owner's decision, 2026-11-02. |
+| Buyer data sent | Ad-click IDs and cookies, IP address, browser user agent, value and currency. **To Meta only, also the email and phone, SHA-256 hashed**, read from the order at send time and never stored. **No name or order ref**, and nothing hashed to TikTok. Owner's decision, 2026-11-03, replacing "browser data only" of 2026-11-02, because Sky Festival needs matched buyers to exclude them from ads and build lookalike audiences. |
 | Who gets an event | Any buyer with that platform's pixel cookie or click ID. This includes people who never clicked an ad, because pixels set `_fbp` and `_ttp` for every visitor. Owner's decision, 2026-11-02. A buyer with none of these sends nothing, and their IP is not stored. |
 | Platforms | Meta Conversions API and TikTok Events API. GA4 only if a tenant asks. |
 | Delivery | A queue table filled by a database trigger, a non-blocking send attempt, and a daily retry. |
@@ -313,7 +313,7 @@ nothing: test from a real browser.
 
 ## Privacy and logging
 
-- Nothing in this feature reads email, phone, name or the order ref into a payload.
+- Nothing in this feature reads a name or the order ref into a payload. Email and phone reach only Meta's payload, and only hashed. Neither they nor their hashes are logged or stored, and GTM stays off the pages that collect them.
 - IP and user agent are personal data. They are only stored when a pixel cookie or
   click ID exists, and are deleted as described above. The pixel on the event page
   already sends the same visitors' IP and user agent to the platforms from the browser.
@@ -342,7 +342,7 @@ nothing: test from a real browser.
 ## Testing
 
 - **Unit:** payload builders, including a test that a fully populated enrollment
-  produces no email, phone, name or ref in either payload.
+  produces no raw email or phone, no name and no ref in either payload, and no hash to TikTok.
 - **Unit:** `event_id` is stable and does not contain the ref.
 - **Unit:** the environment table, cookie validation, and the per-row decisions.
 - **Unit:** outcome handling, including TikTok's 200 with a non-zero `code`, rate

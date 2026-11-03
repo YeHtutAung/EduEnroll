@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ─── In-memory stand-in for the admin client ────────────────────────────────
@@ -177,9 +178,9 @@ beforeEach(() => {
         id: ENROLLMENT,
         status: "confirmed",
         internal_test_at: null,
-        // Present so a test can prove none of it travels.
+        // Present so a test can prove none of it travels unhashed.
         student_name_en: "Buyer Name",
-        email: "buyer@example.com",
+        email: "Buyer@Example.com",
         phone: "+95900000000",
         enrollment_ref: "ORDER-REF-1",
       },
@@ -476,10 +477,48 @@ describe("sendPendingConversions", () => {
     expect(fetchedBody().data[0].event_time).toBe(Date.UTC(2026, 10, 2, 10, 0, 0) / 1000);
   });
 
-  it("copies the queue row and ad context into the request, and nothing about the buyer", async () => {
+  it("gives Meta the hashed email and phone, and TikTok neither", async () => {
     await sendPendingConversions(ENROLLMENT);
 
-    expect(selects.enrollments).toEqual(["status, internal_test_at"]);
+    const emailHash = createHash("sha256").update("buyer@example.com").digest("hex");
+    const phoneHash = createHash("sha256").update("95900000000").digest("hex");
+    const meta = mockFetch.mock.calls.find(([url]) => url.includes("facebook"))!;
+    const tiktok = mockFetch.mock.calls.find(([url]) => url.includes("tiktok"))!;
+    expect(JSON.parse(meta[1].body as string).data[0].user_data).toMatchObject({
+      em: [emailHash],
+      ph: [phoneHash],
+    });
+    expect(tiktok[1].body as string).not.toContain(emailHash);
+    expect(tiktok[1].body as string).not.toContain(phoneHash);
+  });
+
+  it("still sends when the order has no usable email or phone", async () => {
+    Object.assign(db.enrollments[0], { email: null, phone: "bad" });
+    await sendPendingConversions(ENROLLMENT);
+
+    const meta = mockFetch.mock.calls.find(([url]) => url.includes("facebook"))!;
+    const { user_data: userData } = JSON.parse(meta[1].body as string).data[0];
+    expect(userData).not.toHaveProperty("em");
+    expect(userData).not.toHaveProperty("ph");
+    expect(metaRow().status).toBe("sent");
+  });
+
+  it("never logs the email, phone or their hashes", async () => {
+    mockFetch.mockImplementation(async () => {
+      throw new Error("connect failed");
+    });
+    await sendPendingConversions(ENROLLMENT);
+
+    const emailHash = createHash("sha256").update("buyer@example.com").digest("hex");
+    for (const value of ["Buyer@Example.com", "+95900000000", emailHash]) {
+      expect(logged()).not.toContain(value);
+    }
+  });
+
+  it("copies the queue row and ad context into the request, and no raw buyer data", async () => {
+    await sendPendingConversions(ENROLLMENT);
+
+    expect(selects.enrollments).toEqual(["status, internal_test_at, email, phone"]);
     const meta = mockFetch.mock.calls.find(([url]) => url.includes("facebook"))!;
     const tiktok = mockFetch.mock.calls.find(([url]) => url.includes("tiktok"))!;
     expect(meta[0]).toContain("/111/events");
@@ -503,7 +542,7 @@ describe("sendPendingConversions", () => {
 
     for (const [, init] of mockFetch.mock.calls) {
       const sent = init.body as string;
-      for (const buyerData of ["Buyer Name", "buyer@example.com", "+95900000000", "ORDER-REF-1"]) {
+      for (const buyerData of ["Buyer Name", "Buyer@Example.com", "buyer@example.com", "+95900000000", "ORDER-REF-1"]) {
         expect(sent).not.toContain(buyerData);
       }
     }
