@@ -3,6 +3,8 @@ import {
   buildMetaRequest,
   buildTiktokRequest,
   classifyResponse,
+  hashEmail,
+  hashPhone,
   type ConversionPlatform,
   type PlatformRequest,
   type SendOutcome,
@@ -157,14 +159,17 @@ async function run(enrollmentId: string, pastDeadline: () => boolean): Promise<v
     { data: enrollment, error: enrollmentError },
     { data: context, error: contextError },
   ] = (await Promise.all([
-    supabase.from("enrollments").select("status, internal_test_at").eq("id", enrollmentId).maybeSingle(),
+    supabase.from("enrollments").select("status, internal_test_at, email, phone").eq("id", enrollmentId).maybeSingle(),
     supabase
       .from("enrollment_ad_context" as never)
       .select("fbp, fbc, ttp, ttclid, client_ip, user_agent, source_url")
       .eq("enrollment_id", enrollmentId)
       .maybeSingle(),
   ])) as unknown as [
-    { data: { status: string; internal_test_at: string | null } | null; error: DbError },
+    {
+      data: { status: string; internal_test_at: string | null; email: string | null; phone: string | null } | null;
+      error: DbError;
+    },
     {
       data: (ContextIds & { client_ip: string | null; user_agent: string | null; source_url: string }) | null;
       error: DbError;
@@ -201,6 +206,9 @@ async function run(enrollmentId: string, pastDeadline: () => boolean): Promise<v
   await Promise.all(
     claimed.map(async ({ row, token, testCode }) => {
       const event = {
+        // Hashed here and never stored: a retry reads them from the order again.
+        hashedEmail: hashEmail(enrollment?.email),
+        hashedPhone: hashPhone(enrollment?.phone),
         eventId: row.event_id,
         occurredAt: row.occurred_at,
         value: Number(row.value),
