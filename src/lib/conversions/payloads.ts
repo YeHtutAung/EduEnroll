@@ -135,6 +135,16 @@ export function buildTiktokRequest(args: {
   };
 }
 
+/** For logs: the names of the buyer fields a request carries. Never their values. */
+export function describeRequest(request: PlatformRequest): string {
+  const body = JSON.parse(request.body) as {
+    test_event_code?: string;
+    data: { user_data?: object; user?: object }[];
+  };
+  const fields = Object.keys(body.data[0].user_data ?? body.data[0].user ?? {});
+  return `fields=${fields.join(",")} test_code=${body.test_event_code ? "yes" : "no"}`;
+}
+
 export interface SendOutcome {
   status: "sent" | "pending" | "failed";
   /** A status or platform code only. Never a response body. */
