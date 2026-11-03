@@ -1,8 +1,8 @@
 // ─── Purchase event payloads: pure rules ────────────────────────────────────
 //
 // Each builder copies named fields only, so buyer data cannot reach a payload by
-// accident. No name or order ref at all, and email and phone only hashed and only
-// to Meta: the owner's decision, 2026-11-03. See
+// accident. No name or order ref at all, and email, phone and country only hashed
+// and only to Meta: the owner's decisions, 2026-11-03 and 2026-11-04. See
 // docs/superpowers/specs/2026-11-02-purchase-conversion-design.md.
 
 import { createHash } from "node:crypto";
@@ -23,16 +23,31 @@ export function hashEmail(raw: string | null | undefined): string | null {
  * Null if it can't be a phone number.
  */
 export function hashPhone(raw: string | null | undefined): string | null {
+  const digits = phoneDigits(raw);
+  return digits ? sha256(digits) : null;
+}
+
+function phoneDigits(raw: string | null | undefined): string | null {
   const trimmed = raw?.trim() ?? "";
   let digits = trimmed.replace(/\D/g, "");
   if (digits.startsWith("00")) digits = digits.slice(2);
   else if (!trimmed.startsWith("+") && digits.startsWith("0")) digits = `95${digits.slice(1)}`;
-  return digits.length >= 8 && digits.length <= 15 ? sha256(digits) : null;
+  return digits.length >= 8 && digits.length <= 15 ? digits : null;
+}
+
+/**
+ * The hash of "mm" for a Myanmar phone number, and null for anything else: the
+ * order holds no country, and a wrong one is worse than none. Owner's decision,
+ * 2026-11-04.
+ */
+export function hashCountryFromPhone(raw: string | null | undefined): string | null {
+  return phoneDigits(raw)?.startsWith("95") ? sha256("mm") : null;
 }
 
 export interface PurchaseEvent {
   hashedEmail: string | null;
   hashedPhone: string | null;
+  hashedCountry: string | null;
   eventId: string;
   occurredAt: string;
   value: number;
@@ -94,6 +109,7 @@ export function buildMetaRequest(args: {
             fbc: event.fbc ?? undefined,
             em: event.hashedEmail ? [event.hashedEmail] : undefined,
             ph: event.hashedPhone ? [event.hashedPhone] : undefined,
+            country: event.hashedCountry ? [event.hashedCountry] : undefined,
           },
           custom_data: { value: event.value, currency: event.currency },
         },
