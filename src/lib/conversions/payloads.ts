@@ -1,12 +1,38 @@
 // ─── Purchase event payloads: pure rules ────────────────────────────────────
 //
 // Each builder copies named fields only, so buyer data cannot reach a payload by
-// accident. No email, phone, name or order ref, hashed or not: the owner's
-// decision. See docs/superpowers/specs/2026-11-02-purchase-conversion-design.md.
+// accident. No name or order ref at all, and email and phone only hashed and only
+// to Meta: the owner's decision, 2026-11-03. See
+// docs/superpowers/specs/2026-11-02-purchase-conversion-design.md.
+
+import { createHash } from "node:crypto";
 
 export type ConversionPlatform = "meta" | "tiktok";
 
+const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
+
+/** Meta's format: trimmed and lowercase before hashing. Null if not an address. */
+export function hashEmail(raw: string | null | undefined): string | null {
+  const email = raw?.trim().toLowerCase();
+  return email && /^[^@\s]+@[^@\s]+$/.test(email) ? sha256(email) : null;
+}
+
+/**
+ * Meta's format: digits only, with the country code, before hashing. A national
+ * number is taken as Myanmar's, which is what the order form asks for by default.
+ * Null if it can't be a phone number.
+ */
+export function hashPhone(raw: string | null | undefined): string | null {
+  const trimmed = raw?.trim() ?? "";
+  let digits = trimmed.replace(/\D/g, "");
+  if (digits.startsWith("00")) digits = digits.slice(2);
+  else if (!trimmed.startsWith("+") && digits.startsWith("0")) digits = `95${digits.slice(1)}`;
+  return digits.length >= 8 && digits.length <= 15 ? sha256(digits) : null;
+}
+
 export interface PurchaseEvent {
+  hashedEmail: string | null;
+  hashedPhone: string | null;
   eventId: string;
   occurredAt: string;
   value: number;
@@ -66,6 +92,8 @@ export function buildMetaRequest(args: {
             client_user_agent: event.userAgent ?? undefined,
             fbp: event.fbp ?? undefined,
             fbc: event.fbc ?? undefined,
+            em: event.hashedEmail ? [event.hashedEmail] : undefined,
+            ph: event.hashedPhone ? [event.hashedPhone] : undefined,
           },
           custom_data: { value: event.value, currency: event.currency },
         },

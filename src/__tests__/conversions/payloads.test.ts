@@ -1,7 +1,18 @@
 import { describe, it, expect } from "vitest";
-import { buildMetaRequest, buildTiktokRequest, classifyResponse } from "@/lib/conversions/payloads";
+import { createHash } from "node:crypto";
+import {
+  buildMetaRequest,
+  buildTiktokRequest,
+  classifyResponse,
+  hashEmail,
+  hashPhone,
+} from "@/lib/conversions/payloads";
+
+const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
 const event = {
+  hashedEmail: "hashed-email",
+  hashedPhone: "hashed-phone",
   eventId: "hash123",
   occurredAt: "2026-11-02T00:00:00.000Z",
   value: 25,
@@ -48,18 +59,66 @@ describe("buildTiktokRequest", () => {
   });
 });
 
-// The owner ruled out buyer contact data. The builders take an explicit field
-// list, and this pins that nothing else can reach a payload.
+describe("hashEmail", () => {
+  it("hashes the trimmed, lowercased address, as Meta requires", () => {
+    expect(hashEmail("  Buyer@Example.COM ")).toBe(sha256("buyer@example.com"));
+  });
+  it.each(["", "   ", "not-an-email", null, undefined])("gives null for %j", (raw) => {
+    expect(hashEmail(raw)).toBeNull();
+  });
+});
+
+describe("hashPhone", () => {
+  it.each([
+    ["09123456789", "959123456789"],
+    ["+959123456789", "959123456789"],
+    ["+95 9 123-456-789", "959123456789"],
+    ["00959123456789", "959123456789"],
+    ["959123456789", "959123456789"],
+    ["+81 90 1234 5678", "819012345678"],
+    ["+66812345678", "66812345678"],
+  ])("hashes %s as %s", (raw, normal) => {
+    expect(hashPhone(raw)).toBe(sha256(normal));
+  });
+  it.each(["", "   ", "abc", "12345", "+1234567890123456", null, undefined])("gives null for %j", (raw) => {
+    expect(hashPhone(raw)).toBeNull();
+  });
+});
+
+// The owner ruled out names and order refs, and allows email and phone only as
+// hashes and only to Meta (2026-11-03). The builders take an explicit field list,
+// and this pins that nothing else can reach a payload.
 describe("privacy", () => {
-  it("never includes buyer data, even if it is passed in", () => {
-    const leaky = { ...event, email: "buyer@example.com", phone: "0912345678", name: "Buyer", enrollmentRef: "SF2-1102-ABC" };
-    const all = [
-      buildMetaRequest({ pixelId: "1", token: "T", testCode: null, event: leaky }).body,
-      buildTiktokRequest({ pixelCode: "P", token: "T", testCode: null, event: leaky }).body,
-    ].join();
-    for (const s of ["buyer@example.com", "0912345678", "Buyer", "SF2-1102-ABC", '"em"', '"ph"', '"email"', '"phone"']) {
+  const leaky = { ...event, email: "buyer@example.com", phone: "0912345678", name: "Buyer", enrollmentRef: "SF2-1102-ABC" };
+  const meta = () => buildMetaRequest({ pixelId: "1", token: "T", testCode: null, event: leaky }).body;
+  const tiktok = () => buildTiktokRequest({ pixelCode: "P", token: "T", testCode: null, event: leaky }).body;
+
+  it("never includes raw buyer data, even if it is passed in", () => {
+    const all = [meta(), tiktok()].join();
+    for (const s of ["buyer@example.com", "0912345678", "Buyer", "SF2-1102-ABC", '"email"', '"phone"', '"fn"', '"ln"']) {
       expect(all).not.toContain(s);
     }
+  });
+
+  it("gives Meta the hashes", () => {
+    expect(JSON.parse(meta()).data[0].user_data).toMatchObject({ em: ["hashed-email"], ph: ["hashed-phone"] });
+  });
+
+  it("leaves a missing hash out of Meta's request", () => {
+    const body = buildMetaRequest({
+      pixelId: "1",
+      token: "T",
+      testCode: null,
+      event: { ...event, hashedEmail: null, hashedPhone: null },
+    }).body;
+    const { user_data: userData } = JSON.parse(body).data[0];
+    expect(userData).not.toHaveProperty("em");
+    expect(userData).not.toHaveProperty("ph");
+  });
+
+  it("never gives TikTok the hashes", () => {
+    const sent = tiktok();
+    for (const s of ["hashed-email", "hashed-phone", '"em"', '"ph"']) expect(sent).not.toContain(s);
   });
 });
 
@@ -137,7 +196,17 @@ describe("classifyResponse Meta setup mistakes", () => {
 
 // Exact shapes, so any new key (an external_id, say) fails here.
 describe("exact payload shape", () => {
-  const nulls = { ...event, clientIp: null, userAgent: null, fbp: null, fbc: null, ttp: null, ttclid: null };
+  const nulls = {
+    ...event,
+    hashedEmail: null,
+    hashedPhone: null,
+    clientIp: null,
+    userAgent: null,
+    fbp: null,
+    fbc: null,
+    ttp: null,
+    ttclid: null,
+  };
 
   it("Meta, full", () => {
     expect(JSON.parse(buildMetaRequest({ pixelId: "1", token: "T", testCode: "TC", event }).body)).toEqual({
@@ -150,7 +219,14 @@ describe("exact payload shape", () => {
           event_id: "hash123",
           action_source: "website",
           event_source_url: event.sourceUrl,
-          user_data: { client_ip_address: "203.0.113.1", client_user_agent: "UA", fbp: "fb.1.1.1", fbc: "fb.1.1.abc" },
+          user_data: {
+            client_ip_address: "203.0.113.1",
+            client_user_agent: "UA",
+            fbp: "fb.1.1.1",
+            fbc: "fb.1.1.abc",
+            em: ["hashed-email"],
+            ph: ["hashed-phone"],
+          },
           custom_data: { value: 25, currency: "USD" },
         },
       ],

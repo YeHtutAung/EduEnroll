@@ -43,8 +43,8 @@ function optionalFieldsValid(fields: Record<string, unknown>): boolean {
 }
 
 // ─── POST /api/webhooks/cbmmqr ──────────────────────────────────────────────
-// Spec §5.3. CB authenticates the callback only with a static apiKey and signs
-// nothing, so the callback is a wake-up: it names a payment, and we then ask
+// Spec §5.3. CB signs nothing, and its apiKey may be null or empty (CB,
+// 2026-11-03), so the callback is a wake-up: it names a payment, and we then ask
 // CB ourselves (status check with the pinned merchant's credentials) and settle
 // on THAT answer through settleCbmmqrPayment(). No callback field moves money.
 //
@@ -80,7 +80,7 @@ export async function POST(request: NextRequest) {
   if (
     typeof referenceNo !== "string" || !REFERENCE_PATTERN.test(referenceNo) ||
     typeof qrReferenceNo !== "string" || !QR_REF_PATTERN.test(qrReferenceNo) ||
-    typeof fields.apiKey !== "string" || fields.apiKey.length === 0 || fields.apiKey.length > 150 ||
+    (fields.apiKey != null && (typeof fields.apiKey !== "string" || fields.apiKey.length > 150)) ||
     typeof description !== "string" || description.length > 250 ||
     !optionalFieldsValid(fields)
   ) {
@@ -122,8 +122,8 @@ export async function POST(request: NextRequest) {
     return err(500, "Configuration Error");
   }
 
-  // ── 4. The key: exactly ONE, the pinned merchant's ─────────
-  if (!apiKeyMatches(fields.apiKey, merchant.apiKey)) {
+  // ── 4. The key: exactly ONE, the pinned merchant's, when it has one ─
+  if (merchant.apiKey !== null && !apiKeyMatches(fields.apiKey, merchant.apiKey)) {
     console.warn(`[cbmmqr-webhook] invalid apiKey for ${referenceNo}`);
     return err(403, "Forbidden");
   }

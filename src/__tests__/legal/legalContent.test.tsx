@@ -62,6 +62,26 @@ describe("Privacy Policy", () => {
     expect(PRIVACY_POLICY.sections).toHaveLength(12);
   });
 
+  // Organisers' pages can run Meta's pixel and Google Tag Manager, and paid
+  // orders send Meta hashed contact details. The policy must not deny that.
+  it("does not claim there is no advertising tracking", () => {
+    const cookies = PRIVACY_POLICY.sections.find((s) => s.title.en.startsWith("7."))!;
+    expect(cookies.intro!.en).not.toMatch(/do not use advertising cookies/);
+    expect(cookies.intro!.en).toMatch(/Google Tag Manager/);
+    expect(cookies.intro!.en).toMatch(/Meta/);
+    expect(cookies.intro!.mm).toMatch(/Google Tag Manager/);
+    expect(cookies.intro!.mm).toMatch(MYANMAR);
+  });
+
+  it("tells buyers Meta can receive their email and phone in hashed form", () => {
+    const sharing = PRIVACY_POLICY.sections.find((s) => s.title.en.startsWith("4."))!;
+    const meta = sharing.items!.find((i) => /hashed/.test(i.en))!;
+    expect(meta.en).toMatch(/email/);
+    expect(meta.en).toMatch(/phone/);
+    expect(meta.en).toMatch(/Meta/);
+    expect(meta.mm).toMatch(MYANMAR);
+  });
+
   it("tells buyers the scanning provider gets the ticket reference and ID only", () => {
     const sharing = PRIVACY_POLICY.sections.find((s) => s.title.en.startsWith("4."))!;
     const scanning = sharing.items!.find((i) => i.en.includes("entry-scanning"))!;
