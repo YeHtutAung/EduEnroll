@@ -29,6 +29,16 @@ describe("parseCbTimestamp", () => {
     expect(parseCbTimestamp("20261031 10:14:14")).toBe(Date.parse("2026-10-31T10:14:14+06:30"));
   });
 
+  // CB's UAT, 2026-11-03: /auth/token uses the spec's format, /dynamicqr this one.
+  it("reads the format /dynamicqr really sends, in the same zone", () => {
+    expect(parseCbTimestamp("2026-11-03T18:27:50.872855694")).toBe(Date.parse("2026-11-03T18:27:50+06:30"));
+    expect(parseCbTimestamp("2026-11-03T18:27:50")).toBe(Date.parse("2026-11-03T18:27:50+06:30"));
+  });
+
+  it.each(["2026-11-03T18:27:50Z", "2026-11-03T18:27:50+06:30", "2026-13-03T18:27:50.1", "2026-11-03 18:27:50", "20261103T18:27:50"])(
+    "refuses the near miss %s", (v) => { expect(parseCbTimestamp(v)).toBeNull(); },
+  );
+
   it("uses CBMMQR_UTC_OFFSET when set", () => {
     process.env.CBMMQR_UTC_OFFSET = "+00:00";
     expect(parseCbTimestamp("20261031 10:14:14")).toBe(Date.parse("2026-10-31T10:14:14Z"));

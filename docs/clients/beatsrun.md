@@ -86,6 +86,9 @@
     (`PATCH /dynamicqr/{qrReferenceNo}/status`) before marking the payment
     verified. The response body carries `qrReferenceNo`, `returnCode` and
     `message`.
+  - QR lifetime: 20 minutes in UAT (2026-11-03), not the 3 of CB's sample, and
+    we cannot set it. A QR may not outlive its booking, so a 15-minute booking
+    window can never show a CB QR.
   - Token: `/auth/token` returns `expiredDateTime`. Reuse the token until then
     and fetch a new one on `0012` (Token Expired).
   - QR display: CB require the WebFrame sample layout (CB's reply of

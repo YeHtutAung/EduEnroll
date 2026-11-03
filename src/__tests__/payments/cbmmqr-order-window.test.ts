@@ -41,6 +41,29 @@ describe("postCheck", () => {
   it("too_late with no deadline but an unreadable expiry", () => expect(postCheck({ kind: "none" }, null)).toBe("too_late"));
 });
 
+// CB's UAT, 2026-11-03: a QR lives 20 minutes.
+describe("a 20-minute QR against a booking window", () => {
+  const enrolled = "2026-11-03T11:36:54Z";
+  const at = Date.parse(enrolled);
+  const qrExpiry = (now: number) => now + 20 * MIN;
+
+  it("the constant matches what CB issues", () => expect(CB_MAX_QR_MINUTES).toBe(20));
+
+  it("a 15-minute booking can never show one", () => {
+    const deadline = enrollmentDeadline(15, enrolled);
+    expect(preCheck(deadline, at)).toBe("too_close");
+    expect(postCheck(deadline, qrExpiry(at))).toBe("too_late");
+  });
+
+  it("a 30-minute booking can, for the first 8 minutes", () => {
+    const deadline = enrollmentDeadline(30, enrolled);
+    const early = at + 7 * MIN;
+    expect(preCheck(deadline, early)).toBe("ok");
+    expect(postCheck(deadline, qrExpiry(early))).toBe("ok");
+    expect(preCheck(deadline, at + 8 * MIN + 1000)).toBe("too_close");
+  });
+});
+
 describe("provisionalExpiry", () => {
   it("is now + max validity + margin", () =>
     expect(provisionalExpiry(now)).toBe(now + (CB_MAX_QR_MINUTES + CB_EXPIRY_MARGIN_MINUTES) * MIN));
