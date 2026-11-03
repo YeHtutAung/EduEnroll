@@ -6,6 +6,7 @@ import {
   classifyResponse,
   hashEmail,
   hashPhone,
+  hashCountryFromPhone,
 } from "@/lib/conversions/payloads";
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -13,6 +14,7 @@ const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 const event = {
   hashedEmail: "hashed-email",
   hashedPhone: "hashed-phone",
+  hashedCountry: "hashed-country",
   eventId: "hash123",
   occurredAt: "2026-11-02T00:00:00.000Z",
   value: 25,
@@ -68,6 +70,28 @@ describe("hashEmail", () => {
   });
 });
 
+describe("hashCountryFromPhone", () => {
+  it("uses Meta's documented hash format", () => {
+    // Meta's own example: "us" hashes to this value, so "mm" follows the same rule.
+    expect(sha256("us")).toBe("79adb2a2fce5c6ba215fe5f27f532d4e7edbac4b6a5e09e1ef3a08084a904621");
+  });
+
+  it.each(["09123456789", "+959123456789", "+95 9 123-456-789", "00959123456789", "959123456789"])(
+    "gives the hash of mm for the Myanmar number %s",
+    (raw) => {
+      expect(hashCountryFromPhone(raw)).toBe(sha256("mm"));
+    },
+  );
+
+  // A wrong country is worse than none, so anything else sends nothing.
+  it.each(["+81 90 1234 5678", "+66812345678", "+1 650 555 1212", "", "abc", "12345", null, undefined])(
+    "gives null for %j",
+    (raw) => {
+      expect(hashCountryFromPhone(raw)).toBeNull();
+    },
+  );
+});
+
 describe("hashPhone", () => {
   it.each([
     ["09123456789", "959123456789"],
@@ -101,7 +125,11 @@ describe("privacy", () => {
   });
 
   it("gives Meta the hashes", () => {
-    expect(JSON.parse(meta()).data[0].user_data).toMatchObject({ em: ["hashed-email"], ph: ["hashed-phone"] });
+    expect(JSON.parse(meta()).data[0].user_data).toMatchObject({
+      em: ["hashed-email"],
+      ph: ["hashed-phone"],
+      country: ["hashed-country"],
+    });
   });
 
   it("leaves a missing hash out of Meta's request", () => {
@@ -109,16 +137,19 @@ describe("privacy", () => {
       pixelId: "1",
       token: "T",
       testCode: null,
-      event: { ...event, hashedEmail: null, hashedPhone: null },
+      event: { ...event, hashedEmail: null, hashedPhone: null, hashedCountry: null },
     }).body;
     const { user_data: userData } = JSON.parse(body).data[0];
     expect(userData).not.toHaveProperty("em");
     expect(userData).not.toHaveProperty("ph");
+    expect(userData).not.toHaveProperty("country");
   });
 
   it("never gives TikTok the hashes", () => {
     const sent = tiktok();
-    for (const s of ["hashed-email", "hashed-phone", '"em"', '"ph"']) expect(sent).not.toContain(s);
+    for (const s of ["hashed-email", "hashed-phone", "hashed-country", '"em"', '"ph"', '"country"']) {
+      expect(sent).not.toContain(s);
+    }
   });
 });
 
@@ -200,6 +231,7 @@ describe("exact payload shape", () => {
     ...event,
     hashedEmail: null,
     hashedPhone: null,
+    hashedCountry: null,
     clientIp: null,
     userAgent: null,
     fbp: null,
@@ -226,6 +258,7 @@ describe("exact payload shape", () => {
             fbc: "fb.1.1.abc",
             em: ["hashed-email"],
             ph: ["hashed-phone"],
+            country: ["hashed-country"],
           },
           custom_data: { value: 25, currency: "USD" },
         },

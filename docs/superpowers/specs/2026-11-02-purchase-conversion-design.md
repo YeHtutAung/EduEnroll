@@ -27,7 +27,7 @@ never affect a payment, a ticket or a notification.
 
 | Question | Decision |
 |---|---|
-| Buyer data sent | Ad-click IDs and cookies, IP address, browser user agent, value and currency. **To Meta only, also the email and phone, SHA-256 hashed**, read from the order at send time and never stored. **No name or order ref**, and nothing hashed to TikTok. Owner's decision, 2026-11-03, replacing "browser data only" of 2026-11-02, because Sky Festival needs matched buyers to exclude them from ads and build lookalike audiences. |
+| Buyer data sent | Ad-click IDs and cookies, IP address, browser user agent, value and currency. **To Meta only, also the email and phone, SHA-256 hashed**, read from the order at send time and never stored, and **the hash of `mm` when the phone is Myanmar's** (the order holds no country, so other buyers send none). **No name or order ref**, and nothing hashed to TikTok. Owner's decisions, 2026-11-03 and 2026-11-04, replacing "browser data only" of 2026-11-02, because Sky Festival needs matched buyers to exclude them from ads and build lookalike audiences. |
 | Who gets an event | Any buyer with that platform's pixel cookie or click ID. This includes people who never clicked an ad, because pixels set `_fbp` and `_ttp` for every visitor. Owner's decision, 2026-11-02. A buyer with none of these sends nothing, and their IP is not stored. |
 | Platforms | Meta Conversions API and TikTok Events API. GA4 only if a tenant asks. |
 | Delivery | A queue table filled by a database trigger, a non-blocking send attempt, and a daily retry. |

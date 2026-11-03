@@ -487,9 +487,20 @@ describe("sendPendingConversions", () => {
     expect(JSON.parse(meta[1].body as string).data[0].user_data).toMatchObject({
       em: [emailHash],
       ph: [phoneHash],
+      country: [createHash("sha256").update("mm").digest("hex")],
     });
     expect(tiktok[1].body as string).not.toContain(emailHash);
     expect(tiktok[1].body as string).not.toContain(phoneHash);
+  });
+
+  it("sends no country for a buyer with a foreign phone number", async () => {
+    Object.assign(db.enrollments[0], { phone: "+81 90 1234 5678" });
+    await sendPendingConversions(ENROLLMENT);
+
+    const meta = mockFetch.mock.calls.find(([url]) => url.includes("facebook"))!;
+    const { user_data: userData } = JSON.parse(meta[1].body as string).data[0];
+    expect(userData).toHaveProperty("ph");
+    expect(userData).not.toHaveProperty("country");
   });
 
   it("still sends when the order has no usable email or phone", async () => {
@@ -508,7 +519,7 @@ describe("sendPendingConversions", () => {
 
     const lines = logSpy.mock.calls.map((args: unknown[]) => String(args[0]));
     expect(lines).toContain(
-      "[conversions] meta sent fields=client_ip_address,client_user_agent,fbp,fbc,em,ph test_code=no",
+      "[conversions] meta sent fields=client_ip_address,client_user_agent,fbp,fbc,em,ph,country test_code=no",
     );
     expect(lines).toContain("[conversions] tiktok sent fields=ttclid,ttp,ip,user_agent test_code=no");
   });

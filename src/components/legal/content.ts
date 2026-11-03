@@ -237,8 +237,8 @@ export const PRIVACY_POLICY: LegalDocumentData = {
           mm: "Messenger bot ကို အသုံးပြုပါက Facebook/Meta ထံ — Meta ၏ ကိုယ်ပိုင် ကိုယ်ရေးအချက်အလက်မူဝါဒဖြင့် ထိန်းချုပ်ပါသည်",
         },
         {
-          en: "With Meta when an event organiser uses purchase tracking: your email and phone number in hashed form, with your purchase value, browser details and IP address, so the organiser can measure its ads, avoid showing them to people who have already bought, and reach similar audiences. Your name and order reference are not included",
-          mm: "ပွဲစီစဉ်သူက ဝယ်ယူမှုခြေရာခံခြင်းကို အသုံးပြုပါက Meta ထံ — သင့်အီးမေးလ်နှင့် ဖုန်းနံပါတ်ကို hash ပြုလုပ်ထားသော ပုံစံဖြင့် ဝယ်ယူမှုတန်ဖိုး၊ browser အချက်အလက်နှင့် IP လိပ်စာတို့နှင့်အတူ ပေးပို့ပါသည်။ ၎င်းမှာ ပွဲစီစဉ်သူက ၎င်း၏ကြော်ငြာများကို တိုင်းတာနိုင်ရန်၊ ဝယ်ယူပြီးသူများထံ ကြော်ငြာမပြရန်နှင့် ဆင်တူသော ပရိသတ်များကို ရှာဖွေနိုင်ရန် ဖြစ်ပါသည်။ သင့်အမည်နှင့် မှာယူမှုအမှတ်ကို မပေးပို့ပါ",
+          en: "With Meta when an event organiser uses purchase tracking: your email and phone number in hashed form, your country in hashed form if you use a Myanmar phone number, with your purchase value, browser details and IP address, so the organiser can measure its ads, avoid showing them to people who have already bought, and reach similar audiences. Your name and order reference are not included",
+          mm: "ပွဲစီစဉ်သူက ဝယ်ယူမှုခြေရာခံခြင်းကို အသုံးပြုပါက Meta ထံ — သင့်အီးမေးလ်နှင့် ဖုန်းနံပါတ်ကို hash ပြုလုပ်ထားသော ပုံစံဖြင့်၊ မြန်မာဖုန်းနံပါတ် အသုံးပြုပါက သင့်နိုင်ငံကိုလည်း hash ပြုလုပ်ထားသော ပုံစံဖြင့် ဝယ်ယူမှုတန်ဖိုး၊ browser အချက်အလက်နှင့် IP လိပ်စာတို့နှင့်အတူ ပေးပို့ပါသည်။ ၎င်းမှာ ပွဲစီစဉ်သူက ၎င်း၏ကြော်ငြာများကို တိုင်းတာနိုင်ရန်၊ ဝယ်ယူပြီးသူများထံ ကြော်ငြာမပြရန်နှင့် ဆင်တူသော ပရိသတ်များကို ရှာဖွေနိုင်ရန် ဖြစ်ပါသည်။ သင့်အမည်နှင့် မှာယူမှုအမှတ်ကို မပေးပို့ပါ",
         },
         {
           en: "When required by law, court order, or governmental authority",

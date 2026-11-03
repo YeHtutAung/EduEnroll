@@ -6,6 +6,7 @@ import {
   describeRequest,
   hashEmail,
   hashPhone,
+  hashCountryFromPhone,
   type ConversionPlatform,
   type PlatformRequest,
   type SendOutcome,
@@ -210,6 +211,7 @@ async function run(enrollmentId: string, pastDeadline: () => boolean): Promise<v
         // Hashed here and never stored: a retry reads them from the order again.
         hashedEmail: hashEmail(enrollment?.email),
         hashedPhone: hashPhone(enrollment?.phone),
+        hashedCountry: hashCountryFromPhone(enrollment?.phone),
         eventId: row.event_id,
         occurredAt: row.occurred_at,
         value: Number(row.value),

@@ -79,6 +79,7 @@ describe("Privacy Policy", () => {
     expect(meta.en).toMatch(/email/);
     expect(meta.en).toMatch(/phone/);
     expect(meta.en).toMatch(/Meta/);
+    expect(meta.en).toMatch(/country/);
     expect(meta.mm).toMatch(MYANMAR);
   });
 
