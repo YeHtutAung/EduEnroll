@@ -75,6 +75,21 @@ describe("adContextFromRequest", () => {
   it("returns null when no click data is present", () => {
     expect(adContextFromRequest(cookies({}), headers)).toBeNull();
   });
+  it("reads the stored referrer's site, and re-checks the cookie", () => {
+    const stored = encodeURIComponent("https://l.facebook.com/");
+    expect(adContextFromRequest(cookies({ _fbp: "fb.1.1.1", kn_ad_referrer: stored }), headers)?.referrer_url).toBe(
+      "https://l.facebook.com/",
+    );
+    const tampered = encodeURIComponent("https://l.facebook.com/l.php?u=secret");
+    expect(adContextFromRequest(cookies({ _fbp: "fb.1.1.1", kn_ad_referrer: tampered }), headers)?.referrer_url).toBe(
+      "https://l.facebook.com/",
+    );
+    expect(adContextFromRequest(cookies({ _fbp: "fb.1.1.1", kn_ad_referrer: "%" }), headers)?.referrer_url).toBeNull();
+  });
+  it("does not create ad data from a referrer alone", () => {
+    const stored = encodeURIComponent("https://l.facebook.com/");
+    expect(adContextFromRequest(cookies({ kn_ad_referrer: stored }), headers)).toBeNull();
+  });
   it("reads the pixel cookies", () => {
     expect(adContextFromRequest(cookies({ _fbp: "fb.1.1.1", _ttp: "ttp1" }), headers)).toMatchObject({
       fbp: "fb.1.1.1", ttp: "ttp1", fbc: null, ttclid: null, client_ip: "203.0.113.1", user_agent: "UA",
@@ -171,6 +186,7 @@ describe("captureAdContext", () => {
       client_ip: "203.0.113.1",
       user_agent: "UA",
       source_url: expect.stringMatching(/\/enroll\/sky-2026$/),
+      referrer_url: null,
     });
   });
 

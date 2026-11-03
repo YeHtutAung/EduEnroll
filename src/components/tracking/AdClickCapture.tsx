@@ -3,7 +3,13 @@
 import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { GTM_CONTAINER_ID_RE, hasSensitiveParam, isTrackedPath } from "@/lib/tagManager";
-import { AD_CLICK_COOKIE, AD_CLICK_MAX_AGE_SECONDS, nextClickCookie } from "@/lib/conversions/clickData";
+import {
+  AD_CLICK_COOKIE,
+  AD_CLICK_MAX_AGE_SECONDS,
+  AD_REFERRER_COOKIE,
+  cleanReferrerOrigin,
+  nextClickCookie,
+} from "@/lib/conversions/clickData";
 
 // Stores the ad platforms' click IDs for the server-side purchase event.
 // Deliberately does not use the full GTM guard: that fails on any unknown storage
@@ -23,6 +29,25 @@ export function clickCookieToWrite(args: {
   return nextClickCookie(args.search, args.existing, args.now);
 }
 
+/**
+ * The outside site this visit came from, for Meta's referrer_url. Only known on
+ * arrival, because the order is placed from a later page. Never our own pages:
+ * their URLs can hold order details.
+ */
+export function referrerCookieToWrite(args: {
+  containerId: string | null;
+  pathname: string;
+  search: string;
+  referrer: string;
+  origin: string;
+}): string | null {
+  if (args.containerId === null || !GTM_CONTAINER_ID_RE.test(args.containerId)) return null;
+  if (!isTrackedPath(args.pathname)) return null;
+  if (hasSensitiveParam(new URLSearchParams(args.search))) return null;
+  const site = cleanReferrerOrigin(args.referrer);
+  return site && site !== `${args.origin}/` ? encodeURIComponent(site) : null;
+}
+
 function readCookie(name: string): string | null {
   const prefix = `${name}=`;
   const found = document.cookie.split("; ").find((c) => c.startsWith(prefix));
@@ -33,6 +58,17 @@ export default function AdClickCapture({ containerId }: { containerId: string | 
   const pathname = usePathname();
 
   useEffect(() => {
+    const site = referrerCookieToWrite({
+      containerId,
+      pathname: pathname ?? "",
+      search: window.location.search,
+      referrer: document.referrer,
+      origin: window.location.origin,
+    });
+    if (site) {
+      document.cookie = `${AD_REFERRER_COOKIE}=${site}; Path=/; Max-Age=${AD_CLICK_MAX_AGE_SECONDS}; SameSite=Lax; Secure`;
+    }
+
     const value = clickCookieToWrite({
       containerId,
       pathname: pathname ?? "",

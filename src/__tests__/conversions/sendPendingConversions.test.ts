@@ -195,6 +195,7 @@ beforeEach(() => {
         client_ip: CLIENT_IP,
         user_agent: "UA/1.0",
         source_url: "https://sky.example.com/enroll/x",
+        referrer_url: "https://l.facebook.com/",
       },
     ],
   };
@@ -512,6 +513,16 @@ describe("sendPendingConversions", () => {
     expect(userData).not.toHaveProperty("em");
     expect(userData).not.toHaveProperty("ph");
     expect(metaRow().status).toBe("sent");
+  });
+
+  it("sends Meta the stored referrer, and TikTok does not get it", async () => {
+    await sendPendingConversions(ENROLLMENT);
+
+    const meta = mockFetch.mock.calls.find(([url]) => url.includes("facebook"))!;
+    const tiktok = mockFetch.mock.calls.find(([url]) => url.includes("tiktok"))!;
+    expect(JSON.parse(meta[1].body as string).data[0].referrer_url).toBe("https://l.facebook.com/");
+    expect(tiktok[1].body as string).not.toContain("l.facebook.com");
+    expect(logged()).not.toContain("l.facebook.com");
   });
 
   it("logs which fields each send carried, by name only", async () => {

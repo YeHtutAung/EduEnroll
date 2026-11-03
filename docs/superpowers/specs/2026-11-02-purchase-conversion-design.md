@@ -314,6 +314,7 @@ nothing: test from a real browser.
 ## Privacy and logging
 
 - Nothing in this feature reads a name or the order ref into a payload. Email and phone reach only Meta's payload, and only hashed. Neither they nor their hashes are logged or stored, and GTM stays off the pages that collect them.
+- `referrer_url` goes to Meta only, as the scheme and host of the outside site the buyer arrived from: never a path or query, and never our own pages. It's kept in the `kn_ad_referrer` cookie, then with the rest of the ad context. Owner's decision, 2026-11-04.
 - IP and user agent are personal data. They are only stored when a pixel cookie or
   click ID exists, and are deleted as described above. The pixel on the event page
   already sends the same visitors' IP and user agent to the platforms from the browser.

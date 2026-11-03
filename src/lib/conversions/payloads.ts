@@ -59,6 +59,7 @@ export interface PurchaseEvent {
   fbc: string | null;
   ttp: string | null;
   ttclid: string | null;
+  referrerUrl: string | null;
 }
 
 export interface PlatformRequest {
@@ -102,6 +103,7 @@ export function buildMetaRequest(args: {
           event_id: event.eventId,
           action_source: "website",
           event_source_url: event.sourceUrl,
+          referrer_url: event.referrerUrl ?? undefined,
           user_data: {
             client_ip_address: event.clientIp ?? undefined,
             client_user_agent: event.userAgent ?? undefined,
