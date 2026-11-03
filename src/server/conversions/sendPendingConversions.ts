@@ -3,6 +3,7 @@ import {
   buildMetaRequest,
   buildTiktokRequest,
   classifyResponse,
+  describeRequest,
   hashEmail,
   hashPhone,
   type ConversionPlatform,
@@ -226,6 +227,7 @@ async function run(enrollmentId: string, pastDeadline: () => boolean): Promise<v
           ? buildMetaRequest({ pixelId: settings.meta_pixel_id!, token, testCode, event })
           : buildTiktokRequest({ pixelCode: settings.tiktok_pixel_code!, token, testCode, event });
       const outcome = await post(request, row.platform);
+      console.log(`[conversions] ${row.platform} ${outcome.status} ${describeRequest(request)}`);
       await finish(row.id, row.attempts + 1, outcome.status, outcome.code);
     }),
   );

@@ -503,6 +503,45 @@ describe("sendPendingConversions", () => {
     expect(metaRow().status).toBe("sent");
   });
 
+  it("logs which fields each send carried, by name only", async () => {
+    await sendPendingConversions(ENROLLMENT);
+
+    const lines = logSpy.mock.calls.map((args: unknown[]) => String(args[0]));
+    expect(lines).toContain(
+      "[conversions] meta sent fields=client_ip_address,client_user_agent,fbp,fbc,em,ph test_code=no",
+    );
+    expect(lines).toContain("[conversions] tiktok sent fields=ttclid,ttp,ip,user_agent test_code=no");
+  });
+
+  it("logs whether a test code went with the send, never the code", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    vi.stubEnv("CONVERSIONS_SKY_META_TEST_CODE", "TEST99999");
+    await sendPendingConversions(ENROLLMENT);
+
+    expect(logged()).toContain("[conversions] meta sent fields=");
+    expect(logged()).toContain("test_code=yes");
+    expect(logged()).not.toContain("TEST99999");
+  });
+
+  it("logs the fields when a send does not succeed too", async () => {
+    mockFetch.mockImplementation(async () => {
+      throw new Error("connect failed");
+    });
+    await sendPendingConversions(ENROLLMENT);
+
+    expect(logged()).toContain("[conversions] meta pending fields=client_ip_address");
+  });
+
+  it("logs none of the values behind those field names", async () => {
+    await sendPendingConversions(ENROLLMENT);
+
+    const emailHash = createHash("sha256").update("buyer@example.com").digest("hex");
+    const phoneHash = createHash("sha256").update("95900000000").digest("hex");
+    for (const value of [emailHash, phoneHash, "Buyer@Example.com", "+95900000000", CLIENT_IP, FBP, FBC, TTP, TTCLID, META_TOKEN]) {
+      expect(logged()).not.toContain(value);
+    }
+  });
+
   it("never logs the email, phone or their hashes", async () => {
     mockFetch.mockImplementation(async () => {
       throw new Error("connect failed");
