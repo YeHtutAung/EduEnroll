@@ -91,7 +91,10 @@ export function buildReferenceNo(): string {
 
 // ── Time ───────────────────────────────────────────────────────────────────
 
+// CB uses two formats and neither carries a zone. Its spec shows only the first,
+// which /auth/token sends; /dynamicqr sends the second (UAT, 2026-11-03).
 const CB_TIMESTAMP = /^(\d{4})(\d{2})(\d{2}) (\d{2}):(\d{2}):(\d{2})$/;
+const CB_TIMESTAMP_ISO = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?$/;
 const OFFSET_PATTERN = /^[+-](0\d|1[0-4]):[0-5]\d$/;
 
 /**
@@ -107,13 +110,15 @@ function utcOffset(): string {
 }
 
 /**
- * `20261031 10:14:14` → epoch ms, or null when it is not in that exact shape
- * or not a real date. Callers treat null as "do not display this QR".
+ * `20261031 10:14:14` or `2026-10-31T10:14:14.872855694` → epoch ms, or null
+ * when it is in neither exact shape or not a real date. Fractions of a second
+ * are dropped. Callers treat null as "do not display this QR".
  */
 export function parseCbTimestamp(value: unknown): number | null {
   const offset = utcOffset();
   if (typeof value !== "string") return null;
-  const m = CB_TIMESTAMP.exec(value.trim());
+  const text = value.trim();
+  const m = CB_TIMESTAMP.exec(text) ?? CB_TIMESTAMP_ISO.exec(text);
   if (!m) return null;
   const [, y, mo, d, h, mi, s] = m;
   const iso = `${y}-${mo}-${d}T${h}:${mi}:${s}${offset}`;

@@ -5,8 +5,8 @@
 // actually returned. A QR that fails the second check is never displayed, so
 // nobody can pay it.
 
-/** CB's maximum QR validity. 3 until CB answers question 2 (gate G2). */
-export const CB_MAX_QR_MINUTES = 3;
+/** How long CB's QR lives: 20 minutes in UAT, 2026-11-03, not the 3 of CB's sample. */
+export const CB_MAX_QR_MINUTES = 20;
 /** Clock-skew and round-trip allowance on every CB time comparison. */
 export const CB_EXPIRY_MARGIN_MINUTES = 2;
 

@@ -301,7 +301,7 @@ describe("CB's answer", () => {
   });
 
   it("post-check too late: stores CB's reference WITHOUT the QR and answers 409", async () => {
-    tenant = { ...tenant, auto_cancel_hours: 15 };
+    tenant = { ...tenant, auto_cancel_hours: 30 };
     mockCreate.mockResolvedValue({ kind: "created", qr: "000201QR", qrReferenceNo: "QR-1", expiresAtMs: Date.now() + 60 * MIN });
     const res = await POST(req());
     expect(res.status).toBe(409);
@@ -322,7 +322,7 @@ describe("CB's answer", () => {
     await POST(req());
     const unreadable = logged();
     spy.mockClear();
-    tenant = { ...tenant, auto_cancel_hours: 15 };
+    tenant = { ...tenant, auto_cancel_hours: 30 };
     mockCreate.mockResolvedValue({ kind: "created", qr: "000201QR", qrReferenceNo: "QR-1", expiresAtMs: Date.now() + 60 * MIN });
     await POST(req());
     const late = logged();

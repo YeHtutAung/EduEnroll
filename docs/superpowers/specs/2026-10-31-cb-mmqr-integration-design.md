@@ -47,7 +47,9 @@ Source: CB's PDF (not in the repo) and CB's email of 2026-10-29.
 | `POST /payment/refund` | — | out of scope |
 
 - Timestamps look like `20201117 10:14:14`, with no timezone. The spec's example expiry is
-  3 minutes after issue.
+  3 minutes after issue. **UAT, 2026-11-03, differs:** `/dynamicqr` sends
+  `2026-11-03T18:27:50.872855694` (still no zone; `/auth/token` keeps the documented format),
+  and the QR lives **20 minutes**. Issue time matched our clock at +06:30.
 - **Callback:** CB POSTs to the URL we register, exactly as given (confirmed 2026-10-29). Body:
   `apiKey` (see below), `referenceNo`, `transactionId`, `transCurrency`,
   `transAmount`, `transDateTime`, `transStatusCode`, `transStatusDescription`
