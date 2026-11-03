@@ -24,7 +24,25 @@ const event = {
   fbc: "fb.1.1.abc",
   ttp: "ttp1",
   ttclid: "tt1",
+  referrerUrl: null as string | null,
 };
+
+describe("referrer_url", () => {
+  const withReferrer = { ...event, referrerUrl: "https://l.facebook.com/" };
+
+  it("goes to Meta beside event_source_url, not in user_data", () => {
+    const data = JSON.parse(buildMetaRequest({ pixelId: "1", token: "T", testCode: null, event: withReferrer }).body).data[0];
+    expect(data.referrer_url).toBe("https://l.facebook.com/");
+    expect(data.user_data).not.toHaveProperty("referrer_url");
+  });
+  it("is left out when there is none", () => {
+    const data = JSON.parse(buildMetaRequest({ pixelId: "1", token: "T", testCode: null, event: { ...event, referrerUrl: null } }).body).data[0];
+    expect(data).not.toHaveProperty("referrer_url");
+  });
+  it("never goes to TikTok", () => {
+    expect(buildTiktokRequest({ pixelCode: "P", token: "T", testCode: null, event: withReferrer }).body).not.toContain("l.facebook.com");
+  });
+});
 
 describe("buildMetaRequest", () => {
   it("sends a Purchase with the agreed fields", () => {

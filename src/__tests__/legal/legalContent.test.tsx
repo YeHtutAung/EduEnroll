@@ -64,6 +64,12 @@ describe("Privacy Policy", () => {
 
   // Organisers' pages can run Meta's pixel and Google Tag Manager, and paid
   // orders send Meta hashed contact details. The policy must not deny that.
+  it("says the referring site can go to Meta with a purchase", () => {
+    const cookies = PRIVACY_POLICY.sections.find((s) => s.title.en.startsWith("7."))!;
+    expect(cookies.intro!.en).toMatch(/website that sent you/);
+    expect(cookies.intro!.mm).toMatch(/ရောက်ရှိလာသော/);
+  });
+
   it("does not claim there is no advertising tracking", () => {
     const cookies = PRIVACY_POLICY.sections.find((s) => s.title.en.startsWith("7."))!;
     expect(cookies.intro!.en).not.toMatch(/do not use advertising cookies/);
