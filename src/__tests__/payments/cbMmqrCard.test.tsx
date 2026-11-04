@@ -27,9 +27,10 @@ describe("CbMmqrCard", () => {
     expect(attr(svg, 'href="data:image/png', "x")).toBe("50");
   });
 
-  it("left-aligns receiver and amount at the 12.5% inset, amount with two decimals", () => {
+  it("centres receiver and amount, amount with two decimals", () => {
     const svg = render();
-    expect(svg).toMatch(/<text[^>]*x="62.5"[^>]*text-anchor="start"[^>]*>The Beats Run<\/text>/);
+    expect(svg).toMatch(/<text[^>]*x="250"[^>]*text-anchor="middle"[^>]*>The Beats Run<\/text>/);
+    expect(svg).toMatch(/<text[^>]*x="250"[^>]*text-anchor="middle"[^>]*>40,000\.00/);
     expect(svg).toContain("40,000.00");
     expect(svg).toContain("MMK");
   });
@@ -60,5 +61,33 @@ describe("CbMmqrCard", () => {
     const y = Number(attr(svg, "cb-bank-logo.png", "y"));
     const h = Number(attr(svg, "cb-bank-logo.png", "height"));
     expect(y + h).toBeLessThan(725 - 4);
+  });
+});
+
+// CB's icon sits at the centre of the QR, as KBZPay's mark does on MmqrCard.
+describe("CbMmqrCard centre logo", () => {
+  const LOGO = "/cbmmqr/cb-bank-icon.png";
+  const BOTTOM = "/cbmmqr/cb-bank-logo.png";
+  const draw = (extra: Partial<Parameters<typeof CbMmqrCard>[0]>) =>
+    renderToStaticMarkup(
+      <CbMmqrCard qrImageUrl="data:image/png;base64,QR" receiverName="The Beats Run" amount={1000} currency="MMK" {...extra} />,
+    );
+
+  it("draws the icon at the centre of the QR on a white plate, and keeps the logo below", () => {
+    const html = draw({ centreLogoUrl: LOGO });
+    expect(html).toContain('data-testid="cb-qr-centre-logo"');
+    expect(html).toContain(LOGO);
+    expect(html).toContain(BOTTOM);
+  });
+
+  it("has no centre logo unless asked for", () => {
+    const html = draw({});
+    expect(html).not.toContain('data-testid="cb-qr-centre-logo"');
+    expect(html).not.toContain(LOGO);
+  });
+
+  it("has no centre logo while the QR is still being drawn", () => {
+    const html = draw({ qrImageUrl: null, centreLogoUrl: LOGO });
+    expect(html).not.toContain('data-testid="cb-qr-centre-logo"');
   });
 });

@@ -119,7 +119,8 @@ export default function QRPaymentModal({
   const apiBase = paymentApiBase(provider);
   // The wallet mark that belongs at the centre of the QR, if any. Provider
   // specific on purpose: an ABank or MMPay tenant must not display KBZPay's.
-  const providerLogoUrl = provider === "kbzpay" ? "/kbzpay-logo.png" : null;
+  const providerLogoUrl =
+    provider === "kbzpay" ? "/kbzpay-logo.png" : provider === "cbmmqr" ? "/cbmmqr/cb-bank-icon.png" : null;
 
   const [state, setState] = useState<ModalState>("loading");
   const [qrData, setQrData] = useState<string | null>(null);
@@ -313,7 +314,8 @@ export default function QRPaymentModal({
         if (qrSource) {
           try {
             const dataUrl = await QRCode.toDataURL(qrSource, {
-              width: 280,
+              // CB's QR at level H has about 85 modules a side: 280 would blur it.
+              width: provider === "cbmmqr" ? 840 : 280,
               margin: 2,
               // A centre mark destroys modules; H recovers ~30% of them.
               errorCorrectionLevel: providerLogoUrl ? "H" : "M",
@@ -341,7 +343,7 @@ export default function QRPaymentModal({
     // This does not change when the effect re-runs: startPolling is already a
     // dependency and is itself a useCallback over [onSuccess, apiBase], so an
     // unstable onSuccess already re-triggered this effect through it.
-  }, [enrollmentRef, startPolling, apiBase, providerLogoUrl]);
+  }, [enrollmentRef, startPolling, apiBase, providerLogoUrl, provider]);
 
   function handleRetry() {
     // The old poller is NOT stopped here: startPolling stops it when the new QR
@@ -412,7 +414,8 @@ export default function QRPaymentModal({
         if (qrSource) {
           try {
             const dataUrl = await QRCode.toDataURL(qrSource, {
-              width: 280,
+              // CB's QR at level H has about 85 modules a side: 280 would blur it.
+              width: provider === "cbmmqr" ? 840 : 280,
               margin: 2,
               // A centre mark destroys modules; H recovers ~30% of them.
               errorCorrectionLevel: providerLogoUrl ? "H" : "M",
@@ -543,7 +546,7 @@ export default function QRPaymentModal({
                 }
                 return (
                   <>
-                    <CbMmqrCard qrImageUrl={qrImageUrl} receiverName={receiverName} amount={amount} currency={currency} />
+                    <CbMmqrCard qrImageUrl={qrImageUrl} centreLogoUrl={providerLogoUrl} receiverName={receiverName} amount={amount} currency={currency} />
                     {countdown.label && (
                       <p className="mt-2 text-xs text-gray-600">QR will expire in {countdown.label}</p>
                     )}
