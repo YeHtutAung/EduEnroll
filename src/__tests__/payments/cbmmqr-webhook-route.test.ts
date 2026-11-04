@@ -254,9 +254,9 @@ describe("POST /api/webhooks/cbmmqr", () => {
       expect(mockStatus).not.toHaveBeenCalled();
     });
 
-    it("still acknowledges FAIL without changing anything", async () => {
+    it("still acknowledges FAIL without settling when CB says it is not paid", async () => {
+      mockStatus.mockResolvedValue({ ...PAID, code: "0006" });
       expect((await post({ ...BODY, apiKey: "", transStatusDescription: "FAIL" })).status).toBe(200);
-      expect(mockStatus).not.toHaveBeenCalled();
       expect(mockSettle).not.toHaveBeenCalled();
     });
   });
@@ -298,11 +298,59 @@ describe("POST /api/webhooks/cbmmqr", () => {
     expect((await post()).status).toBe(500);
   });
 
-  it("FAIL is acknowledged and changes nothing", async () => {
-    const res = await post({ ...BODY, transStatusDescription: "FAIL" });
-    expect(res.status).toBe(200);
-    expect(mockStatus).not.toHaveBeenCalled();
-    expect(mockSettle).not.toHaveBeenCalled();
+  // CB's real callback on production, 2026-11-04, said "Transaction is succeeded."
+  // and our route, which only knew "SUCCESS", ignored a paid order.
+  describe("the description never decides whether we ask CB", () => {
+    it.each([
+      ["CB's real wording", "Transaction is succeeded."],
+      ["the spec's wording", "SUCCESS"],
+      ["wording we have never seen", "Done"],
+      ["an empty description", ""],
+      ["FAIL, when the QR is in fact paid", "FAIL"],
+    ])("settles on CB's answer for %s", async (_n, transStatusDescription) => {
+      const res = await post({ ...BODY, transStatusDescription });
+      expect(res.status).toBe(200);
+      expect(mockStatus).toHaveBeenCalledTimes(1);
+      expect(mockSettle).toHaveBeenCalledTimes(1);
+      expect(mockSettle.mock.calls[0][0].status).toBe(PAID);
+    });
+
+    const NOT_PAID = { kind: "answer", code: "0006", currency: null, amount: null };
+
+    it("does not settle on 'succeeded' wording when CB says it is not paid, and asks for a retry", async () => {
+      const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      mockStatus.mockResolvedValue(NOT_PAID);
+      const res = await post({ ...BODY, transStatusDescription: "Transaction is succeeded." });
+      expect(res.status).toBe(500);
+      expect(mockSettle).not.toHaveBeenCalled();
+      spy.mockRestore();
+    });
+
+    it.each([["FAIL"], ["Transaction is failed."]])(
+      "acknowledges %s without settling when CB says it is not paid",
+      async (transStatusDescription) => {
+        const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+        mockStatus.mockResolvedValue(NOT_PAID);
+        const res = await post({ ...BODY, transStatusDescription });
+        expect(res.status).toBe(200);
+        expect(mockSettle).not.toHaveBeenCalled();
+        spy.mockRestore();
+      },
+    );
+
+    it("asks for a retry on FAIL when CB can't be reached", async () => {
+      mockStatus.mockResolvedValue({ kind: "unreachable" });
+      expect((await post({ ...BODY, transStatusDescription: "FAIL" })).status).toBe(500);
+      expect(mockSettle).not.toHaveBeenCalled();
+    });
+
+    it("does not log the description, which anyone could send", async () => {
+      const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      mockStatus.mockResolvedValue(NOT_PAID);
+      await post({ ...BODY, transStatusDescription: "SECRET-TEXT" });
+      expect(spy.mock.calls.map((c) => c.join(" ")).join("\n")).not.toContain("SECRET");
+      spy.mockRestore();
+    });
   });
 
   it("500 when the status check is unreachable or does not show success", async () => {

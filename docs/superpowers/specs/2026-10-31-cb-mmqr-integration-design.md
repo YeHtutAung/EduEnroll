@@ -334,9 +334,9 @@ logged loudly and one is refunded by hand.
 4. If the row has a stored `provider_order_ref` and the callback's `qrReferenceNo` differs →
    403, logged as an error (references and the merchant id only), whatever the description
    says. CB is not called.
-5. Any `transStatusDescription` other than `SUCCESS` (trimmed, case-insensitive; `FAIL` in
-   CB's spec) → 200 acknowledged; change nothing (the QR may still be paid).
-6. `SUCCESS` → status check with the pinned merchant's credentials, for the **stored**
+5. `transStatusDescription` never decides whether we ask CB. CB's real text on production on
+   2026-11-04 was `Transaction is succeeded.`, not the `SUCCESS` in its spec.
+6. Status check with the pinned merchant's credentials, for the **stored**
    `provider_order_ref` when there is one, else (create response lost) the callback's
    `qrReferenceNo`, which the §5.5 bind then records once. CB's answer must carry that same
    `qrReferenceNo`; a different one is refused (logged, 200 acknowledged, no settlement)
@@ -345,9 +345,12 @@ logged loudly and one is refunded by hand.
    - settled or already settled → 200 `{ qrReferenceNo, returnCode: "0000", message }`;
    - §5.5 refuses on a mismatch → logged loudly, 200 acknowledged, no settlement (KBZPay
      parity);
-   - status check failure, a status answer that is not success, a configuration failure, or
-     a settlement that can only be retried → 500, so CB retries (CB's retry policy is
-     question 5).
+   - a status answer that is not success, when the description contains `fail` (any case) →
+     200 acknowledged, no settlement; this wording affects only whether CB retries;
+   - status check failure, any other status answer that is not success, a configuration
+     failure, or a settlement that can only be retried → 500, so CB retries (CB's retry policy
+     is question 5). CB sent three POSTs within 0.2 seconds after a 400, so retries may
+     be too quick to outlast `0008`.
 8. Nothing is derived from the request `Host`.
 
 ### 5.4 Status — `GET /api/public/payments/cbmmqr/status?ref=`
