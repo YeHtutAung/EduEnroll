@@ -17,29 +17,29 @@ const GATEWAY_BUDGET_MS = 6_000;
 const MAX_BODY_BYTES = 8 * 1024;
 const QR_REF_PATTERN = /^[\x21-\x7E]{1,25}$/;
 
-/**
- * CB's other callback fields (spec §3), bounded to CB's documented lengths.
- * Absent is allowed — a FAIL callback need not carry a transaction, and none
- * of these ever moves money — but present-and-malformed is a 400.
- */
-const OPTIONAL_STRINGS: Record<string, number> = {
-  transactionId: 35, transCurrency: 3, transDateTime: 17, transStatusCode: 4,
-  institutionId: 4, institutionName: 150, merchantId: 15, remark: 140, terminalId: 8,
-};
+// Only referenceNo, qrReferenceNo, transStatusDescription and apiKey are read.
+// CB's other fields are not checked: strict limits on them refused CB's real
+// callbacks on production, and none of them can move money.
 
-function optionalFieldsValid(fields: Record<string, unknown>): boolean {
-  for (const [name, max] of Object.entries(OPTIONAL_STRINGS)) {
-    const v = fields[name];
-    if (v === undefined || v === null) continue;
-    if (typeof v === "number" && (name === "transCurrency" || name === "transStatusCode")) continue;
-    if (typeof v !== "string" || v.length > max) return false;
+const LOGGED_NAME = /^[A-Za-z0-9_]{1,40}$/;
+const MAX_LOGGED_NAMES = 40;
+
+/**
+ * Why a callback was refused, so a format mismatch can be seen. Lengths, types
+ * and field names only: this route is public, and a value could be anything.
+ */
+function logRejected(reason: string, fields?: Record<string, unknown>, field?: string): void {
+  const parts = [`[cbmmqr-webhook] rejected: ${reason}`];
+  if (fields && field) {
+    const v = fields[field];
+    const length = typeof v === "string" ? ` length=${v.length}` : "";
+    parts.push(`field=${field} type=${v === null ? "null" : typeof v}${length}`);
   }
-  const amount = fields.transAmount;
-  if (amount !== undefined && amount !== null) {
-    const n = typeof amount === "string" ? Number(amount) : amount;
-    if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return false;
+  if (fields) {
+    const names = Object.keys(fields).filter((n) => LOGGED_NAME.test(n)).slice(0, MAX_LOGGED_NAMES);
+    parts.push(`fields=${names.join(",")}`);
   }
-  return true;
+  console.warn(parts.join(" "));
 }
 
 // ─── POST /api/webhooks/cbmmqr ──────────────────────────────────────────────
@@ -63,27 +63,37 @@ function gatewayBudget(): CallBudget | undefined {
 export async function POST(request: NextRequest) {
   // ── 1. Size and shape, before anything touches the database ─
   const text = await request.text();
-  if (Buffer.byteLength(text, "utf8") > MAX_BODY_BYTES) return err(400, "Bad Request");
+  if (Buffer.byteLength(text, "utf8") > MAX_BODY_BYTES) {
+    logRejected("body too large");
+    return err(400, "Bad Request");
+  }
 
   let fields: Record<string, unknown>;
   try {
     const parsed = JSON.parse(text);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return err(400, "Bad Request");
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      logRejected("body is not an object");
+      return err(400, "Bad Request");
+    }
     fields = parsed as Record<string, unknown>;
   } catch {
+    logRejected("body is not JSON");
     return err(400, "Bad Request");
   }
 
   const referenceNo = fields.referenceNo;
   const qrReferenceNo = fields.qrReferenceNo;
   const description = fields.transStatusDescription;
-  if (
-    typeof referenceNo !== "string" || !REFERENCE_PATTERN.test(referenceNo) ||
-    typeof qrReferenceNo !== "string" || !QR_REF_PATTERN.test(qrReferenceNo) ||
-    (fields.apiKey != null && (typeof fields.apiKey !== "string" || fields.apiKey.length > 150)) ||
-    typeof description !== "string" || description.length > 250 ||
-    !optionalFieldsValid(fields)
-  ) {
+  if (typeof referenceNo !== "string" || !REFERENCE_PATTERN.test(referenceNo)) {
+    logRejected("bad required field", fields, "referenceNo");
+    return err(400, "Bad Request");
+  }
+  if (typeof qrReferenceNo !== "string" || !QR_REF_PATTERN.test(qrReferenceNo)) {
+    logRejected("bad required field", fields, "qrReferenceNo");
+    return err(400, "Bad Request");
+  }
+  if (typeof description !== "string" || description.length > 250) {
+    logRejected("bad required field", fields, "transStatusDescription");
     return err(400, "Bad Request");
   }
 
