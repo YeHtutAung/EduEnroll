@@ -9,15 +9,25 @@ import { NextRequest } from "next/server";
 // signature tests stay green. Only queryOrder and settlement are stubbed.
 
 const APP_KEY = "testkey0123456789abcdef";
-process.env.KBZPAY_APP_KEY = APP_KEY;
-process.env.KBZPAY_APPID = "kptest0000000000000000000000000000";
-process.env.KBZPAY_MERCH_CODE = "70000000001";
+process.env.KBZPAY_BRAVE_APPID = "kptest0000000000000000000000000000";
+process.env.KBZPAY_BRAVE_MERCH_CODE = "70000000001";
+process.env.KBZPAY_BRAVE_APP_KEY = APP_KEY;
+process.env.KBZPAY_BRAVE_NOTIFY_ORIGIN = "https://brave.kuunyi.com";
+
+// A second, fully configured merchant: its key is valid, just not for Brave's orders.
+const SKYFEST_KEY = "skyfestkey0123456789abcd";
+process.env.KBZPAY_SKYFEST_APPID = "kpsky00000000000000000000000000000";
+process.env.KBZPAY_SKYFEST_MERCH_CODE = "70000000002";
+process.env.KBZPAY_SKYFEST_APP_KEY = SKYFEST_KEY;
+process.env.KBZPAY_SKYFEST_NOTIFY_ORIGIN = "https://skyfest.kuunyi.com";
 
 type Row = Record<string, unknown>;
 
 let payment: Row | null;
+let lookupError: { message: string } | null;
 let queryResult: Row;
 let settleResult: Row;
+let eqCalls: [string, unknown][];
 
 const mockFrom = vi.fn();
 vi.mock("@/lib/supabase/admin", () => ({
@@ -68,7 +78,7 @@ function signedRequest(over: Record<string, unknown> = {}, key = APP_KEY) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  payment = { id: "pay-1", enrollment_id: "enr-1", status: "awaiting_payment", amount: 40000 };
+  payment = { id: "pay-1", enrollment_id: "enr-1", status: "awaiting_payment", amount: 40000, kbzpay_merchant: "BRAVE" };
   queryResult = {
     ok: true,
     tradeStatus: "PAY_SUCCESS",
@@ -81,9 +91,16 @@ beforeEach(() => {
 
   mockQueryOrder.mockImplementation(async () => queryResult);
   mockSettle.mockImplementation(async () => settleResult);
+  eqCalls = [];
+  lookupError = null;
   mockFrom.mockImplementation(() => ({
     select: () => ({
-      eq: () => ({ maybeSingle: async () => ({ data: payment, error: null }) }),
+      eq: (c1: string, v1: unknown) => ({
+        eq: (c2: string, v2: unknown) => {
+          eqCalls.push([c1, v1], [c2, v2]);
+          return { maybeSingle: async () => ({ data: payment, error: lookupError }) };
+        },
+      }),
     }),
   }));
 });
@@ -153,7 +170,7 @@ describe("request budget is platform-aware", () => {
 
     await POST(signedRequest());
 
-    expect(mockQueryOrder.mock.calls[0][1]).toMatchObject({ deadlineMs: expect.any(Number) });
+    expect(mockQueryOrder.mock.calls[0][2]).toMatchObject({ deadlineMs: expect.any(Number) });
   });
 });
 
@@ -163,12 +180,12 @@ describe("server-side confirmation (§7)", () => {
   it("confirms via queryOrder before settling", async () => {
     await POST(signedRequest());
 
-    expect(mockQueryOrder.mock.calls[0][0]).toBe(REF);
+    expect(mockQueryOrder.mock.calls[0][1]).toBe(REF);
 
     // No budget off-platform. The budget exists only to respect a serverless
     // function cap; applying it locally aborted a legitimate ~9.5s cold
     // connection and broke UAT until that was measured.
-    expect(mockQueryOrder.mock.calls[0][1]).toBeUndefined();
+    expect(mockQueryOrder.mock.calls[0][2]).toBeUndefined();
     expect(mockQueryOrder.mock.invocationCallOrder[0]).toBeLessThan(
       mockSettle.mock.invocationCallOrder[0],
     );
@@ -250,5 +267,87 @@ describe("callback response contract", () => {
   it("returns 500 when settlement reports not_found", async () => {
     settleResult = { kind: "not_found" };
     expect((await POST(signedRequest())).status).toBe(500);
+  });
+});
+
+describe("per-merchant verification", () => {
+  it("rejects a callback validly signed with ANOTHER merchant's key", async () => {
+    const res = await POST(signedRequest({}, SKYFEST_KEY));
+    expect(res.status).toBe(403);
+    expect(mockQueryOrder).not.toHaveBeenCalled();
+    expect(mockSettle).not.toHaveBeenCalled();
+  });
+
+  it("rejects a correctly signed callback whose merch_code is not the pinned merchant's", async () => {
+    const res = await POST(signedRequest({ merch_code: "70000000002" }));
+    expect(res.status).toBe(403);
+    expect(mockQueryOrder).not.toHaveBeenCalled();
+    expect(mockSettle).not.toHaveBeenCalled();
+  });
+
+  // Every field is coherent for SKYFEST (key, merch_code, appid), but the row
+  // is pinned to BRAVE: a whole other merchant's identity must still be refused.
+  it("rejects a fully coherent callback from ANOTHER merchant against a BRAVE-pinned row", async () => {
+    const res = await POST(
+      signedRequest(
+        { merch_code: "70000000002", appid: "kpsky00000000000000000000000000000" },
+        SKYFEST_KEY,
+      ),
+    );
+    expect(res.status).toBe(403);
+    expect(mockQueryOrder).not.toHaveBeenCalled();
+    expect(mockSettle).not.toHaveBeenCalled();
+  });
+
+  it("verifies with the pinned merchant, not the tenant's current assignment", async () => {
+    payment = { ...payment!, kbzpay_merchant: "SKYFEST" };
+    const res = await POST(signedRequest({ merch_code: "70000000002" }, SKYFEST_KEY));
+    expect(res.status).toBe(200);
+    expect(mockQueryOrder.mock.calls[0][0]).toEqual(expect.objectContaining({ id: "SKYFEST" }));
+  });
+
+  it("looks up KBZPay rows only", async () => {
+    await POST(signedRequest());
+    expect(eqCalls).toContainEqual(["payment_method", "kbzpay_mmqr"]);
+    expect(eqCalls).toContainEqual(["payment_ref", REF]);
+  });
+
+  it("returns 404 for an unknown ref, so KBZPay retries a creation race", async () => {
+    payment = null;
+    expect((await POST(signedRequest())).status).toBe(404);
+  });
+
+  it("returns 500, not 403, when the pinned merchant is misconfigured", async () => {
+    payment = { ...payment!, kbzpay_merchant: "NOPE" };
+    const res = await POST(signedRequest());
+    expect(res.status).toBe(500);
+    expect(mockSettle).not.toHaveBeenCalled();
+  });
+});
+
+describe("callback ref and lookup failures", () => {
+  // The lookup runs before authentication, so an unauthenticated caller
+  // controls the ref: bound it before it reaches the DB or a log line.
+  it.each([
+    ["contains CR/LF", "KBZ_1a2b3c4d_9f3c\r\nforged log line"],
+    ["is 65 characters long", "K".repeat(65)],
+  ])("returns 400 without a DB call when the ref %s", async (_label, ref) => {
+    const res = await POST(signedRequest({ merch_order_id: ref }));
+
+    expect(res.status).toBe(400);
+    expect(mockFrom).not.toHaveBeenCalled();
+    expect(mockQueryOrder).not.toHaveBeenCalled();
+    expect(mockSettle).not.toHaveBeenCalled();
+  });
+
+  // A DB failure is not "no such payment": 404 would hide an outage as a race.
+  it("returns 500 so KBZPay retries when the payment lookup fails", async () => {
+    payment = null;
+    lookupError = { message: "boom" };
+    const res = await POST(signedRequest());
+
+    expect(res.status).toBe(500);
+    expect(mockQueryOrder).not.toHaveBeenCalled();
+    expect(mockSettle).not.toHaveBeenCalled();
   });
 });

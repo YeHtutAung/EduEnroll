@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { EvTrustedOfficialTemplate } from "@/components/enrollment/templates";
 import type { ClassStatus } from "@/types/database";
 import { applyPriorityUnlock, capturePriorityToken } from "@/lib/interest/priorityUnlock";
+import { pushDataLayer, viewItemPayload } from "@/lib/tagManager";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -131,6 +132,22 @@ export default function TicketsPage() {
       })
       .catch(() => setApiError({ error: "Failed to load event." }));
   }, [params.slug]);
+
+  // view_item once per slug (the ref stops StrictMode's double effect).
+  const viewItemSlugRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!data || viewItemSlugRef.current === params.slug) return;
+    viewItemSlugRef.current = params.slug;
+    pushDataLayer(
+      "view_item",
+      viewItemPayload({
+        slug: params.slug,
+        eventName: data.intake.name,
+        currency: data.labels.currency,
+        tiers: data.classes.map((c) => ({ id: c.id, name: c.level, price: c.fee_amount })),
+      }),
+    );
+  }, [data, params.slug]);
 
   if (apiError) {
     if (apiError.code === "INTAKE_DRAFT") return <ComingSoon intake={apiError.intake} opensAt={apiError.opens_at} />;

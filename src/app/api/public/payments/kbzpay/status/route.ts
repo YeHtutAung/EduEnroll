@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { queryOrder, type TradeStatus, type CallBudget } from "@/lib/kbzpay";
+import {
+  queryOrder,
+  getKbzMerchant,
+  type KbzMerchant,
+  type TradeStatus,
+  type CallBudget,
+} from "@/lib/kbzpay";
 import { settleMmqrPayment } from "@/server/payments/settleMmqrPayment";
+import { repairInterruptedFulfilment } from "@/server/payments/repairFulfilment";
 
 // Same 10s platform cap as the creation route. Declared rather than
 // inherited so the limit is visible next to the gateway call it bounds.
@@ -66,29 +73,56 @@ export async function GET(request: NextRequest) {
 
   const supabase = createAdminClient();
 
-  const { data: payment } = (await supabase
+  const { data: payment, error: lookupError } = (await supabase
     .from("payments")
-    .select("id, enrollment_id, mmqr_status, status")
+    .select("id, enrollment_id, mmqr_status, status, kbzpay_merchant")
     .eq("payment_ref", paymentRef)
+    // KBZPay rows only (spec §5.4): another provider's ref must never reach KBZPay.
+    .eq("payment_method", "kbzpay_mmqr")
     .maybeSingle()) as {
-    data: { id: string; enrollment_id: string; mmqr_status: string; status: string } | null;
-    error: unknown;
+    data: {
+      id: string;
+      enrollment_id: string;
+      mmqr_status: string;
+      status: string;
+      kbzpay_merchant: string | null;
+    } | null;
+    error: { message: string } | null;
   };
 
   // Unknown ref: keep the modal polling rather than showing an error. A row
   // created moments ago may not be visible to this read yet.
+  // A failed read answers the same way, but must not be silent: it is the one
+  // case that looks identical to "unknown ref" from the browser.
+  if (lookupError) {
+    console.error(`[kbzpay-status] payment lookup failed for ${paymentRef}: ${lookupError.message}`);
+  }
   if (!payment) return NextResponse.json({ mmqr_status: "PENDING" });
 
   // ── Already final locally — no provider call needed ────────
   if (payment.status === "verified" || payment.mmqr_status === "SUCCESS") {
+    // The request that wrote this may have been cut off before the ticket.
+    await repairInterruptedFulfilment(payment.enrollment_id);
     return NextResponse.json({ mmqr_status: "SUCCESS" });
   }
   if (payment.mmqr_status === "FAILED") {
     return NextResponse.json({ mmqr_status: "FAILED" });
   }
 
+  // ── Resolve the merchant pinned on this order ──────────────
+  // A config error is not a payment outcome. Keep polling, never terminal.
+  let merchant: KbzMerchant;
+  try {
+    merchant = getKbzMerchant(payment.kbzpay_merchant);
+  } catch (err) {
+    console.error(
+      `[kbzpay-status] merchant config error for ${paymentRef}: ${err instanceof Error ? err.message : err}`,
+    );
+    return NextResponse.json({ mmqr_status: "PENDING" });
+  }
+
   // ── Ask KBZPay ─────────────────────────────────────────────
-  const result = await queryOrder(paymentRef, budget);
+  const result = await queryOrder(merchant, paymentRef, budget);
   if (!result.ok) {
     // Unreachable is not failed. Keep polling.
     return NextResponse.json({ mmqr_status: "PENDING" });

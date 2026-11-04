@@ -20,6 +20,15 @@ vi.mock("@/server/payments/notifyEnrollmentConfirmed", () => ({
   notifyEnrollmentConfirmed: (...a: unknown[]) => mockNotifyWinner(...a),
 }));
 
+const mockWaitUntil = vi.fn();
+vi.mock("@vercel/functions", () => ({
+  waitUntil: (...a: unknown[]) => mockWaitUntil(...a),
+}));
+const mockSendPending = vi.fn();
+vi.mock("@/server/conversions/sendPendingConversions", () => ({
+  sendPendingConversions: (...a: unknown[]) => mockSendPending(...a),
+}));
+
 const { settlePaidPayment } = await import("@/server/payments/settlePaidPayment");
 const { handleStripePaymentFailure } = await import("@/server/payments/handleStripePaymentFailure");
 
@@ -86,6 +95,39 @@ beforeEach(() => {
   mockRpc.mockResolvedValue({ data: null, error: null });
   mockIssue.mockResolvedValue(undefined);
   mockNotifyWinner.mockResolvedValue(undefined);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// issueTickets is replaced above, and it is where the sender starts. So this
+// runs the real one, for a non-event tenant so it returns after two reads.
+describe("settlePaidPayment — purchase conversion sender", () => {
+  it("does not stop the buyer's confirmation when it never settles", async () => {
+    const actual = await vi.importActual<typeof import("@/server/tickets/issueTickets")>(
+      "@/server/tickets/issueTickets",
+    );
+    mockIssue.mockImplementationOnce(actual.issueTicketsForEnrollment);
+    const neverSettles = new Promise<void>(() => undefined);
+    mockSendPending.mockReturnValue(neverSettles);
+
+    queue("payments", { data: PAYMENT, error: null });
+    queue("payments", { data: [{ id: "pay-1" }], error: null });
+    queue("enrollments", { data: { id: "enr-1", status: "confirmed" }, error: null }); // settlement
+    queue("enrollments", {
+      data: { id: "enr-1", tenant_id: "ten-1", class_id: "c1", quantity: 1, status: "confirmed" },
+      error: null,
+    }); // issuance
+    queue("tenants", { data: { org_type: "language_school" }, error: null });
+
+    const out = await Promise.race([
+      settlePaidPayment(paidInput()),
+      new Promise<"still waiting">((resolve) => setTimeout(() => resolve("still waiting"), 200)),
+    ]);
+
+    expect(out).toEqual({ kind: "settled", paymentId: "pay-1", enrollmentId: "enr-1" });
+    expect(mockSendPending).toHaveBeenCalledExactlyOnceWith("enr-1");
+    expect(mockWaitUntil.mock.calls[0][0]).toBe(neverSettles);
+    expect(mockNotifyWinner).toHaveBeenCalledExactlyOnceWith("enr-1");
+  });
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

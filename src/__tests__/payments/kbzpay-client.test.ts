@@ -4,11 +4,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // Spec §3.1, §3.5. No real credentials are needed or used — gate G1 is about
 // live verification, not about being able to build and test this.
 
-const ENV = {
-  KBZPAY_APPID: "kptest0000000000000000000000000000",
-  KBZPAY_MERCH_CODE: "70000000001",
-  KBZPAY_APP_KEY: "testkey0123456789abcdef",
-  KBZPAY_MODE: "uat",
+const ENV = { KBZPAY_MODE: "uat" };
+
+const MERCHANT = {
+  id: "BRAVE",
+  appid: "kptest0000000000000000000000000000",
+  merchCode: "70000000001",
+  appKey: "testkey0123456789abcdef",
+  notifyOrigin: "https://brave.kuunyi.com",
 };
 
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -41,7 +44,7 @@ describe("precreate", () => {
       ok({ result: "SUCCESS", code: "0", qrCode: "0002010102...", prepay_id: "KBZ00abc" }),
     );
 
-    const res = await precreate({
+    const res = await precreate(MERCHANT, {
       merchOrderId: "KBZ_1a2b3c4d_9f3c7b21d0e4a856",
       amount: 40000,
       title: "Payment for ENR-1",
@@ -72,7 +75,7 @@ describe("precreate", () => {
     const { precreate } = await import("@/lib/kbzpay");
     fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0", qrCode: "q", prepay_id: "p" }));
 
-    await precreate({ merchOrderId: "KBZ_x_y", amount: 1, title: "t", notifyUrl: "https://x/y", timeoutMinutes: 120 });
+    await precreate(MERCHANT, { merchOrderId: "KBZ_x_y", amount: 1, title: "t", notifyUrl: "https://x/y", timeoutMinutes: 120 });
 
     expect(fetchMock.mock.calls[0][0]).toBe("https://api.kbzpay.com/payment/gateway/precreate");
   });
@@ -83,7 +86,7 @@ describe("precreate", () => {
       ok({ result: "FAIL", code: "ATHENTICATION_FAIL", msg: "merchant authentication fail." }),
     );
 
-    const res = await precreate({
+    const res = await precreate(MERCHANT, {
       merchOrderId: "KBZ_x_y",
       amount: 1,
       title: "t",
@@ -97,7 +100,7 @@ describe("precreate", () => {
     const { precreate } = await import("@/lib/kbzpay");
     fetchMock.mockResolvedValue({ ok: false, status: 502, text: async () => "bad gateway" });
 
-    const res = await precreate({
+    const res = await precreate(MERCHANT, {
       merchOrderId: "KBZ_x_y",
       amount: 1,
       title: "t",
@@ -111,7 +114,7 @@ describe("precreate", () => {
     const { precreate } = await import("@/lib/kbzpay");
     fetchMock.mockRejectedValue(new Error("ECONNRESET"));
 
-    const res = await precreate({
+    const res = await precreate(MERCHANT, {
       merchOrderId: "KBZ_x_y",
       amount: 1,
       title: "t",
@@ -135,7 +138,7 @@ describe("precreate", () => {
       },
     });
 
-    const res = await precreate({
+    const res = await precreate(MERCHANT, {
       merchOrderId: "KBZ_x_y",
       amount: 1,
       title: "t",
@@ -155,7 +158,7 @@ describe("precreate", () => {
       },
     });
 
-    const res = await precreate({
+    const res = await precreate(MERCHANT, {
       merchOrderId: "KBZ_x_y",
       amount: 1,
       title: "t",
@@ -181,7 +184,7 @@ describe("queryOrder", () => {
       }),
     );
 
-    const res = await queryOrder("KBZ_1a2b3c4d_9f3c7b21d0e4a856");
+    const res = await queryOrder(MERCHANT, "KBZ_1a2b3c4d_9f3c7b21d0e4a856");
 
     expect(fetchMock.mock.calls[0][0]).toBe(
       "http://api-uat.kbzpay.com/payment/gateway/uat/queryorder",
@@ -217,7 +220,7 @@ describe("queryOrder", () => {
     const { queryOrder } = await import("@/lib/kbzpay");
     fetchMock.mockResolvedValue(ok({ result: "FAIL", code, msg }));
 
-    expect(await queryOrder("KBZ_missing")).toMatchObject({
+    expect(await queryOrder(MERCHANT, "KBZ_missing")).toMatchObject({
       ok: true,
       tradeStatus: "ORDER_NOT_FOUND",
     });
@@ -232,7 +235,7 @@ describe("queryOrder", () => {
       const { queryOrder } = await import("@/lib/kbzpay");
       fetchMock.mockResolvedValue(ok({ result: "FAIL", code, msg: "x" }));
 
-      expect(await queryOrder("KBZ_x")).toEqual({ ok: false });
+      expect(await queryOrder(MERCHANT, "KBZ_x")).toEqual({ ok: false });
     },
   );
 
@@ -243,14 +246,14 @@ describe("queryOrder", () => {
       ok({ result: "SUCCESS", code: "0", trade_status: "WAIT_PAY" }),
     );
 
-    expect(await queryOrder("KBZ_x")).toMatchObject({ ok: true, tradeStatus: "WAIT_PAY" });
+    expect(await queryOrder(MERCHANT, "KBZ_x")).toMatchObject({ ok: true, tradeStatus: "WAIT_PAY" });
   });
 
   it("reports ok:false for a genuine failure, which is NOT an answer", async () => {
     const { queryOrder } = await import("@/lib/kbzpay");
     fetchMock.mockResolvedValue(ok({ result: "FAIL", code: "SYSTEM_ERROR", msg: "x" }));
 
-    expect(await queryOrder("KBZ_x")).toEqual({ ok: false });
+    expect(await queryOrder(MERCHANT, "KBZ_x")).toEqual({ ok: false });
   });
 
   // The docs' own success example prints " PAY_SUCCESS" with a leading space.
@@ -260,7 +263,7 @@ describe("queryOrder", () => {
       ok({ result: "SUCCESS", code: "0", trade_status: " PAY_SUCCESS" }),
     );
 
-    expect(await queryOrder("KBZ_x")).toMatchObject({ tradeStatus: "PAY_SUCCESS" });
+    expect(await queryOrder(MERCHANT, "KBZ_x")).toMatchObject({ tradeStatus: "PAY_SUCCESS" });
   });
 });
 
@@ -271,7 +274,7 @@ describe("closeOrder", () => {
     const { closeOrder } = await import("@/lib/kbzpay");
     for (const code of ["ORDER_ALREADY_CLOSED", "QUERYORDER_FAIL"]) {
       fetchMock.mockResolvedValue(ok({ result: "FAIL", code, msg: "x" }));
-      expect((await closeOrder("KBZ_x")).ok).toBe(true);
+      expect((await closeOrder(MERCHANT, "KBZ_x")).ok).toBe(true);
     }
   });
 
@@ -279,7 +282,7 @@ describe("closeOrder", () => {
     const { closeOrder } = await import("@/lib/kbzpay");
     for (const code of ["AOP03028", "SYSTEM_ERROR", "FLOW_CONTROL"]) {
       fetchMock.mockResolvedValue(ok({ result: "FAIL", code, msg: "x" }));
-      expect((await closeOrder("KBZ_x")).ok).toBe(false);
+      expect((await closeOrder(MERCHANT, "KBZ_x")).ok).toBe(false);
     }
   });
 
@@ -287,7 +290,7 @@ describe("closeOrder", () => {
     const { closeOrder } = await import("@/lib/kbzpay");
     fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0", msg: "success" }));
 
-    expect((await closeOrder("KBZ_x")).ok).toBe(true);
+    expect((await closeOrder(MERCHANT, "KBZ_x")).ok).toBe(true);
     expect(fetchMock.mock.calls[0][0]).toBe(
       "https://api-uat.kbzpay.com/payment/gateway/uat/closeorder",
     );
@@ -316,7 +319,7 @@ describe("endpoint scheme", () => {
     fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0", qrCode: "q", prepay_id: "p" }));
 
     if (fn === "precreate") {
-      await mod.precreate({
+      await mod.precreate(MERCHANT, {
         merchOrderId: "KBZ_x_y",
         amount: 1,
         title: "t",
@@ -324,7 +327,7 @@ describe("endpoint scheme", () => {
         timeoutMinutes: 120,
       });
     } else {
-      await mod[fn]("KBZ_x");
+      await mod[fn](MERCHANT, "KBZ_x");
     }
 
     return fetchMock.mock.calls[0][0] as string;
@@ -436,7 +439,7 @@ describe("request budget", () => {
     const { queryOrder } = await import("@/lib/kbzpay");
     fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0", trade_status: "WAIT_PAY" }));
 
-    const res = await queryOrder("KBZ_x", { deadlineMs: Date.now() - 1 });
+    const res = await queryOrder(MERCHANT, "KBZ_x", { deadlineMs: Date.now() - 1 });
 
     // No request at all, and a handled failure rather than an exception.
     expect(fetchMock).not.toHaveBeenCalled();
@@ -448,7 +451,7 @@ describe("request budget", () => {
     fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0", trade_status: "WAIT_PAY" }));
 
     // Under the one-second floor: not worth starting.
-    await queryOrder("KBZ_x", { deadlineMs: Date.now() + 200 });
+    await queryOrder(MERCHANT, "KBZ_x", { deadlineMs: Date.now() + 200 });
 
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -457,7 +460,7 @@ describe("request budget", () => {
     const { queryOrder } = await import("@/lib/kbzpay");
     fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0", trade_status: "WAIT_PAY" }));
 
-    const res = await queryOrder("KBZ_x", { deadlineMs: Date.now() + 8_000 });
+    const res = await queryOrder(MERCHANT, "KBZ_x", { deadlineMs: Date.now() + 8_000 });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(res).toMatchObject({ ok: true, tradeStatus: "WAIT_PAY" });
@@ -467,7 +470,7 @@ describe("request budget", () => {
     const { queryOrder } = await import("@/lib/kbzpay");
     fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0", trade_status: "WAIT_PAY" }));
 
-    await queryOrder("KBZ_x", { deadlineMs: Date.now() + 8_000 });
+    await queryOrder(MERCHANT, "KBZ_x", { deadlineMs: Date.now() + 8_000 });
 
     for (const signal of signalTimeouts()) expect(signal).toBeInstanceOf(AbortSignal);
   });
@@ -478,7 +481,7 @@ describe("request budget", () => {
     const { queryOrder } = await import("@/lib/kbzpay");
     fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0", trade_status: "WAIT_PAY" }));
 
-    expect(await queryOrder("KBZ_x")).toMatchObject({ ok: true });
+    expect(await queryOrder(MERCHANT, "KBZ_x")).toMatchObject({ ok: true });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
@@ -490,10 +493,10 @@ describe("request budget", () => {
     fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0", trade_status: "WAIT_PAY" }));
 
     const budget = { deadlineMs: Date.now() + 8_000 };
-    await queryOrder("KBZ_x", budget);
-    await closeOrder("KBZ_x", budget);
-    await queryOrder("KBZ_x", budget);
-    await precreate(
+    await queryOrder(MERCHANT, "KBZ_x", budget);
+    await closeOrder(MERCHANT, "KBZ_x", budget);
+    await queryOrder(MERCHANT, "KBZ_x", budget);
+    await precreate(MERCHANT,
       { merchOrderId: "KBZ_x_y", amount: 1, title: "t", notifyUrl: "https://x/y", timeoutMinutes: 120 },
       budget,
     );
@@ -507,9 +510,9 @@ describe("credential hygiene", () => {
     const { precreate } = await import("@/lib/kbzpay");
     fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0", qrCode: "q", prepay_id: "p" }));
 
-    await precreate({ merchOrderId: "KBZ_x_y", amount: 1, title: "t", notifyUrl: "https://x/y", timeoutMinutes: 120 });
+    await precreate(MERCHANT, { merchOrderId: "KBZ_x_y", amount: 1, title: "t", notifyUrl: "https://x/y", timeoutMinutes: 120 });
 
-    expect(fetchMock.mock.calls[0][1].body).not.toContain(ENV.KBZPAY_APP_KEY);
+    expect(fetchMock.mock.calls[0][1].body).not.toContain(MERCHANT.appKey);
   });
 });
 
@@ -522,7 +525,7 @@ describe("timeout_express guard", () => {
   const call = async (timeoutMinutes: unknown) => {
     const { precreate } = await import("@/lib/kbzpay");
     fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0", qrCode: "q", prepay_id: "p" }));
-    await precreate({
+    await precreate(MERCHANT, {
       merchOrderId: "KBZ_x_y",
       amount: 1,
       title: "t",
@@ -563,5 +566,34 @@ describe("timeout_express guard", () => {
       expect(m).toBeGreaterThanOrEqual(1);
       expect(m).toBeLessThanOrEqual(120);
     }
+  });
+});
+
+describe("per-merchant credentials", () => {
+  it("sends the merchant's appid and merch_code and signs with its key", async () => {
+    const { queryOrder, sign } = await import("@/lib/kbzpay");
+    fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0", trade_status: "WAIT_PAY" }));
+
+    await queryOrder(MERCHANT, "KBZ_x_y");
+
+    const body = requestBody();
+    expect(body.biz_content.appid).toBe(MERCHANT.appid);
+    expect(body.biz_content.merch_code).toBe(MERCHANT.merchCode);
+    const { sign: sent, ...unsigned } = body;
+    expect(sent).toBe(sign(unsigned, MERCHANT.appKey));
+  });
+
+  it("signs with the key of the merchant it was given, not another's", async () => {
+    // Compared on ONE captured payload: two separate calls would differ anyway
+    // through nonce_str and timestamp, which would make this pass trivially.
+    const { closeOrder, sign } = await import("@/lib/kbzpay");
+    fetchMock.mockResolvedValue(ok({ result: "SUCCESS", code: "0" }));
+    const other = { ...MERCHANT, id: "SKYFEST", appKey: "otherkey0123456789abcdef" };
+
+    await closeOrder(other, "KBZ_x_y");
+
+    const { sign: sent, ...unsigned } = requestBody();
+    expect(sent).toBe(sign(unsigned, other.appKey));
+    expect(sent).not.toBe(sign(unsigned, MERCHANT.appKey));
   });
 });

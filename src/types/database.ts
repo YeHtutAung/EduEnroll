@@ -128,8 +128,9 @@ export interface Tenant {
   auto_cancel_hours: number; // default 72, 0 = disabled
   email_on_enroll: boolean; // default false — send confirmation email on enrollment
   payment_mode: "bank_transfer" | "mmqr" | "stripe";
-  mmqr_provider: "abank" | "mmpay";
+  mmqr_provider: "abank" | "mmpay" | "kbzpay" | "cbmmqr";
   telegram_auto_send_invite: boolean;
+  gtm_container_id: string | null; // platform-set only (trigger-guarded)
   created_at: string;
 }
 
@@ -322,6 +323,18 @@ export interface Payment {
    * top-ups, and every row predating the column.
    */
   platform_fee: number;
+  /**
+   * KBZPay merchant id (KBZPAY_<ID>_*) that created this order. Set once at
+   * insert and immutable; null for every other payment method.
+   */
+  kbzpay_merchant: string | null;
+  /**
+   * CB Bank merchant id (CBMMQR_<ID>_*) that created this QR. Set once at
+   * insert and immutable; null for every other payment method.
+   */
+  cbmmqr_merchant: string | null;
+  /** The provider's own order reference (CB: the QR's reference); null otherwise. */
+  provider_order_ref: string | null;
   proof_image_url: string | null;
   proof_image_urls: string[];
   bank_reference: string | null;
@@ -437,6 +450,18 @@ export interface BankAccount {
   created_at: string;
 }
 
+export interface MarketingPageVersion {
+  id: string;
+  status: "draft" | "published" | "archived";
+  content: unknown;
+  revision: number;
+  created_by: string | null;
+  published_by: string | null;
+  created_at: string;
+  updated_at: string;
+  published_at: string | null;
+}
+
 // ─── Supabase Database shape ──────────────────────────────────────────────────
 
 export interface Database {
@@ -485,9 +510,22 @@ export interface Database {
         Insert: Omit<EnrollmentItem, "id" | "created_at">;
         Update: Partial<Omit<EnrollmentItem, "id" | "created_at">>;
       };
+      marketing_page_versions: {
+        Row: MarketingPageVersion;
+        Insert: Partial<MarketingPageVersion> & { status: MarketingPageVersion["status"]; content: unknown };
+        Update: Partial<MarketingPageVersion>;
+      };
     };
     Views: Record<string, never>;
     Functions: {
+      create_marketing_draft: {
+        Args: { p_base_published_id: string | null; p_content: unknown; p_user_id: string };
+        Returns: string;
+      };
+      publish_marketing_draft: {
+        Args: { p_expected_revision: number; p_user_id: string };
+        Returns: string;
+      };
       get_my_tenant_id: {
         Args: Record<string, never>;
         Returns: string;

@@ -50,6 +50,14 @@ describe("TermsConsent", () => {
     expect(html).toContain("&lt;script&gt;");
   });
 
+  // Owner's decision, 2026-11-04: the Meta disclosure lives in the Terms of Sale,
+  // which this box agrees to, not as a separate line on the form.
+  it("shows no separate advertising notice on the form", () => {
+    const html = render();
+    expect(html).not.toContain("hashed form");
+    expect(html).not.toContain("Meta");
+  });
+
   it("reflects the checked state", () => {
     expect(render({ checked: true })).toMatch(/<input[^>]+checked=""/);
     expect(render({ checked: false })).not.toMatch(/<input[^>]+checked=""/);

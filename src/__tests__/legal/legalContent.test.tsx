@@ -55,11 +55,59 @@ describe("Terms of Sale", () => {
   it("shows the same version that orders record", () => {
     expect(TERMS_OF_SALE.subtitle.en).toContain(TERMS_VERSION);
   });
+
+  // Buyers agree to this wording, so it needs a version newer than the one they
+  // accepted before it was added.
+  it("discloses sharing with Meta, in a version newer than before it was added", () => {
+    const section = TERMS_OF_SALE.sections.find((s) => /Advertising/.test(s.title.en))!;
+    const text = section.items!.map((i) => i.en).join(" ");
+    expect(text).toMatch(/email/);
+    expect(text).toMatch(/phone/);
+    expect(text).toMatch(/hashed/);
+    expect(text).toMatch(/Meta/);
+    expect(section.items!.every((i) => MYANMAR.test(i.mm))).toBe(true);
+    expect(TERMS_VERSION > "2026-09-28").toBe(true);
+  });
 });
 
 describe("Privacy Policy", () => {
   it("keeps all twelve sections of the English policy", () => {
     expect(PRIVACY_POLICY.sections).toHaveLength(12);
+  });
+
+  // Organisers' pages can run Meta's pixel and Google Tag Manager, and paid
+  // orders send Meta hashed contact details. The policy must not deny that.
+  it("says the referring site can go to Meta with a purchase", () => {
+    const cookies = PRIVACY_POLICY.sections.find((s) => s.title.en.startsWith("7."))!;
+    expect(cookies.intro!.en).toMatch(/website that sent you/);
+    expect(cookies.intro!.mm).toMatch(/ရောက်ရှိလာသော/);
+  });
+
+  it("tells buyers what Google Analytics gets with a purchase", () => {
+    const sharing = PRIVACY_POLICY.sections.find((s) => s.title.en.startsWith("4."))!;
+    const google = sharing.items!.find((i) => /Google Analytics/.test(i.en))!;
+    expect(google.en).toMatch(/purchase value/);
+    expect(google.en).toMatch(/not included/);
+    expect(google.mm).toMatch(MYANMAR);
+  });
+
+  it("does not claim there is no advertising tracking", () => {
+    const cookies = PRIVACY_POLICY.sections.find((s) => s.title.en.startsWith("7."))!;
+    expect(cookies.intro!.en).not.toMatch(/do not use advertising cookies/);
+    expect(cookies.intro!.en).toMatch(/Google Tag Manager/);
+    expect(cookies.intro!.en).toMatch(/Meta/);
+    expect(cookies.intro!.mm).toMatch(/Google Tag Manager/);
+    expect(cookies.intro!.mm).toMatch(MYANMAR);
+  });
+
+  it("tells buyers Meta can receive their email and phone in hashed form", () => {
+    const sharing = PRIVACY_POLICY.sections.find((s) => s.title.en.startsWith("4."))!;
+    const meta = sharing.items!.find((i) => /hashed/.test(i.en))!;
+    expect(meta.en).toMatch(/email/);
+    expect(meta.en).toMatch(/phone/);
+    expect(meta.en).toMatch(/Meta/);
+    expect(meta.en).toMatch(/country/);
+    expect(meta.mm).toMatch(MYANMAR);
   });
 
   it("tells buyers the scanning provider gets the ticket reference and ID only", () => {
@@ -106,11 +154,12 @@ describe("Terms of Sale wording (owner review, 2026-09-21)", () => {
   // Trimmed to three sections at the owner's request (2026-09-28): the
   // refunds, lost-tickets, event-changes, your-information, your-order and
   // contact sections were dropped.
-  it("has exactly the three sections the owner kept", () => {
+  it("has the three sections the owner kept, plus advertising (2026-11-04)", () => {
     expect(TERMS_OF_SALE.sections.map((s) => s.title.en)).toEqual([
       "1. Verification",
       "2. Tickets and entry",
       "3. Resale and transfer",
+      "4. Advertising",
     ]);
   });
 

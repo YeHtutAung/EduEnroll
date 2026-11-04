@@ -5,6 +5,7 @@ import { formatCurrency } from "@/lib/utils";
 import { statusTicketAmounts } from "@/lib/payments/statusTicketAmounts";
 import type { Enrollment, Class, Intake, Payment } from "@/types/database";
 import type { EnrollmentStatus, PaymentStatus } from "@/types/database";
+import { loadPartialPayment } from "@/server/payments/partialPayment";
 
 // ─── Bilingual status labels ──────────────────────────────────────────────────
 
@@ -163,6 +164,16 @@ export async function GET(request: NextRequest) {
   // ── Build response ────────────────────────────────────────────────
   const enrollmentLabel = ENROLLMENT_STATUS_LABELS[enrollment.status];
 
+  // Display only, so an unreadable history falls back to the latest row. That row
+  // is often a top-up holding only the remainder, or one with nothing recorded.
+  // A confirmed order reads it too: its latest row can be a settled top-up, which
+  // is a remainder and says nothing about the order total or its fee.
+  const partial = enrollment.status === "partial_payment" || enrollment.status === "confirmed"
+    ? await loadPartialPayment(supabase, enrollment.id)
+    : null;
+  const recordedPartial = partial && partial.orderTotal !== null ? partial : null;
+  const owingPartial = enrollment.status === "partial_payment" ? recordedPartial : null;
+
   const paymentBlock = payment
     ? {
         id:                  payment.id,
@@ -171,13 +182,15 @@ export async function GET(request: NextRequest) {
         status_label_mm:     PAYMENT_STATUS_LABELS[payment.status].mm,
         submitted_at:        payment.created_at,
         admin_note:          payment.admin_note ?? null,
-        received_amount: payment.received_amount ?? null,
-        total_amount:    payment.amount,
+        received_amount: owingPartial?.received ?? payment.received_amount ?? null,
+        total_amount:    recordedPartial?.orderTotal ?? payment.amount,
         // The fee inside total_amount, as recorded when the row was created.
-        platform_fee:    payment.platform_fee ?? 0,
-        remaining_amount: payment.received_amount != null
-          ? payment.amount - payment.received_amount
-          : null,
+        platform_fee:    recordedPartial?.orderFee ?? payment.platform_fee ?? 0,
+        remaining_amount: owingPartial
+          ? owingPartial.remaining
+          : payment.received_amount != null
+            ? payment.amount - payment.received_amount
+            : null,
       }
     : null;
 
@@ -207,12 +220,18 @@ export async function GET(request: NextRequest) {
     console.error("[status] tenant lookup failed for", tenantId, tenantError ?? "no row");
   }
 
-  // Telegram config lives in tenant_telegram_configs (moved in migration 068)
-  const { data: tgConfig } = await supabase
-    .from("tenant_telegram_configs")
+  // Bots live in tenant_bots (moved in migration 071). Buyers link to the
+  // enrollment bot, and a tenant without one is normal, hence maybeSingle.
+  const { data: enrollmentBot, error: botError } = await supabase
+    .from("tenant_bots")
     .select("bot_username, enabled")
     .eq("tenant_id", tenantId)
-    .single() as { data: { bot_username: string | null; enabled: boolean } | null; error: unknown };
+    .eq("bot_type", "enrollment")
+    .maybeSingle() as { data: { bot_username: string | null; enabled: boolean } | null; error: unknown };
+
+  if (botError) {
+    console.error("[status] enrollment bot lookup failed for", tenantId, botError);
+  }
 
   return NextResponse.json({
     enrollment_ref:   enrollment.enrollment_ref,
@@ -243,7 +262,7 @@ export async function GET(request: NextRequest) {
     org_type:         tenantInfo?.org_type ?? null,
     enrolled_at:      enrollment.enrolled_at,
     auto_cancel_minutes: tenantInfo?.auto_cancel_hours ?? 4320,
-    telegram_bot_username: tgConfig?.enabled ? (tgConfig.bot_username ?? null) : null,
+    telegram_bot_username: enrollmentBot?.enabled ? (enrollmentBot.bot_username ?? null) : null,
     payment_mode: tenantInfo?.payment_mode ?? "bank_transfer",
     // Fee settings, so the payment and confirmation screens can show the split
     // rather than a single figure the buyer cannot account for.

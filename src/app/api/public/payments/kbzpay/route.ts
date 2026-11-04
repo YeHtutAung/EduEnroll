@@ -1,11 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
-import { platformOrigin } from "@/lib/origin";
-import { precreate, buildMerchOrderId, type CallBudget } from "@/lib/kbzpay";
+import {
+  precreate,
+  buildMerchOrderId,
+  getKbzMerchant,
+  type CallBudget,
+  type KbzMerchant,
+} from "@/lib/kbzpay";
 import { resolveKbzpayOrder } from "@/server/payments/resolveKbzpayOrder";
 import { orderWindow } from "@/server/payments/kbzpayOrderWindow";
 import { attachPackSizes, computeOrderTotal } from "@/server/payments/platformFee";
+import {
+  loadPartialPayment,
+  noBalanceRemaining,
+  partialHistoryUnavailable,
+} from "@/server/payments/partialPayment";
 
 // The Vercel plan caps a function at 10s and it cannot be raised, so declare
 // it rather than inherit it silently. This route can make FOUR sequential
@@ -35,55 +45,6 @@ const GATEWAY_BUDGET_MS = 8_000;
 // No settleMmqrPayment result object ever reaches the browser — the route
 // translates, always.
 
-/**
- * Origin KBZPay will POST its payment notification to.
- *
- * `KBZPAY_NOTIFY_ORIGIN` exists because the callback host has to be registered
- * with KBZPay per environment, and the host they register must match what we
- * send with each order. It is an operator-set, fixed value per deployment —
- * NOT derived from the request or from whichever tenant is checking out.
- *
- * That distinction is the point (spec §7). A tenant-derived host could be a
- * custom domain the tenant controls and might remove, which would strand
- * in-flight payments and would mean registering every new tenant domain with
- * KBZPay. `platformOrigin()` remains the fallback, so an unset variable is
- * safe rather than broken.
- */
-function notifyOrigin(): string {
-  const configured = process.env.KBZPAY_NOTIFY_ORIGIN;
-  if (!configured) return platformOrigin();
-
-  let parsed: URL;
-  try {
-    parsed = new URL(configured);
-  } catch {
-    // A malformed value must not silently become a relative or empty URL —
-    // fall back to the known-good platform origin and say so.
-    console.error("[kbzpay] KBZPAY_NOTIFY_ORIGIN is not a valid URL; using platformOrigin()");
-    return platformOrigin();
-  }
-
-  // HTTPS only. `new URL()` happily accepts http:, ftp: and file:, and .origin
-  // would return them unchanged — or the literal string "null" for opaque
-  // schemes like file:, producing a notify_url of "null/api/webhooks/kbzmmqr".
-  // The callback carries payment notifications and must not be delivered over
-  // plaintext, so anything other than https falls back rather than being sent
-  // to KBZPay.
-  //
-  // The platformOrigin() fallback is deliberately NOT scheme-checked: it is the
-  // app's own configured origin, is http://localhost in local development, and
-  // no provider can reach that host anyway.
-  if (parsed.protocol !== "https:") {
-    console.error(
-      `[kbzpay] KBZPAY_NOTIFY_ORIGIN must use https (got ${parsed.protocol}); ` +
-        `using platformOrigin()`,
-    );
-    return platformOrigin();
-  }
-
-  return parsed.origin;
-}
-
 type EnrollmentRow = {
   id: string;
   enrollment_ref: string;
@@ -97,14 +58,38 @@ type EnrollmentRow = {
   enrollment_items: { class_id: string; quantity: number; fee_amount: number }[] | null;
 };
 
-type ClaimRow = { outcome: string; payment_id: string | null; ref: string | null; qr: string | null };
-type SupersedeRow = { outcome: string; payment_id: string | null };
+type ClaimRow = {
+  outcome: string;
+  payment_id: string | null;
+  ref: string | null;
+  qr: string | null;
+  merchant: string | null;
+};
+type SupersedeRow = { outcome: string; payment_id: string | null; merchant: string | null };
 
 const fail = (status: number, message: string, error: string) =>
   NextResponse.json({ error, message }, { status });
 
 const gatewayError = () =>
   fail(502, "Failed to generate QR code. Please try again.", "Payment Gateway Error");
+
+/** Nothing at KBZPay is reachable for this tenant until the operator fixes config. */
+const notConfigured = () =>
+  fail(503, "Payment is not available for this event yet.", "Service Unavailable");
+
+/**
+ * The merchant, or null after logging why. Errors name variables, never values.
+ */
+function resolveMerchant(id: string | null, context: string): KbzMerchant | null {
+  try {
+    return getKbzMerchant(id);
+  } catch (err) {
+    console.error(
+      `[kbzpay] merchant config error for ${context}: ${err instanceof Error ? err.message : err}`,
+    );
+    return null;
+  }
+}
 
 /**
  * The request budget, or none when nothing is capping the request.
@@ -247,16 +232,12 @@ export async function POST(request: NextRequest) {
   let recordedFee = order.platformFee;
 
   if (enrollment.status === "partial_payment") {
-    const { data: existingPayment } = (await supabase
-      .from("payments")
-      .select("received_amount")
-      .eq("enrollment_id", enrollment.id)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single()) as { data: { received_amount: number | null } | null; error: unknown };
+    const partial = await loadPartialPayment(supabase, enrollment.id);
+    if (!partial) return partialHistoryUnavailable();
 
-    if (existingPayment?.received_amount) {
-      totalFee = totalFee - existingPayment.received_amount;
+    if (partial.remaining !== null) {
+      totalFee = partial.remaining;
+      if (totalFee <= 0) return noBalanceRemaining();
       recordedFee = 0;
     }
   }
@@ -264,6 +245,18 @@ export async function POST(request: NextRequest) {
   // ── 5. Claim the order slot ────────────────────────────────
   const claimed = await claimSlot();
   if (claimed instanceof NextResponse) return claimed;
+
+  if (claimed.outcome === "no_merchant") {
+    console.error(`[kbzpay] tenant ${enrollment.tenant_id} has no KBZPay merchant assigned`);
+    return notConfigured();
+  }
+
+  // ── 5a. Resolve the pinned merchant, before ANY outcome branch ──
+  // Including reuse (spec 2026-10-30 §5.2): a merchant whose config was removed
+  // or broken must not keep handing out payable QRs whose callbacks and status
+  // checks can no longer be verified. The row stays PENDING; never FAILED here.
+  let merchant = resolveMerchant(claimed.merchant, claimed.ref ?? enrollment.enrollment_ref);
+  if (!merchant) return notConfigured();
 
   let { ref: merchOrderId } = claimed;
 
@@ -277,10 +270,18 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  // ── 6a. Only 'created' and 'unresolved' (after its supersede) may precreate ──
+  // Anything else is an outcome this code does not know, e.g. from a newer
+  // claim function. Fail closed rather than fall through to the gateway.
+  if (claimed.outcome !== "created" && claimed.outcome !== "unresolved") {
+    console.error(`[kbzpay] unexpected claim outcome "${claimed.outcome}"; refusing to call precreate`);
+    return gatewayError();
+  }
+
   // ── 7. unresolved → resolve against KBZPay, then swap ──────
   if (claimed.outcome === "unresolved") {
     const oldRef = claimed.ref!;
-    const resolution = await resolveKbzpayOrder({ oldRef, source: "create", budget });
+    const resolution = await resolveKbzpayOrder({ oldRef, merchant, source: "create", budget });
 
     if (resolution.kind === "already_paid") {
       // §5.1a — the browser contract, not the settlement object (R10/R11/R12).
@@ -328,6 +329,11 @@ export async function POST(request: NextRequest) {
     if (outcome === "invalid_enrollment") {
       return fail(409, "This enrollment is not awaiting payment.", "Conflict");
     }
+    if (outcome === "no_merchant") {
+      // Checked before the old row is touched, so nothing changed (§4.3).
+      console.error(`[kbzpay] supersede: tenant ${enrollment.tenant_id} has no KBZPay merchant`);
+      return notConfigured();
+    }
     if (outcome !== "replaced") {
       // not_live / not_found — someone else moved it. Never guess; let the
       // student retry, which re-claims from a clean read.
@@ -336,6 +342,12 @@ export async function POST(request: NextRequest) {
     }
 
     merchOrderId = newRef;
+
+    // The new row carries the CURRENT assignment's merchant, which may differ
+    // from the old row's.
+    const next = resolveMerchant(data[0].merchant, newRef);
+    if (!next) return notConfigured();
+    merchant = next;
   }
 
   // ── 8. Create the order at KBZPay ──────────────────────────
@@ -350,9 +362,9 @@ export async function POST(request: NextRequest) {
     return gatewayError();
   }
 
-  const notifyUrl = `${notifyOrigin()}/api/webhooks/kbzmmqr`;
+  const notifyUrl = `${merchant.notifyOrigin}/api/webhooks/kbzmmqr`;
 
-  const created = await precreate({
+  const created = await precreate(merchant, {
     merchOrderId,
     amount: totalFee,
     title: `Payment for ${enrollment.enrollment_ref}`,

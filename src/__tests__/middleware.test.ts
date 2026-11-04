@@ -180,6 +180,17 @@ describe("middleware — custom domain surface split", () => {
     expect(res.headers.get("location")).toBe("https://flashtic.com/enroll");
   });
 
+  it("carries only the click IDs across the root redirect", async () => {
+    const res = await get("https://flashtic.com/?fbclid=F1&ttclid=T1&ref=SECRET&utm_source=x");
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe("https://flashtic.com/enroll?fbclid=F1&ttclid=T1");
+  });
+
+  it("drops an invalid click ID on the root redirect", async () => {
+    const res = await get("https://flashtic.com/?fbclid=%3Cx%3E");
+    expect(res.headers.get("location")).toBe("https://flashtic.com/enroll");
+  });
+
   it("redirects tenant staff pages to the tenant subdomain", async () => {
     for (const path of ["/admin/dashboard", "/login", "/onboarding"]) {
       const res = await get(`https://flashtic.com${path}`);
@@ -231,6 +242,58 @@ describe("middleware — custom domain surface split", () => {
 
   it("leaves the kuunyi root landing page alone", async () => {
     const res = await get("https://kuunyi.com/");
+    expect(res.status).not.toBe(307);
+  });
+});
+
+describe("middleware — tenant subdomain root", () => {
+  it("sends a tenant subdomain root to its enroll index", async () => {
+    for (const host of [
+      "nihon-moment.kuunyi.com",
+      "nihon-moment.staging.kuunyi.com",
+      "nihon-moment.edu-enroll-xi.vercel.app",
+      "nihon-moment.localhost:3005",
+    ]) {
+      const res = await get(`https://${host}/`);
+      expect(res.status, host).toBe(307);
+      expect(res.headers.get("location"), host).toBe(`https://${host}/enroll`);
+    }
+  });
+
+  it("carries only the click IDs across a tenant subdomain root redirect", async () => {
+    const res = await get("https://nihon-moment.kuunyi.com/?ttclid=T1&ref=SECRET");
+    expect(res.headers.get("location")).toBe("https://nihon-moment.kuunyi.com/enroll?ttclid=T1");
+  });
+
+  // www and staging are reserved labels, not tenants.
+  it("keeps the homepage on platform hosts", async () => {
+    process.env.VERCEL_ENV = "production";
+    for (const host of [
+      "kuunyi.com",
+      "www.kuunyi.com",
+      "staging.kuunyi.com",
+      "edu-enroll-xi.vercel.app",
+    ]) {
+      const res = await get(`https://${host}/`);
+      expect(res.status, host).not.toBe(307);
+      expect(res.headers.get("location"), host).toBeNull();
+    }
+  });
+
+  // The redirect follows the host resolver only. The dev fallback would put a
+  // tenant on bare localhost and hide the homepage from local development.
+  it("keeps the homepage on bare localhost even with a dev tenant set", async () => {
+    delete process.env.VERCEL_ENV;
+    process.env.NEXT_PUBLIC_DEV_TENANT = "nihon-moment";
+    for (const url of ["http://localhost:3005/", "http://localhost:3005/?tenant=acme"]) {
+      const res = await get(url);
+      expect(res.status, url).not.toBe(307);
+      expect(res.headers.get("location"), url).toBeNull();
+    }
+  });
+
+  it("only redirects the root, not other tenant paths", async () => {
+    const res = await get("https://nihon-moment.kuunyi.com/enroll");
     expect(res.status).not.toBe(307);
   });
 });

@@ -1,23 +1,18 @@
 // ─── MMQR payment card ──────────────────────────────────────────────────────
 //
-// Layout follows the reference card MyanmarPay/KBZPay signed off, which the
-// "Digital & POS Brand Guideline (Dynamic QR)" underpins:
+// Layout follows the framed reference card KBZPay sent (2026-11-02), Option 1,
+// on the proportions of the "Digital & POS Brand Guideline (Dynamic QR)":
 //
 //   card ratio        20:29
-//   side margins      12.5% of width
-//   header            logo sits ON the yellow rule
-//   receiver + amount centred, ABOVE the QR
-//   separator         dotted yellow rule
-//   MMQR wording      centred, directly above the QR
-//   QR                70% of width, centred, on the bottom margin
+//   frame             1px border, solid blue footer rule; the QR sits inside it
+//   header            full-width MyanmarPay banner (rule + logo + wordmark)
+//   receiver + amount centred, ABOVE the QR (owner's call over the sample)
+//   separator         dotted yellow rule, full width
+//   MMQR wording      centred, black, directly above the QR
+//   QR                70% of width, centred, wallet mark at its centre
 //   receiver name     3% of height, amount 6%, currency 3%
 //   font              Arial, letter-spacing 0%
 //   colours           #ffffff  #000000  #FBD913  #17479E
-//
-// The MyanmarPay mark is cropped to drop its own "MMQR" wordmark: the card
-// already carries MMQR above the QR, and the duplicate was flagged for removal.
-// 0-81.7% of the source height cuts through the blank band between
-// "MyanmarPay" and that wordmark.
 //
 // ── Why this is an SVG ──────────────────────────────────────────────────────
 //
@@ -38,15 +33,17 @@
 const VB_W = 500;
 const VB_H = VB_W * (29 / 20); // 725
 
-const SIDE = VB_W * 0.125;
-const RULE_INSET = VB_W * 0.03;
 const QR = VB_W * 0.7;
 const NAME_SIZE = VB_H * 0.03;
 const AMOUNT_SIZE = VB_H * 0.06;
 const CURRENCY_SIZE = VB_H * 0.03;
 
+// Pixel size of the shared banner asset, measured from the PNG header.
+const BANNER_W = 1080;
+const BANNER_H = 300;
+const BANNER_DRAW_H = VB_W * (BANNER_H / BANNER_W);
+
 // Vertical rhythm, in viewBox units.
-const RULE_Y = VB_H * 0.125;
 const NAME_BASELINE = VB_H * 0.285;
 const AMOUNT_BASELINE = VB_H * 0.355;
 const DOTTED_Y = VB_H * 0.405;
@@ -54,13 +51,8 @@ const WORDING_BASELINE = VB_H * 0.455;
 const BOTTOM_MARGIN = VB_H * 0.05;
 const QR_Y = VB_H - BOTTOM_MARGIN - QR;
 const QR_X = (VB_W - QR) / 2;
-
-/** Logo height, straddling the rule. */
-const LOGO_H = VB_H * 0.15;
-/** Fraction of the logo's own height kept — drops its "MMQR" wordmark. */
-const LOGO_CROP = 0.817;
-/** Native aspect of the cropped mark, used to centre it without distortion. */
-const LOGO_ASPECT = 1920 / 2432;
+const FOOTER_H = 12;
+const BORDER = 2;
 
 const YELLOW = "#FBD913";
 const BLUE = "#17479E";
@@ -111,37 +103,9 @@ export default function MmqrCard({
     >
       <rect width={VB_W} height={VB_H} fill="#ffffff" />
 
-      {/* Header rule, with the logo sitting over it */}
-      <line
-        x1={RULE_INSET}
-        y1={RULE_Y}
-        x2={VB_W - RULE_INSET}
-        y2={RULE_Y}
-        stroke={YELLOW}
-        strokeWidth={4}
-      />
-      {/* White plate so the rule does not run through the mark */}
-      <rect
-        x={(VB_W - LOGO_H * LOGO_ASPECT) / 2 - 8}
-        y={RULE_Y - LOGO_H / 2 - 4}
-        width={LOGO_H * LOGO_ASPECT + 16}
-        height={LOGO_H + 8}
-        fill="#ffffff"
-      />
-      {/* Cropped to drop the logo's own MMQR wordmark — the card carries one
-          already, directly above the QR. */}
-      <svg
-        x={(VB_W - LOGO_H * LOGO_ASPECT) / 2}
-        y={RULE_Y - LOGO_H / 2}
-        width={LOGO_H * LOGO_ASPECT}
-        height={LOGO_H}
-        viewBox={`0 0 1920 ${Math.round(2943 * LOGO_CROP)}`}
-        preserveAspectRatio="xMidYMid meet"
-      >
-        <image href="/mmqr-logo.png" x={0} y={0} width={1920} height={2943} />
-      </svg>
+      <image href="/cbmmqr/myanmarpay-banner.png" x={0} y={0} width={VB_W} height={BANNER_DRAW_H} />
 
-      {/* Receiver and amount — centred, above the QR */}
+      {/* Receiver and amount, above the QR */}
       <text
         x={VB_W / 2}
         y={NAME_BASELINE}
@@ -171,9 +135,9 @@ export default function MmqrCard({
 
       {/* Dotted separator */}
       <line
-        x1={SIDE}
+        x1={0}
         y1={DOTTED_Y}
-        x2={VB_W - SIDE}
+        x2={VB_W}
         y2={DOTTED_Y}
         stroke={YELLOW}
         strokeWidth={3}
@@ -189,7 +153,7 @@ export default function MmqrCard({
         fontFamily={FONT}
         fontSize={VB_H * 0.042}
         letterSpacing="0"
-        fill={BLUE}
+        fill="#000000"
       >
         MMQR
       </text>
@@ -242,6 +206,19 @@ export default function MmqrCard({
           />
         </>
       )}
+
+      {/* The frame: footer rule, then the border over everything */}
+      <rect data-testid="mmqr-footer" x={0} y={VB_H - FOOTER_H} width={VB_W} height={FOOTER_H} fill={BLUE} />
+      <rect
+        data-testid="mmqr-frame"
+        x={BORDER / 2}
+        y={BORDER / 2}
+        width={VB_W - BORDER}
+        height={VB_H - BORDER}
+        fill="none"
+        stroke="#000000"
+        strokeWidth={BORDER}
+      />
     </svg>
   );
 }

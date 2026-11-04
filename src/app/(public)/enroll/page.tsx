@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { extractSubdomainFromHost } from "@/lib/tenant";
+import { forwardedClickQuery } from "@/lib/conversions/clickData";
 
 // ─── Public enrollment index ────────────────────────────────────────────────
 // The landing page for a tenant's domain: middleware sends the root of a custom
@@ -25,7 +26,11 @@ interface OpenIntake {
   slug: string;
 }
 
-export default async function EnrollPage() {
+export default async function EnrollPage({
+  searchParams,
+}: {
+  searchParams?: Record<string, string | string[] | undefined>;
+}) {
   const headersList = headers();
   // Same resolution the public layout uses: middleware's header, falling back
   // to the host — the header doesn't always propagate on Vercel.
@@ -100,7 +105,14 @@ export default async function EnrollPage() {
   // Exactly one open intake: send them straight there. redirect() throws, so
   // nothing below runs.
   if (intakes.length === 1) {
-    redirect(`/enroll/${intakes[0].slug}`);
+    // Only the ad click IDs survive the hop, so an ad linking here keeps them.
+    const first = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
+    const carry = new URLSearchParams();
+    for (const k of ["fbclid", "ttclid"]) {
+      const v = first(searchParams?.[k]);
+      if (v) carry.set(k, v);
+    }
+    redirect(`/enroll/${intakes[0].slug}${forwardedClickQuery(carry)}`);
   }
 
   if (intakes.length === 0) {

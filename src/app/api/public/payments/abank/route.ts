@@ -4,6 +4,11 @@ import { resolveTenantId } from "@/lib/api";
 import { platformOrigin } from "@/lib/origin";
 import abank from "@/lib/abank";
 import { resolveOrderTotal } from "@/server/payments/platformFee";
+import {
+  loadPartialPayment,
+  noBalanceRemaining,
+  partialHistoryUnavailable,
+} from "@/server/payments/partialPayment";
 
 // ─── POST /api/public/payments/abank ────────────────────────────────────────
 // Creates an ABank MMQR order and returns a QR string for the user to scan.
@@ -107,16 +112,12 @@ export async function POST(request: NextRequest) {
 
   // ── 5. Adjust for partial payment ──────────────────────────
   if (enrollment.status === "partial_payment") {
-    const { data: existingPayment } = (await supabase
-      .from("payments")
-      .select("received_amount")
-      .eq("enrollment_id", enrollment.id)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .single()) as { data: { received_amount: number | null } | null; error: unknown };
+    const partial = await loadPartialPayment(supabase, enrollment.id);
+    if (!partial) return partialHistoryUnavailable();
 
-    if (existingPayment?.received_amount) {
-      totalFee = totalFee - existingPayment.received_amount;
+    if (partial.remaining !== null) {
+      totalFee = partial.remaining;
+      if (totalFee <= 0) return noBalanceRemaining();
       recordedFee = 0;
     }
   }

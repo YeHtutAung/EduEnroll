@@ -4,10 +4,23 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import QRCode from "qrcode";
 import { formatCurrencySimple } from "@/lib/utils";
 import MmqrCard from "@/components/payments/MmqrCard";
+import CbMmqrCard from "@/components/payments/CbMmqrCard";
+import { renderCardPng } from "@/components/payments/mmqrCardImage";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type QRProvider = "mmpay" | "abank" | "paypay" | "kbzpay";
+type QRProvider = "mmpay" | "abank" | "paypay" | "kbzpay" | "cbmmqr";
+
+/** The create/status route for a provider. Exported for the dispatch test. */
+export function paymentApiBase(provider: QRProvider): string {
+  switch (provider) {
+    case "abank": return "/api/public/payments/abank";
+    case "paypay": return "/api/public/payments/paypay";
+    case "kbzpay": return "/api/public/payments/kbzpay";
+    case "cbmmqr": return "/api/public/payments/cbmmqr";
+    default: return "/api/public/payments/mmpay";
+  }
+}
 
 // ─── Creation-response interpretation ───────────────────────────────────────
 // Exported and pure so the decision can be tested without a DOM (this project
@@ -25,20 +38,52 @@ type QRProvider = "mmpay" | "abank" | "paypay" | "kbzpay";
 // ABank, MMPay and PayPay never send `status`, so they fall through unchanged.
 export type CreateResponse =
   | { kind: "already_paid" }
-  | { kind: "qr"; qrSource: string; orderId: string };
+  | { kind: "qr"; qrSource: string; orderId: string; expiresAt?: string; serverNow?: string };
 
 export function interpretCreateResponse(data: {
   status?: string;
   qr?: string;
   url?: string;
   orderId?: string;
+  expiresAt?: string;
+  serverNow?: string;
 }): CreateResponse | null {
   if (data?.status === "already_paid") return { kind: "already_paid" };
 
   const qrSource = data?.qr ?? data?.url;
   if (!qrSource || !data?.orderId) return null;
 
-  return { kind: "qr", qrSource, orderId: data.orderId };
+  // Only CB sends expiresAt / serverNow; every other provider keeps the old shape.
+  const out: CreateResponse = { kind: "qr", qrSource, orderId: data.orderId };
+  if (typeof data.expiresAt === "string") out.expiresAt = data.expiresAt;
+  if (typeof data.serverNow === "string") out.serverNow = data.serverNow;
+  return out;
+}
+
+/**
+ * When the QR stops being payable, on THIS device's clock. CB's expiry is
+ * server time; a phone clock minutes off would otherwise show a live QR as
+ * expired (or the reverse). With serverNow the remaining time is
+ * expiresAt - serverNow, counted from the device's now. No serverNow: the
+ * raw expiry. No parsable expiry: no countdown.
+ */
+export function localExpiryMs(
+  expiresAt: string | null | undefined,
+  serverNow: string | null | undefined,
+  nowMs: number,
+): number | null {
+  const exp = Date.parse(expiresAt ?? "");
+  if (!Number.isFinite(exp)) return null;
+  const srv = Date.parse(serverNow ?? "");
+  return Number.isFinite(srv) ? nowMs + (exp - srv) : exp;
+}
+
+/** Countdown under a CB card. Pure, for tests; the component ticks `now`. */
+export function qrCountdown(expiresAtMs: number | null, nowMs: number): { expired: boolean; label: string | null } {
+  if (expiresAtMs === null) return { expired: false, label: null };
+  const left = Math.ceil((expiresAtMs - nowMs) / 1000);
+  if (left <= 0) return { expired: true, label: null };
+  return { expired: false, label: `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` };
 }
 
 interface QRPaymentModalProps {
@@ -71,23 +116,33 @@ export default function QRPaymentModal({
   onClose,
   provider = "mmpay",
 }: QRPaymentModalProps) {
-  const apiBase =
-    provider === "abank" ? "/api/public/payments/abank"
-    : provider === "paypay" ? "/api/public/payments/paypay"
-    : provider === "kbzpay" ? "/api/public/payments/kbzpay"
-    : "/api/public/payments/mmpay";
+  const apiBase = paymentApiBase(provider);
   // The wallet mark that belongs at the centre of the QR, if any. Provider
   // specific on purpose: an ABank or MMPay tenant must not display KBZPay's.
-  const providerLogoUrl = provider === "kbzpay" ? "/kbzpay-logo.png" : null;
+  const providerLogoUrl =
+    provider === "kbzpay" ? "/kbzpay-logo.png" : provider === "cbmmqr" ? "/cbmmqr/cb-bank-icon.png" : null;
 
   const [state, setState] = useState<ModalState>("loading");
   const [qrData, setQrData] = useState<string | null>(null);
   const [orderId, setOrderId] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [qrImageUrl, setQrImageUrl] = useState<string | null>(null);
+  // CB only: when the QR on screen stops being payable, and a clock that ticks
+  // once a second while it is shown so the countdown and expiry view update.
+  const [qrExpiresAtMs, setQrExpiresAtMs] = useState<number | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [saveFailed, setSaveFailed] = useState(false);
+  const panelRef = useRef<HTMLDivElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const slowTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Which poller is current. Each startPolling bumps it; a status answer from
+  // an older poller is dropped, so the old QR's request can never touch a new QR.
+  const pollGenRef = useRef(0);
+  // Set once the payment is known to be paid. A CB retry keeps polling the old
+  // QR while the new one is being created; if the old one turns out paid, the
+  // in-flight retry must not replace the success screen.
+  const paidRef = useRef(false);
   // The parent passes an inline arrow at both call sites, so `onSuccess` is a
   // new function on every parent render — and the payment page re-renders on
   // every status poll. Holding it in a ref keeps the effects below from
@@ -117,40 +172,62 @@ export default function QRPaymentModal({
     return () => document.removeEventListener("keydown", handleKey);
   }, [onClose]);
 
+  // ── CB countdown clock ─────────────────────────────────────
+  // Ticks only while a CB QR is live; once expired there is nothing to count.
+  const cbQrExpired = qrCountdown(qrExpiresAtMs, nowMs).expired;
+  useEffect(() => {
+    if (provider !== "cbmmqr" || state !== "qr" || qrExpiresAtMs === null || cbQrExpired) return;
+    const id = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [provider, state, qrExpiresAtMs, cbQrExpired]);
+
+  // ── Stop every poll timer ──────────────────────────────────
+  // One place, used everywhere a poller ends and before any new one starts.
+  // Clearing only pollRef (as retry used to) left the previous QR's 2-minute
+  // timer to replace the new QR's poller and its 10-minute timer to force the
+  // new QR into "expired".
+  const stopPolling = useCallback(() => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+    if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
+    pollRef.current = null;
+    pollTimerRef.current = null;
+    slowTimerRef.current = null;
+  }, []);
+
   // ── Cleanup polling + timers on unmount ────────────────────
   useEffect(() => {
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
-      if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
-      if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
+      stopPolling();
     };
-  }, []);
+  }, [stopPolling]);
 
   // ── Smart polling: 5s for 2min → 15s until 10min → stop ────
 
   const startPolling = useCallback(
     (paymentRef: string) => {
+      stopPolling();
+      const gen = ++pollGenRef.current;
       const pollFn = async () => {
         try {
           const res = await fetch(
             `${apiBase}/status?ref=${encodeURIComponent(paymentRef)}`,
           );
+          if (gen !== pollGenRef.current) return;
           if (!res.ok) return;
           const data = await res.json();
+          if (gen !== pollGenRef.current) return;
 
           // PayPay returns paypay_status, MMQR returns mmqr_status
           const status = data.paypay_status ?? data.mmqr_status;
 
           if (status === "SUCCESS" || status === "COMPLETED") {
-            if (pollRef.current) clearInterval(pollRef.current);
-            if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
-            if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
+            stopPolling();
+            paidRef.current = true;
             setState("success");
             onSuccessRef.current();
           } else if (status === "FAILED" || status === "CANCELED" || status === "EXPIRED") {
-            if (pollRef.current) clearInterval(pollRef.current);
-            if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
-            if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
+            stopPolling();
             setState("error");
             setErrorMsg(
               status === "EXPIRED"
@@ -174,13 +251,12 @@ export default function QRPaymentModal({
 
       // Phase 3: after 10 min, stop and show expiry
       pollTimerRef.current = setTimeout(() => {
-        if (pollRef.current) clearInterval(pollRef.current);
-        if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
+        stopPolling();
         setState("error");
         setErrorMsg("QR code has expired. Please try again.");
       }, 10 * 60 * 1000);
     },
-    [apiBase],
+    [apiBase, stopPolling],
   );
 
   // ── Create payment on mount ────────────────────────────────
@@ -212,6 +288,7 @@ export default function QRPaymentModal({
         // The previous order turned out to be paid (spec §5.1a). Show success
         // and start NO poller — there is no order to poll for.
         if (interpreted?.kind === "already_paid") {
+          paidRef.current = true;
           setState("success");
           onSuccessRef.current();
           return;
@@ -227,12 +304,18 @@ export default function QRPaymentModal({
         const qrSource = interpreted.qrSource;
         setQrData(qrSource);
         setOrderId(interpreted.orderId);
+        {
+          const now = Date.now();
+          setQrExpiresAtMs(localExpiryMs(interpreted.expiresAt, interpreted.serverNow, now));
+          setNowMs(now);
+        }
 
         // Generate QR image from either EMVCo string or PayPay URL
         if (qrSource) {
           try {
             const dataUrl = await QRCode.toDataURL(qrSource, {
-              width: 280,
+              // CB's QR at level H has about 85 modules a side: 280 would blur it.
+              width: provider === "cbmmqr" ? 840 : 280,
               margin: 2,
               // A centre mark destroys modules; H recovers ~30% of them.
               errorCorrectionLevel: providerLogoUrl ? "H" : "M",
@@ -260,10 +343,16 @@ export default function QRPaymentModal({
     // This does not change when the effect re-runs: startPolling is already a
     // dependency and is itself a useCallback over [onSuccess, apiBase], so an
     // unstable onSuccess already re-triggered this effect through it.
-  }, [enrollmentRef, startPolling, apiBase, providerLogoUrl]);
+  }, [enrollmentRef, startPolling, apiBase, providerLogoUrl, provider]);
 
   function handleRetry() {
-    if (pollRef.current) clearInterval(pollRef.current);
+    // The old poller is NOT stopped here: startPolling stops it when the new QR
+    // is shown. Until then a CB payment made on the old QR still turns into
+    // SUCCESS (spec §7.2). If the retry fails, CB keeps polling the old QR;
+    // every other provider stops, as it did before.
+    const failRetry = () => {
+      if (provider !== "cbmmqr") stopPolling();
+    };
     setQrData(null);
     setOrderId(null);
     setErrorMsg("");
@@ -278,15 +367,19 @@ export default function QRPaymentModal({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ enrollmentRef }),
         });
+        if (paidRef.current) return;
 
         if (!res.ok) {
           const body = await res.json().catch(() => ({}));
+          if (paidRef.current) return;
+          failRetry();
           setErrorMsg(body.message || "Failed to generate QR code.");
           setState("error");
           return;
         }
 
         const data = await res.json();
+        if (paidRef.current) return;
         const interpreted = interpretCreateResponse(data);
 
         // Same already-paid branch as the mount effect. Retry is a second
@@ -294,12 +387,14 @@ export default function QRPaymentModal({
         // leave the blank-QR-then-expiry path alive for anyone who pressed
         // "Try again" (spec §5.1a).
         if (interpreted?.kind === "already_paid") {
+          paidRef.current = true;
           setState("success");
           onSuccess();
           return;
         }
 
         if (!interpreted) {
+          failRetry();
           setErrorMsg("Failed to generate QR code.");
           setState("error");
           return;
@@ -308,10 +403,19 @@ export default function QRPaymentModal({
         const qrSource = interpreted.qrSource;
         setQrData(qrSource);
         setOrderId(interpreted.orderId);
+        {
+          const now = Date.now();
+          setQrExpiresAtMs(localExpiryMs(interpreted.expiresAt, interpreted.serverNow, now));
+          setNowMs(now);
+        }
+        // Only now, with the new order known: if rendering the new QR fails, the old
+        // (possibly expired) image must not stay on screen under the new order id.
+        setQrImageUrl(null);
         if (qrSource) {
           try {
             const dataUrl = await QRCode.toDataURL(qrSource, {
-              width: 280,
+              // CB's QR at level H has about 85 modules a side: 280 would blur it.
+              width: provider === "cbmmqr" ? 840 : 280,
               margin: 2,
               // A centre mark destroys modules; H recovers ~30% of them.
               errorCorrectionLevel: providerLogoUrl ? "H" : "M",
@@ -321,11 +425,14 @@ export default function QRPaymentModal({
             console.error("[QRPaymentModal] QR render failed");
           }
         }
+        if (paidRef.current) return;
         if (data.url) setPaypayUrl(data.url);
         if (data.deeplink) setPaypayDeeplink(data.deeplink);
         setState("qr");
         startPolling(interpreted.orderId);
       } catch {
+        if (paidRef.current) return;
+        failRetry();
         setErrorMsg("Network error. Please check your connection.");
         setState("error");
       }
@@ -352,7 +459,7 @@ export default function QRPaymentModal({
           unreachable. The MMQR card is roughly twice the height of the bare QR
           it replaced, which turns that latent bug into a routine one on short
           phones. */}
-      <div className="relative max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
+      <div ref={panelRef} className="relative max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-6 shadow-xl">
         {/* Close button */}
         <button
           onClick={onClose}
@@ -420,6 +527,33 @@ export default function QRPaymentModal({
                   </div>
                 )}
               </>
+            ) : provider === "cbmmqr" && (qrImageUrl || qrData) ? (
+              (() => {
+                const countdown = qrCountdown(qrExpiresAtMs, nowMs);
+                if (countdown.expired) {
+                  // Spec §5.4 / §7.2: the QR is hidden, but polling continues — a payment
+                  // made just before expiry still turns into SUCCESS. A new QR goes
+                  // through the create route, which may answer "previous QR still active".
+                  return (
+                    <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-6 text-center">
+                      <p className="text-sm text-amber-800">This QR has expired. If you already paid, we are still confirming it.</p>
+                      <button type="button" onClick={handleRetry}
+                        className="mt-3 rounded-lg bg-[#264EA1] px-4 py-2 text-sm font-medium text-white">
+                        Get a new QR
+                      </button>
+                    </div>
+                  );
+                }
+                return (
+                  <>
+                    <CbMmqrCard qrImageUrl={qrImageUrl} centreLogoUrl={providerLogoUrl} receiverName={receiverName} amount={amount} currency={currency} />
+                    {countdown.label && (
+                      <p className="mt-2 text-xs text-gray-600">QR will expire in {countdown.label}</p>
+                    )}
+                    <p className="mt-1 text-xs text-gray-500">{studentName}</p>
+                  </>
+                );
+              })()
             ) : qrImageUrl || qrData ? (
               <>
                 <MmqrCard
@@ -443,15 +577,33 @@ export default function QRPaymentModal({
             )}
 
             {/* Save QR button */}
-            {qrImageUrl && (
+            {qrImageUrl && !(provider === "cbmmqr" && cbQrExpired) && (
               <button
                 onClick={async () => {
                   const fileName = `MMQR-${orderId ?? "payment"}.png`;
-                  const byteString = atob(qrImageUrl.split(",")[1]);
-                  const ab = new ArrayBuffer(byteString.length);
-                  const ia = new Uint8Array(ab);
-                  for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
-                  const blob = new Blob([ab], { type: "image/png" });
+                  setSaveFailed(false);
+
+                  let blob: Blob;
+                  if (provider === "paypay") {
+                    const byteString = atob(qrImageUrl.split(",")[1]);
+                    const ab = new ArrayBuffer(byteString.length);
+                    const ia = new Uint8Array(ab);
+                    for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i);
+                    blob = new Blob([ab], { type: "image/png" });
+                  } else {
+                    // An MMQR code must stay inside its frame, so there is no
+                    // fallback to the bare code if the card cannot be exported.
+                    const card = panelRef.current?.querySelector<SVGSVGElement>('svg[data-testid$="mmqr-card"]');
+                    try {
+                      if (!card) throw new Error("Card is not on screen");
+                      blob = await renderCardPng(card);
+                    } catch (err) {
+                      console.error("[QRPaymentModal] Card export failed", err);
+                      setSaveFailed(true);
+                      return;
+                    }
+                  }
+
                   const file = new File([blob], fileName, { type: "image/png" });
 
                   // Mobile: use Web Share API (triggers native share sheet → Save to Photos)
@@ -483,6 +635,12 @@ export default function QRPaymentModal({
                 </svg>
                 Save QR / <span className="font-myanmar">QR သိမ်းမည်</span>
               </button>
+            )}
+            {saveFailed && (
+              <p role="alert" className="mt-2 text-center text-xs text-amber-700">
+                Could not save the QR. Please take a screenshot instead.{" "}
+                <span className="font-myanmar">QR သိမ်း၍ မရပါ။ Screenshot ရိုက်ယူပါ။</span>
+              </p>
             )}
 
             {/* Open in PayPay app (mobile) */}

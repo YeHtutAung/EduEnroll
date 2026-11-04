@@ -80,6 +80,15 @@ export const TERMS_OF_SALE: LegalDocumentData = {
         },
       ],
     },
+    {
+      title: { en: "4. Advertising", mm: "၄။ ကြော်ငြာ" },
+      items: [
+        {
+          en: "Your email and phone, and your country if you use a Myanmar phone number, may be shared in hashed form with Meta to measure ads and choose who sees them.",
+          mm: "သင့်အီးမေးလ်နှင့် ဖုန်းနံပါတ်၊ မြန်မာဖုန်းနံပါတ် အသုံးပြုပါက သင့်နိုင်ငံကို ကြော်ငြာတိုင်းတာရန်နှင့် ကြော်ငြာမြင်ရမည့်သူများကို ရွေးချယ်ရန် hash ပြုလုပ်ထားသော ပုံစံဖြင့် Meta ထံ မျှဝေနိုင်ပါသည်။",
+        },
+      ],
+    },
   ],
 };
 
@@ -88,8 +97,8 @@ export const TERMS_OF_SALE: LegalDocumentData = {
 export const PRIVACY_POLICY: LegalDocumentData = {
   title: { en: "Privacy Policy", mm: "ကိုယ်ရေးအချက်အလက် မူဝါဒ" },
   subtitle: {
-    en: "Last updated: September 2026 · Effective: September 2026",
-    mm: "နောက်ဆုံးပြင်ဆင်သည့်ရက် - ၂၀၂၆ ခုနှစ် စက်တင်ဘာလ · စတင်အသက်ဝင်သည့်ရက် - ၂၀၂၆ ခုနှစ် စက်တင်ဘာလ",
+    en: "Last updated: November 2026 · Effective: November 2026",
+    mm: "နောက်ဆုံးပြင်ဆင်သည့်ရက် - ၂၀၂၆ ခုနှစ် နိုဝင်ဘာလ · စတင်အသက်ဝင်သည့်ရက် - ၂၀၂၆ ခုနှစ် နိုဝင်ဘာလ",
   },
   intro: {
     en:
@@ -233,8 +242,16 @@ export const PRIVACY_POLICY: LegalDocumentData = {
           mm: "ပလက်ဖောင်း လည်ပတ်ရန် ကူညီသော ဝန်ဆောင်မှုပေးသူများ (Supabase, Vercel, Resend) ထံ — တင်းကျပ်သော ဒေတာ စီမံဆောင်ရွက်မှု သဘောတူညီချက်များဖြင့်",
         },
         {
+          en: "With Google Analytics when an event organiser uses purchase tracking: your purchase value, the tickets you bought and your analytics browser and session identifiers, so the organiser can measure its sales. Your name, email, phone and order reference are not included",
+          mm: "ပွဲစီစဉ်သူက ဝယ်ယူမှုခြေရာခံခြင်းကို အသုံးပြုပါက Google Analytics ထံ — ပွဲစီစဉ်သူက ၎င်း၏ရောင်းအားကို တိုင်းတာနိုင်ရန် သင့်ဝယ်ယူမှုတန်ဖိုး၊ သင်ဝယ်ယူသော လက်မှတ်များနှင့် browser နှင့် session ခွဲခြမ်းစိတ်ဖြာရေး အမှတ်အသားများကို ပေးပို့ပါသည်။ သင့်အမည်၊ အီးမေးလ်၊ ဖုန်းနံပါတ်နှင့် မှာယူမှုအမှတ်ကို မပေးပို့ပါ",
+        },
+        {
           en: "With Facebook/Meta when you use the Messenger bot integration — governed by Meta's own Privacy Policy",
           mm: "Messenger bot ကို အသုံးပြုပါက Facebook/Meta ထံ — Meta ၏ ကိုယ်ပိုင် ကိုယ်ရေးအချက်အလက်မူဝါဒဖြင့် ထိန်းချုပ်ပါသည်",
+        },
+        {
+          en: "With Meta when an event organiser uses purchase tracking: your email and phone number in hashed form, your country in hashed form if you use a Myanmar phone number, with your purchase value, browser details and IP address, so the organiser can measure its ads, avoid showing them to people who have already bought, and reach similar audiences. Your name and order reference are not included",
+          mm: "ပွဲစီစဉ်သူက ဝယ်ယူမှုခြေရာခံခြင်းကို အသုံးပြုပါက Meta ထံ — သင့်အီးမေးလ်နှင့် ဖုန်းနံပါတ်ကို hash ပြုလုပ်ထားသော ပုံစံဖြင့်၊ မြန်မာဖုန်းနံပါတ် အသုံးပြုပါက သင့်နိုင်ငံကိုလည်း hash ပြုလုပ်ထားသော ပုံစံဖြင့် ဝယ်ယူမှုတန်ဖိုး၊ browser အချက်အလက်နှင့် IP လိပ်စာတို့နှင့်အတူ ပေးပို့ပါသည်။ ၎င်းမှာ ပွဲစီစဉ်သူက ၎င်း၏ကြော်ငြာများကို တိုင်းတာနိုင်ရန်၊ ဝယ်ယူပြီးသူများထံ ကြော်ငြာမပြရန်နှင့် ဆင်တူသော ပရိသတ်များကို ရှာဖွေနိုင်ရန် ဖြစ်ပါသည်။ သင့်အမည်နှင့် မှာယူမှုအမှတ်ကို မပေးပို့ပါ",
         },
         {
           en: "When required by law, court order, or governmental authority",
@@ -284,9 +301,9 @@ export const PRIVACY_POLICY: LegalDocumentData = {
       title: { en: "7. Cookies and Tracking", mm: "၇။ Cookie နှင့် ခြေရာခံခြင်း" },
       intro: {
         en:
-          "KuuNyi uses essential cookies to maintain your login session and platform functionality. We do not use advertising cookies or third-party tracking technologies. Session cookies are deleted when you close your browser.",
+          "KuuNyi uses essential cookies to maintain your login session and platform functionality. Session cookies are deleted when you close your browser. Some event organisers also use advertising and analytics tools on their event pages, through Google Tag Manager, such as Meta Pixel and Google Analytics. These tools can set their own cookies and collect your browsing activity on those pages. They do not run on the pages where you enter your details or pay. When you buy, the address of the website that sent you to the event page, without any page or search details, may also be shared with Meta.",
         mm:
-          "KuuNyi သည် အကောင့်ဝင်ထားမှုနှင့် ပလက်ဖောင်း လုပ်ဆောင်ချက်များအတွက် မရှိမဖြစ် cookie များကိုသာ အသုံးပြုပါသည်။ ကြော်ငြာ cookie များ သို့မဟုတ် ပြင်ပ ခြေရာခံနည်းပညာများကို မသုံးပါ။ Session cookie များသည် browser ကို ပိတ်လိုက်သည့်အခါ ပျက်သွားပါသည်။",
+          "KuuNyi သည် အကောင့်ဝင်ထားမှုနှင့် ပလက်ဖောင်း လုပ်ဆောင်ချက်များအတွက် မရှိမဖြစ် cookie များကို အသုံးပြုပါသည်။ Session cookie များသည် browser ကို ပိတ်လိုက်သည့်အခါ ပျက်သွားပါသည်။ ပွဲစီစဉ်သူအချို့သည် ၎င်းတို့၏ ပွဲစာမျက်နှာများတွင် Google Tag Manager မှတစ်ဆင့် Meta Pixel နှင့် Google Analytics ကဲ့သို့သော ကြော်ငြာနှင့် ခွဲခြမ်းစိတ်ဖြာရေးကိရိယာများကိုလည်း အသုံးပြုပါသည်။ ဤကိရိယာများသည် ၎င်းတို့၏ကိုယ်ပိုင် cookie များကို သတ်မှတ်ပြီး ထိုစာမျက်နှာများပေါ်ရှိ သင့်လုပ်ဆောင်မှုကို စုဆောင်းနိုင်ပါသည်။ သင့်အချက်အလက်ထည့်သွင်းသည့် သို့မဟုတ် ငွေပေးချေသည့် စာမျက်နှာများတွင် ၎င်းတို့ မလုပ်ဆောင်ပါ။ သင်ဝယ်ယူသည့်အခါ ပွဲစာမျက်နှာသို့ ရောက်ရှိလာသော ဝက်ဘ်ဆိုက်လိပ်စာကို စာမျက်နှာ သို့မဟုတ် ရှာဖွေမှုအသေးစိတ်မပါဘဲ Meta ထံ မျှဝေနိုင်ပါသည်။",
       },
     },
     {

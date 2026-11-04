@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { getAnnouncementRecipients } from "@/lib/announcements/announcementRecipients";
 
 // ─── GET /api/admin/announcements/recipients ──────────────────────────────────
 // Returns count of unique Telegram recipients for a given intake + class_level.
@@ -8,32 +10,23 @@ import { requireAuth } from "@/lib/api";
 export async function GET(request: NextRequest) {
   const auth = await requireAuth();
   if (auth instanceof NextResponse) return auth;
-  const { supabase, tenantId } = auth;
+  const { tenantId } = auth;
 
   const intakeId = request.nextUrl.searchParams.get("intake_id");
   if (!intakeId) {
     return NextResponse.json({ count: 0 });
   }
 
-  let query = supabase
-    .from("enrollments")
-    .select("telegram_chat_id")
-    .eq("tenant_id", tenantId)
-    .is("internal_test_at", null)
-    .eq("intake_id", intakeId)
-    .not("telegram_chat_id", "is", null);
+  // The same client and query as the send, so the count matches who gets it.
+  const recipients = await getAnnouncementRecipients(createAdminClient(), {
+    tenantId,
+    intakeId,
+    classLevel: request.nextUrl.searchParams.get("class_level"),
+  });
 
-  const classLevel = request.nextUrl.searchParams.get("class_level");
-  if (classLevel) {
-    query = query.eq("class_level", classLevel);
+  if (!recipients) {
+    return NextResponse.json({ error: "Could not read the recipients." }, { status: 500 });
   }
 
-  const { data } = (await query) as {
-    data: { telegram_chat_id: string }[] | null;
-    error: unknown;
-  };
-
-  const uniqueCount = new Set(data?.map((e) => e.telegram_chat_id) ?? []).size;
-
-  return NextResponse.json({ count: uniqueCount });
+  return NextResponse.json({ count: recipients.length });
 }

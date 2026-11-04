@@ -11,6 +11,8 @@ import {
   displayTotals,
   selectOrderPayment,
 } from "@/server/payments/platformFee";
+import { summarisePartialPayment } from "@/server/payments/partialPayment";
+import { repairInterruptedFulfilment } from "@/server/payments/repairFulfilment";
 
 // "Not found" and "the query failed" are different answers, and only the first
 // is an enumeration signal.
@@ -78,7 +80,7 @@ export async function GET(
       enrollment_items(quantity, fee_amount, classes(level, pack_size, intakes(id, name, slug))),
       classes(level, fee_amount, pack_size, intakes(id, name, slug)),
       quantity,
-      payments(stripe_payment_intent_id, status, payment_method, card_brand, card_last4, amount, platform_fee)
+      payments(stripe_payment_intent_id, status, payment_method, card_brand, card_last4, amount, platform_fee, received_amount, created_at)
     `)
     .eq("enrollment_ref", params.ref.trim())
     .eq("tenant_id", tenantId)
@@ -147,7 +149,20 @@ export async function GET(
   // partial-payment top-up is by definition a remainder. The embedded relation
   // has no ORDER BY, so `find` above returns whichever row the database
   // happened to hand back — fine for reading a card brand, not for money.
-  const orderPayment = selectOrderPayment(payments);
+  //
+  // A part-paid order's largest settled row can still be a top-up, which is only
+  // a remainder and records no fee. The row that recorded the first part-payment
+  // holds the order's saved total and fee, so that one speaks for the order.
+  const settledPayment = selectOrderPayment(payments);
+  const partial = summarisePartialPayment(
+    [...(payments ?? [])]
+      .map((p) => ({ ...p, amount: p.amount ?? 0 }))
+      .sort((a, b) => a.created_at.localeCompare(b.created_at)),
+  );
+  const orderPayment =
+    partial.orderTotal !== null && (settledPayment?.amount ?? 0) < partial.orderTotal
+      ? { amount: partial.orderTotal, platform_fee: partial.orderFee }
+      : settledPayment;
   // Fall back to any payment so the success page can show the method even before verification
   const anyPayment = payments?.[0];
 
@@ -164,9 +179,9 @@ export async function GET(
       .single() as unknown as Promise<{ data: { logo_url: string | null; primary_color: string | null; sponsor_config: unknown } | null; error: unknown }>,
     supabase
       .from("tenants")
-      .select("payment_mode, mmqr_provider, platform_fee_mode, platform_fee_amount")
+      .select("org_type, payment_mode, mmqr_provider, platform_fee_mode, platform_fee_amount")
       .eq("id", tenantId)
-      .single() as unknown as Promise<{ data: { payment_mode: string | null; mmqr_provider: string | null; platform_fee_mode: string | null; platform_fee_amount: number | null } | null; error: unknown }>,
+      .single() as unknown as Promise<{ data: { org_type: string | null; payment_mode: string | null; mmqr_provider: string | null; platform_fee_mode: string | null; platform_fee_amount: number | null } | null; error: unknown }>,
     supabase
       .from("bank_accounts")
       .select("bank_name, account_number, account_holder, qr_code_url")
@@ -193,13 +208,23 @@ export async function GET(
   // Build signed ticket JWTs for confirmed enrollments only.
   let tickets: { jti: string; tier: string; admits: number; jwt: string; qr: string }[] = [];
   if (enrollment.status === "confirmed") {
-    const { data: ticketRows } = (await supabase
-      .from("tickets")
-      .select("id, intake_id, tier, admits, exp, status")
-      .eq("enrollment_id", enrollment.id)) as unknown as {
-      data: TicketRow[] | null;
-      error: unknown;
-    };
+    const loadTicketRows = async () =>
+      ((await supabase
+        .from("tickets")
+        .select("id, intake_id, tier, admits, exp, status")
+        .eq("enrollment_id", enrollment.id)) as unknown as {
+        data: TicketRow[] | null;
+        error: unknown;
+      }).data;
+
+    let ticketRows = await loadTicketRows();
+
+    // The settlement may have been cut off before the ticket, and a buyer who
+    // left the page has no status poll left to repair it.
+    if (ticketRows?.length === 0 && tenant?.org_type === "event") {
+      await repairInterruptedFulfilment(enrollment.id);
+      ticketRows = await loadTicketRows();
+    }
 
     const validRows = (ticketRows ?? []).filter((t) => t.status === "valid");
 
@@ -398,6 +423,8 @@ interface PaymentRow {
   status: string;
   amount: number | null;
   platform_fee: number | null;
+  received_amount: number | null;
+  created_at: string;
   payment_method: string;
   card_brand: string | null;
   card_last4: string | null;
