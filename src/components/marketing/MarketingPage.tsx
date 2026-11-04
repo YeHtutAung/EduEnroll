@@ -2,6 +2,26 @@ import Link from "next/link";
 import Image from "next/image";
 import { marketingImageSrc as src, type MarketingContent } from "@/lib/marketing/content";
 
+const MMQR_SUPPORTED_PROVIDERS = [
+  "KBZPay",
+  "OK$",
+  "Wave Money",
+  "AYA Pay",
+  "A+",
+  "uabpay",
+  "TrustPay",
+  "CB Bank",
+  "CTZPay",
+  "Yoma Bank",
+  "MAB",
+  "GTB Pay",
+  "MoMoney",
+  "Zapp Partner",
+  "MSP",
+  "Shwe Bill Pay",
+  "MTB Pay",
+];
+
 export default function MarketingPage({ content }: { content: MarketingContent }) {
   const { sections, hero, organizers, payments, solutions, pos, howItWorks, industries, cta, footer } = content;
 
@@ -16,6 +36,7 @@ export default function MarketingPage({ content }: { content: MarketingContent }
   const showCards = sections.solutions && visibleSolutions.length > 0;
   const showHow = sections.howItWorks && visibleSteps.length > 0;
   const showIndustries = sections.industries && visibleIndustries.length > 0;
+  const hasMmqr = visiblePayments.some((payment) => payment.id === "mmqr");
 
   return (
     <div className="min-h-screen bg-white text-slate-900">
@@ -174,6 +195,26 @@ export default function MarketingPage({ content }: { content: MarketingContent }
                 )),
               )}
             </div>
+            {hasMmqr && (
+              <div className="mt-10 border-t border-slate-200 pt-8">
+                <p className="text-center text-sm font-semibold text-slate-700">
+                  More banks and wallets supported via MyanmarPay MMQR
+                </p>
+                <ul
+                  aria-label="MyanmarPay MMQR-supported payment providers"
+                  className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6"
+                >
+                  {MMQR_SUPPORTED_PROVIDERS.map((provider) => (
+                    <li
+                      key={provider}
+                      className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-center text-xs font-semibold text-slate-600 shadow-sm"
+                    >
+                      {provider}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         </section>
       )}
