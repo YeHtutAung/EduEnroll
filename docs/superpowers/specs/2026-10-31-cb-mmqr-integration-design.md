@@ -47,7 +47,11 @@ Source: CB's PDF (not in the repo) and CB's email of 2026-10-29.
 | `POST /payment/refund` | — | out of scope |
 
 - Timestamps look like `20201117 10:14:14`, with no timezone. The spec's example expiry is
-  3 minutes after issue.
+  3 minutes after issue. **UAT, 2026-11-03, differs:** `/dynamicqr` sends
+  `2026-11-03T18:27:50.872855694` (still no zone; `/auth/token` keeps the documented format),
+  and the QR lives **20 minutes**. Issue time matched our clock at +06:30.
+  **CB, 2026-11-04:** the format is the same in Production, and a QR lives 20 minutes in UAT
+  and **5 minutes in Production**; the 3 is only an example.
 - **Callback:** CB POSTs to the URL we register, exactly as given (confirmed 2026-10-29). Body:
   `apiKey` (see below), `referenceNo`, `transactionId`, `transCurrency`,
   `transAmount`, `transDateTime`, `transStatusCode`, `transStatusDescription`
@@ -200,8 +204,9 @@ columns) and `20261030120000_kbzpay_per_tenant_merchants.sql` (pin, locking, gra
 - **Time.** CB timestamps are parsed at the fixed offset `CBMMQR_UTC_OFFSET` (default
   `+06:30`; Myanmar has one offset and no DST — to be confirmed, gate G2). An unparseable
   timestamp makes the QR non-displayable.
-- **Constants.** `CB_MAX_QR_MINUTES` — CB's maximum QR validity (3 until CB answers question
-  2) — and `CB_EXPIRY_MARGIN_MINUTES` = 2.
+- **`cbQrMinutes()`** — CB's QR validity for the current `CBMMQR_MODE`: 20 in UAT, 5 in
+  Production. A bad mode throws, and the create route answers 502 before any row exists.
+- **Constant.** `CB_EXPIRY_MARGIN_MINUTES` = 2.
 - **`isConfirmedDead(statusResponse, row, now)`** — the only code allowed to free the slot of a
   QR that was displayed. True only when `now` is past the row's `provider_order_expires_at`
   plus the margin **and** the status response's return code is in
@@ -223,7 +228,7 @@ columns) and `20261030120000_kbzpay_per_tenant_merchants.sql` (pin, locking, gra
 1. Resolve the tenant; load the enrollment scoped to it (404); it must be `pending_payment` or
    `partial_payment` (409).
 2. **Pre-check.** The enrollment deadline (from `auto_cancel_hours`, which holds minutes,
-   as in `kbzpayOrderWindow.ts`) is closer than `CB_MAX_QR_MINUTES` + margin → 409
+   as in `kbzpayOrderWindow.ts`) is closer than `cbQrMinutes()` + margin → 409
    `deadline`, no row. A tenant row that cannot be read, or a deadline that cannot be
    derived, fails closed with 502.
 3. Compute the fee exactly as the KBZPay route (cart items or class × quantity, minus
@@ -233,7 +238,7 @@ columns) and `20261030120000_kbzpay_per_tenant_merchants.sql` (pin, locking, gra
    branch, reuse included: no assignment (`no_merchant`) → 503; config missing or invalid →
    503 with no CB call, and a row this request just created is marked `FAILED` so it does
    not hold the slot (a reused or unresolved row is left untouched).
-5. The claim uses a new reference and `p_expires_at` = now + `CB_MAX_QR_MINUTES` + margin (a
+5. The claim uses a new reference and `p_expires_at` = now + `cbQrMinutes()` + margin (a
    provisional hint); a unique violation on the reference is retried once with a new one:
    - `reuse` → return the stored QR and expiry. No CB call.
    - `unresolved` → §5.2.
@@ -260,8 +265,8 @@ columns) and `20261030120000_kbzpay_per_tenant_merchants.sql` (pin, locking, gra
    the device's own now, so a phone clock that is off does not shift the expiry.
 
 **Cancellation or rejection while a QR is displayed.** Auto-cancel and admin rejection are
-not changed by this spec. A CB QR is displayed for at most `CB_MAX_QR_MINUTES` (about 3
-minutes, against KBZPay's 120), the pre-check keeps auto-cancel outside that window, and step
+not changed by this spec. A CB QR is displayed for at most `cbQrMinutes()` (5 minutes in
+Production, against KBZPay's 120), the pre-check keeps auto-cancel outside that window, and step
 8 refuses to display a QR for an enrollment that is no longer payable. What remains is an
 admin rejecting the enrollment during those minutes and the buyer paying anyway: the payment
 settles but cannot re-confirm a rejected enrollment (`fn_block_reconfirm_rejected`), which is
@@ -294,7 +299,7 @@ from this path.
   but the post-check withheld the QR at §5.1 step 7; the status check above ran first). CB may
   hold a QR for this reference, but its payload was never shown to anyone, so no buyer can
   scan it.
-  - Once now is past the row's `created_at` + `CB_MAX_QR_MINUTES` + margin →
+  - Once now is past the row's `created_at` + `cbQrMinutes()` + margin →
     `complete_cbmmqr_replace(reason 'FAILED')`; before that → 409 `qr_active`. If a callback
     bound a payment to the row meanwhile, the replace answers `settling` and nothing is
     replaced.

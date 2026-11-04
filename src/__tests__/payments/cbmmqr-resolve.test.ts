@@ -12,7 +12,7 @@ vi.mock("@/server/payments/settleCbmmqrPayment", () => ({
 
 const mod = await import("@/server/payments/resolveCbmmqrOrder");
 const { resolveCbmmqrOrder, isConfirmedDead, CB_CONFIRMED_DEAD_CODES } = mod;
-const { CB_MAX_QR_MINUTES, CB_EXPIRY_MARGIN_MINUTES } = await import("@/server/payments/cbmmqrOrderWindow");
+const { cbQrMinutes, CB_EXPIRY_MARGIN_MINUTES } = await import("@/server/payments/cbmmqrOrderWindow");
 
 const MIN = 60_000;
 const NOW = Date.parse("2026-10-31T04:00:00Z");
@@ -95,7 +95,7 @@ describe("resolveCbmmqrOrder — row with CB's reference", () => {
 });
 
 describe("resolveCbmmqrOrder — row without CB's reference (lost create response, never displayed)", () => {
-  const window = (CB_MAX_QR_MINUTES + CB_EXPIRY_MARGIN_MINUTES) * MIN;
+  const window = (cbQrMinutes() + CB_EXPIRY_MARGIN_MINUTES) * MIN;
 
   it("retire FAILED after created_at + max validity + margin, without calling CB", async () => {
     expect(await run(row({ orderRef: null, createdAtMs: NOW - window - 1 }))).toEqual({ kind: "retire", reason: "FAILED" });
@@ -109,8 +109,21 @@ describe("resolveCbmmqrOrder — row without CB's reference (lost create respons
   });
 });
 
+describe("resolveCbmmqrOrder — the lost-response window follows the mode", () => {
+  afterEach(() => { delete process.env.CBMMQR_MODE; });
+
+  it("frees the slot after 7 minutes in Production, not UAT's 22", async () => {
+    process.env.CBMMQR_MODE = "production";
+    const window = 7 * MIN;
+    expect(await run(row({ orderRef: null, createdAtMs: NOW - window - 1 }))).toEqual({ kind: "retire", reason: "FAILED" });
+    expect(await run(row({ orderRef: null, createdAtMs: NOW - window + 1000 }))).toEqual({
+      kind: "active", retryAtMs: NOW + 1000,
+    });
+  });
+});
+
 describe("resolveCbmmqrOrder — CB's reference stored but QR withheld (never displayed)", () => {
-  const window = (CB_MAX_QR_MINUTES + CB_EXPIRY_MARGIN_MINUTES) * MIN;
+  const window = (cbQrMinutes() + CB_EXPIRY_MARGIN_MINUTES) * MIN;
 
   it("checks status with the pinned merchant, then retires FAILED after the window", async () => {
     expect(await run(row({ displayed: false, createdAtMs: NOW - window - 1 }))).toEqual({ kind: "retire", reason: "FAILED" });

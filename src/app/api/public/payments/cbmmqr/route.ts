@@ -12,6 +12,7 @@ import { resolveCbmmqrOrder } from "@/server/payments/resolveCbmmqrOrder";
 import {
   enrollmentDeadline,
   postCheck,
+  cbQrMinutes,
   preCheck,
   provisionalExpiry,
 } from "@/server/payments/cbmmqrOrderWindow";
@@ -154,6 +155,14 @@ export async function POST(request: NextRequest) {
   // Fail closed: without the tenant row we do not know the deadline.
   if (tenantError || !tenant) {
     console.error(`[cbmmqr] tenant ${enrollment.tenant_id} lookup failed; refusing to guess the deadline`);
+    return gatewayError();
+  }
+
+  // A bad CBMMQR_MODE is our configuration fault: stop before any row exists.
+  try {
+    cbQrMinutes();
+  } catch (err) {
+    console.error(`[cbmmqr] config error for ${enrollment.enrollment_ref}: ${err instanceof Error ? err.message : err}`);
     return gatewayError();
   }
 
