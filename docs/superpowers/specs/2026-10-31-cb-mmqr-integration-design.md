@@ -323,13 +323,10 @@ logged loudly and one is refunded by hand.
 
 1. Body ≤ 8 KB and a JSON object. Required, with type and length: `referenceNo` (our
    `CB…` format), `qrReferenceNo` (1–25 printable ASCII characters),
-   `transStatusDescription` (≤ 250). `apiKey` may be absent, null or empty; if present it must
-   be a string of ≤ 150. CB's other fields may be absent — a `FAIL` callback need
-   not carry a transaction, and none of them moves money — but if present they must have
-   CB's types and lengths (`transactionId` ≤ 35, `transCurrency` ≤ 3, `transDateTime` ≤ 17,
-   `transStatusCode` ≤ 4, `institutionId` ≤ 4, `merchantId` ≤ 15, `terminalId` ≤ 8,
-   `institutionName` ≤ 150, `remark` ≤ 140, `transAmount` a non-negative number). Anything else → 400, before
-   any database read.
+   `transStatusDescription` (≤ 250). Anything else → 400, before any database read, logged with
+   the field's name, type and length and the body's field names, never a value. CB's other
+   fields are not checked, because none of them is read or moves money: limits taken from CB's
+   spec refused its real callbacks on production on 2026-11-04. `apiKey` matters only in step 3.
 2. Find the payment by `referenceNo` (with its stored `provider_order_ref`); it must be
    `cb_mmqr` → else 404; a failed lookup → 500.
 3. If the merchant **pinned on that payment** has an API key configured, compare `apiKey` with

@@ -102,6 +102,11 @@
     on CB's side: `ACCOUNT RECORD MISSING` from a non-wallet account, and `0007`
     (merchant name mismatch) through "AB OI". **CB's callback was not received
     for any payment**, so a buyer who closes the page is not settled yet.
+  - Production test, 2026-11-04: CB's callback does reach
+    `https://beatsrun.kuunyi.com/api/webhooks/cbmmqr`, three POSTs per payment,
+    but our route answered 400 to all of them. Its limits on optional fields
+    came from CB's spec. The route no longer checks those fields, and logs why
+    it refuses a callback. A closed-page test on production must confirm this.
   - QR card: title and amount centred, CB's icon at the QR centre as well as
     the logo below it. Both differ from CB's sample, by the owner's decision.
     MMQR's guideline (page 13) allows a centre logo as an icon only, or a logo
