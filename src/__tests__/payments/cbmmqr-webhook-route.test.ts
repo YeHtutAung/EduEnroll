@@ -107,19 +107,83 @@ describe("POST /api/webhooks/cbmmqr", () => {
     ["malformed JSON", "{nope"],
     ["a non-object", "[]"],
     ["a bad referenceNo", { ...BODY, referenceNo: "KBZ_x" }],
-    ["a non-string apiKey", { ...BODY, apiKey: 123 }],
-    ["an over-long apiKey", { ...BODY, apiKey: "k".repeat(151) }],
     ["an over-long qrReferenceNo", { ...BODY, qrReferenceNo: "Q".repeat(26) }],
+    ["a missing transStatusDescription", { ...BODY, transStatusDescription: undefined }],
     ["a body over 8 KB", { ...BODY, remark: "x".repeat(9000) }],
-    ["an over-long transactionId", { ...BODY, transactionId: "T".repeat(36) }],
-    ["a non-string merchantId", { ...BODY, merchantId: { x: 1 } }],
-    ["an over-long terminalId", { ...BODY, terminalId: "T".repeat(9) }],
-    ["a non-numeric transAmount", { ...BODY, transAmount: "lots" }],
-    ["a negative transAmount", { ...BODY, transAmount: -1 }],
-    ["an over-long institutionName", { ...BODY, institutionName: "I".repeat(151) }],
   ])("400 for %s, before any lookup", async (_n, body) => {
+    const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
     expect((await post(body)).status).toBe(400);
     expect(mockFrom).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  // CB's real callback was refused on production: three POSTs per payment, all 400.
+  // No field outside the three required ones is read, so none may refuse a callback.
+  it.each([
+    ["CB's long date format", { transDateTime: "2026-11-04T17:35:48.872855694" }],
+    ["an over-long transactionId", { transactionId: "T".repeat(36) }],
+    ["a non-string merchantId", { merchantId: { x: 1 } }],
+    ["a numeric merchantId", { merchantId: 223780222946190 }],
+    ["an over-long terminalId", { terminalId: "T".repeat(9) }],
+    ["a non-numeric transAmount", { transAmount: "lots" }],
+    ["a negative transAmount", { transAmount: -1 }],
+    ["an over-long institutionName", { institutionName: "I".repeat(151) }],
+    ["a field we have never seen", { somethingNew: [1, 2] }],
+  ])("settles through the status check despite %s", async (_n, extra) => {
+    const res = await post({ ...BODY, ...extra });
+    expect(res.status).toBe(200);
+    expect(mockSettle).toHaveBeenCalledTimes(1);
+    expect(mockSettle.mock.calls[0][0].status).toBe(PAID);
+  });
+
+  it("does not reject on the shape of apiKey: a configured key still gets 403", async () => {
+    expect((await post({ ...BODY, apiKey: 123 })).status).toBe(403);
+    expect((await post({ ...BODY, apiKey: "k".repeat(151) })).status).toBe(403);
+    expect(mockSettle).not.toHaveBeenCalled();
+  });
+
+  describe("logging a rejected callback", () => {
+    const warned = async (body: unknown) => {
+      const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      expect((await post(body)).status).toBe(400);
+      const lines = spy.mock.calls.map((c) => c.join(" "));
+      spy.mockRestore();
+      return lines.join("\n");
+    };
+
+    it("names the field, its type and length, and the body's field names", async () => {
+      const line = await warned({ ...BODY, referenceNo: "NOT-OUR-FORMAT" });
+      expect(line).toContain("[cbmmqr-webhook] rejected");
+      expect(line).toContain("field=referenceNo type=string length=14");
+      expect(line).toContain("transStatusDescription");
+    });
+
+    it("reports a missing field as absent", async () => {
+      expect(await warned({ ...BODY, qrReferenceNo: undefined })).toContain("field=qrReferenceNo type=undefined");
+    });
+
+    it("never logs a value", async () => {
+      const line = await warned({
+        ...BODY, referenceNo: "SECRET-REF-VALUE", apiKey: "SECRET-KEY-VALUE", remark: "SECRET-REMARK-VALUE",
+      });
+      expect(line).not.toContain("SECRET");
+    });
+
+    it("drops field names that are not plain identifiers, and caps the list", async () => {
+      const many = Object.fromEntries(Array.from({ length: 60 }, (_, i) => [`f${i}`, 1]));
+      const line = await warned({ referenceNo: "x", "bad name\nFAKE LOG LINE": 1, ...many });
+      expect(line).not.toContain("FAKE LOG LINE");
+      expect(line).not.toContain("f59");
+    });
+
+    it("says why when the body is not JSON or not an object", async () => {
+      expect(await warned("{nope")).toContain("not JSON");
+      expect(await warned("[]")).toContain("not an object");
+    });
+
+    it("says why when the body is too large", async () => {
+      expect(await warned({ ...BODY, remark: "x".repeat(9000) })).toContain("too large");
+    });
   });
 
   it("404 for an unknown reference; 500 when the lookup fails", async () => {
