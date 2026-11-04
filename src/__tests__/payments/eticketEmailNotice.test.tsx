@@ -13,6 +13,13 @@ describe("ETicketEmailNotice", () => {
     expect(html).toContain("Check your inbox and spam folder.");
   });
 
+  it("only animates the icon for buyers who have not asked for reduced motion", () => {
+    const html = render("event", 1);
+    expect(html).toContain("motion-safe:animate-mail-nudge");
+    expect(html).toContain("motion-safe:animate-mail-ring");
+    expect(html).not.toMatch(/[\s"]animate-mail-/);
+  });
+
   it("promises nothing while the tickets are unknown", () => {
     expect(render("event", null)).toBe("");
   });
