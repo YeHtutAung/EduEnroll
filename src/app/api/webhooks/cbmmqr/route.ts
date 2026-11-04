@@ -150,13 +150,9 @@ export async function POST(request: NextRequest) {
   }
   const queryQrRef = storedQrRef ?? qrReferenceNo;
 
-  // ── 5. FAIL changes nothing: the QR may still be paid ──────
-  if (description.trim().toUpperCase() !== "SUCCESS") {
-    console.warn(`[cbmmqr-webhook] ${referenceNo} reported ${description.slice(0, 40)}; nothing changed`);
-    return ack(qrReferenceNo);
-  }
-
-  // ── 6. Ask CB ourselves ────────────────────────────────────
+  // ── 5. Ask CB ourselves, whatever the callback's wording ──
+  // CB's real text is "Transaction is succeeded.", not the spec's "SUCCESS". The
+  // wording can't move money, so it must not decide whether we look either.
   let status: StatusResult;
   try {
     status = await checkStatus(merchant, queryQrRef, gatewayBudget());
@@ -167,8 +163,10 @@ export async function POST(request: NextRequest) {
   }
   if (status.kind !== "answer") return err(500, "Query Failed");
   if (status.code !== CB_SUCCESS) {
-    console.warn(`[cbmmqr-webhook] ${referenceNo}: callback said SUCCESS, status says ${status.code}`);
-    return err(500, "Not Settled");
+    console.warn(`[cbmmqr-webhook] ${referenceNo}: status says ${status.code}; not settled`);
+    // The wording decides only whether CB should try again: a reported failure
+    // has nothing more to tell us, and anything else may just be early.
+    return /fail/i.test(description) ? ack(qrReferenceNo) : err(500, "Not Settled");
   }
   // CB's answer must be about the QR we asked for. A refusal, like a
   // settlement refusal: a retry sends the same facts and cannot change it.
@@ -179,7 +177,7 @@ export async function POST(request: NextRequest) {
     return ack(qrReferenceNo);
   }
 
-  // ── 7. Settle on the status answer ─────────────────────────
+  // ── 6. Settle on the status answer ─────────────────────────
   const outcome = await settleCbmmqrPayment({
     payment: { payment_ref: payment.payment_ref, payment_method: payment.payment_method, cbmmqr_merchant: payment.cbmmqr_merchant },
     merchant,
