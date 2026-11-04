@@ -301,12 +301,25 @@ describe("CB's answer", () => {
   });
 
   it("post-check too late: stores CB's reference WITHOUT the QR and answers 409", async () => {
-    tenant = { ...tenant, auto_cancel_hours: 15 };
+    tenant = { ...tenant, auto_cancel_hours: 30 };
     mockCreate.mockResolvedValue({ kind: "created", qr: "000201QR", qrReferenceNo: "QR-1", expiresAtMs: Date.now() + 60 * MIN });
     const res = await POST(req());
     expect(res.status).toBe(409);
     expect(called("store_cbmmqr_qr")[0].args).toMatchObject({ p_qr: null, p_order_ref: "QR-1" });
     expect(JSON.stringify(await res.json())).not.toContain("000201QR");
+  });
+
+  it("a bad CBMMQR_MODE fails closed before any row or CB call", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    process.env.CBMMQR_MODE = "prod";
+    try {
+      expect((await POST(req())).status).toBe(502);
+      expect(called("claim_cbmmqr_order_slot")).toHaveLength(0);
+      expect(mockCreate).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.CBMMQR_MODE;
+      spy.mockRestore();
+    }
   });
 
   it("post-check: an unreadable CB expiry is never displayed", async () => {
@@ -322,7 +335,7 @@ describe("CB's answer", () => {
     await POST(req());
     const unreadable = logged();
     spy.mockClear();
-    tenant = { ...tenant, auto_cancel_hours: 15 };
+    tenant = { ...tenant, auto_cancel_hours: 30 };
     mockCreate.mockResolvedValue({ kind: "created", qr: "000201QR", qrReferenceNo: "QR-1", expiresAtMs: Date.now() + 60 * MIN });
     await POST(req());
     const late = logged();

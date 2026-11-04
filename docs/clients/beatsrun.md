@@ -86,6 +86,21 @@
     (`PATCH /dynamicqr/{qrReferenceNo}/status`) before marking the payment
     verified. The response body carries `qrReferenceNo`, `returnCode` and
     `message`.
+  - QR lifetime (CB, 2026-11-04): 20 minutes in UAT, 5 in Production, and we
+    cannot set it. A QR may not outlive its booking, and the booking must have
+    the lifetime plus 2 minutes left when the buyer asks for the QR: 22 minutes
+    in UAT, 7 in Production. So a 15-minute booking can never show a QR in UAT,
+    which is why BeatsRun's dev DB setting is 30. Production's value is decided
+    at go-live.
+  - Date format of `/dynamicqr` is the same in UAT and Production (CB,
+    2026-11-04).
+  - UAT payment: CB will provide a CB Pay UAT wallet app, or its team can scan
+    our QR. It cannot trigger a callback without a real scan (CB, 2026-11-04).
+  - UAT status check, 2026-11-03: an unpaid QR returns `0006` "Waiting for
+    payment."; an expired QR returns `0005` "Dynamic QR time is expire!"; an
+    unknown QR returns `0026`. CB has not confirmed in writing that `0005` is
+    final, so it is not in `CB_CONFIRMED_DEAD_CODES` (gate G1). Not yet tested,
+    for lack of a UAT wallet: a paid QR, CB's real callback, settlement, ticket.
   - Token: `/auth/token` returns `expiredDateTime`. Reuse the token until then
     and fetch a new one on `0012` (Token Expired).
   - QR display: CB require the WebFrame sample layout (CB's reply of

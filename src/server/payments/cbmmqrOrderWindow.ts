@@ -5,8 +5,16 @@
 // actually returned. A QR that fails the second check is never displayed, so
 // nobody can pay it.
 
-/** CB's maximum QR validity. 3 until CB answers question 2 (gate G2). */
-export const CB_MAX_QR_MINUTES = 3;
+import { resolveMode } from "@/lib/cbmmqr";
+
+/**
+ * How long CB's QR lives. CB, 2026-11-04: 20 minutes in UAT, 5 in Production; the
+ * 3 in its spec is only an example. Throws on a bad CBMMQR_MODE, as the client does.
+ */
+export function cbQrMinutes(): number {
+  return resolveMode() === "production" ? 5 : 20;
+}
+
 /** Clock-skew and round-trip allowance on every CB time comparison. */
 export const CB_EXPIRY_MARGIN_MINUTES = 2;
 
@@ -32,7 +40,7 @@ export function enrollmentDeadline(
 export function preCheck(deadline: Deadline, now: number): "ok" | "too_close" | "unknown" {
   if (deadline.kind === "none") return "ok";
   if (deadline.kind === "unknown") return "unknown";
-  return deadline.ms - now >= (CB_MAX_QR_MINUTES + CB_EXPIRY_MARGIN_MINUTES) * MIN ? "ok" : "too_close";
+  return deadline.ms - now >= (cbQrMinutes() + CB_EXPIRY_MARGIN_MINUTES) * MIN ? "ok" : "too_close";
 }
 
 /** After CB answers: may this QR be displayed? Unreadable expiry → no. */
@@ -45,5 +53,5 @@ export function postCheck(deadline: Deadline, qrExpiresAtMs: number | null): "ok
 
 /** The provisional provider_order_expires_at written at claim time (a hint). */
 export function provisionalExpiry(now: number): number {
-  return now + (CB_MAX_QR_MINUTES + CB_EXPIRY_MARGIN_MINUTES) * MIN;
+  return now + (cbQrMinutes() + CB_EXPIRY_MARGIN_MINUTES) * MIN;
 }
