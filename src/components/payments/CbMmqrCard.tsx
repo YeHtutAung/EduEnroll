@@ -5,11 +5,15 @@
 //
 //   card ratio        20:29 (guideline; the sample itself has no fixed ratio)
 //   header            full-width MyanmarPay banner (rule + logo + wordmark)
-//   receiver + amount LEFT-aligned at a 12.5% inset, amount with 2 decimals
+//   receiver + amount centred, amount with 2 decimals (owner's call, as on
+//                     MmqrCard; CB's sample left-aligns them at a 12.5% inset)
 //   separator         yellow dotted rule, full width
 //   MMQR wording      centred, BLACK
 //   QR                80% of width, centred
 //   CB Bank logo      20% of width, centred below the QR
+//   centre logo       CB's icon, without the name, on a white plate at the QR's
+//                     centre, as KBZPay's mark on MmqrCard. Owner's call; CB's
+//                     sample has none, but MMQR's guideline allows it, icon only.
 //   footer            solid #264EA1 rule; 1px grey border round the card
 //   font              Arial (guideline) — the sample uses Calibri
 //
@@ -26,11 +30,19 @@ const BANNER_H = 300;
 const LOGO_W = 371;
 const LOGO_H = 160;
 
-const INSET = VB_W * 0.125; // 62.5
 const QR = VB_W * 0.8; // 400
 const QR_X = (VB_W - QR) / 2; // 50
 const LOGO_DRAW_W = VB_W * 0.2; // 100
 const LOGO_DRAW_H = LOGO_DRAW_W * (LOGO_H / LOGO_W);
+// Measured from public/cbmmqr/cb-bank-icon.png. The icon is wide, so it covers less
+// than MmqrCard's 18% square: about 2.4% of the QR. Level H recovers ~30% of
+// modules; the plate is a clean quiet zone.
+const ICON_W = 183;
+const ICON_H = 92;
+const CENTRE_W = QR * 0.22;
+const CENTRE_H = CENTRE_W * (ICON_H / ICON_W);
+const PLATE_W = CENTRE_W * 1.18;
+const PLATE_H = CENTRE_H * 1.3;
 const BANNER_DRAW_H = VB_W * (BANNER_H / BANNER_W);
 
 const NAME_SIZE = VB_H * 0.03;
@@ -61,11 +73,17 @@ interface CbMmqrCardProps {
   receiverName: string;
   amount: number;
   currency: string;
+  /**
+   * Icon for the centre of the QR, or none. MMQR's guideline allows the icon
+   * only, without the name. The QR must be generated at error correction H, or
+   * the covered modules cannot be recovered.
+   */
+  centreLogoUrl?: string | null;
   /** Widest the card may render. It shrinks freely below this. */
   maxWidth?: number;
 }
 
-export default function CbMmqrCard({ qrImageUrl, receiverName, amount, currency, maxWidth = 320 }: CbMmqrCardProps) {
+export default function CbMmqrCard({ qrImageUrl, receiverName, amount, currency, centreLogoUrl = null, maxWidth = 320 }: CbMmqrCardProps) {
   const amountText = amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   return (
@@ -82,10 +100,10 @@ export default function CbMmqrCard({ qrImageUrl, receiverName, amount, currency,
 
       <image href="/cbmmqr/myanmarpay-banner.png" x={0} y={0} width={VB_W} height={BANNER_DRAW_H} />
 
-      <text x={INSET} y={NAME_BASELINE} textAnchor="start" fontFamily={FONT} fontSize={NAME_SIZE} letterSpacing="0" fill="#000000">
+      <text x={VB_W / 2} y={NAME_BASELINE} textAnchor="middle" fontFamily={FONT} fontSize={NAME_SIZE} letterSpacing="0" fill="#000000">
         {receiverName}
       </text>
-      <text x={INSET} y={AMOUNT_BASELINE} textAnchor="start" fontFamily={FONT} fontWeight="bold" fontSize={AMOUNT_SIZE} letterSpacing="0" fill="#000000">
+      <text x={VB_W / 2} y={AMOUNT_BASELINE} textAnchor="middle" fontFamily={FONT} fontWeight="bold" fontSize={AMOUNT_SIZE} letterSpacing="0" fill="#000000">
         {amountText}
         <tspan fontSize={CURRENCY_SIZE} fontWeight="normal" dx={10}>
           {currency}
@@ -107,6 +125,27 @@ export default function CbMmqrCard({ qrImageUrl, receiverName, amount, currency,
             Rendering QR...
           </text>
         </>
+      )}
+
+      {qrImageUrl && centreLogoUrl && (
+        <g data-testid="cb-qr-centre-logo">
+          <rect
+            x={(VB_W - PLATE_W) / 2}
+            y={QR_Y + (QR - PLATE_H) / 2}
+            width={PLATE_W}
+            height={PLATE_H}
+            rx={PLATE_H * 0.14}
+            fill="#ffffff"
+          />
+          <image
+            href={centreLogoUrl}
+            x={(VB_W - CENTRE_W) / 2}
+            y={QR_Y + (QR - CENTRE_H) / 2}
+            width={CENTRE_W}
+            height={CENTRE_H}
+            preserveAspectRatio="xMidYMid meet"
+          />
+        </g>
       )}
 
       <image href="/cbmmqr/cb-bank-logo.png" x={(VB_W - LOGO_DRAW_W) / 2} y={LOGO_Y} width={LOGO_DRAW_W} height={LOGO_DRAW_H} />
