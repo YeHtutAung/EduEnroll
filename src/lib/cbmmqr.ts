@@ -195,7 +195,7 @@ export function currencyFromCb(value: unknown): "MMK" | null {
  * Same fail-closed rules as KBZPay's resolveMode(): an unrecognised value is
  * always an error, and on VERCEL_ENV=production only "production" is accepted.
  */
-function resolveMode(): "production" | "uat" {
+export function resolveMode(): "production" | "uat" {
   const raw = (process.env.CBMMQR_MODE ?? "").trim().toLowerCase();
   if (raw === "production") return "production";
   if (process.env.VERCEL_ENV === "production") {

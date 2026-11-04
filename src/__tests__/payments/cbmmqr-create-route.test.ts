@@ -309,6 +309,19 @@ describe("CB's answer", () => {
     expect(JSON.stringify(await res.json())).not.toContain("000201QR");
   });
 
+  it("a bad CBMMQR_MODE fails closed before any row or CB call", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    process.env.CBMMQR_MODE = "prod";
+    try {
+      expect((await POST(req())).status).toBe(502);
+      expect(called("claim_cbmmqr_order_slot")).toHaveLength(0);
+      expect(mockCreate).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.CBMMQR_MODE;
+      spy.mockRestore();
+    }
+  });
+
   it("post-check: an unreadable CB expiry is never displayed", async () => {
     mockCreate.mockResolvedValue({ kind: "created", qr: "000201QR", qrReferenceNo: "QR-1", expiresAtMs: null });
     expect((await POST(req())).status).toBe(409);
