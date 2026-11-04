@@ -113,7 +113,7 @@ const META_TOKEN = "tok-meta-secret";
 const TIKTOK_TOKEN = "tok-tiktok-secret";
 const BODY_SENTINEL = "response-body-sentinel";
 
-const queueRow = (platform: "meta" | "tiktok", over: Row = {}): Row => ({
+const queueRow = (platform: "meta" | "tiktok" | "ga4", over: Row = {}): Row => ({
   id: `row-${platform}`,
   enrollment_id: ENROLLMENT,
   tenant_id: "ten-1",
@@ -214,7 +214,137 @@ const settings = { enabled: true, config_id: "SKY", meta_pixel_id: "1", tiktok_p
 const enrollment = { status: "confirmed", internal_test_at: null };
 const context = { fbp: "f", fbc: null, ttp: null, ttclid: null };
 
+describe("GA4 purchase", () => {
+  const GA_SECRET = "ga-secret-sentinel";
+  const ga4Call = () => mockFetch.mock.calls.find(([url]) => url.includes("google-analytics"));
+  const ga4Body = () => JSON.parse(ga4Call()![1].body as string);
+  const ga4Row = () => row("row-ga4");
+
+  beforeEach(() => {
+    vi.stubEnv("CONVERSIONS_SKY_GA4_TOKEN", GA_SECRET);
+    mockFetch.mockImplementation(async (url) => {
+      if (url.includes("google-analytics")) return { status: 204, json: async () => { throw new SyntaxError("empty"); } };
+      return url.includes("facebook") ? metaOk() : tiktokOk();
+    });
+    db.conversion_events = [queueRow("ga4", { value: 160000, currency: "MMK" })];
+    db.tenant_conversion_settings[0].ga4_measurement_id = "G-TESTID123";
+    Object.assign(db.enrollment_ad_context[0], { ga_client_id: "111.222", ga_session_id: "333" });
+    db.enrollment_items = [
+      {
+        enrollment_id: ENROLLMENT,
+        class_id: "class-1",
+        quantity: 2,
+        fee_amount: 80000,
+        classes: { level: "All Day", intakes: { name: "Sky Festival 2026", slug: "november-2026" } },
+      },
+    ];
+  });
+
+  it("sends the order's value, tickets and GA IDs", async () => {
+    await sendPendingConversions(ENROLLMENT);
+
+    expect(ga4Body()).toMatchObject({
+      client_id: "111.222",
+      events: [
+        {
+          name: "purchase",
+          params: {
+            session_id: "333",
+            transaction_id: "event-hash",
+            value: 160000,
+            currency: "MMK",
+            festival_name: "Sky Festival 2026",
+            event_slug: "november-2026",
+            items: [{ item_id: "class-1", item_name: "All Day", price: 80000, quantity: 2 }],
+          },
+        },
+      ],
+    });
+    expect(ga4Row().status).toBe("sent");
+  });
+
+  it("sends only once when it runs again", async () => {
+    await sendPendingConversions(ENROLLMENT);
+    await sendPendingConversions(ENROLLMENT);
+    expect(mockFetch.mock.calls.filter(([url]) => url.includes("google-analytics"))).toHaveLength(1);
+  });
+
+  it("reads a single-ticket order's class when it has no item rows", async () => {
+    db.enrollment_items = [];
+    Object.assign(db.enrollments[0], { class_id: "class-9", quantity: 3 });
+    db.classes = [
+      { id: "class-9", level: "Day 1", fee_amount: 45000, intakes: { name: "Sky Festival 2026", slug: "november-2026" } },
+    ];
+    await sendPendingConversions(ENROLLMENT);
+
+    expect(ga4Body().events[0].params.items).toEqual([
+      { item_id: "class-9", item_name: "Day 1", price: 45000, quantity: 3 },
+    ]);
+  });
+
+  it("still sends when the buyer has no ad data, using the fallback ID", async () => {
+    db.enrollment_ad_context = [];
+    await sendPendingConversions(ENROLLMENT);
+
+    expect(ga4Body().client_id).toMatch(/^\d+\.\d+$/);
+    expect(ga4Body().events[0].params).not.toHaveProperty("session_id");
+    expect(ga4Row().status).toBe("sent");
+  });
+
+  it("leaves the row pending, unclaimed, when the tickets can't be read", async () => {
+    fail = (table) => (table === "enrollment_items" ? { code: "XX000", message: "down" } : undefined);
+    await sendPendingConversions(ENROLLMENT);
+
+    expect(ga4Call()).toBeUndefined();
+    expect(ga4Row()).toMatchObject({ status: "pending", attempts: 0 });
+  });
+
+  it("holds without a secret, attempts unchanged", async () => {
+    vi.stubEnv("CONVERSIONS_SKY_GA4_TOKEN", "");
+    await sendPendingConversions(ENROLLMENT);
+
+    expect(ga4Call()).toBeUndefined();
+    expect(ga4Row()).toMatchObject({ status: "pending", attempts: 0 });
+  });
+
+  it("only validates on a non-production deployment", async () => {
+    vi.stubEnv("VERCEL_ENV", "preview");
+    mockFetch.mockImplementation(async () => respond(200, { validationMessages: [] }));
+    await sendPendingConversions(ENROLLMENT);
+
+    expect(ga4Call()![0]).toContain("/debug/mp/collect");
+    expect(ga4Row().status).toBe("sent");
+  });
+
+  it("does not log the secret, the IDs or the URL", async () => {
+    await sendPendingConversions(ENROLLMENT);
+
+    expect(logged()).toContain("[conversions] ga4 sent fields=client_id,session_id test_code=no");
+    for (const value of [GA_SECRET, "111.222", "google-analytics", "G-TESTID123"]) {
+      expect(logged()).not.toContain(value);
+    }
+  });
+
+  it("keeps Meta and TikTok rows skipped without ad data", async () => {
+    db.conversion_events = [queueRow("meta"), queueRow("tiktok"), queueRow("ga4")];
+    db.enrollment_ad_context = [];
+    await sendPendingConversions(ENROLLMENT);
+
+    expect(metaRow().status).toBe("skipped");
+    expect(tiktokRow().status).toBe("skipped");
+    expect(ga4Row().status).toBe("sent");
+  });
+});
+
 describe("decideRow", () => {
+  it("sends GA4 with no ad data, for a confirmed order with a measurement ID", () => {
+    const ga = { ...settings, ga4_measurement_id: "G-X" };
+    expect(decideRow("ga4", ga, enrollment, null)).toBe("send");
+    expect(decideRow("ga4", settings, enrollment, null)).toBe("skip");
+    expect(decideRow("ga4", ga, { ...enrollment, status: "rejected" }, null)).toBe("skip");
+    expect(decideRow("ga4", ga, { ...enrollment, internal_test_at: "x" }, null)).toBe("skip");
+  });
+
   it("sends when everything is present", () => expect(decideRow("meta", settings, enrollment, context)).toBe("send"));
   it("skips an unconfirmed enrollment", () =>
     expect(decideRow("meta", settings, { ...enrollment, status: "rejected" }, context)).toBe("skip"));
@@ -579,7 +709,7 @@ describe("sendPendingConversions", () => {
   it("copies the queue row and ad context into the request, and no raw buyer data", async () => {
     await sendPendingConversions(ENROLLMENT);
 
-    expect(selects.enrollments).toEqual(["status, internal_test_at, email, phone"]);
+    expect(selects.enrollments).toEqual(["status, internal_test_at, email, phone, class_id, quantity"]);
     const meta = mockFetch.mock.calls.find(([url]) => url.includes("facebook"))!;
     const tiktok = mockFetch.mock.calls.find(([url]) => url.includes("tiktok"))!;
     expect(meta[0]).toContain("/111/events");

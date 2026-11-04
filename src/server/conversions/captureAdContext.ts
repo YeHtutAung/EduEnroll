@@ -7,7 +7,11 @@ import {
   buildFbc,
   cleanClickValue,
   cleanReferrerOrigin,
+  GA_CLIENT_COOKIE,
+  gaSessionCookieName,
   parseClickCookie,
+  parseGaClientId,
+  parseGaSessionId,
 } from "@/lib/conversions/clickData";
 
 const USER_AGENT_MAX = 1000;
@@ -21,6 +25,7 @@ export interface AdContext {
   client_ip: string | null;
   user_agent: string | null;
   referrer_url: string | null;
+  ga_client_id: string | null;
 }
 
 /** Cookies can be edited by the browser, so this cleans it again. */
@@ -34,8 +39,8 @@ function storedReferrer(raw: string | undefined): string | null {
 }
 
 /**
- * Null when the buyer has none of fbp, fbc, ttp or ttclid: their IP is never
- * stored. Pixel cookies count on their own (owner's decision, 2026-11-02).
+ * Null when the buyer has none of fbp, fbc, ttp, ttclid or a GA cookie: their IP
+ * is never stored. Pixel cookies count on their own (owner's decision, 2026-11-02).
  */
 export function adContextFromRequest(
   cookie: (name: string) => string | undefined,
@@ -48,7 +53,8 @@ export function adContextFromRequest(
     cleanClickValue(cookie("_fbc")) ??
     (clicks.fbclid && clicks.at !== null ? buildFbc(clicks.fbclid, clicks.at) : null);
   const ttclid = clicks.ttclid;
-  if (!fbp && !fbc && !ttp && !ttclid) return null;
+  const gaClientId = parseGaClientId(cookie(GA_CLIENT_COOKIE));
+  if (!fbp && !fbc && !ttp && !ttclid && !gaClientId) return null;
 
   const ip = clientIpFrom(headers);
   return {
@@ -59,6 +65,7 @@ export function adContextFromRequest(
     client_ip: ip === "unknown" ? null : ip,
     user_agent: headers.get("user-agent")?.slice(0, USER_AGENT_MAX) ?? null,
     referrer_url: storedReferrer(cookie(AD_REFERRER_COOKIE)),
+    ga_client_id: gaClientId,
   };
 }
 
@@ -88,11 +95,14 @@ export async function captureAdContext(args: {
     const supabase = createAdminClient();
     const { data: settings, error: settingsError } = (await supabase
       .from("tenant_conversion_settings" as never)
-      .select("tenant_id")
+      .select("tenant_id, ga4_measurement_id")
       .eq("tenant_id", args.tenantId)
       .eq("enabled", true)
       .abortSignal(signal)
-      .maybeSingle()) as { data: { tenant_id: string } | null; error: { code?: string } | null };
+      .maybeSingle()) as {
+      data: { tenant_id: string; ga4_measurement_id?: string | null } | null;
+      error: { code?: string } | null;
+    };
     if (settingsError) {
       // A failed read is not "disabled": say so, then skip. The order stands.
       if (signal.aborted) logTimeout();
@@ -100,6 +110,15 @@ export async function captureAdContext(args: {
       return;
     }
     if (!settings) return;
+
+    // GA IDs are kept only for a tenant that reports to GA4. Without that, GA
+    // cookies alone are no reason to store anything about this buyer.
+    const measurementId = settings.ga4_measurement_id ?? null;
+    if (!measurementId && !context.fbp && !context.fbc && !context.ttp && !context.ttclid) return;
+    const gaIds = {
+      ga_client_id: measurementId ? context.ga_client_id : null,
+      ga_session_id: measurementId ? parseGaSessionId(args.cookie(gaSessionCookieName(measurementId))) : null,
+    };
 
     // Built from our own data, never from the Host header or a request URL.
     let path = "/enroll";
@@ -124,7 +143,12 @@ export async function captureAdContext(args: {
     const { error } = (await supabase
       .from("enrollment_ad_context" as never)
       .upsert(
-        { enrollment_id: args.enrollmentId, ...context, source_url: `${tenantLinkOrigin(args.subdomain)}${path}` } as never,
+        {
+          enrollment_id: args.enrollmentId,
+          ...context,
+          ...gaIds,
+          source_url: `${tenantLinkOrigin(args.subdomain)}${path}`,
+        } as never,
         { onConflict: "enrollment_id", ignoreDuplicates: true },
       )
       .abortSignal(signal)) as { error: { code?: string } | null };

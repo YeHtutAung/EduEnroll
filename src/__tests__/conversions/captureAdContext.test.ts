@@ -187,6 +187,35 @@ describe("captureAdContext", () => {
       user_agent: "UA",
       source_url: expect.stringMatching(/\/enroll\/sky-2026$/),
       referrer_url: null,
+      ga_client_id: null,
+      ga_session_id: null,
+    });
+  });
+
+  describe("GA cookies", () => {
+    const gaCookies = { _ga: "GA1.1.111.222", _ga_TESTID123: "GS2.1.s333$o1$g1" };
+    const row = () => calls.find((c) => c.upsert)?.upsert?.row;
+
+    it("stores both IDs when the tenant uses GA4", async () => {
+      results.tenant_conversion_settings = { data: { tenant_id: "tenant-1", ga4_measurement_id: "G-TESTID123" } };
+      await captureAdContext(args({ cookie: cookies({ _fbp: "fb.1.1.1", ...gaCookies }) }));
+      expect(row()).toMatchObject({ ga_client_id: "111.222", ga_session_id: "333" });
+    });
+
+    it("stores a row for a buyer with only GA cookies", async () => {
+      results.tenant_conversion_settings = { data: { tenant_id: "tenant-1", ga4_measurement_id: "G-TESTID123" } };
+      await captureAdContext(args({ cookie: cookies(gaCookies) }));
+      expect(row()).toMatchObject({ fbp: null, ga_client_id: "111.222" });
+    });
+
+    it("stores no GA IDs when the tenant doesn't use GA4", async () => {
+      await captureAdContext(args({ cookie: cookies({ _fbp: "fb.1.1.1", ...gaCookies }) }));
+      expect(row()).toMatchObject({ ga_client_id: null, ga_session_id: null });
+    });
+
+    it("stores no row for GA cookies alone when the tenant doesn't use GA4", async () => {
+      await captureAdContext(args({ cookie: cookies(gaCookies) }));
+      expect(row()).toBeUndefined();
     });
   });
 

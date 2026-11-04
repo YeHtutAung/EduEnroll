@@ -83,6 +83,14 @@ describe("Privacy Policy", () => {
     expect(cookies.intro!.mm).toMatch(/ရောက်ရှိလာသော/);
   });
 
+  it("tells buyers what Google Analytics gets with a purchase", () => {
+    const sharing = PRIVACY_POLICY.sections.find((s) => s.title.en.startsWith("4."))!;
+    const google = sharing.items!.find((i) => /Google Analytics/.test(i.en))!;
+    expect(google.en).toMatch(/purchase value/);
+    expect(google.en).toMatch(/not included/);
+    expect(google.mm).toMatch(MYANMAR);
+  });
+
   it("does not claim there is no advertising tracking", () => {
     const cookies = PRIVACY_POLICY.sections.find((s) => s.title.en.startsWith("7."))!;
     expect(cookies.intro!.en).not.toMatch(/do not use advertising cookies/);

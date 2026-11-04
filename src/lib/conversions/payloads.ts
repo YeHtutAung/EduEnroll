@@ -7,7 +7,7 @@
 
 import { createHash } from "node:crypto";
 
-export type ConversionPlatform = "meta" | "tiktok";
+export type ConversionPlatform = "meta" | "tiktok" | "ga4";
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 
@@ -153,13 +153,85 @@ export function buildTiktokRequest(args: {
   };
 }
 
+export interface Ga4Purchase {
+  measurementId: string;
+  apiSecret: string;
+  validateOnly: boolean;
+  eventId: string;
+  occurredAt: string;
+  value: number;
+  currency: string;
+  clientId: string | null;
+  sessionId: string | null;
+  festivalName: string | null;
+  eventSlug: string | null;
+  items: { id: string; name: string; price: number; quantity: number }[];
+}
+
+const GA4_ORIGIN = "https://www.google-analytics.com";
+const GA4_VALIDATE_PATH = "/debug/mp/collect";
+const GA4_BACKDATE_MAX_MS = 72 * 60 * 60 * 1000;
+
+/**
+ * For a buyer with no GA cookie, so the revenue still counts. GA wants two
+ * numbers. Taken from the event hash so a retry keeps it, and so it holds nothing
+ * that leads back to the order.
+ */
+export function fallbackGaClientId(eventId: string): string {
+  const hash = sha256(eventId);
+  return `${parseInt(hash.slice(0, 8), 16)}.${parseInt(hash.slice(8, 16), 16)}`;
+}
+
+/** transaction_id is the event hash Meta also gets, never the order ref. */
+export function buildGa4Request(p: Ga4Purchase, now: number = Date.now()): PlatformRequest {
+  const occurred = new Date(p.occurredAt).getTime();
+  const url = new URL(p.validateOnly ? GA4_VALIDATE_PATH : "/mp/collect", GA4_ORIGIN);
+  url.searchParams.set("measurement_id", p.measurementId);
+  url.searchParams.set("api_secret", p.apiSecret);
+  return {
+    url: url.toString(),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      client_id: p.clientId ?? fallbackGaClientId(p.eventId),
+      // A retry keeps the time of payment, for as long as GA accepts one.
+      ...(now - occurred < GA4_BACKDATE_MAX_MS ? { timestamp_micros: occurred * 1000 } : {}),
+      events: [
+        {
+          name: "purchase",
+          params: {
+            session_id: p.sessionId ?? undefined,
+            engagement_time_msec: 1,
+            transaction_id: p.eventId,
+            value: p.value,
+            currency: p.currency,
+            festival_name: p.festivalName ?? undefined,
+            event_slug: p.eventSlug ?? undefined,
+            items: p.items.map((i) => ({
+              item_id: i.id,
+              item_name: i.name,
+              price: i.price,
+              quantity: i.quantity,
+            })),
+          },
+        },
+      ],
+    }),
+  };
+}
+
 /** For logs: the names of the buyer fields a request carries. Never their values. */
 export function describeRequest(request: PlatformRequest): string {
   const body = JSON.parse(request.body) as {
     test_event_code?: string;
-    data: { user_data?: object; user?: object }[];
+    data?: { user_data?: object; user?: object }[];
+    client_id?: string;
+    events?: { params: { session_id?: string } }[];
   };
-  const fields = Object.keys(body.data[0].user_data ?? body.data[0].user ?? {});
+  if (body.events) {
+    const fields = ["client_id", ...(body.events[0].params.session_id ? ["session_id"] : [])];
+    return `fields=${fields.join(",")} test_code=${request.url.includes(GA4_VALIDATE_PATH) ? "yes" : "no"}`;
+  }
+  const fields = Object.keys(body.data?.[0].user_data ?? body.data?.[0].user ?? {});
   return `fields=${fields.join(",")} test_code=${body.test_event_code ? "yes" : "no"}`;
 }
 
@@ -183,6 +255,17 @@ export function classifyResponse(platform: ConversionPlatform, httpStatus: numbe
     status: isRetryableStatus(httpStatus) ? "pending" : "failed",
     code: `http_${httpStatus}`,
   };
+
+  if (platform === "ga4") {
+    // The live endpoint answers 2xx with no body, even for an invalid event. Only
+    // the validation endpoint says what's wrong; keep its code, never its text.
+    const message = (body as { validationMessages?: { validationCode?: unknown }[] } | null)?.validationMessages?.[0];
+    if (message) {
+      const code = typeof message.validationCode === "string" ? message.validationCode.replace(/\W/g, "") : "unknown";
+      return { status: "failed", code: `ga4_${code}` };
+    }
+    return httpStatus >= 200 && httpStatus < 300 ? { status: "sent", code: null } : noCode;
+  }
 
   if (platform === "tiktok") {
     // Judged by the body code first. TikTok's docs conflict on HTTP status, and
