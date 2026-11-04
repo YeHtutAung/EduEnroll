@@ -70,6 +70,26 @@ export function cleanReferrerOrigin(value: string | null | undefined): string | 
   }
 }
 
+export const GA_CLIENT_COOKIE = "_ga";
+
+/** The session cookie is named after the GA4 property: G-ABC123 uses _ga_ABC123. */
+export function gaSessionCookieName(measurementId: string): string {
+  return `_ga_${measurementId.replace(/^G-/, "")}`;
+}
+
+// Google doesn't document these cookies' format, so anything unexpected reads as
+// no ID: the purchase then goes out under the fallback ID, not a wrong one.
+
+/** `123.456` from a `_ga` cookie such as `GA1.1.123.456`. */
+export function parseGaClientId(raw: string | null | undefined): string | null {
+  return /^GA\d+\.\d+(?:-\d+)?\.(\d+\.\d+)$/.exec(raw ?? "")?.[1] ?? null;
+}
+
+/** The session number from `GS2.1.s123$o1…` or the older `GS1.1.123.1…`. */
+export function parseGaSessionId(raw: string | null | undefined): string | null {
+  return /^GS\d+\.\d+\.s?(\d+)(?:[$.]|$)/.exec(raw ?? "")?.[1] ?? null;
+}
+
 export function buildFbc(fbclid: string, capturedAtMs: number): string {
   return `fb.1.${capturedAtMs}.${fbclid}`;
 }
