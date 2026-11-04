@@ -242,6 +242,10 @@ export const PRIVACY_POLICY: LegalDocumentData = {
           mm: "ပလက်ဖောင်း လည်ပတ်ရန် ကူညီသော ဝန်ဆောင်မှုပေးသူများ (Supabase, Vercel, Resend) ထံ — တင်းကျပ်သော ဒေတာ စီမံဆောင်ရွက်မှု သဘောတူညီချက်များဖြင့်",
         },
         {
+          en: "With Google Analytics when an event organiser uses purchase tracking: your purchase value, the tickets you bought and your analytics browser and session identifiers, so the organiser can measure its sales. Your name, email, phone and order reference are not included",
+          mm: "ပွဲစီစဉ်သူက ဝယ်ယူမှုခြေရာခံခြင်းကို အသုံးပြုပါက Google Analytics ထံ — ပွဲစီစဉ်သူက ၎င်း၏ရောင်းအားကို တိုင်းတာနိုင်ရန် သင့်ဝယ်ယူမှုတန်ဖိုး၊ သင်ဝယ်ယူသော လက်မှတ်များနှင့် browser နှင့် session ခွဲခြမ်းစိတ်ဖြာရေး အမှတ်အသားများကို ပေးပို့ပါသည်။ သင့်အမည်၊ အီးမေးလ်၊ ဖုန်းနံပါတ်နှင့် မှာယူမှုအမှတ်ကို မပေးပို့ပါ",
+        },
+        {
           en: "With Facebook/Meta when you use the Messenger bot integration — governed by Meta's own Privacy Policy",
           mm: "Messenger bot ကို အသုံးပြုပါက Facebook/Meta ထံ — Meta ၏ ကိုယ်ပိုင် ကိုယ်ရေးအချက်အလက်မူဝါဒဖြင့် ထိန်းချုပ်ပါသည်",
         },

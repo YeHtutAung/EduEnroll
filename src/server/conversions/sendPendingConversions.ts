@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
+  buildGa4Request,
   buildMetaRequest,
   buildTiktokRequest,
   classifyResponse,
@@ -28,6 +29,7 @@ interface Settings {
   config_id: string;
   meta_pixel_id: string | null;
   tiktok_pixel_code: string | null;
+  ga4_measurement_id?: string | null;
 }
 interface ContextIds {
   fbp: string | null;
@@ -55,6 +57,8 @@ export function decideRow(
 ): "send" | "skip" {
   if (!enrollment || enrollment.status !== "confirmed" || enrollment.internal_test_at) return "skip";
   if (!settings || !settings.enabled) return "skip";
+  // Sales count in GA4 even with no ad data: it falls back to an anonymous ID.
+  if (platform === "ga4") return settings.ga4_measurement_id ? "send" : "skip";
   if (!context) return "skip";
   if (platform === "meta") return settings.meta_pixel_id && (context.fbp || context.fbc) ? "send" : "skip";
   return settings.tiktok_pixel_code && (context.ttclid || context.ttp) ? "send" : "skip";
@@ -82,6 +86,60 @@ async function post(request: PlatformRequest, platform: ConversionPlatform): Pro
   }
 }
 
+type Ga4Order = {
+  items: { id: string; name: string; price: number; quantity: number }[];
+  festivalName: string | null;
+  eventSlug: string | null;
+};
+type ClassInfo = { level: string; intakes: { name: string | null; slug: string | null } | null } | null;
+
+/**
+ * The tickets, as the same IDs, names and prices the event page reports in
+ * view_item and begin_checkout. A cart order has item rows; a single-ticket order
+ * may only have class_id. Null when a read failed, so the row stays pending.
+ */
+async function readGa4Order(
+  supabase: ReturnType<typeof createAdminClient>,
+  enrollmentId: string,
+  enrollment: { class_id?: string | null; quantity?: number | null } | null,
+): Promise<Ga4Order | null> {
+  const { data: rows, error } = (await supabase
+    .from("enrollment_items")
+    .select("class_id, quantity, fee_amount, classes(level, intakes(name, slug))")
+    .eq("enrollment_id", enrollmentId)) as unknown as {
+    data: { class_id: string; quantity: number; fee_amount: number; classes: ClassInfo }[] | null;
+    error: DbError;
+  };
+  if (error) return null;
+
+  let lines = (rows ?? []).map((r) => ({
+    id: r.class_id,
+    price: r.fee_amount,
+    quantity: r.quantity,
+    info: r.classes,
+  }));
+  if (lines.length === 0 && enrollment?.class_id) {
+    const { data: cls, error: clsError } = (await supabase
+      .from("classes")
+      .select("id, level, fee_amount, intakes(name, slug)")
+      .eq("id", enrollment.class_id)
+      .maybeSingle()) as unknown as {
+      data: { id: string; level: string; fee_amount: number; intakes: NonNullable<ClassInfo>["intakes"] } | null;
+      error: DbError;
+    };
+    if (clsError) return null;
+    if (cls) {
+      lines = [{ id: cls.id, price: cls.fee_amount, quantity: enrollment.quantity ?? 1, info: cls }];
+    }
+  }
+
+  return {
+    items: lines.map((l) => ({ id: l.id, name: l.info?.level ?? l.id, price: l.price, quantity: l.quantity })),
+    festivalName: lines[0]?.info?.intakes?.name ?? null,
+    eventSlug: lines[0]?.info?.intakes?.slug ?? null,
+  };
+}
+
 async function run(enrollmentId: string, pastDeadline: () => boolean): Promise<void> {
   const supabase = createAdminClient();
   const table = () => supabase.from("conversion_events" as never);
@@ -103,7 +161,7 @@ async function run(enrollmentId: string, pastDeadline: () => boolean): Promise<v
 
   const { data: settings, error: settingsError } = (await supabase
     .from("tenant_conversion_settings" as never)
-    .select("enabled, config_id, meta_pixel_id, tiktok_pixel_code")
+    .select("enabled, config_id, meta_pixel_id, tiktok_pixel_code, ga4_measurement_id")
     .eq("tenant_id", pending[0].tenant_id)
     .maybeSingle()) as unknown as { data: Settings | null; error: DbError };
   if (settingsError) {
@@ -161,15 +219,26 @@ async function run(enrollmentId: string, pastDeadline: () => boolean): Promise<v
     { data: enrollment, error: enrollmentError },
     { data: context, error: contextError },
   ] = (await Promise.all([
-    supabase.from("enrollments").select("status, internal_test_at, email, phone").eq("id", enrollmentId).maybeSingle(),
+    supabase
+      .from("enrollments")
+      .select("status, internal_test_at, email, phone, class_id, quantity")
+      .eq("id", enrollmentId)
+      .maybeSingle(),
     supabase
       .from("enrollment_ad_context" as never)
-      .select("fbp, fbc, ttp, ttclid, client_ip, user_agent, source_url, referrer_url")
+      .select("fbp, fbc, ttp, ttclid, client_ip, user_agent, source_url, referrer_url, ga_client_id, ga_session_id")
       .eq("enrollment_id", enrollmentId)
       .maybeSingle(),
   ])) as unknown as [
     {
-      data: { status: string; internal_test_at: string | null; email: string | null; phone: string | null } | null;
+      data: {
+        status: string;
+        internal_test_at: string | null;
+        email: string | null;
+        phone: string | null;
+        class_id: string | null;
+        quantity: number | null;
+      } | null;
       error: DbError;
     },
     {
@@ -179,6 +248,8 @@ async function run(enrollmentId: string, pastDeadline: () => boolean): Promise<v
             user_agent: string | null;
             source_url: string;
             referrer_url: string | null;
+            ga_client_id: string | null;
+            ga_session_id: string | null;
           })
         | null;
       error: DbError;
@@ -190,6 +261,16 @@ async function run(enrollmentId: string, pastDeadline: () => boolean): Promise<v
       enrollmentError?.code ?? contextError?.code ?? "unknown",
     );
     return;
+  }
+
+  // Only when a GA4 row will go out. Before claiming, for the reason above.
+  let ga4Order: Ga4Order | null = null;
+  if (candidates.some(({ row }) => decideRow(row.platform, settings, enrollment, context) === "send" && row.platform === "ga4")) {
+    ga4Order = await readGa4Order(supabase, enrollmentId, enrollment);
+    if (!ga4Order) {
+      console.error("[conversions] order read failed:", "ga4_items");
+      return;
+    }
   }
 
   const claimed: typeof candidates = [];
@@ -210,10 +291,32 @@ async function run(enrollmentId: string, pastDeadline: () => boolean): Promise<v
     if (claimError) console.error("[conversions] claim failed:", claimError.code ?? "unknown");
     else if (won && won.length > 0) claimed.push(candidate);
   }
-  if (claimed.length === 0 || !context || !settings || pastDeadline()) return;
+  if (claimed.length === 0 || !settings || pastDeadline()) return;
 
   await Promise.all(
     claimed.map(async ({ row, token, testCode }) => {
+      if (row.platform === "ga4") {
+        const request = buildGa4Request({
+          measurementId: settings.ga4_measurement_id!,
+          apiSecret: token,
+          validateOnly: testCode !== null,
+          eventId: row.event_id,
+          occurredAt: row.occurred_at,
+          value: Number(row.value),
+          currency: row.currency,
+          clientId: context?.ga_client_id ?? null,
+          sessionId: context?.ga_session_id ?? null,
+          festivalName: ga4Order?.festivalName ?? null,
+          eventSlug: ga4Order?.eventSlug ?? null,
+          items: ga4Order?.items ?? [],
+        });
+        const outcome = await post(request, row.platform);
+        console.log(`[conversions] ${row.platform} ${outcome.status} ${describeRequest(request)}`);
+        await finish(row.id, row.attempts + 1, outcome.status, outcome.code);
+        return;
+      }
+      // decideRow skips Meta and TikTok rows that have no ad data.
+      if (!context) return;
       const event = {
         // Hashed here and never stored: a retry reads them from the order again.
         hashedEmail: hashEmail(enrollment?.email),
