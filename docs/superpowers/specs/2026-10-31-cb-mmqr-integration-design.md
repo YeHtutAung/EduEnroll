@@ -82,7 +82,7 @@ Source: CB's PDF (not in the repo) and CB's email of 2026-10-29.
 | `src/app/api/public/payments/cbmmqr/route.ts` | `POST` — create the QR. |
 | `src/app/api/public/payments/cbmmqr/status/route.ts` | `GET` — browser poller. |
 | `src/app/api/webhooks/cbmmqr/route.ts` | `POST` — callback receiver. |
-| `src/components/payments/CbMmqrCard.tsx` | CB's WebFrame card (§7.1). |
+| `src/components/payments/CbMmqrCard.tsx` | CB's WebFrame card (§7.1), with two owner changes on 2026-11-04: receiver and amount centred, and CB's icon at the QR centre (level H, QR drawn at 840px). |
 
 ### 4.2 Modified files
 
@@ -448,8 +448,8 @@ CBMMQR_<ID>_API_KEY=         # optional; leave empty (CB issues none). If set, c
 CB requires its WebFrame layout (email of 2026-10-29). From CB's sample page and UI guideline:
 
 - full-width MyanmarPay banner (yellow rule, logo and "MyanmarPay" wordmark), not cropped;
-- receiver name and amount left-aligned at a 12.5% inset, currency after the amount, amount
-  with two decimals (`100,000.00`);
+- receiver name and amount centred (owner, 2026-11-04; CB's sample left-aligns them at a 12.5%
+  inset), currency after the amount, amount with two decimals (`100,000.00`);
 - yellow `#FBD913` dotted rule across the full width;
 - "MMQR" centred, **black**;
 - QR at 80% of the card width; CB Bank logo at 20% width, centred below it;
@@ -457,7 +457,10 @@ CB requires its WebFrame layout (email of 2026-10-29). From CB's sample page and
 - Arial (the sample uses Calibri; CB's guideline says Arial);
 - 20:29 (the guideline) with its own vertical layout — `MmqrCard`'s spacing does not fit an
   80% QR;
-- no mark in the centre of the QR; QR at least 0.6 inches; no account numbers on the card.
+- CB's icon in the middle of the QR (owner, 2026-11-04). MMQR's guideline, page 13, offers a
+  logo in the middle, icon only and not so large that it disrupts the QR, or at the centre
+  bottom. We show both; CB's sample has only the bottom one. QR at least 0.6 inches; no
+  account numbers on the card.
 
 `MmqrCard` is unchanged.
 

@@ -96,6 +96,17 @@
     2026-11-04).
   - UAT payment: CB will provide a CB Pay UAT wallet app, or its team can scan
     our QR. It cannot trigger a callback without a real scan (CB, 2026-11-04).
+  - UAT paid test, 2026-11-04: paid through the CB Pay wallet ("CB OI"), status
+    `0008` then `0000`, settled by the page's status check, ticket issued. Paid
+    twice, the second time with a centre logo that still included the name. Other routes failed
+    on CB's side: `ACCOUNT RECORD MISSING` from a non-wallet account, and `0007`
+    (merchant name mismatch) through "AB OI". **CB's callback was not received
+    for any payment**, so a buyer who closes the page is not settled yet.
+  - QR card: title and amount centred, CB's icon at the QR centre as well as
+    the logo below it. Both differ from CB's sample, by the owner's decision.
+    MMQR's guideline (page 13) allows a centre logo as an icon only, or a logo
+    at the centre bottom. The card still needs CB's and the Central Bank's
+    approval (gate G4).
   - UAT status check, 2026-11-03: an unpaid QR returns `0006` "Waiting for
     payment."; an expired QR returns `0005` "Dynamic QR time is expire!"; an
     unknown QR returns `0026`. CB has not confirmed in writing that `0005` is
