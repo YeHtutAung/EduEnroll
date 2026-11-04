@@ -7,6 +7,7 @@ import { verifyStripeReturn } from "@/lib/payments/verifyStripeReturn";
 import { formatCurrencySimple, formatAmount } from "@/lib/utils";
 import QRPaymentModal from "@/components/payments/QRPaymentModal";
 import PayNowQrSaveButton from "@/components/payments/PayNowQrSaveButton";
+import ETicketEmailNotice from "@/components/payments/ETicketEmailNotice";
 import BrandHeader from "@/components/enrollment/BrandHeader";
 import { OrderItemAmount } from "@/components/payments/OrderItemAmount";
 import html2canvas from "html2canvas";
@@ -1682,6 +1683,10 @@ export default function PaymentInstructionsPage() {
               <div className="mt-2">
                 <CopyButton text={enrollment.enrollment_ref} />
               </div>
+              <ETicketEmailNotice
+                orgType={enrollment.org_type}
+                ticketCount={ticketFetch?.state === "loaded" ? ticketFetch.tickets.length : null}
+              />
             </div>
 
             {/* Order items */}
