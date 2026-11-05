@@ -1,6 +1,7 @@
 "use client";
 
 import { isLinkOnlyTier } from "@/lib/interest/priorityUnlock";
+import { readableTextColor } from "@/lib/readableText";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
 import QRCode from "qrcode";
@@ -2370,8 +2371,8 @@ export default function PaymentInstructionsPage() {
                 </div>
                 <a
                   href={`/enroll/${encodeURIComponent(enrollment.intake_slug!)}`}
-                  className="rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-colors"
-                  style={{ backgroundColor: primaryColor }}
+                  className="rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors"
+                  style={{ backgroundColor: primaryColor, color: readableTextColor(primaryColor) }}
                 >
                   {orgType === "event" ? "Get Tickets" : "Enroll"}
                 </a>
