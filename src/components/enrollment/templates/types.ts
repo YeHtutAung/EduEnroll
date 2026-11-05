@@ -136,6 +136,22 @@ export function fmtDate(iso: string, opts?: Intl.DateTimeFormatOptions) {
   return new Date(iso).toLocaleDateString("en-GB", opts ?? { day: "numeric", month: "short", year: "numeric" });
 }
 
+/**
+ * An event's date, or "start – end" when it runs past its start date.
+ *
+ * The end date is `classes.end_time`: migration 031 made that column a DATE and
+ * the admin form labels it "End Date". An end on or before the start shows the
+ * start alone, so a mistyped end date never prints a backwards range.
+ */
+export function fmtEventDates(
+  start: string,
+  end: string | null | undefined,
+  opts: Intl.DateTimeFormatOptions,
+) {
+  const fmt = (date: string) => new Date(`${date}T00:00:00`).toLocaleDateString("en-GB", opts);
+  return end && end > start ? `${fmt(start)} – ${fmt(end)}` : fmt(start);
+}
+
 export const LEVEL_COLORS: Record<string, string> = {
   N5: "bg-emerald-100 text-emerald-800",
   N4: "bg-blue-100 text-blue-800",
