@@ -19,6 +19,12 @@ vi.mock("@/server/tickets/eticketEmailAttachment", () => ({
   buildEticketEmailAttachment: (...args: unknown[]) => mockBuildEticketEmailAttachment(...args),
 }));
 
+const mockLoadEventEmailTerms = vi.fn().mockResolvedValue(null);
+
+vi.mock("@/server/notifications/eventEmailTerms", () => ({
+  loadEventEmailTerms: (...args: unknown[]) => mockLoadEventEmailTerms(...args),
+}));
+
 const mockSendSms = vi.fn().mockResolvedValue(true);
 
 vi.mock("@/lib/sms", () => ({
@@ -80,6 +86,7 @@ describe("dispatchPaymentApproved", () => {
     mockSendEmail.mockResolvedValue(true);
     mockEnrollmentApprovedEmail.mockReturnValue({ subject: "Approved", html: "<p>ok</p>" });
     mockBuildEticketEmailAttachment.mockResolvedValue(null);
+    mockLoadEventEmailTerms.mockResolvedValue("Non-Refundable.");
     mockSendSms.mockResolvedValue(true);
     mockSendStatusNotification.mockResolvedValue(true);
     mockSendTelegramStatusNotification.mockResolvedValue(true);
@@ -107,10 +114,12 @@ describe("dispatchPaymentApproved", () => {
       classLevel: "N5",
       statusUrl: "https://example.com/status/NM-2026-0001",
       feeFormatted: "50,000 MMK",
+      eventTerms: "Non-Refundable.",
       orgType: "language_school",
       tenantName: "Nihon Moment",
       logoUrl: undefined,
     });
+    expect(mockLoadEventEmailTerms).toHaveBeenCalledWith("enroll-1");
   });
 
   it("calls sendEmail with the email address and template output", async () => {

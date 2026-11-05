@@ -6,6 +6,7 @@ import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
 import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils";
 import { sendSms } from "@/lib/sms";
 import { buildEticketEmailAttachment } from "@/server/tickets/eticketEmailAttachment";
+import { loadEventEmailTerms } from "@/server/notifications/eventEmailTerms";
 import { loadPartialPayment } from "@/server/payments/partialPayment";
 
 /**
@@ -182,6 +183,7 @@ export async function notifyEnrollmentConfirmed(enrollmentId: string): Promise<v
       platformFeeFormatted,
       totalPaidFormatted,
       ticketCount,
+      eventTerms: await loadEventEmailTerms(enrollmentId),
       orgType: tenantInfo?.org_type,
       tenantName: tenantInfo?.name,
       logoUrl: tenantInfo?.logo_url ?? undefined,
