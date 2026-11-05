@@ -133,6 +133,8 @@ beforeEach(() => {
   historyServed = false;
   process.env.STRIPE_SALES_OPEN = "true";
   delete process.env.STRIPE_SMOKE_REFS;
+  // The CB route checks its gateway settings before it claims a row.
+  process.env.CBMMQR_BASE_URL = "https://cbgw.test/api";
 });
 
 describe.each(Object.keys(ROUTES))("%s top-up", (route) => {

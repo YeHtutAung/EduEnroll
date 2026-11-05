@@ -234,7 +234,8 @@ columns) and `20261030120000_kbzpay_per_tenant_merchants.sql` (pin, locking, gra
 3. Compute the fee exactly as the KBZPay route (cart items or class × quantity, minus
    `received_amount`, plus the platform fee). **Below 1,000 → 422 `below_minimum`**, no row,
    no CB call.
-4. Claim the slot (step 5), then load the **pinned** merchant's config (§6) before any
+4. A bad gateway setting (`CBMMQR_BASE_URL`, `CBMMQR_PROXY_URL`, `CBMMQR_UTC_OFFSET`) → 503
+   before any row exists. Claim the slot (step 5), then load the **pinned** merchant's config (§6) before any
    branch, reuse included: no assignment (`no_merchant`) → 503; config missing or invalid →
    503 with no CB call, and a row this request just created is marked `FAILED` so it does
    not hold the slot (a reused or unresolved row is left untouched).

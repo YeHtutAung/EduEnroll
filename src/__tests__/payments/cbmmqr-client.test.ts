@@ -89,7 +89,8 @@ describe("currencyFromCb", () => {
   });
 });
 
-const { createDynamicQr, checkStatus, __resetTokenCacheForTests } = await import("@/lib/cbmmqr");
+const cbmmqr = await import("@/lib/cbmmqr");
+const { createDynamicQr, checkStatus, __resetTokenCacheForTests } = cbmmqr;
 
 const MERCHANT = {
   id: "YOUNGMONEY", userId: "ym-user", password: "ym-password", sourceId: "ym-source",
@@ -313,6 +314,40 @@ describe("checkStatus", () => {
     expect(await checkStatus(MERCHANT, "QR-1")).toEqual({ kind: "unreachable" });
     answers.status = [{ body: { message: "?" } }];
     expect(await checkStatus(MERCHANT, "QR-1")).toEqual({ kind: "unreachable" });
+  });
+});
+
+describe("assertCbGatewayConfig", () => {
+  const { assertCbGatewayConfig } = cbmmqr;
+
+  afterEach(() => { delete process.env.CBMMQR_UTC_OFFSET; });
+
+  it("passes on a good configuration and calls nothing", () => {
+    expect(() => assertCbGatewayConfig()).not.toThrow();
+    expect(calls).toHaveLength(0);
+  });
+
+  it.each([
+    ["a missing base URL", () => { delete process.env.CBMMQR_BASE_URL; }, /CBMMQR_BASE_URL/],
+    ["a base URL that does not parse", () => { process.env.CBMMQR_BASE_URL = "not a url"; }, /CBMMQR_BASE_URL/],
+    ["plaintext in production mode", () => {
+      process.env.CBMMQR_MODE = "production";
+      process.env.CBMMQR_BASE_URL = "http://cbgw.test/api";
+    }, /https/],
+    ["a malformed UTC offset", () => { process.env.CBMMQR_UTC_OFFSET = "Asia/Yangon"; }, /CBMMQR_UTC_OFFSET/],
+  ])("throws on %s", (_n, arrange, message) => {
+    arrange();
+    expect(() => assertCbGatewayConfig()).toThrow(message);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("throws on a bad proxy URL without repeating it", async () => {
+    process.env.CBMMQR_PROXY_URL = "http://u:sekret@host:99999";
+    vi.resetModules(); // the dispatcher is cached per module instance
+    try {
+      const fresh = await import("@/lib/cbmmqr");
+      expect(() => fresh.assertCbGatewayConfig()).toThrow("CBMMQR_PROXY_URL is not a valid proxy URL");
+    } finally { delete process.env.CBMMQR_PROXY_URL; }
   });
 });
 

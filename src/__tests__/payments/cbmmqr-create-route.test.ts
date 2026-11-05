@@ -9,6 +9,7 @@ import { NextRequest } from "next/server";
 //   - a live QR is never replaced unless resolveCbmmqrOrder says retire
 
 Object.assign(process.env, {
+  CBMMQR_BASE_URL: "https://cbgw.test/api",
   CBMMQR_YOUNGMONEY_USER_ID: "u", CBMMQR_YOUNGMONEY_PASSWORD: "p", CBMMQR_YOUNGMONEY_SOURCE_ID: "s",
   CBMMQR_YOUNGMONEY_MERCHANT_ID: "M0001", CBMMQR_YOUNGMONEY_TERMINAL_ID: "T0001", CBMMQR_YOUNGMONEY_API_KEY: "k",
   CBMMQR_OTHER_USER_ID: "u2", CBMMQR_OTHER_PASSWORD: "p2", CBMMQR_OTHER_SOURCE_ID: "s2",
@@ -344,6 +345,32 @@ describe("CB's answer", () => {
       expect(mockCreate).not.toHaveBeenCalled();
     } finally {
       delete process.env.CBMMQR_MODE;
+      spy.mockRestore();
+    }
+  });
+
+  it.each([
+    ["a missing base URL", "CBMMQR_BASE_URL", undefined],
+    ["a base URL that does not parse", "CBMMQR_BASE_URL", "not a url"],
+    ["a malformed UTC offset", "CBMMQR_UTC_OFFSET", "Asia/Yangon"],
+  ])("%s: 503 before any row or CB call, naming the variable only in the log", async (_n, name, value) => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const saved = process.env[name];
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+    try {
+      const res = await POST(req());
+      const body = await res.json();
+      expect(res.status).toBe(503);
+      expect(body.message).toMatch(/not available/);
+      expect(JSON.stringify(body)).not.toContain("CBMMQR");
+      expect(spy.mock.calls.flat().join(" ")).toContain(name);
+      expect(rpcCalls).toHaveLength(0);
+      expect(paymentUpdates).toHaveLength(0);
+      expect(mockCreate).not.toHaveBeenCalled();
+    } finally {
+      if (saved === undefined) delete process.env[name];
+      else process.env[name] = saved;
       spy.mockRestore();
     }
   });

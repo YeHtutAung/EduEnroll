@@ -185,6 +185,22 @@ describe("the token request fails, so CB was never asked to create a QR", () => 
   });
 });
 
+describe("the gateway configuration is broken", () => {
+  it("leaves no row, so fixing it lets the next press through", async () => {
+    delete process.env.CBMMQR_BASE_URL;
+    const first = await press();
+    expect(first.status).toBe(503);
+    expect(payments).toEqual([]);
+
+    process.env.CBMMQR_BASE_URL = "https://cbgw.test/api";
+    tokenAnswers = [tokenBody];
+    createAnswers = [qrBody];
+    const second = await press();
+    expect(second.status).toBe(200);
+    expect(second.body).toMatchObject({ status: "created", qr: "000201QR" });
+  });
+});
+
 describe("the request to create a QR was sent and no answer came back", () => {
   beforeEach(() => {
     tokenAnswers = [tokenBody];

@@ -255,6 +255,17 @@ function egressDispatcher(): ProxyAgent | Agent {
   return cachedProxy ?? ipv4Agent;
 }
 
+/**
+ * Throws on any setting the calls below would throw on. For use before a payment
+ * row exists: thrown mid-request, these would leave that row holding the slot.
+ * Errors name the variable, never its value.
+ */
+export function assertCbGatewayConfig(): void {
+  baseUrl();
+  egressDispatcher();
+  utcOffset();
+}
+
 const CALL_TIMEOUT_MS = 20_000;
 const MIN_CALL_MS = 1_000;
 

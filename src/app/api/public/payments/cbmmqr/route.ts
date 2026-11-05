@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import {
+  assertCbGatewayConfig,
   buildReferenceNo,
   createDynamicQr,
   getCbMerchant,
@@ -202,6 +203,14 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     console.error(`[cbmmqr] config error for ${enrollment.enrollment_ref}: ${err instanceof Error ? err.message : err}`);
     return gatewayError();
+  }
+  // So is a bad gateway setting: thrown after the claim, it would leave a PENDING
+  // row blocking this buyer even though CB was never called.
+  try {
+    assertCbGatewayConfig();
+  } catch (err) {
+    console.error(`[cbmmqr] gateway config error for ${enrollment.enrollment_ref}: ${err instanceof Error ? err.message : err}`);
+    return notConfigured();
   }
 
   const deadline = enrollmentDeadline(tenant.auto_cancel_hours, enrollment.enrolled_at);
