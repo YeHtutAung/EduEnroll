@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { EventTemplateProps, TemplateClass } from "./types";
-import { cartTicketCount, getCardState, fmtDate } from "./types";
+import { cartTicketCount, getCardState, fmtDate, fmtEventDates } from "./types";
 import PackBadge from "./PackBadge";
 import { eventFontCssUrl, eventFontStyle } from "@/lib/eventFont";
 
@@ -81,7 +81,7 @@ function TicketCard({
 
         {cls.event_date && (
           <p className="text-xs text-white/40 mb-4">
-            {fmtDate(cls.event_date, { weekday: "short", day: "numeric", month: "short" })}
+            {fmtEventDates(cls.event_date, cls.end_time, { weekday: "short", day: "numeric", month: "short" })}
             {cls.start_time && ` · ${cls.start_time}`}
             {cls.venue && ` · ${cls.venue}`}
           </p>

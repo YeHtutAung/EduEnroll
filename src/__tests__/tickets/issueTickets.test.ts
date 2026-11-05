@@ -25,6 +25,7 @@ let classesData: {
   level: string;
   intake_id: string;
   event_date: string | null;
+  end_time?: string | null;
   // Optional: fixtures without it exercise the pre-package default of 1.
   pack_size?: number | null;
 }[] = [];
@@ -142,6 +143,33 @@ describe("issueTicketsForEnrollment", () => {
       expect(row.exp).toMatch(ISO_RE);
     }
     expect(rows.map((r) => r.seat_no)).toEqual([1, 2]);
+  });
+
+  it("expires a multi-day ticket at the end of the event's last date", async () => {
+    ticketsCount = 0;
+    enrollmentData = { id: "e1", tenant_id: "t1", class_id: "c1", quantity: 1, status: "confirmed" };
+    classesData = [
+      { id: "c1", level: "All Day", intake_id: "i1", event_date: "2026-11-21", end_time: "2026-11-24" },
+    ];
+
+    await issueTicketsForEnrollment("e1");
+
+    const rows = mockUpsert.mock.calls[0][0] as Record<string, unknown>[];
+    // 23:59:59 on 24 Nov in Asia/Yangon (UTC+6:30).
+    expect(rows[0].exp).toBe("2026-11-24T17:29:59.000Z");
+  });
+
+  it("expires a same-day ticket at the end of that date", async () => {
+    ticketsCount = 0;
+    enrollmentData = { id: "e1", tenant_id: "t1", class_id: "c1", quantity: 1, status: "confirmed" };
+    classesData = [
+      { id: "c1", level: "Day 1", intake_id: "i1", event_date: "2026-11-21", end_time: "2026-11-21" },
+    ];
+
+    await issueTicketsForEnrollment("e1");
+
+    const rows = mockUpsert.mock.calls[0][0] as Record<string, unknown>[];
+    expect(rows[0].exp).toBe("2026-11-21T17:29:59.000Z");
   });
 
   it("materializes tickets per class line for a cart enrollment", async () => {

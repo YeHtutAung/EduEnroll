@@ -24,7 +24,25 @@ function getOffsetMs(date: Date, tz: string): number {
   return asUTC - date.getTime();
 }
 
-// Returns Unix seconds for 23:59:59 on event_date in the given IANA tz.
+// The date an event finishes. The end date lives in classes.end_time, a DATE
+// since migration 031. An end on or before the start, or an end with no start,
+// is ignored. Both are YYYY-MM-DD, so they compare as strings.
+export function lastEventDate(eventDate: string | null, endDate: string | null | undefined): string | null {
+  if (!eventDate) return null;
+  return endDate && endDate > eventDate ? endDate : eventDate;
+}
+
+// Today as YYYY-MM-DD in the given IANA tz, not the server's UTC date.
+export function todayInTz(tz: string, now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
+
+// Returns Unix seconds for 23:59:59 on the given date in the given IANA tz.
 export function ticketExpiry(eventDate: string | null, tz: string): number {
   if (!eventDate) return Math.floor(Date.now() / 1000) + 365 * 24 * 3600;
   // Build the local wall-clock end-of-day, then find its UTC instant for `tz`.

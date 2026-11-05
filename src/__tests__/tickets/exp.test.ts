@@ -1,5 +1,30 @@
 import { describe, it, expect } from "vitest";
-import { ticketExpiry } from "@/lib/tickets/exp";
+import { lastEventDate, ticketExpiry, todayInTz } from "@/lib/tickets/exp";
+
+describe("todayInTz", () => {
+  it("uses the event's date, not UTC's, around midnight", () => {
+    // 00:30 on 22 Nov in Yangon (UTC+6:30) is still 21 Nov in UTC.
+    expect(todayInTz("Asia/Yangon", new Date("2026-11-21T18:00:00Z"))).toBe("2026-11-22");
+    expect(todayInTz("Asia/Yangon", new Date("2026-11-21T17:00:00Z"))).toBe("2026-11-21");
+  });
+});
+
+describe("lastEventDate", () => {
+  it("is the end date when the event runs past its start date", () => {
+    expect(lastEventDate("2026-11-21", "2026-11-24")).toBe("2026-11-24");
+  });
+  it.each([
+    ["the same as the start", "2026-11-21"],
+    ["before the start", "2026-11-20"],
+    ["missing", null],
+    ["undefined", undefined],
+  ])("is the start date when the end date is %s", (_label, end) => {
+    expect(lastEventDate("2026-11-21", end)).toBe("2026-11-21");
+  });
+  it("stays null without a start date, so an undated ticket keeps its long expiry", () => {
+    expect(lastEventDate(null, "2026-11-24")).toBeNull();
+  });
+});
 
 describe("ticketExpiry", () => {
   it("returns end-of-event-day epoch seconds in the event tz", () => {
