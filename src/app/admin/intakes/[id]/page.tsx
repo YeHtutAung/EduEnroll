@@ -176,8 +176,8 @@ function EditClassModal({
   function handleEmailImageChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] ?? null;
     if (!file) return;
-    // A higher limit than the ticket image: this one is always converted to a
-    // small JPEG before upload, and event posters arrive at 7-9 MB.
+    // This one is always converted to a small JPEG before upload, and event
+    // posters arrive at 7-9 MB.
     if (file.size > 20 * 1024 * 1024) { toast.error("Image must be under 20 MB."); return; }
     setEmailImageFile(file);
     setEmailImagePreview(URL.createObjectURL(file));
@@ -193,7 +193,9 @@ function EditClassModal({
   function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] ?? null;
     if (!file) return;
-    if (file.size > 5 * 1024 * 1024) { toast.error("Image must be under 5 MB."); return; }
+    // The picked file may be large, but downscaleImage shrinks it before upload.
+    // The class-images bucket still refuses anything over 5 MB after that.
+    if (file.size > 20 * 1024 * 1024) { toast.error("Image must be under 20 MB."); return; }
     setImageFile(file);
     setImagePreview(URL.createObjectURL(file));
     setRemoveImageFlag(false);
@@ -551,7 +553,7 @@ function EditClassModal({
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
                 </svg>
-                Upload image (max 5 MB)
+                Upload image (max 20 MB)
                 <input
                   type="file"
                   accept="image/jpeg,image/png,image/webp"
@@ -675,7 +677,9 @@ function AddCustomClassModal({
   function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] ?? null;
     if (!file) { setImageFile(null); setImagePreview(null); return; }
-    if (file.size > 5 * 1024 * 1024) { toast.error("Image must be under 5 MB."); return; }
+    // The picked file may be large, but downscaleImage shrinks it before upload.
+    // The class-images bucket still refuses anything over 5 MB after that.
+    if (file.size > 20 * 1024 * 1024) { toast.error("Image must be under 20 MB."); return; }
     setImageFile(file);
     setImagePreview(URL.createObjectURL(file));
   }
@@ -925,7 +929,7 @@ function AddCustomClassModal({
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
                 </svg>
-                Upload image (max 5 MB)
+                Upload image (max 20 MB)
                 <input
                   type="file"
                   accept="image/jpeg,image/png,image/webp"
