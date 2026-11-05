@@ -13,7 +13,7 @@ import {
   EvCorporateTemplate,
 } from "@/components/enrollment/templates";
 import type { TemplateProps, EventTemplateProps } from "@/components/enrollment/templates";
-import { applyPriorityUnlock, capturePriorityToken, hideLinkOnlyTiers, isLinkOnlyTier } from "@/lib/interest/priorityUnlock";
+import { applyPriorityUnlock, capturePriorityToken, hideLinkOnlyTiers, isLinkOnlyTier, onlyUnlockedLinkTiers } from "@/lib/interest/priorityUnlock";
 import { readableTextColor } from "@/lib/readableText";
 import { beginCheckoutPayload, claimNavigation, hardNavigate, pushDataLayer, viewItemPayload } from "@/lib/tagManager";
 
@@ -427,7 +427,7 @@ function IntakeLandingContent() {
     coveredClassIds: data.priority_covered_class_ids ?? [],
     token: priorityToken,
   });
-  const allClasses = hideLinkOnlyTiers(unlockedClasses);
+  const allClasses = onlyUnlockedLinkTiers(hideLinkOnlyTiers(unlockedClasses));
 
   const classes = levelFilter ? allClasses.filter((c) => c.level === levelFilter) : allClasses;
   const tl = data.labels ?? DEFAULT_LABELS;
