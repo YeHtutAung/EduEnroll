@@ -139,3 +139,35 @@ export function applyPriorityUnlock<T extends Pick<TemplateClass, "id">>(
   const covered = new Set(opts.coveredClassIds);
   return classes.map((c) => (covered.has(c.id) ? { ...c, priority_unlocked: true } : c));
 }
+
+/**
+ * A tier that closes no later than it opens has no public sale at all: only
+ * priority link holders can ever buy it. An organiser sets this up on purpose,
+ * for example a pre-registration price for invitees only.
+ *
+ * A missing or unparseable date is never treated as link-only, so bad data
+ * cannot make a tier disappear.
+ */
+export function isLinkOnlyTier(c: {
+  enrollment_open_at?: string | null;
+  enrollment_close_at?: string | null;
+}): boolean {
+  if (!c.enrollment_open_at || !c.enrollment_close_at) return false;
+  const opensAt = Date.parse(c.enrollment_open_at);
+  const closesAt = Date.parse(c.enrollment_close_at);
+  if (Number.isNaN(opensAt) || Number.isNaN(closesAt)) return false;
+  return closesAt <= opensAt;
+}
+
+/**
+ * Remove link-only tiers unless this visitor's link has unlocked them. Call it
+ * after applyPriorityUnlock.
+ *
+ * Like the unlock, this is presentational: the API still returns these tiers,
+ * and the database gate decides who can buy them.
+ */
+export function hideLinkOnlyTiers<
+  T extends Pick<TemplateClass, "enrollment_open_at" | "enrollment_close_at" | "priority_unlocked">,
+>(classes: T[]): T[] {
+  return classes.filter((c) => !isLinkOnlyTier(c) || c.priority_unlocked);
+}
