@@ -6,6 +6,7 @@ import StatsCard from "@/components/ui/StatsCard";
 import StatusBadge from "@/components/ui/StatusBadge";
 import { formatCurrencySimple } from "@/lib/utils";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
+import { pollWhileVisible } from "@/lib/admin/pollWhileVisible";
 import { mm } from "@/lib/mm-labels";
 import type { EnrollmentStatus, JlptLevel } from "@/types/database";
 
@@ -181,8 +182,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     fetchAll();
-    const id = setInterval(() => fetchAll(true), 300_000);
-    return () => clearInterval(id);
+    return pollWhileVisible(() => fetchAll(true), 300_000);
   }, [fetchAll]);
 
   // ── Error state ────────────────────────────────────────────────────────────

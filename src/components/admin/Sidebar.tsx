@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import LogoutButton from "@/components/admin/LogoutButton";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
+import { pollWhileVisible } from "@/lib/admin/pollWhileVisible";
 
 import type { UserRole } from "@/types/database";
 
@@ -70,7 +71,7 @@ export default function Sidebar({ displayName, displayEmail, displayRole, school
 
   useEffect(() => {
     function fetchCounts() {
-      fetch("/api/admin/stats")
+      fetch("/api/admin/stats/pending-count")
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
           if (data) {
@@ -81,8 +82,7 @@ export default function Sidebar({ displayName, displayEmail, displayRole, school
         .catch(() => {});
     }
     fetchCounts();
-    const id = setInterval(fetchCounts, 30_000);
-    return () => clearInterval(id);
+    return pollWhileVisible(fetchCounts, 30_000);
   }, []);
 
   function isActive(href: string) {
