@@ -78,19 +78,33 @@ describe("loadEventEmailImages", () => {
     expect(images.map((image) => image.alt)).toEqual(["Day 1", "Day 3"]);
   });
 
-  it("returns no posters for All Day alone", async () => {
+  it("returns nothing for All Day alone when it has no image of its own", async () => {
     order([allDay]);
     await expect(loadEventEmailImages("order-1")).resolves.toEqual([]);
   });
 
-  it("returns no posters when an order includes All Day alongside a single day", async () => {
+  it("keeps a single day's poster when the order also includes All Day", async () => {
     order([day(2), allDay]);
-    await expect(loadEventEmailImages("order-1")).resolves.toEqual([]);
+    await expect(loadEventEmailImages("order-1")).resolves.toEqual([
+      { url: url("day-2"), alt: "Day 2" },
+    ]);
   });
 
-  it("does the same if a multi-day tier has a poster of its own", async () => {
+  it("returns All Day's own image when it has one", async () => {
     order([{ ...allDay, email_image_url: url("all-day") }]);
-    await expect(loadEventEmailImages("order-1")).resolves.toEqual([]);
+    await expect(loadEventEmailImages("order-1")).resolves.toEqual([
+      { url: url("all-day"), alt: "All Day" },
+    ]);
+  });
+
+  it("gives the same order when All Day and Day 1 share a date", async () => {
+    const pass = { ...allDay, email_image_url: url("all-day") };
+    order([day(1), pass]);
+    const first = await loadEventEmailImages("order-1");
+    order([pass, day(1)]);
+    const second = await loadEventEmailImages("order-1");
+    expect(first).toEqual(second);
+    expect(first.map((image) => image.alt)).toEqual(["All Day", "Day 1"]);
   });
 
   it("returns nothing for a tier with no poster, which is every other client's", async () => {
