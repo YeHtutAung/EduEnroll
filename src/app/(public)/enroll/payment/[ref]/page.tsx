@@ -1,5 +1,6 @@
 "use client";
 
+import { isLinkOnlyTier } from "@/lib/interest/priorityUnlock";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
 import QRCode from "qrcode";
@@ -7,6 +8,7 @@ import { verifyStripeReturn } from "@/lib/payments/verifyStripeReturn";
 import { formatCurrencySimple, formatAmount } from "@/lib/utils";
 import QRPaymentModal from "@/components/payments/QRPaymentModal";
 import PayNowQrSaveButton from "@/components/payments/PayNowQrSaveButton";
+import ETicketEmailNotice from "@/components/payments/ETicketEmailNotice";
 import BrandHeader from "@/components/enrollment/BrandHeader";
 import { OrderItemAmount } from "@/components/payments/OrderItemAmount";
 import html2canvas from "html2canvas";
@@ -79,6 +81,8 @@ interface AvailableClass {
   seat_remaining: number;
   status: string;
   image_url: string | null;
+  enrollment_open_at?: string | null;
+  enrollment_close_at?: string | null;
 }
 
 interface BankAccountInfo {
@@ -1231,7 +1235,7 @@ export default function PaymentInstructionsPage() {
 
             // Filter to open classes not already purchased
             const classes: AvailableClass[] = (intakeData.classes ?? []).filter(
-              (c: AvailableClass) => c.status === "open" && c.seat_remaining > 0 && !purchasedLevels.has(c.level),
+              (c: AvailableClass) => c.status === "open" && c.seat_remaining > 0 && !purchasedLevels.has(c.level) && !isLinkOnlyTier(c),
             );
             setAvailableClasses(classes);
           } catch { /* non-critical */ }
@@ -1682,6 +1686,10 @@ export default function PaymentInstructionsPage() {
               <div className="mt-2">
                 <CopyButton text={enrollment.enrollment_ref} />
               </div>
+              <ETicketEmailNotice
+                orgType={enrollment.org_type}
+                ticketCount={ticketFetch?.state === "loaded" ? ticketFetch.tickets.length : null}
+              />
             </div>
 
             {/* Order items */}

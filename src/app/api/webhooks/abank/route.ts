@@ -8,6 +8,7 @@ import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
 import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils";
 import { sendSms } from "@/lib/sms";
 import { buildEticketEmailAttachment } from "@/server/tickets/eticketEmailAttachment";
+import { loadEventEmailTerms } from "@/server/notifications/eventEmailTerms";
 
 // ─── GET /api/webhooks/abank ────────────────────────────────
 // ABank calls this URL (GET) after payment completes.
@@ -231,6 +232,7 @@ export async function GET(request: NextRequest) {
           classLevel,
           statusUrl,
           feeFormatted,
+          eventTerms: await loadEventEmailTerms(payment.enrollment_id),
           orgType: tenantInfo?.org_type,
           tenantName: tenantInfo?.name,
           logoUrl: tenantInfo?.logo_url ?? undefined,

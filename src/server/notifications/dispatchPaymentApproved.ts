@@ -4,6 +4,7 @@ import { sendStatusNotification } from "@/lib/messenger/notify";
 import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
 import { buildEticketEmailAttachment } from "@/server/tickets/eticketEmailAttachment";
+import { loadEventEmailTerms } from "@/server/notifications/eventEmailTerms";
 
 export interface ApprovalNotificationInput {
   tenantId: string;
@@ -43,6 +44,7 @@ export async function dispatchPaymentApproved(input: ApprovalNotificationInput):
       classLevel: input.classLevel,
       statusUrl: input.statusUrl,
       feeFormatted: input.feeFormatted,
+      eventTerms: await loadEventEmailTerms(input.enrollmentId),
       orgType: input.orgType,
       tenantName: input.tenantName,
       logoUrl: input.logoUrl,

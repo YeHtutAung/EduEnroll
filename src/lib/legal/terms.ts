@@ -17,6 +17,9 @@ export const TERMS_VERSION = "2026-11-04";
 /** Longest organiser rules text an event may carry. Mirrored by a DB check. */
 export const ORGANISER_TERMS_MAX = 5000;
 
+/** Longest terms text an event may print in its confirmation email. Mirrored by a DB check. */
+export const EMAIL_TERMS_MAX = 5000;
+
 /** Trimmed rules, or null when there is nothing to show. */
 export function normaliseOrganiserTerms(value: string | null | undefined): string | null {
   const trimmed = (value ?? "").trim();

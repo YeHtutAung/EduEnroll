@@ -68,6 +68,17 @@ describe("MarketingPage", () => {
     expect(out).not.toContain(c.industries.items[0].name.en);
   });
 
+  it("shows MMQR-supported providers only while MMQR is available", () => {
+    const c = clone();
+    const withMmqr = html(c);
+    expect(withMmqr).toContain("Wave Money");
+    expect(withMmqr).toContain("Yoma Bank");
+    expect(withMmqr).toContain("MTB Pay");
+
+    c.payments.items.find((payment) => payment.id === "mmqr")!.hidden = true;
+    expect(html(c)).not.toContain("More banks and wallets supported via MyanmarPay MMQR");
+  });
+
   it("numbers steps by visible position", () => {
     const c = clone();
     c.howItWorks.steps[1].hidden = true;

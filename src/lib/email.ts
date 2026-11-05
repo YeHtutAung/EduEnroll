@@ -306,6 +306,21 @@ export function enrollmentConfirmationEmail(params: {
 
 // ── Enrollment approved email ───────────────────────────────────────────────
 
+/** Organiser-written text, so it is escaped and its line breaks kept as typed. */
+function eventTermsSection(terms: string | null | undefined): string {
+  const text = terms?.trim();
+  if (!text) return "";
+  const html = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;")
+    .replace(/\r?\n/g, "<br />");
+  return `
+      <div style="margin: 24px 0 0; padding: 16px; background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans Myanmar', sans-serif; font-size: 13px; line-height: 1.6; color: #4b5563; word-break: break-word;">${html}</div>`;
+}
+
 export function enrollmentApprovedEmail(params: {
   studentName: string;
   enrollmentRef: string;
@@ -316,6 +331,8 @@ export function enrollmentApprovedEmail(params: {
   platformFeeFormatted?: string;
   totalPaidFormatted?: string;
   ticketCount?: number;
+  /** The event's own terms, from intakes.email_terms. */
+  eventTerms?: string | null;
   orgType?: string;
   tenantName?: string;
   logoUrl?: string;
@@ -330,6 +347,7 @@ export function enrollmentApprovedEmail(params: {
     platformFeeFormatted,
     totalPaidFormatted,
     ticketCount,
+    eventTerms,
     orgType,
     tenantName,
     logoUrl,
@@ -413,6 +431,7 @@ export function enrollmentApprovedEmail(params: {
       <div style="text-align: center; margin: 24px 0;">
         <a href="${statusUrl}" style="display: inline-block; padding: 12px 28px; background: #1a6b3c; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px;">View ${l.enrollLabel} Details</a>
       </div>
+      ${eventTermsSection(eventTerms)}
     `, tenantName, logoUrl),
   };
 }

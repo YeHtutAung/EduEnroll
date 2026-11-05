@@ -55,4 +55,40 @@ describe("enrollmentApprovedEmail", () => {
     expect(html).toContain("Online platform fee");
     expect(html).toContain("No fee");
   });
+
+  describe("event terms", () => {
+    const base = {
+      studentName: "Buyer",
+      enrollmentRef: "SF2-1105-TERMS",
+      classLevel: "General Access",
+      statusUrl: "https://skyfestival.kuunyi.com/status?ref=SF2-1105-TERMS",
+      orgType: "event",
+    };
+
+    it("prints the terms with their line breaks", () => {
+      const { html } = enrollmentApprovedEmail({
+        ...base,
+        eventTerms: "SKY FESTIVAL 2026\n\nNon-Refundable: All ticket purchases are final.",
+      });
+
+      expect(html).toContain(
+        "SKY FESTIVAL 2026<br /><br />Non-Refundable: All ticket purchases are final.",
+      );
+    });
+
+    it("escapes what the organiser typed", () => {
+      const { html } = enrollmentApprovedEmail({
+        ...base,
+        eventTerms: `TERMS & CONDITIONS <img src=x onerror="alert(1)">`,
+      });
+
+      expect(html).toContain("TERMS &amp; CONDITIONS &lt;img src=x onerror=&quot;alert(1)&quot;&gt;");
+      expect(html).not.toContain("<img src=x");
+    });
+
+    it.each([undefined, null, "", "   \n "])("adds no box for %j", (eventTerms) => {
+      const withTerms = enrollmentApprovedEmail(base).html;
+      expect(enrollmentApprovedEmail({ ...base, eventTerms }).html).toBe(withTerms);
+    });
+  });
 });
