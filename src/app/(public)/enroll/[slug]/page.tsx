@@ -13,7 +13,7 @@ import {
   EvCorporateTemplate,
 } from "@/components/enrollment/templates";
 import type { TemplateProps, EventTemplateProps } from "@/components/enrollment/templates";
-import { applyPriorityUnlock, capturePriorityToken } from "@/lib/interest/priorityUnlock";
+import { applyPriorityUnlock, capturePriorityToken, hideLinkOnlyTiers, isLinkOnlyTier } from "@/lib/interest/priorityUnlock";
 import { readableTextColor } from "@/lib/readableText";
 import { beginCheckoutPayload, claimNavigation, hardNavigate, pushDataLayer, viewItemPayload } from "@/lib/tagManager";
 
@@ -342,7 +342,7 @@ function IntakeLandingContent() {
         slug: params.slug,
         eventName: data.intake.name,
         currency: (data.labels ?? DEFAULT_LABELS).currency,
-        tiers: data.classes.map((c) => ({ id: c.id, name: c.level, price: c.fee_amount })),
+        tiers: data.classes.filter((c) => !isLinkOnlyTier(c)).map((c) => ({ id: c.id, name: c.level, price: c.fee_amount })),
       }),
     );
   }, [data, params.slug]);
@@ -422,11 +422,12 @@ function IntakeLandingContent() {
   // whichever subset ends up rendered, and applied here rather than in the API
   // because it depends on this visitor's sessionStorage, which the server
   // cannot see. The database gate remains the authority at submit.
-  const allClasses = applyPriorityUnlock(rawClasses, {
+  const unlockedClasses = applyPriorityUnlock(rawClasses, {
     priorityOpenAt: intake.priority_open_at,
     coveredClassIds: data.priority_covered_class_ids ?? [],
     token: priorityToken,
   });
+  const allClasses = hideLinkOnlyTiers(unlockedClasses);
 
   const classes = levelFilter ? allClasses.filter((c) => c.level === levelFilter) : allClasses;
   const tl = data.labels ?? DEFAULT_LABELS;
@@ -438,7 +439,8 @@ function IntakeLandingContent() {
   const priorityStillOpen = !!intake.priority_open_at && Date.parse(intake.priority_open_at) > Date.now();
   const showInterestCta = priorityStillOpen && coveredClassIds.length > 0;
   const coveredLevels = Array.from(
-    new Set(allClasses.filter((c) => coveredClassIds.includes(c.id)).map((c) => c.level)),
+    // Unfiltered: the signup banner exists to name the tiers a link gives access to.
+    new Set(unlockedClasses.filter((c) => coveredClassIds.includes(c.id)).map((c) => c.level)),
   );
   const interestBanner = showInterestCta ? (
     <InterestBanner slug={params.slug} levels={coveredLevels} primaryColor={appearance.primary_color || "#2563eb"} />

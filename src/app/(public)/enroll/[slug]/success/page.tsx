@@ -1,5 +1,6 @@
 "use client";
 
+import { isLinkOnlyTier } from "@/lib/interest/priorityUnlock";
 import { Suspense, useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import { formatCurrencySimple, formatAmount } from "@/lib/utils";
@@ -33,6 +34,8 @@ interface PublicClass {
   fee_formatted: string;
   seat_remaining: number;
   status: ClassStatus;
+  enrollment_open_at?: string | null;
+  enrollment_close_at?: string | null;
 }
 
 // ─── Bank badge colors ───────────────────────────────────────────────────────
@@ -204,7 +207,7 @@ function SuccessPage() {
           if (intakeData.labels?.orgType) setOrgType(intakeData.labels.orgType);
           if (intakeData.labels?.currency) setCurrency(intakeData.labels.currency);
           const available = (intakeData.classes ?? []).filter(
-            (c: PublicClass) => c.status === "open" && c.seat_remaining > 0,
+            (c: PublicClass) => c.status === "open" && c.seat_remaining > 0 && !isLinkOnlyTier(c),
           );
           setOtherClasses(available);
         }

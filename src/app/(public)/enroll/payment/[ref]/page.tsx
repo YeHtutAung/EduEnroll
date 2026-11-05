@@ -1,5 +1,6 @@
 "use client";
 
+import { isLinkOnlyTier } from "@/lib/interest/priorityUnlock";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
 import QRCode from "qrcode";
@@ -80,6 +81,8 @@ interface AvailableClass {
   seat_remaining: number;
   status: string;
   image_url: string | null;
+  enrollment_open_at?: string | null;
+  enrollment_close_at?: string | null;
 }
 
 interface BankAccountInfo {
@@ -1232,7 +1235,7 @@ export default function PaymentInstructionsPage() {
 
             // Filter to open classes not already purchased
             const classes: AvailableClass[] = (intakeData.classes ?? []).filter(
-              (c: AvailableClass) => c.status === "open" && c.seat_remaining > 0 && !purchasedLevels.has(c.level),
+              (c: AvailableClass) => c.status === "open" && c.seat_remaining > 0 && !purchasedLevels.has(c.level) && !isLinkOnlyTier(c),
             );
             setAvailableClasses(classes);
           } catch { /* non-critical */ }
