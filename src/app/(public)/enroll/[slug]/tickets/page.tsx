@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { EvTrustedOfficialTemplate } from "@/components/enrollment/templates";
 import type { ClassStatus } from "@/types/database";
-import { applyPriorityUnlock, capturePriorityToken } from "@/lib/interest/priorityUnlock";
+import { applyPriorityUnlock, capturePriorityToken, hideLinkOnlyTiers, isLinkOnlyTier } from "@/lib/interest/priorityUnlock";
 import { pushDataLayer, viewItemPayload } from "@/lib/tagManager";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -144,7 +144,7 @@ export default function TicketsPage() {
         slug: params.slug,
         eventName: data.intake.name,
         currency: data.labels.currency,
-        tiers: data.classes.map((c) => ({ id: c.id, name: c.level, price: c.fee_amount })),
+        tiers: data.classes.filter((c) => !isLinkOnlyTier(c)).map((c) => ({ id: c.id, name: c.level, price: c.fee_amount })),
       }),
     );
   }, [data, params.slug]);
@@ -171,11 +171,11 @@ export default function TicketsPage() {
     <EvTrustedOfficialTemplate
       appearance={data.appearance as never}
       intake={data.intake}
-      classes={applyPriorityUnlock(data.classes, {
+      classes={hideLinkOnlyTiers(applyPriorityUnlock(data.classes, {
         priorityOpenAt: data.intake.priority_open_at,
         coveredClassIds: data.priority_covered_class_ids ?? [],
         token: priorityToken,
-      })}
+      }))}
       labels={data.labels}
       slug={params.slug}
       currency={data.labels.currency}
