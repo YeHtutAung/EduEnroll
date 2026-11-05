@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { EventTemplateProps, TemplateClass } from "./types";
-import { cartTicketCount, getCardState, fmtDate } from "./types";
+import { cartTicketCount, getCardState, fmtDate, fmtEventDates } from "./types";
 import PackBadge from "./PackBadge";
 import { eventFontCssUrl, eventFontStyle } from "@/lib/eventFont";
 
@@ -81,7 +81,7 @@ function TicketCard({
 
         {cls.event_date && (
           <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-gray-400 mb-4">
-            <span>📅 {fmtDate(cls.event_date, { weekday: "short", day: "numeric", month: "short", year: "numeric" })}</span>
+            <span>📅 {fmtEventDates(cls.event_date, cls.end_time, { weekday: "short", day: "numeric", month: "short", year: "numeric" })}</span>
             {cls.start_time && <span>🕐 {cls.start_time}{cls.end_time ? ` – ${cls.end_time}` : ""}</span>}
             {cls.venue && <span>📍 {cls.venue}</span>}
           </div>
