@@ -97,6 +97,12 @@ describe("loadEventEmailImages", () => {
     ]);
   });
 
+  it("shows All Day's image and all four days' posters when all are bought", async () => {
+    order([day(4), day(2), { ...allDay, email_image_url: url("all-day") }, day(1), day(3)]);
+    const images = await loadEventEmailImages("order-1");
+    expect(images.map((image) => image.alt)).toEqual(["All Day", "Day 1", "Day 2", "Day 3", "Day 4"]);
+  });
+
   it("gives the same order when All Day and Day 1 share a date", async () => {
     const pass = { ...allDay, email_image_url: url("all-day") };
     order([day(1), pass]);
