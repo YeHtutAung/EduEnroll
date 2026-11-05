@@ -33,6 +33,7 @@ interface IntakeRow {
 interface ClassRow {
   intake_id: string;
   event_date: string | null;
+  end_time?: string | null;
   venue: string | null;
 }
 
@@ -134,6 +135,35 @@ describe("GET /api/events", () => {
           day: "numeric",
         }),
         location: "Future Hall",
+      },
+    ]);
+  });
+
+  it("keeps an event in the list until its end date has passed", async () => {
+    mockResolveScannerTenant.mockResolvedValue("tenant-1");
+
+    const inDays = (n: number) =>
+      new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+    setupTables(
+      [
+        { id: "intake-running", name: "Running Event", status: "open" },
+        { id: "intake-over", name: "Finished Event", status: "open" },
+      ],
+      [
+        { intake_id: "intake-running", event_date: inDays(-1), end_time: inDays(3), venue: "Field" },
+        { intake_id: "intake-over", event_date: inDays(-5), end_time: inDays(-3), venue: "Hall" },
+      ],
+    );
+
+    const res = await GET(makeRequest("Bearer validkey"));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body).toEqual([
+      {
+        id: "intake-running",
+        name: "Running Event",
+        date: new Date(inDays(-1)).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        location: "Field",
       },
     ]);
   });
