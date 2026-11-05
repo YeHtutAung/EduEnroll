@@ -71,11 +71,6 @@ interface TicketLoadRow {
   classes?: { event_date: string | null; end_time: string | null } | null;
 }
 
-interface ClaimRow {
-  first_scan_at: string;
-  first_scan_gate: string | null;
-}
-
 // Sets up the by-table mock for the `tickets` table across the route's
 // possible sequential calls:
 //   1st `.select()` call  -> ticket load
