@@ -9,6 +9,7 @@ import { randomId } from "@/lib/randomId";
 import { computePlatformFee } from "@/server/payments/platformFee";
 import TermsConsent from "@/components/enrollment/TermsConsent";
 import { TERMS_VERSION } from "@/lib/legal/terms";
+import { readableTextColor } from "@/lib/readableText";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -823,8 +824,8 @@ function EnrollmentFormPage() {
 
         <button
           onClick={handleNext}
-          className="mt-2 w-full rounded-lg py-3 text-sm font-semibold text-white transition-colors"
-          style={{ backgroundColor: primaryColor }}
+          className="mt-2 w-full rounded-lg py-3 text-sm font-semibold transition-colors"
+          style={{ backgroundColor: primaryColor, color: readableTextColor(primaryColor) }}
         >
           Next &rarr;
         </button>
@@ -935,8 +936,8 @@ function EnrollmentFormPage() {
         <button
           onClick={handleSubmit}
           disabled={submitting}
-          className="flex-1 rounded-lg py-3 text-sm font-semibold text-white transition-colors disabled:opacity-50"
-          style={{ backgroundColor: primaryColor }}
+          className="flex-1 rounded-lg py-3 text-sm font-semibold transition-colors disabled:opacity-50"
+          style={{ backgroundColor: primaryColor, color: readableTextColor(primaryColor) }}
         >
           {submitting ? (
             <span className="inline-flex items-center gap-2">
