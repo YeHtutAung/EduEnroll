@@ -277,6 +277,8 @@ export interface Class {
   end_time: string | null;
   venue: string | null;
   image_url: string | null;
+  /** Printed in the confirmation email for this tier. Empty for most tiers. */
+  email_image_url: string | null;
   max_tickets_per_person: number;
   /** Admissions issued per unit sold; 1 for an ordinary tier, 3 for a "3-Pack". */
   pack_size: number;

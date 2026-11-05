@@ -2,7 +2,7 @@
 
 import { STORAGE_CACHE_CONTROL } from "@/lib/storage/cache";
 
-import { downscaleImage } from "@/lib/images/downscale";
+import { downscaleImage, prepareEmailImage } from "@/lib/images/downscale";
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
@@ -165,9 +165,29 @@ function EditClassModal({
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(cls.image_url ?? null);
   const [removeImageFlag, setRemoveImageFlag] = useState(false);
+  const [emailImageFile, setEmailImageFile] = useState<File | null>(null);
+  const [emailImagePreview, setEmailImagePreview] = useState<string | null>(cls.email_image_url ?? null);
+  const [removeEmailImageFlag, setRemoveEmailImageFlag] = useState(false);
 
   function set(key: keyof EditForm, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }));
+  }
+
+  function handleEmailImageChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null;
+    if (!file) return;
+    // A higher limit than the ticket image: this one is always converted to a
+    // small JPEG before upload, and event posters arrive at 7-9 MB.
+    if (file.size > 20 * 1024 * 1024) { toast.error("Image must be under 20 MB."); return; }
+    setEmailImageFile(file);
+    setEmailImagePreview(URL.createObjectURL(file));
+    setRemoveEmailImageFlag(false);
+  }
+
+  function removeEmailImage() {
+    setEmailImageFile(null);
+    setEmailImagePreview(null);
+    setRemoveEmailImageFlag(true);
   }
 
   function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -244,6 +264,21 @@ function EditClassModal({
       }
       if (image_url !== undefined) {
         payload.image_url = image_url;
+      }
+      // Sent only when changed, so saving a tier never touches this column.
+      if (emailImageFile) {
+        const supabase = createClient();
+        const upload = await prepareEmailImage(emailImageFile);
+        // Tenant-prefixed path — required by the class-images storage RLS policy.
+        // Never overwritten: emails already sent keep showing the file they link to.
+        const path = `${cls.tenant_id}/${cls.intake_id}/email-${cls.level.replace(/\s+/g, "-").toLowerCase()}-${Date.now()}.jpg`;
+        const { error: uploadErr } = await supabase.storage
+          .from("class-images")
+          .upload(path, upload, { cacheControl: STORAGE_CACHE_CONTROL });
+        if (uploadErr) throw new Error("Email image upload failed: " + uploadErr.message);
+        payload.email_image_url = supabase.storage.from("class-images").getPublicUrl(path).data.publicUrl;
+      } else if (removeEmailImageFlag) {
+        payload.email_image_url = null;
       }
 
       const res = await fetch(`/api/classes/${cls.id}`, {
@@ -526,6 +561,47 @@ function EditClassModal({
               </label>
             )}
           </div>
+
+          {/* Image printed in the confirmation email (optional) */}
+          {showEventFields && (
+            <div>
+              <label className={labelClass}>Email Image (optional)</label>
+              {emailImagePreview ? (
+                <div className="relative inline-block">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={emailImagePreview}
+                    alt="Email image preview"
+                    className="h-32 w-auto rounded-lg border border-gray-200 object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={removeEmailImage}
+                    aria-label="Remove email image"
+                    className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-red-500 text-white text-xs hover:bg-red-600 transition-colors"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <label className="flex cursor-pointer items-center gap-2 rounded-lg border-2 border-dashed border-gray-300 px-4 py-3 text-sm text-gray-500 hover:border-[#1a3f8a] hover:text-[#1a3f8a] transition-colors">
+                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909M3.75 21h16.5A2.25 2.25 0 0022.5 18.75V5.25A2.25 2.25 0 0020.25 3H3.75A2.25 2.25 0 001.5 5.25v13.5A2.25 2.25 0 003.75 21z" />
+                  </svg>
+                  Upload email image (max 20 MB)
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    onChange={handleEmailImageChange}
+                    className="hidden"
+                  />
+                </label>
+              )}
+              <p className="text-xs text-gray-400 mt-1">
+                Shown in the confirmation email for this ticket. An order that includes a multi-day ticket shows no images.
+              </p>
+            </div>
+          )}
 
           {/* Actions */}
           <div className="flex gap-3 pt-2">

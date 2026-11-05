@@ -56,6 +56,7 @@ export async function PATCH(
     end_time,
     venue,
     image_url,
+    email_image_url,
     max_tickets_per_person,
     pack_size,
     compare_at_amount,
@@ -156,6 +157,17 @@ export async function PATCH(
       return badRequest("image_url must be a string or null.");
     }
     update.image_url = (image_url as string | null) ?? null;
+  }
+
+  // email_image_url — goes into buyers' inboxes, so only https is accepted
+  if ("email_image_url" in (body as object)) {
+    if (
+      email_image_url !== null &&
+      (typeof email_image_url !== "string" || !email_image_url.startsWith("https://"))
+    ) {
+      return badRequest("email_image_url must be an https address or null.");
+    }
+    update.email_image_url = email_image_url as string | null;
   }
 
   // max_tickets_per_person
