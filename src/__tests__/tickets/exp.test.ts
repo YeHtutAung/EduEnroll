@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { lastEventDate, ticketExpiry } from "@/lib/tickets/exp";
+import { lastEventDate, ticketExpiry, todayInTz } from "@/lib/tickets/exp";
+
+describe("todayInTz", () => {
+  it("uses the event's date, not UTC's, around midnight", () => {
+    // 00:30 on 22 Nov in Yangon (UTC+6:30) is still 21 Nov in UTC.
+    expect(todayInTz("Asia/Yangon", new Date("2026-11-21T18:00:00Z"))).toBe("2026-11-22");
+    expect(todayInTz("Asia/Yangon", new Date("2026-11-21T17:00:00Z"))).toBe("2026-11-21");
+  });
+});
 
 describe("lastEventDate", () => {
   it("is the end date when the event runs past its start date", () => {

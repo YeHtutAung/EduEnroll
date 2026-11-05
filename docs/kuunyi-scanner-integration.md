@@ -9,11 +9,12 @@ list events, verify ticket QR codes offline, and record scans.
 2. On startup, call `GET /api/events` to populate the event picker.
 3. When a QR is scanned, verify the embedded JWT **offline** first (signature + `exp`),
    then send **the token itself** to `POST /api/scans` to record the scan and enforce
-   single-use server-side.
+   the entry limit server-side: once for a one-day event, once per day for a multi-day
+   event.
 
 Never mark an entry as admitted based on offline JWT verification alone — always call
-`/api/scans`. The server is the source of truth for single-use, tenant scope, void, and
-expiry, and it independently verifies the token's signature.
+`/api/scans`. The server is the source of truth for the entry limit, tenant scope, void,
+and expiry, and it independently verifies the token's signature.
 
 ## Auth
 
@@ -63,7 +64,7 @@ Record a scan for a ticket.
 | Field   | Required | Notes                                                                     |
 | ------- | -------- | ------------------------------------------------------------------------- |
 | `token` | **yes**  | The compact JWT exactly as encoded in the QR. Its signature is the admission credential — the server verifies it before any lookup. |
-| `gate`  | no       | Free-text gate label, recorded on the first scan only.                    |
+| `gate`  | no       | Free-text gate label, recorded on each admitted scan.                     |
 | `jti`   | no       | Advisory. If sent it must equal the token's `jti` claim, or the request is rejected with `400`. |
 | `eid`   | no       | Advisory. If sent it must equal the token's `eid` claim, or the request is rejected with `400`. |
 
@@ -74,12 +75,12 @@ admitted; `jti`/`eid` in the body are a cross-check for client bugs, not inputs.
 
 | Status | Body                                                        | Meaning                                          |
 | ------ | ----------------------------------------------------------- | ------------------------------------------------ |
-| `200`  | `{ "ok": true }`                                            | First valid scan — admit.                        |
-| `409`  | `{ "firstScanTime": "<ISO>", "firstScanGate": "<string>" }` | Already scanned — show prior scan info.          |
+| `200`  | `{ "ok": true }`                                            | Valid scan — admit.                              |
+| `409`  | `{ "firstScanTime": "<ISO>", "firstScanGate": "<string>" }` | Already scanned — show prior scan info. On a multi-day ticket this is today's scan; the day changes at midnight in `TICKET_TZ`. |
 | `404`  | —                                                           | Not an admission: bad signature, not a ticket token, unknown ticket, wrong event, void, or expired. |
 | `400`  | —                                                           | Malformed body, missing `token`, or body contradicting the token's claims. |
 | `401`  | —                                                           | Missing/invalid API key.                         |
-| `500`  | —                                                           | Server cannot verify tickets (signing key not configured). **Not** a bad ticket — do not show "invalid" to the operator. |
+| `500`  | —                                                           | Server cannot verify tickets (signing key not configured) or reach the database. **Not** a bad ticket — do not show "invalid" to the operator. |
 
 ## Ticket JWT (embedded in each QR)
 
@@ -116,7 +117,7 @@ Each QR code encodes a compact JWT.
 The app verifies the JWT **offline** using a bundled `kid → public key` map before ever
 calling the network, so a forged QR is rejected without a round trip. The server then
 verifies the same signature again on `/api/scans`, and re-checks tenant scope, existence,
-void status, expiry, and single-use.
+void status, expiry, and the entry limit.
 
 Both checks matter and neither replaces the other. The offline check keeps a bad QR off
 the network; the server check is what makes a stolen or guessed ticket id worthless,
@@ -145,8 +146,9 @@ reuse the dev key/kid for production tickets.
 - **One QR per admission.** An order of 2×GA + 1×VIP produces 3 separate tickets, each with
   its own `jti` and `admits: 1` — there is no multi-admit ticket in v1.
 - Always call `/api/scans` for every scan, even if offline verification passed. The server
-  enforces single-use, tenant scope, void, and expiry independently of the client's
-  offline verdict.
+  enforces the entry limit, tenant scope, void, and expiry independently of the client's
+  offline verdict. Don't cache a "used" result on the device: a multi-day ticket is valid
+  again the next day.
 - A `404` from `/api/scans` should be treated by the UI as "not a valid ticket" without
   distinguishing the exact reason (not found / wrong event / void / expired) for a
   scanning operator.
