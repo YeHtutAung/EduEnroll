@@ -66,6 +66,36 @@ function patch(body: unknown) {
 
 beforeEach(() => vi.clearAllMocks());
 
+describe("PATCH /api/classes/[id] — email image", () => {
+  const url = "https://project.supabase.co/storage/v1/object/public/class-images/t/i/email-day-1.jpg";
+
+  it("stores an https address and clears it with null", async () => {
+    const capture = { payload: null as Record<string, unknown> | null };
+    authWith(makeSupabase(baseClass, capture));
+    expect((await patch({ email_image_url: url })).status).toBe(200);
+    expect(capture.payload).toEqual({ email_image_url: url });
+
+    authWith(makeSupabase(baseClass, capture));
+    expect((await patch({ email_image_url: null })).status).toBe(200);
+    expect(capture.payload).toEqual({ email_image_url: null });
+  });
+
+  it("leaves it alone when a save doesn't send it", async () => {
+    const capture = { payload: null as Record<string, unknown> | null };
+    authWith(makeSupabase(baseClass, capture));
+    await patch({ fee_amount: 1000 });
+    expect(capture.payload).not.toHaveProperty("email_image_url");
+  });
+
+  it.each(["http://example.com/a.jpg", "javascript:alert(1)", 42])("refuses %j", async (value) => {
+    const capture = { payload: null as Record<string, unknown> | null };
+    authWith(makeSupabase(baseClass, capture));
+    const res = await patch({ email_image_url: value });
+    expect(res.status).toBe(400);
+    expect(capture.payload).toBeNull();
+  });
+});
+
 describe("PATCH /api/classes/[id] — package fields", () => {
   it("sets pack_size and compare_at_amount on a tier that has not sold", async () => {
     const capture = { payload: null as Record<string, unknown> | null };

@@ -56,6 +56,57 @@ describe("enrollmentApprovedEmail", () => {
     expect(html).toContain("No fee");
   });
 
+  describe("event images", () => {
+    const base = {
+      studentName: "Buyer",
+      enrollmentRef: "SF2-1105-IMG",
+      classLevel: "Day 1",
+      statusUrl: "https://skyfestival.kuunyi.com/status?ref=SF2-1105-IMG",
+      orgType: "event",
+    };
+    const image = { url: "https://cdn.example.com/day-1.jpg", alt: "Day 1" };
+
+    it("prints each poster at full width, between the button and the terms", () => {
+      const { html } = enrollmentApprovedEmail({
+        ...base,
+        eventTerms: "Non-Refundable.",
+        eventImages: [image, { url: "https://cdn.example.com/day-2.jpg", alt: "Day 2" }],
+      });
+
+      expect(html).toContain('src="https://cdn.example.com/day-1.jpg"');
+      expect(html).toContain('src="https://cdn.example.com/day-2.jpg"');
+      expect(html).toContain('alt="Day 1"');
+      expect(html).toContain("width: 100%");
+      expect(html.indexOf("Details</a>")).toBeLessThan(html.indexOf("day-1.jpg"));
+      expect(html.indexOf("day-1.jpg")).toBeLessThan(html.indexOf("day-2.jpg"));
+      expect(html.indexOf("day-2.jpg")).toBeLessThan(html.indexOf("Non-Refundable."));
+    });
+
+    it("escapes the tier name and the address", () => {
+      const { html } = enrollmentApprovedEmail({
+        ...base,
+        eventImages: [
+          { url: 'https://cdn.example.com/a.jpg?x="><script>', alt: '"><script>alert(1)</script>' },
+        ],
+      });
+      expect(html).not.toContain("<script>");
+    });
+
+    it("refuses an address that is not https", () => {
+      const { html } = enrollmentApprovedEmail({
+        ...base,
+        eventImages: [{ url: "javascript:alert(1)", alt: "Day 1" }],
+      });
+      expect(html).not.toContain("javascript:");
+    });
+
+    // Other clients have no images: their email must not change at all.
+    it.each([[undefined], [null], [[]]])("leaves the email exactly as it was for %j", (eventImages) => {
+      const before = enrollmentApprovedEmail(base).html;
+      expect(enrollmentApprovedEmail({ ...base, eventImages }).html).toBe(before);
+    });
+  });
+
   describe("event terms", () => {
     const base = {
       studentName: "Buyer",

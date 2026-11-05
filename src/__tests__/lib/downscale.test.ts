@@ -5,6 +5,8 @@ import {
   MAX_EDGE_LOGO,
   SKIP_BELOW_BYTES,
   downscaleImage,
+  MAX_EDGE_EMAIL,
+  prepareEmailImage,
 } from "@/lib/images/downscale";
 
 // The canvas round-trip needs a real browser, so these cover the parts that
@@ -61,6 +63,19 @@ describe("downscaleImage bail-outs", () => {
     const big = fileOf("poster.jpg", "image/jpeg", SKIP_BELOW_BYTES * 6);
     const out = await downscaleImage(big);
     expect(out).toBe(big);
+  });
+});
+
+describe("prepareEmailImage", () => {
+  // Unlike downscaleImage this must not fall back to the original: a WebP or a
+  // 9 MB PNG reaching an email is the failure it exists to prevent.
+  it("throws rather than passing the original through when it cannot convert", async () => {
+    const poster = new File([new Uint8Array(1024)], "poster.png", { type: "image/png" });
+    await expect(prepareEmailImage(poster)).rejects.toThrow();
+  });
+
+  it("caps a poster at the email width", () => {
+    expect(fitWithin(3000, 4000, MAX_EDGE_EMAIL).height).toBe(MAX_EDGE_EMAIL);
   });
 });
 
