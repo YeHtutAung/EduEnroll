@@ -600,7 +600,7 @@ function EditClassModal({
                 </label>
               )}
               <p className="text-xs text-gray-400 mt-1">
-                Shown in the confirmation email for this ticket. An order that includes a multi-day ticket shows no images.
+                Shown in the confirmation email for this ticket. A multi-day ticket shows only its own image, so leave it empty for none.
               </p>
             </div>
           )}

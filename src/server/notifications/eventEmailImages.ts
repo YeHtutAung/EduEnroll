@@ -1,12 +1,10 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import { lastEventDate } from "@/lib/tickets/exp";
 
 type Lookup<T> = { data: T | null; error: { message?: string } | null };
 
 interface ClassRow {
   level: string;
   event_date: string | null;
-  end_time: string | null;
   email_image_url: string | null;
 }
 
@@ -17,9 +15,9 @@ export interface EventEmailImage {
 
 /**
  * The images to print in an order's confirmation email: one per tier bought, in
- * date order. An order that includes a multi-day tier (an All Day pass) gets none,
- * even when it also holds a single day. A tier only has an image if an organiser
- * uploaded one, so every other event gets an empty list.
+ * date order. A multi-day tier (an All Day pass) is treated like any other: it
+ * shows its own image, not its days' images. A tier only has an image if an
+ * organiser uploaded one, so every other event gets an empty list.
  *
  * Never throws: an image must not stop a paid buyer's confirmation and e-ticket
  * from going out, so a failed lookup logs and sends the email without them.
@@ -54,22 +52,20 @@ export async function loadEventEmailImages(enrollmentId: string): Promise<EventE
 
     const classes = (await supabase
       .from("classes")
-      .select("level, event_date, end_time, email_image_url")
+      .select("level, event_date, email_image_url")
       .in("id", classIds)) as unknown as Lookup<ClassRow[]>;
     if (classes.error) {
       console.error("[event-email-images] class lookup failed:", classes.error.message);
       return [];
     }
 
-    const rows = classes.data ?? [];
-    const includesMultiDay = rows.some(
-      (row) => lastEventDate(row.event_date, row.end_time) !== row.event_date,
-    );
-    if (includesMultiDay) return [];
-
     const seen = new Set<string>();
-    return [...rows]
-      .sort((a, b) => (a.event_date ?? "").localeCompare(b.event_date ?? ""))
+    return [...(classes.data ?? [])]
+      // An All Day pass starts on the same date as Day 1, so the name settles ties.
+      .sort(
+        (a, b) =>
+          (a.event_date ?? "").localeCompare(b.event_date ?? "") || a.level.localeCompare(b.level),
+      )
       .flatMap((row) => {
         const url = row.email_image_url?.trim();
         if (!url || !url.startsWith("https://") || seen.has(url)) return [];
