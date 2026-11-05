@@ -7,7 +7,8 @@ import { useToast } from "@/components/ui/Toast";
 import { useRole } from "@/components/admin/RoleContext";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
 import { mm } from "@/lib/mm-labels";
-import { formatCurrencySimple } from "@/lib/utils";
+import { formatCurrencySimple, resolveEmailFromFormData } from "@/lib/utils";
+import EmailTypoHint from "@/components/enrollment/EmailTypoHint";
 import type { EnrollmentStatus, Intake, JlptLevel, PaymentStatus } from "@/types/database";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -360,6 +361,16 @@ function StudentDetailModal({
                       {detail.email && <DetailRow label="Email" value={detail.email} />}
                     </>
                   )}
+                  <EditOrderEmail
+                    enrollmentId={row.enrollment_id}
+                    currentEmail={
+                      detail.email || resolveEmailFromFormData(detail.form_data) || ""
+                    }
+                    canResend={detail.payment != null}
+                    onSaved={(email, formData) =>
+                      setDetail((prev) => (prev ? { ...prev, email, form_data: formData } : prev))
+                    }
+                  />
                   <DetailRow
                     label="Ref"
                     value={
@@ -670,6 +681,112 @@ function StudentDetailModal({
         </div>
       )}
     </>
+  );
+}
+
+/** Corrects a mistyped address. Saving sends nothing: the admin resends afterwards. */
+function EditOrderEmail({
+  enrollmentId,
+  currentEmail,
+  canResend,
+  onSaved,
+}: {
+  enrollmentId: string;
+  currentEmail: string;
+  canResend: boolean;
+  onSaved: (email: string, formData: Record<string, string>) => void;
+}) {
+  const toast = useToast();
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(currentEmail);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/enrollments/${enrollmentId}/email`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: value }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || `${res.status}`);
+      onSaved(data.email, data.form_data);
+      setValue(data.email);
+      setEditing(false);
+      setSaved(true);
+      toast.success(`Email changed to ${data.email}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to change the email.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (!editing) {
+    return (
+      <div>
+        <button
+          type="button"
+          onClick={() => {
+            setValue(currentEmail);
+            setError(null);
+            setSaved(false);
+            setEditing(true);
+          }}
+          className="text-xs font-medium text-[#1a3f8a] underline"
+        >
+          {currentEmail ? "Edit Email" : "Add Email"}
+        </button>
+        {saved && (
+          <p className="mt-1 text-xs text-gray-500">
+            Saved. No email was sent.
+            {canResend ? " Use Resend Email to send it to the new address." : ""}
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-gray-200 p-3">
+      <label className="mb-1 block text-xs font-medium text-gray-600" htmlFor="edit-order-email">
+        Buyer&apos;s email
+      </label>
+      <input
+        id="edit-order-email"
+        type="email"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none focus:border-[#1a3f8a]"
+      />
+      <EmailTypoHint value={value} onUse={setValue} />
+      <p className="mt-1.5 text-xs text-gray-500">
+        Confirm the new address with the buyer first. Their e-ticket goes to this address.
+      </p>
+      {error && <p className="mt-1.5 text-xs text-red-600">{error}</p>}
+      <div className="mt-2 flex gap-2">
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving || !value.trim()}
+          className="rounded-lg bg-[#1a3f8a] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+        >
+          {saving ? "Saving…" : "Save"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditing(false)}
+          disabled={saving}
+          className="rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 disabled:opacity-50"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }
 

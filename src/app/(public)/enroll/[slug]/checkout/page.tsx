@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
+import { useEffect, useRef, useState, Suspense } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import TrustedOfficialShell from "@/components/enrollment/TrustedOfficialShell";
+import EmailTypoHint from "@/components/enrollment/EmailTypoHint";
+import { emailTypoToConfirm } from "@/lib/enrollment/emailAddress";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -41,6 +43,9 @@ function DynamicField({
 }) {
   const isEmail = field.field_key === "email";
   const baseInput = "w-full h-[33px] px-3 rounded-[7px] text-[12px] outline-none";
+  // Held back while typing, or "name@gmail.c" would be queried on its way to ".com".
+  const [leftField, setLeftField] = useState(false);
+  const typoHint = leftField ? <EmailTypoHint value={value} onUse={onChange} /> : null;
 
   // Colour and background are stated, never inherited. Tailwind's preflight puts
   // `color: inherit` on form controls, so an input that sets only a border takes
@@ -176,9 +181,12 @@ function DynamicField({
             style={borderStyle(value)}
             value={value}
             onChange={(e) => onChange(e.target.value)}
+            onFocus={() => setLeftField(false)}
+            onBlur={() => setLeftField(true)}
             placeholder="you@example.com"
             required={field.is_required}
           />
+          {typoHint}
           {isEmail && (
             <p className="text-[9.5px] mt-1" style={{ color: "#9a9484" }}>E-ticket will be sent to this address.</p>
           )}
@@ -195,9 +203,12 @@ function DynamicField({
             style={borderStyle(value)}
             value={value}
             onChange={(e) => onChange(e.target.value)}
+            onFocus={() => setLeftField(false)}
+            onBlur={() => setLeftField(true)}
             placeholder={field.field_label}
             required={field.is_required}
           />
+          {isEmail && typoHint}
         </div>
       );
   }
@@ -219,6 +230,7 @@ function CheckoutForm() {
   const [values, setValues] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const emailTyposQueried = useRef(new Set<string>());
 
   useEffect(() => {
     if (!ref) { setLoadError("Missing order reference."); return; }
@@ -279,6 +291,15 @@ function CheckoutForm() {
 
     if (!student_name_en || !email) {
       setFormError("Name and email are required.");
+      setSubmitting(false);
+      return;
+    }
+
+    const emailSuggestion = emailTypoToConfirm(email, emailTyposQueried.current);
+    if (emailSuggestion) {
+      setFormError(
+        `Please check your email, because your e-ticket goes there. Did you mean ${emailSuggestion}? If ${email} is correct, press the button again.`,
+      );
       setSubmitting(false);
       return;
     }

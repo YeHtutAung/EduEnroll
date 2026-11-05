@@ -4,33 +4,11 @@ import { resolveTenantId } from "@/lib/api";
 import { formatCurrency } from "@/lib/utils";
 import { statusTicketAmounts } from "@/lib/payments/statusTicketAmounts";
 import type { Enrollment, Class, Intake, Payment } from "@/types/database";
-import type { EnrollmentStatus, PaymentStatus } from "@/types/database";
+import type { PaymentStatus } from "@/types/database";
 import { loadPartialPayment } from "@/server/payments/partialPayment";
+import { enrollmentStatusLabels, statusNotFoundMessage } from "@/lib/enrollment/orderWording";
 
 // ─── Bilingual status labels ──────────────────────────────────────────────────
-
-const ENROLLMENT_STATUS_LABELS: Record<EnrollmentStatus, { en: string; mm: string }> = {
-  pending_payment: {
-    en: "Awaiting Payment",
-    mm: "ငွေပေးချေမှု စောင့်ဆိုင်းဆဲ",
-  },
-  payment_submitted: {
-    en: "Payment Under Review",
-    mm: "ငွေပေးချေမှု စစ်ဆေးနေဆဲ",
-  },
-  partial_payment: {
-    en: "Partial Payment — Please Complete",
-    mm: "ငွေတစ်စိတ်တစ်ပိုင်း — ကျန်ငွေ ပေးချေပါ",
-  },
-  confirmed: {
-    en: "Enrollment Confirmed",
-    mm: "စာရင်းသွင်းမှု အတည်ပြုပြီး",
-  },
-  rejected: {
-    en: "Enrollment Rejected",
-    mm: "စာရင်းသွင်းမှု ငြင်းဆိုထားသည်",
-  },
-};
 
 const PAYMENT_STATUS_LABELS: Record<PaymentStatus, { en: string; mm: string }> = {
   awaiting_payment: {
@@ -113,8 +91,17 @@ export async function GET(request: NextRequest) {
     .single() as EnrollmentResult;
 
   if (enrollmentError || !enrollment) {
+    // The not-found screens have no order to take the tenant's wording from.
+    // A failed read stays unknown, the same as the success response below.
+    const { data: tenantOrg } = await supabase
+      .from("tenants")
+      .select("org_type")
+      .eq("id", tenantId)
+      .maybeSingle() as { data: { org_type: string } | null; error: unknown };
+    const orgType = tenantOrg?.org_type ?? null;
+
     return NextResponse.json(
-      { error: "Not Found", message: "No enrollment found for this reference." },
+      { error: "Not Found", message: statusNotFoundMessage(orgType), org_type: orgType },
       { status: 404 },
     );
   }
@@ -162,8 +149,6 @@ export async function GET(request: NextRequest) {
   }
 
   // ── Build response ────────────────────────────────────────────────
-  const enrollmentLabel = ENROLLMENT_STATUS_LABELS[enrollment.status];
-
   // Display only, so an unreadable history falls back to the latest row. That row
   // is often a top-up holding only the remainder, or one with nothing recorded.
   // A confirmed order reads it too: its latest row can be a settled top-up, which
@@ -219,6 +204,8 @@ export async function GET(request: NextRequest) {
   if (tenantError || !tenantInfo) {
     console.error("[status] tenant lookup failed for", tenantId, tenantError ?? "no row");
   }
+
+  const enrollmentLabel = enrollmentStatusLabels(tenantInfo?.org_type)[enrollment.status];
 
   // Bots live in tenant_bots (moved in migration 071). Buyers link to the
   // enrollment bot, and a tenant without one is normal, hence maybeSingle.

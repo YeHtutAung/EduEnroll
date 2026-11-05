@@ -7,7 +7,7 @@
 import { checkStatus, type CbMerchant, type CallBudget, type StatusResult, CB_SUCCESS } from "@/lib/cbmmqr";
 import { settleCbmmqrPayment } from "@/server/payments/settleCbmmqrPayment";
 import type { SettleMmqrSource } from "@/server/payments/settleMmqrPayment";
-import { CB_EXPIRY_MARGIN_MINUTES, cbQrMinutes } from "@/server/payments/cbmmqrOrderWindow";
+import { CB_EXPIRY_MARGIN_MINUTES, neverDisplayedFreeAt } from "@/server/payments/cbmmqrOrderWindow";
 
 const MIN = 60_000;
 
@@ -87,7 +87,7 @@ export async function resolveCbmmqrOrder(input: {
   // the same reference (spec §5.2) is NOT built: it waits for CB's answer to
   // question 3.
   if (!row.orderRef || !row.displayed) {
-    const freeAt = row.createdAtMs + cbQrMinutes() * MIN + margin;
+    const freeAt = neverDisplayedFreeAt(row.createdAtMs);
     return now > freeAt ? { kind: "retire", reason: "FAILED" } : { kind: "active", retryAtMs: freeAt };
   }
 

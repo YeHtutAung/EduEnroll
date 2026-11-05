@@ -6,6 +6,8 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams } from "next/navigation";
 import QRCode from "qrcode";
 import { verifyStripeReturn } from "@/lib/payments/verifyStripeReturn";
+import { enrollmentStatusLabels, paymentPageCopy } from "@/lib/enrollment/orderWording";
+import type { EnrollmentStatus } from "@/types/database";
 import { formatCurrencySimple, formatAmount } from "@/lib/utils";
 import QRPaymentModal from "@/components/payments/QRPaymentModal";
 import PayNowQrSaveButton from "@/components/payments/PayNowQrSaveButton";
@@ -265,7 +267,9 @@ function LoadingSkeleton() {
 
 // ─── Error page ──────────────────────────────────────────────────────────────
 
-function ErrorPage({ message }: { message: string }) {
+function ErrorPage({ message, orgType }: { message: string; orgType: string }) {
+  const { notFoundTitle } = paymentPageCopy(orgType);
+
   return (
     <div className="flex flex-col items-center py-20 text-center">
       <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-50">
@@ -274,8 +278,8 @@ function ErrorPage({ message }: { message: string }) {
             d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
         </svg>
       </div>
-      <h2 className="mb-2 text-xl font-semibold text-gray-900">Enrollment Not Found</h2>
-      <p className="font-myanmar text-gray-500">စာရင်းသွင်းမှု ရှာမတွေ့ပါ</p>
+      <h2 className="mb-2 text-xl font-semibold text-gray-900">{notFoundTitle.en}</h2>
+      <p className="font-myanmar text-gray-500">{notFoundTitle.mm}</p>
       <p className="mt-4 max-w-sm text-sm text-gray-500">{message}</p>
     </div>
   );
@@ -287,10 +291,12 @@ function UploadSection({
   enrollmentRef,
   onUploadSuccess,
   isPartialReUpload,
+  orgType,
 }: {
   enrollmentRef: string;
   onUploadSuccess: () => void;
   isPartialReUpload?: boolean;
+  orgType: string;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadingRef = useRef(false);
@@ -421,6 +427,8 @@ function UploadSection({
 
   // ── Success screen ──────────────────────────────────────────
   if (uploadDone) {
+    const copy = paymentPageCopy(orgType);
+
     return (
       <div className="rounded-xl border border-green-200 bg-green-50 p-8 text-center">
         <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
@@ -436,15 +444,15 @@ function UploadSection({
         </p>
 
         <div className="mt-5 rounded-lg bg-white/70 px-4 py-3">
-          <p className="text-xs text-gray-500">Enrollment Reference</p>
+          <p className="text-xs text-gray-500">{copy.referenceLabel}</p>
           <p className="font-mono text-lg font-bold text-[#1a6b3c]">{enrollmentRef}</p>
         </div>
 
         <p className="mt-5 text-sm text-gray-600">
-          We will review your payment and confirm your enrollment shortly.
+          {copy.reviewNote.en}
         </p>
         <p className="font-myanmar mt-1 text-sm text-gray-500">
-          သင့်ငွေပေးချေမှုကို စစ်ဆေးပြီး စာရင်းသွင်းမှုကို မကြာမီ အတည်ပြုပေးပါမည်။
+          {copy.reviewNote.mm}
         </p>
 
         <div className="mt-4 flex items-center justify-center gap-2 text-xs text-gray-500">
@@ -1165,18 +1173,16 @@ export default function PaymentInstructionsPage() {
           setStripeError("Payment confirmation is still processing. Do not submit another payment yet — check again shortly or contact support.");
           return;
         }
-        const STATUS_LABELS: Record<string, { en: string; mm: string }> = {
-          confirmed:       { en: "Enrollment Confirmed",       mm: "စာရင်းသွင်းမှု အတည်ပြုပြီး" },
-          payment_submitted: { en: "Payment Under Review",     mm: "ငွေပေးချေမှု စစ်ဆေးနေဆဲ" },
-          partial_payment: { en: "Partial Payment — Please Complete", mm: "ငွေတစ်စိတ်တစ်ပိုင်း — ကျန်ငွေ ပေးချေပါ" },
-          rejected:        { en: "Enrollment Rejected",        mm: "စာရင်းသွင်းမှု ငြင်းဆိုထားသည်" },
-        };
-        const label = STATUS_LABELS[outcome.status];
-        setEnrollment((prev) => prev ? {
-          ...prev,
-          status: outcome.status,
-          ...(label ? { status_label_en: label.en, status_label_mm: label.mm } : {}),
-        } : prev);
+        setEnrollment((prev) => {
+          if (!prev) return prev;
+          // The order's own org type: this effect's orgType state is still the initial value.
+          const label = enrollmentStatusLabels(prev.org_type)[outcome.status as EnrollmentStatus];
+          return {
+            ...prev,
+            status: outcome.status,
+            ...(label ? { status_label_en: label.en, status_label_mm: label.mm } : {}),
+          };
+        });
         setStripeReturn(null);
       });
     } else if (stripeParam === "cancelled") {
@@ -1204,12 +1210,15 @@ export default function PaymentInstructionsPage() {
 
         if (!statusRes.ok) {
           const body = await statusRes.json().catch(() => ({}));
+          if (body.org_type) setOrgType(body.org_type);
           setError(body.message || "Enrollment not found.");
           return;
         }
 
         const statusData: EnrollmentInfo = await statusRes.json();
         setEnrollment(statusData);
+        // Set here too, as an order with no intake never reaches the read below.
+        if (statusData.org_type) setOrgType(statusData.org_type);
 
         if (banksRes.ok) {
           const banksData: BankAccountInfo[] = await banksRes.json();
@@ -1534,7 +1543,7 @@ export default function PaymentInstructionsPage() {
   if (error || !enrollment) return (
     <div className="min-h-screen bg-white">
       {brandHeader}
-      <main className="mx-auto max-w-lg px-4 py-8 sm:px-6"><ErrorPage message={error || "Unknown error"} /></main>
+      <main className="mx-auto max-w-lg px-4 py-8 sm:px-6"><ErrorPage message={error || "Unknown error"} orgType={orgType} /></main>
     </div>
   );
 
@@ -2182,7 +2191,7 @@ export default function PaymentInstructionsPage() {
               </span>
               <div className="text-sm text-gray-700">
                 <p>
-                  Use your enrollment ref{" "}
+                  {paymentPageCopy(orgType).transferNotePrefix}{" "}
                   <span className="font-mono font-bold text-red-600">{enrollment.enrollment_ref}</span>{" "}
                   as the transfer note
                 </p>
@@ -2316,6 +2325,7 @@ export default function PaymentInstructionsPage() {
 
           <div className="border-t border-gray-200 pt-8">
             <UploadSection
+              orgType={orgType}
               enrollmentRef={enrollment.enrollment_ref}
               onUploadSuccess={handleUploadSuccess}
               isPartialReUpload={isPartialReUpload}
@@ -2384,7 +2394,7 @@ export default function PaymentInstructionsPage() {
 
       {/* ── Connect Telegram for updates ────── */}
       {enrollment?.telegram_bot_username && enrollment.status !== "pending_payment" && (
-        <TelegramConnectButton enrollmentRef={enrollment.enrollment_ref} classLevel={enrollment.class_level ?? "Class"} />
+        <TelegramConnectButton enrollmentRef={enrollment.enrollment_ref} classLevel={enrollment.class_level ?? paymentPageCopy(orgType).itemFallback} />
       )}
 
       </main>
