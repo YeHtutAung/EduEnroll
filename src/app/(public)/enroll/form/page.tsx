@@ -11,7 +11,7 @@ import TermsConsent from "@/components/enrollment/TermsConsent";
 import { TERMS_VERSION } from "@/lib/legal/terms";
 import { readableTextColor } from "@/lib/readableText";
 import EmailTypoHint from "@/components/enrollment/EmailTypoHint";
-import { emailTypoToConfirm } from "@/lib/enrollment/emailAddress";
+import { emailBlockedFor, emailBlockedMessage, emailTypoToConfirm } from "@/lib/enrollment/emailAddress";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -206,7 +206,7 @@ function getFieldHint(field: FormFieldDef): { en: string; mm?: string } | null {
 function getFieldPlaceholder(field: FormFieldDef): string {
   const key = field.field_key.toLowerCase();
   if (field.field_type === "phone") return "09xxxxxxxxx";
-  if (field.field_type === "email" || key === "email") return "example@email.com";
+  if (field.field_type === "email" || key === "email") return "yourname@gmail.com";
   if (key === "name_en" || key === "student_name_en") return "e.g. Aung Aung";
   if (key === "name_mm" || key === "student_name_mm") return "ဥပမာ - အောင်အောင်";
   if (key === "nrc" || key === "nrc_number") return "12/ThaGaKa(N)123456";
@@ -570,6 +570,9 @@ function EnrollmentFormPage() {
       if (isEmailField(field)) {
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
           errors[field.field_key] = "Invalid email address.";
+        } else if (emailBlockedFor(val)) {
+          const blocked = emailBlockedMessage(emailBlockedFor(val)!);
+          errors[field.field_key] = `${blocked.en} ${blocked.mm}`;
         } else {
           const suggestion = emailTypoToConfirm(val, emailTyposQueried.current);
           if (suggestion) {
@@ -855,6 +858,9 @@ function EnrollmentFormPage() {
   }
 
   // ── Step 2: Review & Confirm ─────────────────────────────────
+  const reviewEmailField = formFields.find(isEmailField);
+  const reviewEmail = reviewEmailField ? (formData[reviewEmailField.field_key] ?? "").trim() : "";
+
   return (
     <PageWrapper schoolName={schoolName} primaryColor={primaryColor} logoUrl={logoUrl}>
     <div className="mx-auto max-w-md">
@@ -934,6 +940,15 @@ function EnrollmentFormPage() {
             );
           })}
         </dl>
+        {reviewEmail && (
+          <div className="mt-4 rounded-lg bg-gray-50 p-3 text-sm">
+            <p className="text-gray-600">
+              We will send your confirmation to:
+              <span className="font-myanmar block text-xs text-gray-500">အတည်ပြုချက်ကို ဤအီးမေးလ်သို့ ပို့ပေးပါမည်-</span>
+            </p>
+            <p className="mt-1 break-all text-base font-semibold text-gray-900">{reviewEmail}</p>
+          </div>
+        )}
       </div>
 
       {/* Error message */}

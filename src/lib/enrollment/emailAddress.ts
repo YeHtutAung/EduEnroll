@@ -13,7 +13,15 @@ const COMMON_DOMAINS = [
 ];
 
 /** Real domains that sit one slip away from a common one, so never "corrected". */
-const REAL_LOOKALIKES = new Set(["mail.com", "email.com", "ymail.com", "gmx.com", "me.com", "msn.com"]);
+const REAL_LOOKALIKES = new Set(["mail.com", "ymail.com", "gmx.com", "me.com", "msn.com"]);
+
+/**
+ * Real, so it can't be refused, but it is often a slip for gmail.com on real
+ * orders, so it is still queried.
+ */
+const REAL_BUT_USUALLY_A_SLIP = new Set(["email.com"]);
+
+const GMAIL = "gmail.com";
 
 /** Endings that are no real top-level domain and are slips for ".com". */
 const COM_TYPOS = new Set(["con", "cmo", "ocm", "vom", "xom", "cim", "comm", "coom"]);
@@ -46,8 +54,7 @@ function isOneSlipAway(a: string, b: string): boolean {
 
 /**
  * The address the buyer probably meant, or null when nothing looks wrong. This
- * only ever suggests: an unusual address can still be real, so no caller may
- * refuse an address because of it.
+ * only suggests. `emailBlockedFor` decides which of these a buyer can't keep.
  */
 export function suggestEmailCorrection(email: string): string | null {
   const trimmed = email.trim();
@@ -72,9 +79,35 @@ export function suggestEmailCorrection(email: string): string | null {
 }
 
 /**
+ * The correction a buyer must accept, or null when they may keep what they typed.
+ * Only near-misses of gmail.com are refused: nearly all real orders use it, and
+ * none has used a real mailbox one slip away from it. A paid ticket sent to one of
+ * these either bounces or may reach whoever owns that domain.
+ */
+export function emailBlockedFor(email: string): string | null {
+  const suggestion = suggestEmailCorrection(email);
+  if (!suggestion) return null;
+
+  const trimmed = email.trim();
+  const typed = trimmed.slice(trimmed.lastIndexOf("@") + 1).toLowerCase();
+  if (REAL_BUT_USUALLY_A_SLIP.has(typed)) return null;
+
+  return suggestion.endsWith(`@${GMAIL}`) ? suggestion : null;
+}
+
+/** What a buyer is told when `emailBlockedFor` refuses their address. */
+export function emailBlockedMessage(suggestion: string): { en: string; mm: string } {
+  return {
+    en: `This email looks mistyped. Did you mean ${suggestion}? Please correct it to continue.`,
+    mm: `ဤအီးမေးလ် စာလုံးပေါင်းမှားနေပုံရပါသည်။ ${suggestion} ကို ဆိုလိုပါသလား။ ဆက်လက်လုပ်ဆောင်ရန် ပြင်ဆင်ပေးပါ။`,
+  };
+}
+
+/**
  * Stops a form once for each address that looks mistyped, and lets the same
  * address through on the next try, so a buyer whose address really is unusual
  * can continue. `warned` is the form's own memory of what it has already queried.
+ * Check `emailBlockedFor` first: a refused address must not reach this.
  */
 export function emailTypoToConfirm(email: string, warned: Set<string>): string | null {
   const value = email.trim();

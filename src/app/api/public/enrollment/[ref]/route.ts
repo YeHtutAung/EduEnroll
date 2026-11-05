@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import { getStripe } from "@/lib/stripe";
+import { emailBlockedFor, emailBlockedMessage } from "@/lib/enrollment/emailAddress";
 import { signTicketJwt } from "@/lib/tickets/sign";
 import { isTicketQrFormat, ticketQrPayload, type TicketQrFormat } from "@/lib/tickets/qrPayload";
 import { clientIpFrom, publicEnrollmentLookupLimiter } from "@/lib/rateLimit";
@@ -346,6 +347,15 @@ export async function PATCH(
   const { student_name_en, email, form_data } = body;
   if (!student_name_en || !email) {
     return NextResponse.json({ error: "Bad Request", message: "student_name_en and email are required." }, { status: 400 });
+  }
+
+  const emailSuggestion = emailBlockedFor(email);
+  if (emailSuggestion) {
+    const blocked = emailBlockedMessage(emailSuggestion);
+    return NextResponse.json(
+      { error: "Invalid Email", message: blocked.en, message_mm: blocked.mm, suggestion: emailSuggestion },
+      { status: 400 },
+    );
   }
 
   const supabase = createAdminClient();
