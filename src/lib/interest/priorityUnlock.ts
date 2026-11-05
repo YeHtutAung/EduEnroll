@@ -171,3 +171,30 @@ export function hideLinkOnlyTiers<
 >(classes: T[]): T[] {
   return classes.filter((c) => !isLinkOnlyTier(c) || c.priority_unlocked);
 }
+
+/**
+ * Show a link holder only the link-only tiers their link unlocked. They came for
+ * the invitee price, so a dearer public tier beside it only invites them to pay
+ * more. Call it after hideLinkOnlyTiers.
+ *
+ * If no unlocked link-only tier can still be bought (sold out or closed), every
+ * tier stays, so the visitor can still buy a public one. The same applies once
+ * the window ends, because a tier stops being unlocked when its opening date
+ * passes.
+ *
+ * The browser cannot check a token, so a used or revoked link also gets this
+ * view and is refused at submit. Like the other helpers here, this is
+ * presentational: the public tiers can still be bought.
+ */
+export function onlyUnlockedLinkTiers<
+  T extends Pick<
+    TemplateClass,
+    "enrollment_open_at" | "enrollment_close_at" | "priority_unlocked" | "seat_remaining" | "status"
+  >,
+>(classes: T[], now: number = Date.now()): T[] {
+  const linkTiers = classes.filter((c) => c.priority_unlocked && isLinkOnlyTier(c));
+  const canStillBuy = linkTiers.some(
+    (c) => c.status !== "full" && c.seat_remaining > 0 && Date.parse(c.enrollment_close_at as string) > now,
+  );
+  return canStillBuy ? linkTiers : classes;
+}
