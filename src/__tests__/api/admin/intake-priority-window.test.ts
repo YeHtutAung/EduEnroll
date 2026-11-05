@@ -197,6 +197,42 @@ describe("PATCH /api/intakes/[id] — organiser_terms", () => {
   });
 });
 
+describe("PATCH /api/intakes/[id] — email_terms", () => {
+  async function patch(body: unknown) {
+    const capture: UpdateCapture = { payload: null, eqs: {} };
+    authWith(makeSupabase({ data: { id: "intake-1" } }, capture));
+    const res = await PATCH(request(body) as never, { params: { id: "intake-1" } });
+    return { res, capture };
+  }
+
+  it("trims and stores the terms without touching the checkout rules", async () => {
+    const { res, capture } = await patch({ email_terms: "  Non-Refundable.\n" });
+    expect(res.status).toBe(200);
+    expect(capture.payload).toMatchObject({ email_terms: "Non-Refundable." });
+    expect(capture.payload).not.toHaveProperty("organiser_terms");
+  });
+
+  it("stores blank terms as null, and leaves them alone when not sent", async () => {
+    const blank = await patch({ email_terms: "   " });
+    expect(blank.capture.payload).toHaveProperty("email_terms", null);
+
+    const absent = await patch({ name: "Renamed" });
+    expect(absent.capture.payload).not.toHaveProperty("email_terms");
+  });
+
+  it("rejects terms longer than 5000 characters with 400 naming the limit", async () => {
+    const { res, capture } = await patch({ email_terms: "x".repeat(5001) });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(await res.json())).toMatch(/5000/);
+    expect(capture.payload).toBeNull();
+  });
+
+  it("rejects a non-string, non-null value", async () => {
+    const { res } = await patch({ email_terms: 42 });
+    expect(res.status).toBe(400);
+  });
+});
+
 describe("PATCH /api/intakes/[id] — custom font", () => {
   async function patch(body: unknown) {
     const capture: UpdateCapture = { payload: null, eqs: {} };

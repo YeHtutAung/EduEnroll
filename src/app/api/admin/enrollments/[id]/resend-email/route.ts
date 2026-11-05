@@ -13,6 +13,7 @@ import {
 import { resolveEmailFromFormData } from "@/lib/utils";
 import type { Enrollment, Payment } from "@/types/database";
 import { buildEticketEmailAttachment } from "@/server/tickets/eticketEmailAttachment";
+import { loadEventEmailTerms } from "@/server/notifications/eventEmailTerms";
 
 type EnrollmentResult = { data: Enrollment | null; error: unknown };
 type PaymentResult = { data: Payment | null; error: unknown };
@@ -126,6 +127,7 @@ export async function POST(
       classLevel,
       statusUrl,
       feeFormatted,
+      eventTerms: await loadEventEmailTerms(enrollment.id),
       orgType,
       tenantName,
       logoUrl,

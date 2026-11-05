@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, requireOwner, badRequest, notFound } from "@/lib/api";
 import type { Intake, IntakeStatus } from "@/types/database";
-import { normaliseOrganiserTerms, ORGANISER_TERMS_MAX } from "@/lib/legal/terms";
+import { EMAIL_TERMS_MAX, normaliseOrganiserTerms, ORGANISER_TERMS_MAX } from "@/lib/legal/terms";
 import { validateEventFont } from "@/lib/eventFont";
 
 const VALID_STATUSES: IntakeStatus[] = ["draft", "open", "closed"];
@@ -37,7 +37,7 @@ export async function GET(
 // Partially update an intake. All body fields are optional.
 //
 // Allowed fields: name, year, status, hero_image_url, priority_open_at, organiser_terms,
-// font_css_url + font_family (together)
+// email_terms, font_css_url + font_family (together)
 
 export async function PATCH(
   request: NextRequest,
@@ -56,7 +56,7 @@ export async function PATCH(
     return badRequest("Request body must be valid JSON.");
   }
 
-  const { name, year, status, hero_image_url, priority_open_at, organiser_terms, font_css_url, font_family } = body as Record<
+  const { name, year, status, hero_image_url, priority_open_at, organiser_terms, email_terms, font_css_url, font_family } = body as Record<
     string,
     unknown
   >;
@@ -124,6 +124,19 @@ export async function PATCH(
       return badRequest(`Event rules must be at most ${ORGANISER_TERMS_MAX} characters.`);
     }
     update.organiser_terms = normalised;
+  }
+
+  // email_terms — printed in the confirmation email only, never at checkout.
+  // Explicit null (or blank text) clears them.
+  if ("email_terms" in (body as object)) {
+    if (email_terms !== null && typeof email_terms !== "string") {
+      return badRequest("email_terms must be a string or null.");
+    }
+    const normalised = normaliseOrganiserTerms(email_terms as string | null);
+    if (normalised !== null && normalised.length > EMAIL_TERMS_MAX) {
+      return badRequest(`Email terms must be at most ${EMAIL_TERMS_MAX} characters.`);
+    }
+    update.email_terms = normalised;
   }
 
   // font_css_url + font_family — the event's Adobe Fonts web font. Validated
