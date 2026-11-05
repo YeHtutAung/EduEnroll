@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 import { EvTrustedOfficialTemplate } from "@/components/enrollment/templates";
 import type { ClassStatus } from "@/types/database";
-import { applyPriorityUnlock, capturePriorityToken, hideLinkOnlyTiers, isLinkOnlyTier } from "@/lib/interest/priorityUnlock";
+import { applyPriorityUnlock, capturePriorityToken, hideLinkOnlyTiers, isLinkOnlyTier, onlyUnlockedLinkTiers } from "@/lib/interest/priorityUnlock";
 import { pushDataLayer, viewItemPayload } from "@/lib/tagManager";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -171,11 +171,11 @@ export default function TicketsPage() {
     <EvTrustedOfficialTemplate
       appearance={data.appearance as never}
       intake={data.intake}
-      classes={hideLinkOnlyTiers(applyPriorityUnlock(data.classes, {
+      classes={onlyUnlockedLinkTiers(hideLinkOnlyTiers(applyPriorityUnlock(data.classes, {
         priorityOpenAt: data.intake.priority_open_at,
         coveredClassIds: data.priority_covered_class_ids ?? [],
         token: priorityToken,
-      }))}
+      })))}
       labels={data.labels}
       slug={params.slug}
       currency={data.labels.currency}
