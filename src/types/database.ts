@@ -414,6 +414,10 @@ export interface Ticket {
   status: "valid" | "void";
   first_scan_at: string | null;
   first_scan_gate: string | null;
+  // Multi-day tickets only: the latest entry, one per day.
+  last_scan_date: string | null;
+  last_scan_at: string | null;
+  last_scan_gate: string | null;
   created_at: string;
 }
 

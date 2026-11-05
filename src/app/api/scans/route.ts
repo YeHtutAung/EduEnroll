@@ -2,13 +2,17 @@ import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveScannerTenant } from "@/lib/scanner/apiKey";
 import { verifyTicketJwt } from "@/lib/tickets/sign";
+import { lastEventDate, todayInTz } from "@/lib/tickets/exp";
 
 // ─── POST /api/scans ────────────────────────────────────────────────────────
 // Called by the kuunyi-scanner app when a ticket QR is scanned.
-// Enforces single-use entry via a race-safe conditional update: only the
-// scan that wins the `.is("first_scan_at", null)` UPDATE gets a 200; any
-// concurrent/subsequent scan of the same ticket gets a 409 with the details
-// of the original (winning) scan.
+// Enforces entry via a race-safe conditional update: only the scan that wins
+// the UPDATE gets a 200; any concurrent/subsequent scan gets a 409 with the
+// details of the winning scan.
+//
+// A ticket for a one-day event admits once. A ticket whose event ends on a later
+// date admits once per calendar day in TICKET_TZ, so the day changes at midnight
+// there. first_scan_* keeps its first entry; last_scan_* holds the latest.
 //
 // Body: { token: string, gate?: string, jti?: string, eid?: string }
 //
@@ -29,6 +33,7 @@ interface TicketRow {
   exp: string;
   first_scan_at: string | null;
   first_scan_gate: string | null;
+  classes: { event_date: string | null; end_time: string | null } | null;
 }
 
 interface ScanBody {
@@ -43,6 +48,20 @@ interface ScanBody {
 // or wrong-event ticket. Operators see one "NOT VALID" state either way.
 const notFound = () =>
   NextResponse.json({ error: "Not Found", message: "Ticket not found." }, { status: 404 });
+
+// A database fault is never "invalid" or "already used": both tell the operator
+// to turn the attendee away. The app shows a 500 as a server problem instead.
+function scanUnavailable(step: string, error: unknown) {
+  console.error(`[scans] ${step} failed`, error);
+  return NextResponse.json(
+    { error: "Internal Server Error", message: "Scan could not be processed." },
+    { status: 500 },
+  );
+}
+
+// PostgREST's "no rows" from .single(), and Postgres's bad uuid: both mean the
+// ticket doesn't exist. Any other error means we don't know.
+const TICKET_ABSENT_CODES = new Set(["PGRST116", "22P02"]);
 
 export async function POST(request: NextRequest) {
   // ── 1. Parse body ──────────────────────────────────────────────────────────
@@ -120,12 +139,16 @@ export async function POST(request: NextRequest) {
   const supabase = createAdminClient();
 
   // ── 5. Load and validate ticket ─────────────────────────────────────────────
-  const { data: ticket } = (await supabase
+  const { data: ticket, error: loadError } = (await supabase
     .from("tickets")
-    .select("id, intake_id, status, exp, first_scan_at, first_scan_gate")
+    .select("id, intake_id, status, exp, first_scan_at, first_scan_gate, classes(event_date, end_time)")
     .eq("id", jti)
     .eq("tenant_id", tenantId)
-    .single()) as unknown as { data: TicketRow | null; error: unknown };
+    .single()) as unknown as { data: TicketRow | null; error: { code?: string } | null };
+
+  if (loadError && !TICKET_ABSENT_CODES.has(loadError.code ?? "")) {
+    return scanUnavailable("ticket load", loadError);
+  }
 
   if (
     !ticket ||
@@ -136,20 +159,66 @@ export async function POST(request: NextRequest) {
     return notFound();
   }
 
-  // ── 6. Race-safe single-use claim ───────────────────────────────────────────
+  const now = new Date().toISOString();
+  const startDate = ticket.classes?.event_date ?? null;
+  const isMultiDay = lastEventDate(startDate, ticket.classes?.end_time) !== startDate;
+
+  // ── 6. Race-safe claim ──────────────────────────────────────────────────────
   // Re-check status='valid' inside the conditional update so a ticket voided
-  // between step 5 and here cannot still be claimed (validity + first-scan claim
-  // happen in one atomic statement).
-  const { data: claimed } = (await supabase
+  // between step 5 and here cannot still be claimed (validity + claim happen in
+  // one atomic statement).
+  if (isMultiDay) {
+    const today = todayInTz(process.env.TICKET_TZ ?? "Asia/Yangon");
+    const { data: claimedToday, error: claimError } = (await supabase
+      .from("tickets")
+      .update({
+        // Only the scan that finds no first entry sets it. Two scans racing on
+        // that are on the same day, so the filter below still lets one through.
+        ...(ticket.first_scan_at ? {} : { first_scan_at: now, first_scan_gate: gate }),
+        last_scan_date: today,
+        last_scan_at: now,
+        last_scan_gate: gate,
+      } as never)
+      .eq("id", jti)
+      .eq("status", "valid")
+      .or(`last_scan_date.is.null,last_scan_date.lt.${today}`)
+      .select("id")) as unknown as { data: { id: string }[] | null; error: unknown };
+
+    if (claimError) return scanUnavailable("daily claim", claimError);
+    if (claimedToday && claimedToday.length > 0) {
+      return NextResponse.json({ ok: true });
+    }
+
+    // Already in today: report today's scan, not the one from an earlier day.
+    const { data: existingToday } = (await supabase
+      .from("tickets")
+      .select("last_scan_at, last_scan_gate")
+      .eq("id", jti)
+      .single()) as unknown as {
+      data: { last_scan_at: string | null; last_scan_gate: string | null } | null;
+    };
+
+    return NextResponse.json(
+      {
+        firstScanTime: existingToday?.last_scan_at ?? null,
+        firstScanGate: existingToday?.last_scan_gate ?? null,
+      },
+      { status: 409 },
+    );
+  }
+
+  const { data: claimed, error: claimError } = (await supabase
     .from("tickets")
-    .update({ first_scan_at: new Date().toISOString(), first_scan_gate: gate } as never)
+    .update({ first_scan_at: now, first_scan_gate: gate } as never)
     .eq("id", jti)
     .eq("status", "valid")
     .is("first_scan_at", null)
     .select("first_scan_at, first_scan_gate")) as unknown as {
     data: { first_scan_at: string; first_scan_gate: string | null }[] | null;
+    error: unknown;
   };
 
+  if (claimError) return scanUnavailable("claim", claimError);
   if (claimed && claimed.length > 0) {
     return NextResponse.json({ ok: true });
   }

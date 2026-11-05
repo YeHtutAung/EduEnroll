@@ -1,7 +1,7 @@
 import { waitUntil } from "@vercel/functions";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { sendPendingConversions } from "@/server/conversions/sendPendingConversions";
-import { ticketExpiry } from "@/lib/tickets/exp";
+import { lastEventDate, ticketExpiry } from "@/lib/tickets/exp";
 import { loadSigningKey } from "@/lib/tickets/keys";
 
 const TZ = process.env.TICKET_TZ ?? "Asia/Yangon";
@@ -152,13 +152,14 @@ async function issueTicketsInner(enrollmentId: string): Promise<void> {
 
   const { data: classes, error: classesError } = (await supabase
     .from("classes")
-    .select("id, level, intake_id, event_date, pack_size")
+    .select("id, level, intake_id, event_date, end_time, pack_size")
     .in("id", Array.from(byClass.keys()))) as unknown as {
     data: {
       id: string;
       level: string;
       intake_id: string;
       event_date: string | null;
+      end_time: string | null;
       pack_size: number | null;
     }[] | null;
     error: unknown;
@@ -198,7 +199,7 @@ async function issueTicketsInner(enrollmentId: string): Promise<void> {
   const rows: Record<string, unknown>[] = [];
   for (const [classId, quantity] of Array.from(admissions.entries())) {
     const c = byId.get(classId)!;
-    const expIso = new Date(ticketExpiry(c.event_date, TZ) * 1000).toISOString();
+    const expIso = new Date(ticketExpiry(lastEventDate(c.event_date, c.end_time), TZ) * 1000).toISOString();
     for (let seat = 1; seat <= quantity; seat++) {
       rows.push({
         tenant_id: enrollment.tenant_id,
