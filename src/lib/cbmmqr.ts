@@ -255,6 +255,17 @@ function egressDispatcher(): ProxyAgent | Agent {
   return cachedProxy ?? ipv4Agent;
 }
 
+/**
+ * Throws on any setting the calls below would throw on. For use before a payment
+ * row exists: thrown mid-request, these would leave that row holding the slot.
+ * Errors name the variable, never its value.
+ */
+export function assertCbGatewayConfig(): void {
+  baseUrl();
+  egressDispatcher();
+  utcOffset();
+}
+
 const CALL_TIMEOUT_MS = 20_000;
 const MIN_CALL_MS = 1_000;
 
@@ -268,12 +279,13 @@ function timeoutFor(budget: CallBudget | undefined, now: number): number | null 
 }
 
 type SendResult =
-  | { ok: false }
+  | { ok: false; skipped?: true }
   | { ok: true; status: number; code: string | null; body: Record<string, unknown> };
 
 /**
- * One HTTP call. `ok: false` means we did not get a parseable answer. A non-2xx
- * with a JSON body is still an answer: CB may put a returnCode on a 400.
+ * One HTTP call. `ok: false` means we did not get a parseable answer. `skipped`
+ * is the one case where we know nothing left this machine. A non-2xx with a
+ * JSON body is still an answer: CB may put a returnCode on a 400.
  * Bodies are never logged — the token request carries the password.
  */
 async function send(
@@ -286,7 +298,7 @@ async function send(
   const timeout = timeoutFor(budget, Date.now());
   if (timeout === null) {
     console.error(`[cbmmqr] ${label} skipped: request budget exhausted`);
-    return { ok: false };
+    return { ok: false, skipped: true };
   }
 
   // Outside the try: a configuration error must surface, not read as "CB down".
@@ -388,7 +400,9 @@ async function withToken(
   // CB already answered the first call, so a failed refresh is never a definite
   // rejection: it stays ambiguous.
   if (!("token" in second)) return { ok: false };
-  return call(second.token);
+  const retried = await call(second.token);
+  // Likewise a retry we skipped: the first call was still sent.
+  return retried.ok ? retried : { ok: false };
 }
 
 // ── Create QR ──────────────────────────────────────────────────────────────
@@ -399,7 +413,9 @@ export type CreateQrResult =
   | { kind: "created"; qr: string; qrReferenceNo: string; expiresAtMs: number | null }
   /** CB created nothing (spec §5.1 step 6): the row may be marked FAILED. */
   | { kind: "rejected"; reason: "below_minimum" | "above_maximum" | "config"; code: string }
-  /** We cannot tell whether CB created a QR: the row stays PENDING (R13). */
+  /** No /dynamicqr request was ever sent, so CB holds nothing: the row may be marked FAILED. */
+  | { kind: "not_sent" }
+  /** A /dynamicqr request was sent and we cannot tell what CB did: the row stays PENDING (R13). */
   | { kind: "ambiguous"; code: string | null };
 
 export async function createDynamicQr(
@@ -427,9 +443,9 @@ export async function createDynamicQr(
     if (r.tokenFailCode === "0016" || r.tokenFailCode === "0021") {
       return { kind: "rejected", reason: "config", code: r.tokenFailCode };
     }
-    return { kind: "ambiguous", code: null };
+    return { kind: "not_sent" };
   }
-  if (!r.ok) return { kind: "ambiguous", code: null };
+  if (!r.ok) return r.skipped ? { kind: "not_sent" } : { kind: "ambiguous", code: null };
 
   if (r.code === CB_SUCCESS) {
     const qr = r.body.qrCodeInfo;

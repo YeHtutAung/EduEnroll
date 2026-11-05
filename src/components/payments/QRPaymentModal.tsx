@@ -86,6 +86,18 @@ export function qrCountdown(expiresAtMs: number | null, nowMs: number): { expire
   return { expired: false, label: `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}` };
 }
 
+/**
+ * The error view's heading. For CB, no order on screen means the QR was never
+ * created: the buyer has not tried to pay, and "Payment Failed" reads as if
+ * money moved. Every other provider keeps its old heading.
+ */
+export function errorHeading(provider: QRProvider, orderId: string | null): { en: string; my: string } {
+  if (provider === "cbmmqr" && orderId === null) {
+    return { en: "QR code not available", my: "QR ကုဒ် မရရှိနိုင်သေးပါ။" };
+  }
+  return { en: "Payment Failed", my: "ငွေပေးချေမှု မအောင်မြင်ပါ" };
+}
+
 interface QRPaymentModalProps {
   enrollmentRef: string;
   amount: number;
@@ -737,8 +749,8 @@ export default function QRPaymentModal({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
-            <h3 className="text-lg font-semibold text-gray-900">Payment Failed</h3>
-            <p className="font-myanmar mt-1 text-sm text-gray-500">ငွေပေးချေမှု မအောင်မြင်ပါ</p>
+            <h3 className="text-lg font-semibold text-gray-900">{errorHeading(provider, orderId).en}</h3>
+            <p className="font-myanmar mt-1 text-sm text-gray-500">{errorHeading(provider, orderId).my}</p>
             <p className="mt-2 text-center text-sm text-gray-600">{errorMsg}</p>
             <div className="mt-6 flex w-full gap-3">
               <button
