@@ -68,6 +68,7 @@ interface TicketLoadRow {
   exp: string;
   first_scan_at: string | null;
   first_scan_gate: string | null;
+  classes?: { event_date: string | null; end_time: string | null } | null;
 }
 
 interface ClaimRow {
@@ -82,13 +83,16 @@ interface ClaimRow {
 //   `.update()` call      -> the race-safe conditional claim
 function setupTicketMock(opts: {
   load: TicketLoadRow | null;
-  claimed?: ClaimRow[];
-  reread?: { first_scan_at: string; first_scan_gate: string | null } | null;
+  loadError?: { code: string; message: string } | null;
+  claimed?: unknown[];
+  claimError?: { code: string; message: string } | null;
+  reread?: Record<string, string | null> | null;
 }) {
   let selectCalls = 0;
   const updateSpy = vi.fn();
   const updateEqSpy = vi.fn();
   const updateIsSpy = vi.fn();
+  const updateOrSpy = vi.fn();
 
   mockAdminFrom.mockImplementation((table: string) => {
     if (table !== "tickets") throw new Error(`Unexpected table: ${table}`);
@@ -103,7 +107,7 @@ function setupTicketMock(opts: {
         chain.eq.mockReturnValue(chain);
         chain.single.mockResolvedValue({
           data: isFirstCall ? opts.load : (opts.reread ?? null),
-          error: null,
+          error: isFirstCall ? (opts.loadError ?? null) : null,
         });
         return chain;
       }),
@@ -112,10 +116,12 @@ function setupTicketMock(opts: {
         const chain: {
           eq: ReturnType<typeof vi.fn>;
           is: ReturnType<typeof vi.fn>;
+          or: ReturnType<typeof vi.fn>;
           select: ReturnType<typeof vi.fn>;
         } = {
           eq: vi.fn(),
           is: vi.fn(),
+          or: vi.fn(),
           select: vi.fn(),
         };
         chain.eq.mockImplementation((...args: unknown[]) => {
@@ -126,13 +132,20 @@ function setupTicketMock(opts: {
           updateIsSpy(...args);
           return chain;
         });
-        chain.select.mockResolvedValue({ data: opts.claimed ?? [], error: null });
+        chain.or.mockImplementation((...args: unknown[]) => {
+          updateOrSpy(...args);
+          return chain;
+        });
+        chain.select.mockResolvedValue({
+          data: opts.claimError ? null : (opts.claimed ?? []),
+          error: opts.claimError ?? null,
+        });
         return chain;
       }),
     };
   });
 
-  return { updateSpy, updateEqSpy, updateIsSpy };
+  return { updateSpy, updateEqSpy, updateIsSpy, updateOrSpy };
 }
 
 const FUTURE_EXP = "2099-01-01T00:00:00.000Z";
@@ -266,6 +279,142 @@ describe("POST /api/scans", () => {
     expect(res.status).toBe(409);
     const body = await res.json();
     expect(body).toEqual({ firstScanTime, firstScanGate: "Gate-B" });
+  });
+});
+
+// ─── Once per day on multi-day tickets ────────────────────────────────────────
+
+describe("POST /api/scans — entry per day", () => {
+  const savedKey = process.env.TICKET_SIGNING_KEY;
+  const savedKid = process.env.TICKET_KID;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    installSigningKey();
+    mockResolveScannerTenant.mockResolvedValue("tenant-1");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    // 22 Nov 2026, 12:00 in Yangon.
+    vi.useFakeTimers({ now: new Date("2026-11-22T05:30:00.000Z"), toFake: ["Date"] });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    process.env.TICKET_SIGNING_KEY = savedKey;
+    process.env.TICKET_KID = savedKid;
+  });
+
+  const load = (overrides: Partial<TicketLoadRow> = {}): TicketLoadRow => ({
+    id: "t1",
+    intake_id: "intake-A",
+    status: "valid",
+    exp: FUTURE_EXP,
+    first_scan_at: null,
+    first_scan_gate: null,
+    classes: { event_date: "2026-11-21", end_time: "2026-11-24" },
+    ...overrides,
+  });
+  const scan = () => POST(makeRequest({ token: tokenFor("t1", "intake-A"), gate: "Gate-A" }));
+  const notScannedToday = "last_scan_date.is.null,last_scan_date.lt.2026-11-22";
+
+  it("admits a pass's first scan and records it as both the first and today's", async () => {
+    const { updateSpy, updateOrSpy, updateIsSpy } = setupTicketMock({
+      load: load(),
+      claimed: [{ id: "t1" }],
+    });
+
+    const res = await scan();
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(updateOrSpy).toHaveBeenCalledWith(notScannedToday);
+    expect(updateIsSpy).not.toHaveBeenCalled();
+    expect(updateSpy).toHaveBeenCalledWith({
+      first_scan_at: "2026-11-22T05:30:00.000Z",
+      first_scan_gate: "Gate-A",
+      last_scan_date: "2026-11-22",
+      last_scan_at: "2026-11-22T05:30:00.000Z",
+      last_scan_gate: "Gate-A",
+    });
+  });
+
+  it("admits the pass again on a later day and keeps the first scan as it was", async () => {
+    const { updateSpy, updateOrSpy } = setupTicketMock({
+      load: load({ first_scan_at: "2026-11-21T11:00:00.000Z", first_scan_gate: "Gate-B" }),
+      claimed: [{ id: "t1" }],
+    });
+
+    const res = await scan();
+
+    expect(res.status).toBe(200);
+    expect(updateOrSpy).toHaveBeenCalledWith(notScannedToday);
+    expect(updateSpy).toHaveBeenCalledWith({
+      last_scan_date: "2026-11-22",
+      last_scan_at: "2026-11-22T05:30:00.000Z",
+      last_scan_gate: "Gate-A",
+    });
+  });
+
+  it("refuses a second scan on the same day and reports today's scan, not the first", async () => {
+    setupTicketMock({
+      load: load({ first_scan_at: "2026-11-21T11:00:00.000Z", first_scan_gate: "Gate-B" }),
+      claimed: [],
+      reread: { last_scan_at: "2026-11-22T04:00:00.000Z", last_scan_gate: "Gate-C" },
+    });
+
+    const res = await scan();
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      firstScanTime: "2026-11-22T04:00:00.000Z",
+      firstScanGate: "Gate-C",
+    });
+  });
+
+  it.each([
+    ["ends on its start date", { event_date: "2026-11-22", end_time: "2026-11-22" }],
+    ["has no end date", { event_date: "2026-11-22", end_time: null }],
+    ["has an end before its start", { event_date: "2026-11-22", end_time: "2026-11-20" }],
+  ])("keeps a ticket single-use when its event %s", async (_label, classes) => {
+    const { updateSpy, updateIsSpy, updateOrSpy } = setupTicketMock({
+      load: load({ classes }),
+      claimed: [{ first_scan_at: "x", first_scan_gate: "Gate-A" }],
+    });
+
+    await scan();
+
+    expect(updateIsSpy).toHaveBeenCalledWith("first_scan_at", null);
+    expect(updateOrSpy).not.toHaveBeenCalled();
+    expect(updateSpy).toHaveBeenCalledWith({
+      first_scan_at: "2026-11-22T05:30:00.000Z",
+      first_scan_gate: "Gate-A",
+    });
+  });
+
+  it("still refuses a voided multi-day pass", async () => {
+    const { updateSpy } = setupTicketMock({ load: load({ status: "void" }) });
+    const res = await scan();
+    expect(res.status).toBe(404);
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  // A database fault must not read as a bad or used ticket: both tell the
+  // operator to turn the attendee away.
+  it("returns 500, not 404, when the ticket cannot be read", async () => {
+    setupTicketMock({ load: null, loadError: { code: "42703", message: "column does not exist" } });
+    const res = await scan();
+    expect(res.status).toBe(500);
+  });
+
+  it("returns 404 when the ticket truly does not exist", async () => {
+    setupTicketMock({ load: null, loadError: { code: "PGRST116", message: "0 rows" } });
+    const res = await scan();
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 500, not 409, when the scan cannot be recorded", async () => {
+    setupTicketMock({ load: load(), claimError: { code: "42703", message: "column does not exist" } });
+    const res = await scan();
+    expect(res.status).toBe(500);
   });
 });
 

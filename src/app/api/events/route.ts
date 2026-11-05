@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveScannerTenant } from "@/lib/scanner/apiKey";
-import { lastEventDate } from "@/lib/tickets/exp";
+import { lastEventDate, todayInTz } from "@/lib/tickets/exp";
 
 // ─── GET /api/events ────────────────────────────────────────────────────────
 // Called by the kuunyi-scanner app at startup to populate its event picker.
@@ -56,15 +56,8 @@ export async function GET(request: NextRequest) {
 
   // "Today" in the event timezone (TICKET_TZ, same convention as ticket expiry)
   // rather than the server's UTC date — otherwise an event that is still today
-  // locally can be dropped as "past" around the UTC midnight boundary. en-CA
-  // formats as YYYY-MM-DD for a safe date-only string compare.
-  const TZ = process.env.TICKET_TZ ?? "Asia/Yangon";
-  const todayStr = new Intl.DateTimeFormat("en-CA", {
-    timeZone: TZ,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
+  // locally can be dropped as "past" around the UTC midnight boundary.
+  const todayStr = todayInTz(process.env.TICKET_TZ ?? "Asia/Yangon");
 
   // Group classes by intake_id and pick the earliest event_date among classes
   // that have not finished. Finished classes are excluded first — otherwise an

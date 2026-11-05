@@ -32,6 +32,16 @@ export function lastEventDate(eventDate: string | null, endDate: string | null |
   return endDate && endDate > eventDate ? endDate : eventDate;
 }
 
+// Today as YYYY-MM-DD in the given IANA tz, not the server's UTC date.
+export function todayInTz(tz: string, now: Date = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+}
+
 // Returns Unix seconds for 23:59:59 on the given date in the given IANA tz.
 export function ticketExpiry(eventDate: string | null, tz: string): number {
   if (!eventDate) return Math.floor(Date.now() / 1000) + 365 * 24 * 3600;
