@@ -210,7 +210,7 @@ function untrackedPages(): string[] {
     for (const name of readdirSync(dir)) {
       const full = join(dir, name);
       if (statSync(full).isDirectory()) walk(full);
-      else if (name === "page.tsx") out.push(relative(ROOT, full).split("\\").join("/"));
+      else if (name === "page.tsx" || name === "StatusLookupClient.tsx") out.push(relative(ROOT, full).split("\\").join("/"));
     }
   };
   walk(join(ROOT, PUBLIC_DIR));
@@ -253,6 +253,7 @@ describe("untracked pages enter tracked pages with a full page load", () => {
     expect(pages).toContain("src/app/(public)/enroll/form/page.tsx");
     expect(pages).toContain("src/app/(public)/enroll/[slug]/checkout/new/page.tsx");
     expect(pages).toContain("src/app/(public)/status/page.tsx");
+    expect(pages).toContain("src/app/(public)/status/StatusLookupClient.tsx");
     expect(pages).not.toContain("src/app/(public)/enroll/[slug]/page.tsx");
   });
 
