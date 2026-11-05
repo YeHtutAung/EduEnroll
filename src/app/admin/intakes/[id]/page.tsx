@@ -15,7 +15,7 @@ import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
 import { useRole } from "@/components/admin/RoleContext";
 import { createClient } from "@/lib/supabase/client";
 import { mm } from "@/lib/mm-labels";
-import { ORGANISER_TERMS_MAX } from "@/lib/legal/terms";
+import { EMAIL_TERMS_MAX, ORGANISER_TERMS_MAX } from "@/lib/legal/terms";
 import { telegramBotIsReady } from "@/lib/telegram/telegramBotIsReady";
 import type { Class, ClassChannel, ClassMode, ClassStatus, Intake, IntakeStatus } from "@/types/database";
 
@@ -990,6 +990,7 @@ export default function IntakeDetailPage({
   const [editYear, setEditYear] = useState(new Date().getFullYear());
   const [editPriorityOpenAt, setEditPriorityOpenAt] = useState("");
   const [editOrganiserTerms, setEditOrganiserTerms] = useState("");
+  const [editEmailTerms, setEditEmailTerms] = useState("");
   const [editFontCssUrl, setEditFontCssUrl] = useState("");
   const [editFontFamily, setEditFontFamily] = useState("");
   const [savingIntake, setSavingIntake] = useState(false);
@@ -1387,6 +1388,7 @@ export default function IntakeDetailPage({
     setEditYear(intake.year);
     setEditPriorityOpenAt(toDatetimeLocal(intake.priority_open_at));
     setEditOrganiserTerms(intake.organiser_terms ?? "");
+    setEditEmailTerms(intake.email_terms ?? "");
     setEditFontCssUrl(intake.font_css_url ?? "");
     setEditFontFamily(intake.font_family ?? "");
     setEditingIntake(true);
@@ -1405,6 +1407,11 @@ export default function IntakeDetailPage({
         year: editYear,
         organiser_terms: editOrganiserTerms,
       };
+      // Only sent when edited, so this page keeps saving other changes if the
+      // code reaches a database that does not have the column yet.
+      if (editEmailTerms !== (intake?.email_terms ?? "")) {
+        payload.email_terms = editEmailTerms;
+      }
       // Only sent when the interest surface is shown — a language-school
       // tenant never renders this field, so it must never send a value
       // (including a clearing null) for one.
@@ -2266,6 +2273,26 @@ export default function IntakeDetailPage({
                   Buyers see these above the agreement checkbox and must accept them to order.
                   Editing them asks anyone with the order page already open to reload.
                   Leave blank for none. {editOrganiserTerms.length}/{ORGANISER_TERMS_MAX}
+                </p>
+              </div>
+
+              {/* Printed in the confirmation email only; never shown at checkout */}
+              <div className="border-t border-gray-100 pt-4">
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">
+                  Terms in the Confirmation Email
+                </label>
+                <textarea
+                  value={editEmailTerms}
+                  onChange={(e) => setEditEmailTerms(e.target.value)}
+                  maxLength={EMAIL_TERMS_MAX}
+                  rows={5}
+                  placeholder="e.g. Non-Refundable: All ticket purchases are final."
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent"
+                />
+                <p className="mt-1.5 text-xs text-gray-400">
+                  Printed as typed at the bottom of the email buyers get once their order is confirmed.
+                  Buyers do not see or accept these at checkout. Emails already sent do not change.
+                  Leave blank for none. {editEmailTerms.length}/{EMAIL_TERMS_MAX}
                 </p>
               </div>
 

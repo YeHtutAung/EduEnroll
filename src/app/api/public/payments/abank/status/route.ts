@@ -8,6 +8,7 @@ import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
 import { resolveEmailFromFormData } from "@/lib/utils";
 import { issueTicketsForEnrollment } from "@/server/tickets/issueTickets";
 import { buildEticketEmailAttachment } from "@/server/tickets/eticketEmailAttachment";
+import { loadEventEmailTerms } from "@/server/notifications/eventEmailTerms";
 
 // ─── GET /api/public/payments/abank/status?ref=AB-xxx ───────────────────────
 // Polls ABank enquiry API and updates local payment record.
@@ -193,6 +194,7 @@ export async function GET(request: NextRequest) {
             classLevel,
             statusUrl,
             feeFormatted,
+            eventTerms: await loadEventEmailTerms(payment.enrollment_id),
             orgType: tenantInfo?.org_type,
             tenantName: tenantInfo?.name,
             logoUrl: tenantInfo?.logo_url ?? undefined,

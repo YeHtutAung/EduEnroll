@@ -8,6 +8,7 @@ import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
 import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils";
 import { sendSms } from "@/lib/sms";
 import { buildEticketEmailAttachment } from "@/server/tickets/eticketEmailAttachment";
+import { loadEventEmailTerms } from "@/server/notifications/eventEmailTerms";
 
 // ─── POST /api/webhooks/mmpay ─────────────────────────────────
 // MyanMyanPay webhook callback handler.
@@ -195,6 +196,7 @@ export async function POST(request: NextRequest) {
           classLevel,
           statusUrl,
           feeFormatted,
+          eventTerms: await loadEventEmailTerms(payment.enrollment_id),
           orgType: tenantInfo?.org_type,
           tenantName: tenantInfo?.name,
           logoUrl: tenantInfo?.logo_url ?? undefined,
