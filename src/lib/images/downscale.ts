@@ -20,6 +20,11 @@ export const MAX_EDGE = 1600;
  * 512 keeps it crisp on a 3x display and still cuts 73%.
  */
 export const MAX_EDGE_LOGO = 512;
+/**
+ * Posters in the confirmation email. They hold small print, so this keeps more
+ * detail than a logo while staying light enough for a Myanmar mobile connection.
+ */
+export const MAX_EDGE_EMAIL = 1200;
 /** Re-encode quality. 0.78 is where these photographs stop shrinking usefully. */
 export const QUALITY = 0.78;
 /** Below this, re-encoding usually costs more bytes than it saves. */
@@ -68,6 +73,44 @@ function extensionFor(mime: string): string {
 function renameTo(original: string, mime: string): string {
   const base = original.replace(/\.[^.]+$/, "") || "image";
   return `${base}.${extensionFor(mime)}`;
+}
+
+/**
+ * Convert an image for use inside an email: always JPEG, because some mail apps
+ * won't show WebP, on white, because JPEG has no transparency.
+ *
+ * Throws instead of returning the original, unlike downscaleImage: a WebP or a
+ * 9 MB PNG reaching buyers' inboxes is exactly what this prevents, so a failure
+ * should reach the admin as an error.
+ */
+export async function prepareEmailImage(file: File): Promise<File> {
+  if (typeof document === "undefined" || typeof createImageBitmap !== "function") {
+    throw new Error("This browser cannot convert the image.");
+  }
+  const bitmap = await createImageBitmap(file);
+  const { width, height } = fitWithin(bitmap.width, bitmap.height, MAX_EDGE_EMAIL);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    bitmap.close?.();
+    throw new Error("This browser cannot convert the image.");
+  }
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  bitmap.close?.();
+
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, "image/jpeg", 0.82),
+  );
+  if (!blob) throw new Error("This browser cannot convert the image.");
+  return new File([blob], renameTo(file.name, "image/jpeg"), {
+    type: "image/jpeg",
+    lastModified: Date.now(),
+  });
 }
 
 /**
