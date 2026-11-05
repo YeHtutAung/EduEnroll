@@ -10,6 +10,8 @@ import { computePlatformFee } from "@/server/payments/platformFee";
 import TermsConsent from "@/components/enrollment/TermsConsent";
 import { TERMS_VERSION } from "@/lib/legal/terms";
 import { readableTextColor } from "@/lib/readableText";
+import EmailTypoHint from "@/components/enrollment/EmailTypoHint";
+import { emailTypoToConfirm } from "@/lib/enrollment/emailAddress";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -211,6 +213,10 @@ function getFieldPlaceholder(field: FormFieldDef): string {
   return field.field_label;
 }
 
+function isEmailField(field: FormFieldDef): boolean {
+  return field.field_type === "email" || (field.field_key === "email" && field.field_type === "text");
+}
+
 function DynamicField({
   field,
   value,
@@ -225,6 +231,8 @@ function DynamicField({
   const hasError = !!error;
   const cls = `${INPUT_BASE} ${hasError ? INPUT_ERROR : ""}`;
   const hint = getFieldHint(field);
+  // Held back while typing, or "name@gmail.c" would be queried on its way to ".com".
+  const [leftField, setLeftField] = useState(false);
 
   let input: React.ReactNode;
 
@@ -350,7 +358,10 @@ function DynamicField({
           {field.is_required && <span className="ml-1 text-red-500">*</span>}
         </label>
       )}
-      {input}
+      <div onFocus={() => setLeftField(false)} onBlur={() => setLeftField(true)}>
+        {input}
+      </div>
+      {leftField && isEmailField(field) && <EmailTypoHint value={value} onUse={onChange} />}
       {hint && !error && (
         <p className="mt-1 text-xs text-gray-400">
           {hint.en}
@@ -428,6 +439,7 @@ function EnrollmentFormPage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
+  const emailTyposQueried = useRef(new Set<string>());
   const idempotencyKeyRef = useRef(randomId());
   const [submitError, setSubmitError] = useState<{ en: string; mm: string } | null>(null);
 
@@ -555,8 +567,16 @@ function EnrollmentFormPage() {
       if (field.field_type === "phone" && !isValidPhone(val)) {
         errors[field.field_key] = "Invalid phone number (e.g. 09xxxxxxxxx or +819xxxxxxxx).";
       }
-      if ((field.field_type === "email" || (field.field_key === "email" && field.field_type === "text")) && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
-        errors[field.field_key] = "Invalid email address.";
+      if (isEmailField(field)) {
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
+          errors[field.field_key] = "Invalid email address.";
+        } else {
+          const suggestion = emailTypoToConfirm(val, emailTyposQueried.current);
+          if (suggestion) {
+            errors[field.field_key] =
+              `Please check this email. Did you mean ${suggestion}? If ${val} is correct, press Next again.`;
+          }
+        }
       }
     }
 
