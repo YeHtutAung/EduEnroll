@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveScannerTenant } from "@/lib/scanner/apiKey";
+import { lastEventDate } from "@/lib/tickets/exp";
 
 // ─── GET /api/events ────────────────────────────────────────────────────────
 // Called by the kuunyi-scanner app at startup to populate its event picker.
@@ -8,8 +9,8 @@ import { resolveScannerTenant } from "@/lib/scanner/apiKey";
 // from the key, not the host.
 //
 // Returns: [{ id, name, date, location }] for the tenant's OPEN intakes that
-// have at least one class with a future (or today) event_date. `id` matches
-// the `eid` claim embedded in ticket JWTs.
+// have at least one class that has not finished (last date is today or later).
+// `id` matches the `eid` claim embedded in ticket JWTs.
 
 interface IntakeRow {
   id: string;
@@ -20,6 +21,7 @@ interface IntakeRow {
 interface ClassRow {
   intake_id: string;
   event_date: string | null;
+  end_time: string | null;
   venue: string | null;
 }
 
@@ -48,7 +50,7 @@ export async function GET(request: NextRequest) {
 
   const { data: classes } = (await supabase
     .from("classes")
-    .select("intake_id, event_date, venue")
+    .select("intake_id, event_date, end_time, venue")
     .eq("tenant_id", tenantId)
     .in("intake_id", intakeIds)) as unknown as { data: ClassRow[] | null; error: unknown };
 
@@ -64,13 +66,15 @@ export async function GET(request: NextRequest) {
     day: "2-digit",
   }).format(new Date());
 
-  // Group classes by intake_id and pick the earliest *upcoming* event_date per
-  // intake. Past dates are excluded first — otherwise an intake whose earliest
-  // class is in the past would disappear even when it also has a future class.
+  // Group classes by intake_id and pick the earliest event_date among classes
+  // that have not finished. Finished classes are excluded first — otherwise an
+  // intake whose earliest class is over would disappear even when it also has a
+  // later class. A class still running keeps its intake listed mid-event, so its
+  // event_date can be in the past.
   const earliestByIntake = new Map<string, { event_date: string; venue: string | null }>();
   for (const row of classes ?? []) {
     if (!row.event_date) continue;
-    if (row.event_date < todayStr) continue;
+    if (lastEventDate(row.event_date, row.end_time)! < todayStr) continue;
     const existing = earliestByIntake.get(row.intake_id);
     if (!existing || row.event_date < existing.event_date) {
       earliestByIntake.set(row.intake_id, { event_date: row.event_date, venue: row.venue });

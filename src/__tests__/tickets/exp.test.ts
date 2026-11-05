@@ -1,5 +1,22 @@
 import { describe, it, expect } from "vitest";
-import { ticketExpiry } from "@/lib/tickets/exp";
+import { lastEventDate, ticketExpiry } from "@/lib/tickets/exp";
+
+describe("lastEventDate", () => {
+  it("is the end date when the event runs past its start date", () => {
+    expect(lastEventDate("2026-11-21", "2026-11-24")).toBe("2026-11-24");
+  });
+  it.each([
+    ["the same as the start", "2026-11-21"],
+    ["before the start", "2026-11-20"],
+    ["missing", null],
+    ["undefined", undefined],
+  ])("is the start date when the end date is %s", (_label, end) => {
+    expect(lastEventDate("2026-11-21", end)).toBe("2026-11-21");
+  });
+  it("stays null without a start date, so an undated ticket keeps its long expiry", () => {
+    expect(lastEventDate(null, "2026-11-24")).toBeNull();
+  });
+});
 
 describe("ticketExpiry", () => {
   it("returns end-of-event-day epoch seconds in the event tz", () => {
