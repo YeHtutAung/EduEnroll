@@ -211,10 +211,64 @@ describe("createDynamicQr", () => {
     expect(String(calls[1].body.purposeOfTransaction)).toHaveLength(25);
   });
 
-  it("is ambiguous without calling CB when the token request fails", async () => {
-    answers.token = [{ body: { returnCode: "0099" } }];
-    expect((await createDynamicQr(MERCHANT, params)).kind).toBe("ambiguous");
-    expect(calls.filter((c) => route(c.url) === "create")).toHaveLength(0);
+  describe("no request to create a QR was sent", () => {
+    const connectTimeout = Object.assign(new TypeError("fetch failed"), {
+      cause: Object.assign(new Error("Connect Timeout Error"), { code: "UND_ERR_CONNECT_TIMEOUT" }),
+    });
+
+    it.each<[string, Answer]>([
+      ["a connect timeout", connectTimeout],
+      ["an HTTP 502 with no JSON", { status: 502, body: null }],
+      ["a 5xx with a code", { status: 503, body: { returnCode: "0021" } }],
+      ["an unknown code", { body: { returnCode: "0099" } }],
+      ["0000 with no token", { body: { returnCode: "0000" } }],
+    ])("%s on the token request is not_sent, and /dynamicqr is never called", async (_n, answer) => {
+      answers.token = [answer];
+      expect(await createDynamicQr(MERCHANT, params)).toEqual({ kind: "not_sent" });
+      expect(calls.filter((c) => route(c.url) === "create")).toHaveLength(0);
+    });
+
+    it("the token request skipped by a spent budget is not_sent", async () => {
+      expect(await createDynamicQr(MERCHANT, params, { deadlineMs: Date.now() })).toEqual({ kind: "not_sent" });
+      expect(calls).toHaveLength(0);
+    });
+
+    it("/dynamicqr skipped by a spent budget, with a cached token, is not_sent", async () => {
+      answers.create = [createOk];
+      await createDynamicQr(MERCHANT, params);
+      calls = [];
+      expect(await createDynamicQr(MERCHANT, params, { deadlineMs: Date.now() })).toEqual({ kind: "not_sent" });
+      expect(calls).toHaveLength(0);
+    });
+  });
+
+  describe("a request to create a QR was sent", () => {
+    it("a connect error on /dynamicqr itself stays ambiguous", async () => {
+      answers.create = [new TypeError("fetch failed")];
+      expect(await createDynamicQr(MERCHANT, params)).toEqual({ kind: "ambiguous", code: null });
+      expect(calls.filter((c) => route(c.url) === "create")).toHaveLength(1);
+    });
+
+    it("a token code, then a refresh that cannot connect, stays ambiguous", async () => {
+      answers.token = [tokenOk(), new TypeError("fetch failed")];
+      answers.create = [{ body: { returnCode: "0017" } }];
+      expect(await createDynamicQr(MERCHANT, params)).toEqual({ kind: "ambiguous", code: null });
+    });
+
+    it("a retry skipped by the budget stays ambiguous: the first call did reach CB", async () => {
+      const budget = { deadlineMs: Date.now() + 60_000 };
+      answers.token = [tokenOk(), tokenOk()];
+      answers.create = [{ body: { returnCode: "0012" } }];
+      const inner = globalThis.fetch;
+      let tokenCalls = 0;
+      vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+        const res = await inner(url, init);
+        if (route(url) === "token" && ++tokenCalls === 2) budget.deadlineMs = 0;
+        return res;
+      });
+      expect(await createDynamicQr(MERCHANT, params, budget)).toEqual({ kind: "ambiguous", code: null });
+      expect(calls.filter((c) => route(c.url) === "create")).toHaveLength(1);
+    });
   });
 
   it("never logs the password, token or API key", async () => {
@@ -227,7 +281,7 @@ describe("createDynamicQr", () => {
   });
 
   it("starts nothing when the request budget is spent", async () => {
-    expect((await createDynamicQr(MERCHANT, params, { deadlineMs: Date.now() })).kind).toBe("ambiguous");
+    await createDynamicQr(MERCHANT, params, { deadlineMs: Date.now() });
     expect(calls).toHaveLength(0);
   });
 });
@@ -307,11 +361,6 @@ describe("review fixes", () => {
     answers.create = [{ body: { returnCode: "0017" } }];
     expect((await createDynamicQr(MERCHANT, params)).kind).toBe("ambiguous");
     expect(calls.filter((c) => route(c.url) === "create")).toHaveLength(1);
-  });
-
-  it("a 5xx token failure with a credential code is ambiguous", async () => {
-    answers.token = [{ status: 503, body: { returnCode: "0021" } }];
-    expect((await createDynamicQr(MERCHANT, params)).kind).toBe("ambiguous");
   });
 
   it("checkStatus stays unreachable when the token request fails", async () => {

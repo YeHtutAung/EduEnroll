@@ -1,5 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { interpretCreateResponse, qrCountdown, localExpiryMs } from "@/components/payments/QRPaymentModal";
+import { interpretCreateResponse, qrCountdown, localExpiryMs, errorHeading } from "@/components/payments/QRPaymentModal";
+
+describe("errorHeading", () => {
+  it("CB with no order on screen: the QR was not created, so nothing about a failed payment", () => {
+    expect(errorHeading("cbmmqr", null).en).toBe("QR code not available");
+  });
+  it("CB with an order on screen, and every other provider: Payment Failed", () => {
+    expect(errorHeading("cbmmqr", "CBREF").en).toBe("Payment Failed");
+    for (const provider of ["mmpay", "abank", "paypay", "kbzpay"] as const) {
+      expect(errorHeading(provider, null).en).toBe("Payment Failed");
+    }
+  });
+});
 
 describe("interpretCreateResponse with expiresAt", () => {
   it("carries CB's expiresAt through", () => {

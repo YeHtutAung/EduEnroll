@@ -11,6 +11,7 @@ import {
 import { resolveCbmmqrOrder } from "@/server/payments/resolveCbmmqrOrder";
 import {
   enrollmentDeadline,
+  neverDisplayedFreeAt,
   postCheck,
   cbQrMinutes,
   preCheck,
@@ -74,16 +75,53 @@ const aboveMaximum = () =>
 const deadlineConflict = () =>
   fail(409, "This booking expires too soon for a QR payment. Please start a new booking.", "Conflict");
 
-function qrActive(retryAtMs: number) {
+// No request to create a QR left this server, so the buyer can simply press again.
+const gatewayUnreachable = () =>
+  fail(502, "We could not reach CB Bank just now, so no payment was taken. Please try again.", "Payment Gateway Error");
+
+function aboutMinutes(retryAtMs: number): string {
   const minutes = Math.max(1, Math.ceil((retryAtMs - Date.now()) / 60_000));
+  return `in about ${minutes} minute${minutes === 1 ? "" : "s"}`;
+}
+
+function qrActive(retryAtMs: number) {
   return NextResponse.json(
     {
       error: "Conflict",
       status: "qr_active",
       retryAt: new Date(retryAtMs).toISOString(),
-      message: `Your previous QR is still active. Scan it if you still have it, or try again in about ${minutes} minute${minutes === 1 ? "" : "s"}.`,
+      message: `Your previous QR is still active. Scan it if you still have it, or try again ${aboutMinutes(retryAtMs)}.`,
     },
     { status: 409 },
+  );
+}
+
+// A row whose QR nobody was shown: CB may hold one, so the slot stays taken until
+// §5.2's window passes, but there is nothing for the buyer to scan or to have paid.
+const qrUnfinishedMessage = (retryAtMs: number) =>
+  `We could not finish creating your QR, so no payment has been taken for it. Please try again ${aboutMinutes(retryAtMs)}.`;
+
+function qrUnfinishedActive(retryAtMs: number) {
+  return NextResponse.json(
+    {
+      error: "Conflict",
+      status: "qr_active",
+      retryAt: new Date(retryAtMs).toISOString(),
+      message: qrUnfinishedMessage(retryAtMs),
+    },
+    { status: 409 },
+  );
+}
+
+function qrUnfinished() {
+  const retryAtMs = neverDisplayedFreeAt(Date.now());
+  return NextResponse.json(
+    {
+      error: "Payment Gateway Error",
+      retryAt: new Date(retryAtMs).toISOString(),
+      message: qrUnfinishedMessage(retryAtMs),
+    },
+    { status: 502 },
   );
 }
 
@@ -261,7 +299,9 @@ export async function POST(request: NextRequest) {
     if (resolution.kind === "settlement_conflict") {
       return fail(409, "A previous payment for this enrollment needs review. Please contact support.", "Conflict");
     }
-    if (resolution.kind === "active") return qrActive(resolution.retryAtMs);
+    if (resolution.kind === "active") {
+      return claimed.qr === null ? qrUnfinishedActive(resolution.retryAtMs) : qrActive(resolution.retryAtMs);
+    }
     if (resolution.kind === "blocked") {
       console.error(`[cbmmqr] resolve blocked for ${oldRef}: ${resolution.reason}`);
       return gatewayError();
@@ -320,11 +360,19 @@ export async function POST(request: NextRequest) {
     budget,
   );
 
+  if (created.kind === "not_sent") {
+    // No request to create a QR was sent under this reference, and this request
+    // is the only one that could send one, so CB cannot hold a QR for it.
+    await markFailed(ref);
+    console.error(`[cbmmqr] create not sent for ${ref}: no /dynamicqr request went out; slot freed`);
+    return gatewayUnreachable();
+  }
+
   if (created.kind === "ambiguous") {
     // NOT marked FAILED: CB may hold a QR under this reference (R13). §5.2
     // frees the slot later; the QR was never shown, so nobody can pay it.
     console.error(`[cbmmqr] create ambiguous for ${ref} (code ${created.code ?? "none"}); row left PENDING`);
-    return gatewayError();
+    return qrUnfinished();
   }
 
   if (created.kind === "rejected") {
@@ -349,7 +397,7 @@ export async function POST(request: NextRequest) {
 
   if (storeError) {
     console.error(`[cbmmqr] store failed for ${ref}: ${storeError.message}; row left PENDING`);
-    return gatewayError();
+    return qrUnfinished();
   }
   if (stored === "not_payable") return notAwaiting();
   if (stored !== "stored") {

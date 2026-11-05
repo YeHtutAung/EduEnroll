@@ -245,8 +245,13 @@ columns) and `20261030120000_kbzpay_per_tenant_merchants.sql` (pin, locking, gra
    - `created` → the row exists **before** any CB call (R2).
 6. `createDynamicQr` with our reference, the amount, currency 104, and the pinned merchant's
    ids.
-   - Transport error, timeout, `0003`, or any code not listed below → **ambiguous**: leave the
-     row `PENDING` with no QR and return 502 (R13). It is recovered by §5.2.
+   - The `/dynamicqr` request was never sent (the token request failed, other than the
+     credential codes below, or the request budget ran out first) → **not sent**: CB holds
+     nothing under this reference, so the row is marked `mmqr_status = 'FAILED'` and the route
+     returns 502, and the buyer can try again at once.
+   - The request was sent and a transport error, timeout, `0003`, or any code not listed below
+     came back → **ambiguous**: leave the row `PENDING` with no QR and return 502 (R13) with the
+     time to come back. It is recovered by §5.2.
    - Definite rejections, where CB created nothing: `0051` → 422 `below_minimum`; `0052` →
      422 `above_maximum`; invalid merchant, terminal, authentication or password codes → 503.
      The row is marked `mmqr_status = 'FAILED'`, which frees the slot.

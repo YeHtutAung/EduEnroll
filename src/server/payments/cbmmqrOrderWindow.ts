@@ -51,6 +51,11 @@ export function postCheck(deadline: Deadline, qrExpiresAtMs: number | null): "ok
   return qrExpiresAtMs < deadline.ms - CB_EXPIRY_MARGIN_MINUTES * MIN ? "ok" : "too_late";
 }
 
+/** When a row whose QR was never displayed may be replaced (spec §5.2's time rule). */
+export function neverDisplayedFreeAt(createdAtMs: number): number {
+  return createdAtMs + (cbQrMinutes() + CB_EXPIRY_MARGIN_MINUTES) * MIN;
+}
+
 /** The provisional provider_order_expires_at written at claim time (a hint). */
 export function provisionalExpiry(now: number): number {
   return now + (cbQrMinutes() + CB_EXPIRY_MARGIN_MINUTES) * MIN;
