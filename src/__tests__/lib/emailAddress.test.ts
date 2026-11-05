@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  emailBlockedFor,
+  emailBlockedMessage,
   emailTypoToConfirm,
   isValidEmail,
   replaceEmailInFormData,
@@ -39,7 +41,6 @@ describe("suggestEmailCorrection", () => {
     "a@yahoo.com",
     "a@mail.com",
     "a@ymail.com",
-    "a@email.com",
     "a@me.com",
     "a@company.com.mm",
     "a@skyfestivalmm.com",
@@ -50,6 +51,71 @@ describe("suggestEmailCorrection", () => {
 
   it.each(["", "nothing", "@gmail.con", "a@"])("has nothing to say about %j", (address) => {
     expect(suggestEmailCorrection(address)).toBeNull();
+  });
+});
+
+// Domains seen on real orders, with how each must behave. Buyers' company domains
+// are replaced with a stand-in, because this repository is public.
+describe("production's domains", () => {
+  it.each([
+    "gmail.con",
+    "gamil.com",
+    "gmai.com",
+    "gmail.tcom",
+    "gmail.co",
+    "gmil.com",
+    "gmail.comq",
+    "gmail.ccom",
+    "gmail..com",
+    "gnail.com",
+    "gmail.comm",
+    "gmial.com",
+    "gamail.com",
+  ])("refuses %s and offers gmail.com", (domain) => {
+    expect(emailBlockedFor(`buyer@${domain}`)).toBe("buyer@gmail.com");
+  });
+
+  it("queries email.com but doesn't refuse it, because it is real", () => {
+    expect(suggestEmailCorrection("buyer@email.com")).toBe("buyer@gmail.com");
+    expect(emailBlockedFor("buyer@email.com")).toBeNull();
+  });
+
+  it.each([
+    "gmail.com",
+    "icloud.com",
+    "googlemail.com",
+    "some-company.com",
+    "yahoo.com",
+    "yahoo.com.sg",
+    "kuunyi.com",
+    "protonmail.com",
+    "mail.com",
+    "university.edu",
+  ])("says nothing about %s", (domain) => {
+    expect(suggestEmailCorrection(`buyer@${domain}`)).toBeNull();
+    expect(emailBlockedFor(`buyer@${domain}`)).toBeNull();
+  });
+});
+
+describe("emailBlockedFor", () => {
+  it("only warns about near-misses of other providers", () => {
+    expect(suggestEmailCorrection("a@yaho.com")).toBe("a@yahoo.com");
+    expect(emailBlockedFor("a@yaho.com")).toBeNull();
+  });
+
+  it("only warns about a .con ending on any other domain", () => {
+    expect(suggestEmailCorrection("a@company.con")).toBe("a@company.com");
+    expect(emailBlockedFor("a@company.con")).toBeNull();
+  });
+
+  it("ignores capitals and spaces", () => {
+    expect(emailBlockedFor("  Buyer@GMAIL.CON ")).toBe("Buyer@gmail.com");
+  });
+
+  it("names the correction in both languages", () => {
+    const message = emailBlockedMessage("a@gmail.com");
+    expect(message.en).toContain("a@gmail.com");
+    expect(message.mm).toContain("a@gmail.com");
   });
 });
 

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, Suspense } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import TrustedOfficialShell from "@/components/enrollment/TrustedOfficialShell";
 import EmailTypoHint from "@/components/enrollment/EmailTypoHint";
-import { emailTypoToConfirm } from "@/lib/enrollment/emailAddress";
+import { emailBlockedFor, emailBlockedMessage, emailTypoToConfirm } from "@/lib/enrollment/emailAddress";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -183,7 +183,7 @@ function DynamicField({
             onChange={(e) => onChange(e.target.value)}
             onFocus={() => setLeftField(false)}
             onBlur={() => setLeftField(true)}
-            placeholder="you@example.com"
+            placeholder="yourname@gmail.com"
             required={field.is_required}
           />
           {typoHint}
@@ -272,6 +272,7 @@ function CheckoutForm() {
 
   function setValue(key: string, val: string) {
     setValues((prev) => ({ ...prev, [key]: val }));
+    setFormError(null);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -291,6 +292,14 @@ function CheckoutForm() {
 
     if (!student_name_en || !email) {
       setFormError("Name and email are required.");
+      setSubmitting(false);
+      return;
+    }
+
+    const blockedFor = emailBlockedFor(email);
+    if (blockedFor) {
+      const blocked = emailBlockedMessage(blockedFor);
+      setFormError(`${blocked.en} ${blocked.mm}`);
       setSubmitting(false);
       return;
     }
@@ -366,6 +375,9 @@ function CheckoutForm() {
     }
   }
 
+  const buyerEmailField = fields.find((f) => f.field_key === "email" || f.field_type === "email");
+  const buyerEmail = buyerEmailField ? (values[buyerEmailField.field_key] ?? "").trim() : "";
+
   if (loadError) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-5" style={{ background: "#f7f5ef" }}>
@@ -427,6 +439,13 @@ function CheckoutForm() {
               <a href={`/enroll/${params.slug}/tickets/`} className="underline">Start again</a>
             )}
           </div>
+        )}
+
+        {buyerEmail && (
+          <p className="text-[12px]" style={{ color: "#43485a" }}>
+            Your e-ticket will be sent to:{" "}
+            <strong className="break-all" style={{ color: "#0f1f42" }}>{buyerEmail}</strong>
+          </p>
         )}
 
         <button

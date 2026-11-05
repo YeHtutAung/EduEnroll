@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
-import { formatCurrency } from "@/lib/utils";
+import { formatCurrency, resolveEmailFromFormData } from "@/lib/utils";
+import { emailBlockedFor, emailBlockedMessage } from "@/lib/enrollment/emailAddress";
 import { tenantLinkOrigin } from "@/lib/origin";
 import { createEnrollment } from "@/server/enrollment/createEnrollment";
 import { createCartEnrollment } from "@/server/enrollment/createCartEnrollment";
@@ -43,6 +44,18 @@ export async function POST(request: NextRequest) {
   const fd = form_data && typeof form_data === "object"
     ? (form_data as Record<string, string>)
     : null;
+
+  // Also checked in the form. Here, before any seat is reserved, so a request
+  // that skips the form can't create an order whose ticket goes nowhere.
+  const buyerEmail = resolveEmailFromFormData(fd);
+  const emailSuggestion = buyerEmail ? emailBlockedFor(buyerEmail) : null;
+  if (emailSuggestion) {
+    const blocked = emailBlockedMessage(emailSuggestion);
+    return NextResponse.json(
+      { error: "Invalid Email", message: blocked.en, message_mm: blocked.mm, suggestion: emailSuggestion },
+      { status: 400 },
+    );
+  }
 
   // The Terms of Sale and the organiser's event rules must be accepted —
   // checked here, before any seat is reserved, so a refused order leaves
