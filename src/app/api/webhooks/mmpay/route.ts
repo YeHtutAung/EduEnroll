@@ -9,6 +9,7 @@ import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils"
 import { sendSms } from "@/lib/sms";
 import { buildEticketEmailAttachment } from "@/server/tickets/eticketEmailAttachment";
 import { loadEventEmailTerms } from "@/server/notifications/eventEmailTerms";
+import { loadEventEmailImages } from "@/server/notifications/eventEmailImages";
 
 // ─── POST /api/webhooks/mmpay ─────────────────────────────────
 // MyanMyanPay webhook callback handler.
@@ -197,6 +198,7 @@ export async function POST(request: NextRequest) {
           statusUrl,
           feeFormatted,
           eventTerms: await loadEventEmailTerms(payment.enrollment_id),
+          eventImages: await loadEventEmailImages(payment.enrollment_id),
           orgType: tenantInfo?.org_type,
           tenantName: tenantInfo?.name,
           logoUrl: tenantInfo?.logo_url ?? undefined,

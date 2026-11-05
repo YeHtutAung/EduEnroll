@@ -7,6 +7,7 @@ import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils"
 import { sendSms } from "@/lib/sms";
 import { buildEticketEmailAttachment } from "@/server/tickets/eticketEmailAttachment";
 import { loadEventEmailTerms } from "@/server/notifications/eventEmailTerms";
+import { loadEventEmailImages } from "@/server/notifications/eventEmailImages";
 import { loadPartialPayment } from "@/server/payments/partialPayment";
 
 /**
@@ -184,6 +185,7 @@ export async function notifyEnrollmentConfirmed(enrollmentId: string): Promise<v
       totalPaidFormatted,
       ticketCount,
       eventTerms: await loadEventEmailTerms(enrollmentId),
+      eventImages: await loadEventEmailImages(enrollmentId),
       orgType: tenantInfo?.org_type,
       tenantName: tenantInfo?.name,
       logoUrl: tenantInfo?.logo_url ?? undefined,
