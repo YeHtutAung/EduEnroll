@@ -9,6 +9,7 @@ import { NextRequest } from "next/server";
 //   - a live QR is never replaced unless resolveCbmmqrOrder says retire
 
 Object.assign(process.env, {
+  CBMMQR_BASE_URL: "https://cbgw.test/api",
   CBMMQR_YOUNGMONEY_USER_ID: "u", CBMMQR_YOUNGMONEY_PASSWORD: "p", CBMMQR_YOUNGMONEY_SOURCE_ID: "s",
   CBMMQR_YOUNGMONEY_MERCHANT_ID: "M0001", CBMMQR_YOUNGMONEY_TERMINAL_ID: "T0001", CBMMQR_YOUNGMONEY_API_KEY: "k",
   CBMMQR_OTHER_USER_ID: "u2", CBMMQR_OTHER_PASSWORD: "p2", CBMMQR_OTHER_SOURCE_ID: "s2",
@@ -287,6 +288,32 @@ describe("CB's answer", () => {
     expect(called("store_cbmmqr_qr")).toHaveLength(0);
   });
 
+  it("ambiguous: tells the buyer when to come back, not to try again now", async () => {
+    mockCreate.mockResolvedValue({ kind: "ambiguous", code: null });
+    const body = await (await POST(req())).json();
+    expect(body.message).toMatch(/in about 22 minutes/);
+    expect(body.message).not.toMatch(/still active|Scan it/);
+    expect(Date.parse(body.retryAt)).toBeGreaterThan(Date.now());
+  });
+
+  it("not_sent: 502, frees this row at once and says to try again now", async () => {
+    mockCreate.mockResolvedValue({ kind: "not_sent" });
+    const res = await POST(req());
+    const body = await res.json();
+    expect(res.status).toBe(502);
+    expect(body.message).toMatch(/could not reach CB Bank/);
+    expect(body.message).toMatch(/try again/i);
+    expect(body.message).not.toMatch(/minute/);
+    expect(body).not.toHaveProperty("retryAt");
+    const ref = called("claim_cbmmqr_order_slot")[0].args.p_payment_ref;
+    expect(paymentUpdates).toHaveLength(1);
+    expect(paymentUpdates[0].payload).toEqual({ mmqr_status: "FAILED" });
+    expect(paymentUpdates[0].filters).toEqual(expect.arrayContaining([
+      ["payment_ref", ref], ["payment_method", "cb_mmqr"], ["mmqr_status", "PENDING"],
+    ]));
+    expect(called("store_cbmmqr_qr")).toHaveLength(0);
+  });
+
   it.each([
     ["below_minimum", 422], ["above_maximum", 422], ["config", 503],
   ])("rejected (%s): marks the row FAILED and answers %i", async (reason, status) => {
@@ -318,6 +345,32 @@ describe("CB's answer", () => {
       expect(mockCreate).not.toHaveBeenCalled();
     } finally {
       delete process.env.CBMMQR_MODE;
+      spy.mockRestore();
+    }
+  });
+
+  it.each([
+    ["a missing base URL", "CBMMQR_BASE_URL", undefined],
+    ["a base URL that does not parse", "CBMMQR_BASE_URL", "not a url"],
+    ["a malformed UTC offset", "CBMMQR_UTC_OFFSET", "Asia/Yangon"],
+  ])("%s: 503 before any row or CB call, naming the variable only in the log", async (_n, name, value) => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const saved = process.env[name];
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+    try {
+      const res = await POST(req());
+      const body = await res.json();
+      expect(res.status).toBe(503);
+      expect(body.message).toMatch(/not available/);
+      expect(JSON.stringify(body)).not.toContain("CBMMQR");
+      expect(spy.mock.calls.flat().join(" ")).toContain(name);
+      expect(rpcCalls).toHaveLength(0);
+      expect(paymentUpdates).toHaveLength(0);
+      expect(mockCreate).not.toHaveBeenCalled();
+    } finally {
+      if (saved === undefined) delete process.env[name];
+      else process.env[name] = saved;
       spy.mockRestore();
     }
   });
@@ -358,9 +411,12 @@ describe("CB's answer", () => {
     expect((await POST(req())).status).toBe(502);
   });
 
-  it("502 when the store errors", async () => {
+  it("502 when the store errors, with the row kept and a time to come back", async () => {
     rpcResults.store_cbmmqr_qr = { data: null, error: { message: "boom" } };
-    expect((await POST(req())).status).toBe(502);
+    const res = await POST(req());
+    expect(res.status).toBe(502);
+    expect((await res.json()).message).toMatch(/in about 22 minutes/);
+    expect(paymentUpdates).toHaveLength(0);
   });
 });
 
@@ -374,6 +430,9 @@ describe("unresolved", () => {
   it("active: 409 qr_active with retryAt; no replacement, no CB create", async () => {
     const retryAtMs = Date.now() + 4 * MIN;
     mockResolve.mockResolvedValue({ kind: "active", retryAtMs });
+    rpcResults.claim_cbmmqr_order_slot = {
+      data: [claimRow({ outcome: "unresolved", ref: "CBOLD", order_ref: "QR-OLD", qr: "000201OLD" })], error: null,
+    };
     const res = await POST(req());
     const body = await res.json();
     expect(res.status).toBe(409);
@@ -381,6 +440,32 @@ describe("unresolved", () => {
     expect(body.message).toMatch(/previous QR is still active/);
     expect(called("complete_cbmmqr_replace")).toHaveLength(0);
     expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("active on a row whose QR was never shown: same 409, but no talk of a QR to scan", async () => {
+    const retryAtMs = Date.now() + 4 * MIN;
+    mockResolve.mockResolvedValue({ kind: "active", retryAtMs });
+    rpcResults.claim_cbmmqr_order_slot = {
+      data: [claimRow({ outcome: "unresolved", ref: "CBOLD", order_ref: null, qr: null })], error: null,
+    };
+    const res = await POST(req());
+    const body = await res.json();
+    expect(res.status).toBe(409);
+    expect(body).toMatchObject({ status: "qr_active", retryAt: new Date(retryAtMs).toISOString() });
+    expect(body.message).toMatch(/in about 4 minutes/);
+    expect(body.message).not.toMatch(/still active|Scan it/);
+    expect(called("complete_cbmmqr_replace")).toHaveLength(0);
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("not_sent for a replacement: frees the NEW row and leaves the rest to the replace", async () => {
+    mockResolve.mockResolvedValue({ kind: "retire", reason: "FAILED" });
+    mockCreate.mockResolvedValue({ kind: "not_sent" });
+    expect((await POST(req())).status).toBe(502);
+    const newRef = called("complete_cbmmqr_replace")[0].args.p_new_ref;
+    expect(paymentUpdates).toHaveLength(1);
+    expect(paymentUpdates[0].filters).toEqual(expect.arrayContaining([["payment_ref", newRef]]));
+    expect(newRef).not.toBe("CBOLD");
   });
 
   it("passes the old row and its pinned merchant to the resolver", async () => {
