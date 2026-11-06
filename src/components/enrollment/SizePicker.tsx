@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { groupSizeOptions, type SizeOption } from "@/lib/enrollment/sizeChart";
 
 // Size buttons plus a "View size chart" link, standing in for a size dropdown
@@ -10,6 +10,11 @@ import { groupSizeOptions, type SizeOption } from "@/lib/enrollment/sizeChart";
 // The buttons are real radio inputs (visually hidden, not display:none), so
 // `required` still stops the form from submitting without a size and the
 // browser's own "please select one" message still points at them.
+//
+// The chart is a modal dialog: opening it moves focus to its close button,
+// Tab and Shift+Tab stay inside it, and closing it returns focus to "View size
+// chart". Without that a keyboard user could Tab through the hidden form
+// behind it and reach the submit button while the chart covers the screen.
 
 const NAVY = "#0f1f42";
 const IDLE_BORDER = "#d8d5c9";
@@ -42,20 +47,64 @@ export default function SizePicker({
   requiredMark?: React.ReactNode;
 }) {
   const [chartOpen, setChartOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   const { kids, adult } = groupSizeOptions(options);
   const selected = [...kids, ...adult].find((o) => o.value === value);
 
   useEffect(() => {
     if (!chartOpen) return;
+    const trigger = triggerRef.current;
+    closeRef.current?.focus();
+
+    const focusables = () =>
+      Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(
+          'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      );
+
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setChartOpen(false);
+      if (e.key === "Escape") {
+        setChartOpen(false);
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const items = focusables();
+      if (items.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      const inside = !!active && !!dialogRef.current?.contains(active);
+      if (e.shiftKey && (active === first || !inside)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !inside)) {
+        e.preventDefault();
+        first.focus();
+      }
     };
+    // Focus that lands outside some other way (a click on nothing, a screen
+    // reader jump) is pulled back in.
+    const onFocusIn = (e: FocusEvent) => {
+      if (dialogRef.current && !dialogRef.current.contains(e.target as Node)) {
+        closeRef.current?.focus();
+      }
+    };
+
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
-    window.addEventListener("keydown", onKey);
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("focusin", onFocusIn);
     return () => {
-      window.removeEventListener("keydown", onKey);
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("focusin", onFocusIn);
       document.body.style.overflow = prevOverflow;
+      trigger?.focus();
     };
   }, [chartOpen]);
 
@@ -115,7 +164,9 @@ export default function SizePicker({
           {requiredMark}
         </span>
         <button
+          ref={triggerRef}
           type="button"
+          aria-haspopup="dialog"
           onClick={() => setChartOpen(true)}
           className="shrink-0 text-[12px] font-semibold underline underline-offset-2"
           style={{ color: NAVY }}
@@ -135,6 +186,7 @@ export default function SizePicker({
 
       {chartOpen && (
         <div
+          ref={dialogRef}
           role="dialog"
           aria-modal="true"
           aria-label={`${label} chart`}
@@ -145,6 +197,7 @@ export default function SizePicker({
           <div className="flex items-center justify-between px-4 py-3 text-white">
             <span className="text-[14px] font-bold">Size chart</span>
             <button
+              ref={closeRef}
               type="button"
               aria-label="Close size chart"
               onClick={() => setChartOpen(false)}
