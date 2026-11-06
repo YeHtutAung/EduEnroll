@@ -11,6 +11,7 @@ import TermsConsent from "@/components/enrollment/TermsConsent";
 import { TERMS_VERSION } from "@/lib/legal/terms";
 import { readableTextColor } from "@/lib/readableText";
 import EmailTypoHint from "@/components/enrollment/EmailTypoHint";
+import SizePicker from "@/components/enrollment/SizePicker";
 import { emailBlockedFor, emailBlockedMessage, emailTypoToConfirm } from "@/lib/enrollment/emailAddress";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -55,6 +56,8 @@ interface FormFieldDef {
   options: string[] | null;
   sort_order: number;
   is_default: boolean;
+  /** Set by the API for an organiser's size field — see @/lib/enrollment/sizeChart. */
+  size_chart_url?: string;
 }
 
 // ─── Phone validation (Myanmar + international) ─────────────────────────────
@@ -233,6 +236,28 @@ function DynamicField({
   const hint = getFieldHint(field);
   // Held back while typing, or "name@gmail.c" would be queried on its way to ".com".
   const [leftField, setLeftField] = useState(false);
+
+  // An organiser's size field (e.g. The Beats Run's Jersey Size): size buttons
+  // plus their size chart. Required-ness is still checked by validateStep1,
+  // whose message shows below like any other field's.
+  if (field.size_chart_url && field.options && field.options.length > 0) {
+    return (
+      <div className="mb-5">
+        <SizePicker
+          name={field.field_key}
+          label={field.field_label}
+          options={field.options}
+          value={value}
+          onChange={onChange}
+          required={field.is_required}
+          chartUrl={field.size_chart_url}
+          labelClassName="text-sm font-medium text-gray-700"
+          requiredMark={field.is_required && <span className="ml-1 text-red-500">*</span>}
+        />
+        {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+      </div>
+    );
+  }
 
   let input: React.ReactNode;
 
