@@ -5,14 +5,18 @@ import { useParams } from "next/navigation";
 import type { TenantAppearance } from "@/types/database";
 import { DEFAULT_APPEARANCE } from "@/types/database";
 import BrandHeader from "@/components/enrollment/BrandHeader";
+import SizePicker from "@/components/enrollment/SizePicker";
 import { readableTextColor } from "@/lib/readableText";
 import {
   INTEREST_ANSWER_MAX,
   fieldOptions,
   interestCustomFields,
   interestPhoneRequired,
-  type InterestFieldDef,
+  type InterestFieldDef as BaseInterestFieldDef,
 } from "@/lib/interest/interestFields";
+
+/** Plus `size_chart_url`, set by the API on a size field (@/lib/enrollment/sizeChart). */
+type InterestFieldDef = BaseInterestFieldDef & { size_chart_url?: string };
 
 // ─── Register interest in an event's priority window ────────────────────────
 //
@@ -205,6 +209,24 @@ function CustomField({
   onChange: (value: string) => void;
 }) {
   const options = fieldOptions(field);
+
+  if (field.size_chart_url && options.length > 0) {
+    return (
+      <div className="mb-5">
+        <SizePicker
+          name={field.field_key}
+          label={field.field_label}
+          options={options}
+          value={value}
+          onChange={onChange}
+          required={field.is_required}
+          chartUrl={field.size_chart_url}
+          labelClassName="text-sm font-medium text-gray-700"
+          requiredMark={field.is_required && <span className="ml-1 text-red-500">*</span>}
+        />
+      </div>
+    );
+  }
 
   if (field.field_type === "checkbox") {
     return (
