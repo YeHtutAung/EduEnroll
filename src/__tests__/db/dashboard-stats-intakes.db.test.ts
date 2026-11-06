@@ -43,7 +43,11 @@ async function makeEmptyIntake(status: "draft" | "open" | "closed") {
   return i.id;
 }
 
-async function makeIntake(status: "draft" | "open" | "closed", level: string) {
+async function makeIntake(
+  status: "draft" | "open" | "closed",
+  level: string,
+  classStatus: "draft" | "open" | "full" | "closed" = "open",
+) {
   const [i] = await sql<{ id: string }>(
     `INSERT INTO intakes (tenant_id, name, year, status)
      VALUES ($1, $2, 2026, $3::intake_status) RETURNING id`,
@@ -53,8 +57,8 @@ async function makeIntake(status: "draft" | "open" | "closed", level: string) {
   const [c] = await sql<{ id: string }>(
     `INSERT INTO classes (tenant_id,intake_id,level,fee_amount,seat_total,seat_remaining,status,
                           max_tickets_per_person)
-     VALUES ($1,$2,$3,100,50,40,'open',10) RETURNING id`,
-    [tenantId, i.id, level],
+     VALUES ($1,$2,$3,100,50,40,$4::class_status,10) RETURNING id`,
+    [tenantId, i.id, level, classStatus],
   );
   made.classes.push(c.id);
   return c.id;
@@ -140,6 +144,17 @@ describe("GET /api/admin/stats — seats_by_class respects intake status", () =>
     await makeIntake("closed", "MIX-CLOSED");
 
     expect(await levelsInOverview()).toEqual(["MIX-OPEN"]);
+  });
+});
+
+describe("GET /api/admin/stats — seats_by_class skips draft tiers", () => {
+  it("D9 leaves out a draft tier in an open intake, and keeps closed and full ones", async () => {
+    await makeIntake("open", "TIER-OPEN", "open");
+    await makeIntake("open", "TIER-DRAFT", "draft");
+    await makeIntake("open", "TIER-CLOSED", "closed");
+    await makeIntake("open", "TIER-FULL", "full");
+
+    expect(await levelsInOverview()).toEqual(["TIER-CLOSED", "TIER-FULL", "TIER-OPEN"]);
   });
 });
 

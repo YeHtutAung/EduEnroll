@@ -85,6 +85,9 @@ export async function GET() {
         .from("classes")
         .select("level, seat_remaining, seat_total, intakes!inner(status)")
         .eq("intakes.status", LIVE_INTAKE_STATUS)
+        // A draft tier was never on sale, for example an organiser's test tier,
+        // so its seats aren't capacity. Closed and full tiers stay: they sold.
+        .neq("status", "draft")
         .eq("tenant_id", tenantId)
         .order("level", { ascending: true }) as unknown as Promise<{ data: ClassRow[] | null; error: unknown }>,
     ]);
