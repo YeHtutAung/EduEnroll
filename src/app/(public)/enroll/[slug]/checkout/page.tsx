@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, Suspense } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import TrustedOfficialShell from "@/components/enrollment/TrustedOfficialShell";
 import EmailTypoHint from "@/components/enrollment/EmailTypoHint";
+import SizePicker from "@/components/enrollment/SizePicker";
 import { emailBlockedFor, emailBlockedMessage, emailTypoToConfirm } from "@/lib/enrollment/emailAddress";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -28,6 +29,8 @@ interface FormField {
   options: string[] | null;
   sort_order: number;
   is_default: boolean;
+  /** Set by the API for an organiser's size field — see @/lib/enrollment/sizeChart. */
+  size_chart_url?: string;
 }
 
 // ─── Dynamic field renderer ───────────────────────────────────────────────────
@@ -66,6 +69,23 @@ function DynamicField({
       {!field.is_required && <span className="font-normal ml-1" style={{ color: "#9a9484" }}>(optional)</span>}
     </label>
   );
+
+  if (field.size_chart_url && field.options && field.options.length > 0) {
+    return (
+      <SizePicker
+        name={field.field_key}
+        label={field.field_label}
+        options={field.options}
+        value={value}
+        onChange={onChange}
+        required={field.is_required}
+        chartUrl={field.size_chart_url}
+        labelClassName="text-[11px] font-semibold"
+        labelStyle={{ color: "#43485a" }}
+        requiredMark={!field.is_required && <span className="font-normal ml-1" style={{ color: "#9a9484" }}>(optional)</span>}
+      />
+    );
+  }
 
   switch (field.field_type) {
     case "select":

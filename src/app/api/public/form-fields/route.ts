@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
+import { sizeChartUrlFor } from "@/lib/enrollment/sizeChart";
 
 // ─── GET /api/public/form-fields?intake_id=UUID ──────────────────────────────
 // Public — returns form fields for an intake, ordered by sort_order.
+// A size field listed in @/lib/enrollment/sizeChart also carries
+// `size_chart_url`, which the public forms draw as size buttons plus a chart.
 
 export async function GET(request: NextRequest) {
   const tenantId = await resolveTenantId();
@@ -49,5 +52,16 @@ export async function GET(request: NextRequest) {
     error: unknown;
   };
 
-  return NextResponse.json(fields ?? []);
+  const { data: tenant } = await supabase
+    .from("tenants")
+    .select("subdomain")
+    .eq("id", tenantId)
+    .maybeSingle() as { data: { subdomain: string } | null; error: unknown };
+
+  return NextResponse.json(
+    (fields ?? []).map((f) => {
+      const sizeChartUrl = sizeChartUrlFor(tenant?.subdomain, f);
+      return sizeChartUrl ? { ...f, size_chart_url: sizeChartUrl } : f;
+    }),
+  );
 }
