@@ -7,7 +7,7 @@ function ClassCard({ cls, primaryColor, onSelect }: { cls: TemplateClass; primar
   const { isDisabled, overlayState } = getCardState(cls);
 
   const overlayLabel =
-    overlayState === "full" ? (soldOutLabel(cls) ?? "FULL") :
+    overlayState === "full" ? ((soldOutLabel(cls) && <span className="normal-case tracking-normal">{soldOutLabel(cls)}</span>) ?? "FULL") :
     overlayState === "not_open" ? "OPENING SOON" :
     overlayState === "closed" ? "CLOSED" : null;
 
