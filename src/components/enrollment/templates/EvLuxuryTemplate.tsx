@@ -12,24 +12,24 @@ import type { EventTemplateProps, TemplateClass } from "./types";
 function EventSeatsBadge({ remaining, total, gold, label, badgeLabel }: {
   remaining: number; total: number; gold: string; label: string | null; badgeLabel: string | null;
 }) {
-  if (remaining === 0 && badgeLabel) {
-    // The organiser's own text for this box (e.g. "COMING SOON"), in the same
-    // green as a tier with plenty left, so it reads as "more is on the way".
-    return (
-      <span className="text-[11px] tracking-wider px-2.5 py-1 rounded-sm border max-w-[60%] text-right break-words"
-        style={{ borderColor: "rgba(74,222,128,0.2)", backgroundColor: "rgba(74,222,128,0.08)", color: "#86efac" }}>
-        {badgeLabel}
-      </span>
-    );
-  }
   if (remaining === 0) {
-    // The organiser's own text, as typed: letter spacing pulls Burmese marks
-    // apart. Longer text wraps inside the badge instead of pushing the tier name.
+    // Always the red sold-out box: the organiser's sold-out text as typed
+    // (letter spacing pulls Burmese marks apart), or SOLD OUT. Below it, only
+    // when the organiser set one, their green box (e.g. "COMING SOON") in the
+    // same green as a tier with plenty left. Long text wraps inside its box.
     return (
-      <span className={`text-[11px] px-2.5 py-1 rounded-sm border border-red-500/30 bg-red-500/10 text-red-300 ${
-        label ? "max-w-[60%] text-right break-words" : "tracking-wider"}`}>
-        {label ?? "SOLD OUT"}
-      </span>
+      <div className="flex flex-col items-end gap-1 max-w-[60%] text-right">
+        <span className={`text-[11px] px-2.5 py-1 rounded-sm border border-red-500/30 bg-red-500/10 text-red-300 break-words ${
+          label ? "" : "tracking-wider"}`}>
+          {label ?? "SOLD OUT"}
+        </span>
+        {badgeLabel && (
+          <span className="text-[11px] tracking-wider px-2.5 py-1 rounded-sm border break-words"
+            style={{ borderColor: "rgba(74,222,128,0.2)", backgroundColor: "rgba(74,222,128,0.08)", color: "#86efac" }}>
+            {badgeLabel}
+          </span>
+        )}
+      </div>
     );
   }
   const pctLeft = total > 0 ? (remaining / total) * 100 : 100;

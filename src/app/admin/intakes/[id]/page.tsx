@@ -455,7 +455,7 @@ function EditClassModal({
                 className={inputClass}
               />
               <p className="text-xs text-gray-400 mt-1">
-                Shown in a green box where &quot;N left&quot; would be, once the ticket sells out (Luxury design). Leave empty to keep the red sold-out box. {form.sold_out_badge_label.trim().length}/{SOLD_OUT_BADGE_LABEL_MAX}
+                Shown in a green box under the red sold-out box once the ticket sells out (Luxury design). Leave empty to show only the red box. {form.sold_out_badge_label.trim().length}/{SOLD_OUT_BADGE_LABEL_MAX}
               </p>
             </div>
           )}
