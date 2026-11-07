@@ -1,7 +1,7 @@
 "use client";
 
 import type { TemplateProps, TemplateClass } from "./types";
-import { getCardState, fmtDate, LEVEL_COLORS } from "./types";
+import { getCardState, fmtDate, LEVEL_COLORS, soldOutLabel } from "./types";
 
 // ─── Bold Template ────────────────────────────────────────────────────────────
 // Strong primary-color header. Big typography. High contrast. Energetic.
@@ -63,7 +63,7 @@ function ClassCard({
       {/* Status banner */}
       {overlayState === "full" && (
         <div className="bg-gray-700 px-4 py-1.5 text-center text-xs font-bold tracking-widest text-white">
-          FULL / <span className="font-myanmar font-normal">နေရာပြည့်သွားပြီ</span>
+          {soldOutLabel(cls) ?? <>FULL / <span className="font-myanmar font-normal">နေရာပြည့်သွားပြီ</span></>}
         </div>
       )}
       {overlayState === "not_open" && (

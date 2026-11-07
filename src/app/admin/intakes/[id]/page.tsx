@@ -17,6 +17,7 @@ import { createClient } from "@/lib/supabase/client";
 import { mm } from "@/lib/mm-labels";
 import { EMAIL_TERMS_MAX, ORGANISER_TERMS_MAX } from "@/lib/legal/terms";
 import { telegramBotIsReady } from "@/lib/telegram/telegramBotIsReady";
+import { SOLD_OUT_LABEL_MAX } from "@/components/enrollment/templates/types";
 import type { Class, ClassChannel, ClassMode, ClassStatus, Intake, IntakeStatus } from "@/types/database";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -126,6 +127,7 @@ interface EditForm {
   max_tickets_per_person: string;
   pack_size: string;
   compare_at_amount: string;
+  sold_out_label: string;
 }
 
 function classToForm(cls: Class): EditForm {
@@ -143,6 +145,7 @@ function classToForm(cls: Class): EditForm {
     max_tickets_per_person: String(cls.max_tickets_per_person ?? 1),
     pack_size: String(cls.pack_size ?? 1),
     compare_at_amount: cls.compare_at_amount ? String(cls.compare_at_amount) : "",
+    sold_out_label: cls.sold_out_label ?? "",
   };
 }
 
@@ -258,6 +261,11 @@ function EditClassModal({
         venue: form.venue || null,
         max_tickets_per_person: maxTix >= 1 ? maxTix : 1,
       };
+      // Sent only when changed, so saving a tier never touches this column.
+      const soldOutLabel = form.sold_out_label.trim();
+      if (soldOutLabel !== (cls.sold_out_label ?? "")) {
+        payload.sold_out_label = soldOutLabel || null;
+      }
       if (showEventFields) {
         // Sent only when changed: the route refuses any pack_size change once
         // the tier has sold, even to the same value it already holds.
@@ -410,6 +418,22 @@ function EditClassModal({
               <option value="full">Full — no seats remaining</option>
               <option value="closed">Closed — enrollment ended</option>
             </select>
+          </div>
+
+          {/* Sold-out text (optional) */}
+          <div>
+            <label className={labelClass}>Sold-out text (optional)</label>
+            <input
+              type="text"
+              value={form.sold_out_label}
+              onChange={(e) => set("sold_out_label", e.target.value)}
+              maxLength={SOLD_OUT_LABEL_MAX}
+              placeholder="SOLD OUT"
+              className={inputClass}
+            />
+            <p className="text-xs text-gray-400 mt-1">
+              Shown on the ticket card once it sells out. Leave empty to show the page&apos;s usual wording. {form.sold_out_label.trim().length}/{SOLD_OUT_LABEL_MAX}
+            </p>
           </div>
 
           {/* Mode toggle — hidden for event org */}

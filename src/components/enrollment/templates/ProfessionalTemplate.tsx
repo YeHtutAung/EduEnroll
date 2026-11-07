@@ -1,7 +1,7 @@
 "use client";
 
 import type { TemplateProps, TemplateClass } from "./types";
-import { getCardState, fmtDate, LEVEL_COLORS } from "./types";
+import { getCardState, fmtDate, LEVEL_COLORS, soldOutLabel } from "./types";
 
 // ─── Professional Template ────────────────────────────────────────────────────
 // Two-column layout: sidebar (school info) + main (class list).
@@ -50,7 +50,9 @@ function ClassRow({
         <div className="mt-0.5 flex flex-wrap items-center gap-3 text-xs text-gray-400">
           {closeLabel && !isDisabled && <span>Closes {closeLabel}</span>}
           {openLabel && <span className="text-amber-600">Opens {openLabel}</span>}
-          {overlayState === "full" && <span className="font-myanmar text-gray-500">နေရာပြည့်သွားပြီ</span>}
+          {overlayState === "full" && (soldOutLabel(cls)
+            ? <span className="text-gray-500">{soldOutLabel(cls)}</span>
+            : <span className="font-myanmar text-gray-500">နေရာပြည့်သွားပြီ</span>)}
           {overlayState === "closed" && <span className="text-red-500">Closed</span>}
           <span>
             {cls.seat_remaining > 0

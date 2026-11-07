@@ -1,7 +1,7 @@
 "use client";
 
 import type { TemplateProps, TemplateClass } from "./types";
-import { getCardState, fmtDate, LEVEL_COLORS } from "./types";
+import { getCardState, fmtDate, LEVEL_COLORS, soldOutLabel } from "./types";
 
 // ─── Minimal Template ─────────────────────────────────────────────────────────
 // Clean white layout. Centered content. Thin borders. Primary color for accents.
@@ -43,7 +43,7 @@ function ClassCard({
       {/* Status banner */}
       {overlayState === "full" && (
         <div className="rounded-t-xl bg-gray-100 px-4 py-1.5 text-center text-xs font-semibold tracking-wide text-gray-500">
-          FULL — <span className="font-myanmar font-normal">နေရာပြည့်သွားပြီ</span>
+          {soldOutLabel(cls) ?? <>FULL — <span className="font-myanmar font-normal">နေရာပြည့်သွားပြီ</span></>}
         </div>
       )}
       {overlayState === "not_open" && (
