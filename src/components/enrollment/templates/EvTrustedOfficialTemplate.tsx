@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { TenantAppearance } from "@/types/database";
 import type { TemplateClass, TemplateIntake, TemplateLabels } from "./types";
-import { cartTicketCount, getCardState } from "./types";
+import { cartTicketCount, getCardState, soldOutLabel } from "./types";
 import PackBadge from "./PackBadge";
 import {
   PresentingSponsorBanner,
@@ -58,7 +58,7 @@ function TicketCard({
 
   const overlayLabel =
     overlayState === "full"
-      ? "Sold Out"
+      ? (soldOutLabel(cls) ?? "Sold Out")
       : overlayState === "not_open"
         ? "Coming Soon"
         : overlayState === "closed"
