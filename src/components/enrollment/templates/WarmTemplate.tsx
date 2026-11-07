@@ -1,7 +1,7 @@
 "use client";
 
 import type { TemplateProps, TemplateClass } from "./types";
-import { getCardState, fmtDate, LEVEL_COLORS } from "./types";
+import { getCardState, fmtDate, LEVEL_COLORS, soldOutLabel } from "./types";
 
 // ─── Warm Template ────────────────────────────────────────────────────────────
 // Soft tinted background, rounded-2xl cards, gentle shadows, italic tagline.
@@ -53,7 +53,7 @@ function ClassCard({
     >
       {overlayState === "full" && (
         <div className="px-4 py-1.5 text-center text-xs font-medium text-gray-500" style={{ background: `rgba(${rgb}, 0.05)` }}>
-          Full / <span className="font-myanmar">နေရာပြည့်သွားပြီ</span>
+          {soldOutLabel(cls) ?? <>Full / <span className="font-myanmar">နေရာပြည့်သွားပြီ</span></>}
         </div>
       )}
       {overlayState === "not_open" && (

@@ -21,6 +21,8 @@ export interface TemplateClass {
   pack_size?: number;
   /** Display only: regular price of the package as single tickets. */
   compare_at_amount?: number | null;
+  /** Organiser's own sold-out wording; see soldOutLabel(). */
+  sold_out_label?: string | null;
   /**
    * This visitor holds a priority-access token and the event's priority window
    * has opened, so the tier's "not open yet" shutter does not apply to them.
@@ -91,6 +93,19 @@ export interface EventTemplateProps {
  * the three conditions is what stops a UI convenience from turning into a way
  * to oversell.
  */
+/** Matches the classes_sold_out_label_length check in the database. */
+export const SOLD_OUT_LABEL_MAX = 60;
+
+/**
+ * The organiser's sold-out text for a tier, or null when none is set. Templates
+ * fall back to their own wording (`soldOutLabel(cls) ?? "SOLD OUT"`), so a tier
+ * without one looks exactly as before.
+ */
+export function soldOutLabel(cls: Pick<TemplateClass, "sold_out_label">): string | null {
+  const label = cls.sold_out_label?.trim();
+  return label ? label : null;
+}
+
 export function getCardState(cls: TemplateClass) {
   const isFull = cls.status === "full" || cls.seat_remaining === 0;
   const now = new Date();

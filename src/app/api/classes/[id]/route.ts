@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireOwner, badRequest, notFound } from "@/lib/api";
 import type { Class, ClassMode, ClassStatus } from "@/types/database";
+import { SOLD_OUT_LABEL_MAX } from "@/components/enrollment/templates/types";
 
 const VALID_CLASS_STATUSES: ClassStatus[] = ["draft", "open", "full", "closed"];
 const VALID_CLASS_MODES: ClassMode[] = ["online", "offline"];
@@ -57,6 +58,7 @@ export async function PATCH(
     venue,
     image_url,
     email_image_url,
+    sold_out_label,
     max_tickets_per_person,
     pack_size,
     compare_at_amount,
@@ -168,6 +170,18 @@ export async function PATCH(
       return badRequest("email_image_url must be an https address or null.");
     }
     update.email_image_url = email_image_url as string | null;
+  }
+
+  // sold_out_label — blank clears it, so the template's own wording comes back
+  if ("sold_out_label" in (body as object)) {
+    if (sold_out_label !== null && typeof sold_out_label !== "string") {
+      return badRequest("sold_out_label must be a string or null.");
+    }
+    const label = typeof sold_out_label === "string" ? sold_out_label.trim() : "";
+    if (label.length > SOLD_OUT_LABEL_MAX) {
+      return badRequest(`Sold-out text must be ${SOLD_OUT_LABEL_MAX} characters or fewer.`);
+    }
+    update.sold_out_label = label || null;
   }
 
   // max_tickets_per_person
