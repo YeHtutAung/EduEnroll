@@ -9,13 +9,14 @@ import type { EventTemplateProps, TemplateClass } from "./types";
 
 // ─── Seat badge ───────────────────────────────────────────────────────────────
 
-function EventSeatsBadge({ remaining, total, gold }: { remaining: number; total: number; gold: string }) {
+function EventSeatsBadge({ remaining, total, gold, label }: { remaining: number; total: number; gold: string; label: string | null }) {
   if (remaining === 0) {
-    // Stays "SOLD OUT" even with the organiser's text: the banner below carries
-    // that, and a long sentence doesn't fit this badge.
+    // The organiser's own text, as typed: letter spacing pulls Burmese marks
+    // apart. Longer text wraps inside the badge instead of pushing the tier name.
     return (
-      <span className="text-[11px] tracking-wider px-2.5 py-1 rounded-sm border border-red-500/30 bg-red-500/10 text-red-300">
-        SOLD OUT
+      <span className={`text-[11px] px-2.5 py-1 rounded-sm border border-red-500/30 bg-red-500/10 text-red-300 ${
+        label ? "max-w-[60%] text-right break-words" : "tracking-wider"}`}>
+        {label ?? "SOLD OUT"}
       </span>
     );
   }
@@ -118,12 +119,12 @@ function TicketCard({
       )}
 
       <div className={`relative z-10 px-8 ${cls.image_url ? "pt-6 pb-10" : "py-10"} sm:px-10 ${cls.image_url ? "sm:pt-8 sm:pb-12" : "sm:py-12"}`}>
-        <div className="flex items-start justify-between mb-8">
+        <div className="flex items-start justify-between gap-3 mb-8">
           <span className={`text-[11px] font-medium tracking-[3px] uppercase px-3 py-1.5 rounded-sm border`}
             style={isHighestTier ? { borderColor: `${gold}66`, color: gold } : { borderColor: "rgba(255,255,255,0.1)", color: "#888880" }}>
             {cls.level}
           </span>
-          <EventSeatsBadge remaining={cls.seat_remaining} total={cls.seat_total} gold={gold} />
+          <EventSeatsBadge remaining={cls.seat_remaining} total={cls.seat_total} gold={gold} label={soldOutLabel(cls)} />
         </div>
 
         <div className="mb-8">
