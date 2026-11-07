@@ -94,3 +94,14 @@ describe.each(DEFAULTS)("%s", (name, fallback) => {
     expect(html).not.toContain(CUSTOM);
   });
 });
+
+// These badges space out and capitalise their own wording. The organiser's text
+// is shown as typed: wide letter spacing pulls Burmese marks apart.
+describe.each([
+  "LsClassicTemplate", "LsWarmTemplate", "BoldTemplate", "MinimalTemplate", "EvLuxuryTemplate",
+] as const)("%s keeps the organiser's text as typed", (name) => {
+  it("turns off the badge's capitals and letter spacing for it", () => {
+    const html = render(name, [tier({ sold_out_label: CUSTOM })]);
+    expect(html).toContain(`<span class="normal-case tracking-normal">${CUSTOM}</span>`);
+  });
+});
