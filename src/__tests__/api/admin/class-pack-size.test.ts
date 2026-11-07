@@ -134,6 +134,36 @@ describe("PATCH /api/classes/[id] — sold-out text", () => {
   });
 });
 
+describe("PATCH /api/classes/[id] — seats box text", () => {
+  it("stores trimmed text, and blank or null clears it", async () => {
+    const capture = { payload: null as Record<string, unknown> | null };
+    authWith(makeSupabase(baseClass, capture));
+    expect((await patch({ sold_out_badge_label: "  COMING SOON  " })).status).toBe(200);
+    expect(capture.payload).toEqual({ sold_out_badge_label: "COMING SOON" });
+
+    for (const value of ["   ", "", null]) {
+      authWith(makeSupabase(baseClass, capture));
+      expect((await patch({ sold_out_badge_label: value })).status).toBe(200);
+      expect(capture.payload).toEqual({ sold_out_badge_label: null });
+    }
+  });
+
+  it("is saved apart from the sold-out text", async () => {
+    const capture = { payload: null as Record<string, unknown> | null };
+    authWith(makeSupabase(baseClass, capture));
+    await patch({ sold_out_label: "SOLD OUT" });
+    expect(capture.payload).not.toHaveProperty("sold_out_badge_label");
+  });
+
+  it.each([["x".repeat(31)], [42], [{ text: "COMING SOON" }]])("refuses %j", async (value) => {
+    const capture = { payload: null as Record<string, unknown> | null };
+    authWith(makeSupabase(baseClass, capture));
+    const res = await patch({ sold_out_badge_label: value });
+    expect(res.status).toBe(400);
+    expect(capture.payload).toBeNull();
+  });
+});
+
 describe("PATCH /api/classes/[id] — package fields", () => {
   it("sets pack_size and compare_at_amount on a tier that has not sold", async () => {
     const capture = { payload: null as Record<string, unknown> | null };

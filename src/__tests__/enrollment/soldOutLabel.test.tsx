@@ -109,6 +109,28 @@ describe("EvLuxuryTemplate seats badge", () => {
   });
 });
 
+// A second, separate text for the Luxury seats box: green, in place of "N left".
+describe("EvLuxuryTemplate seats box text", () => {
+  it("shows it in green instead of the red sold-out box, banner untouched", () => {
+    const html = render("EvLuxuryTemplate", [tier({ sold_out_badge_label: " COMING SOON " })]);
+    expect(html).toMatch(/color:#86efac[^>]*>COMING SOON</);
+    expect(html.split("SOLD OUT").length - 1).toBe(1); // only the banner
+    expect(html).not.toContain("border-red-500/30");
+  });
+
+  it("works next to the organiser's sold-out text", () => {
+    const html = render("EvLuxuryTemplate", [tier({ sold_out_label: CUSTOM, sold_out_badge_label: "COMING SOON" })]);
+    expect(html.split(CUSTOM).length - 1).toBe(1);
+    expect(html).toContain("COMING SOON");
+  });
+
+  it("doesn't show while the tier is on sale", () => {
+    const html = render("EvLuxuryTemplate", [tier({ status: "open", seat_remaining: 10, sold_out_badge_label: "COMING SOON" })]);
+    expect(html).not.toContain("COMING SOON");
+    expect(html).toContain("10 left");
+  });
+});
+
 // These badges space out and capitalise their own wording. The organiser's text
 // is shown as typed: wide letter spacing pulls Burmese marks apart.
 describe.each([
