@@ -111,17 +111,23 @@ describe("EvLuxuryTemplate seats badge", () => {
 
 // A second, separate text for the Luxury seats box: green, in place of "N left".
 describe("EvLuxuryTemplate seats box text", () => {
-  it("shows it in green instead of the red sold-out box, banner untouched", () => {
+  it("shows the green box under the red SOLD OUT box", () => {
     const html = render("EvLuxuryTemplate", [tier({ sold_out_badge_label: " COMING SOON " })]);
     expect(html).toMatch(/color:#86efac[^>]*>COMING SOON</);
-    expect(html.split("SOLD OUT").length - 1).toBe(1); // only the banner
-    expect(html).not.toContain("border-red-500/30");
+    expect(html).toMatch(/border-red-500\/30[^>]*>SOLD OUT</);
+    expect(html.indexOf(">SOLD OUT<")).toBeLessThan(html.indexOf(">COMING SOON<"));
   });
 
-  it("works next to the organiser's sold-out text", () => {
+  it("puts the organiser's sold-out text in the red box beside it", () => {
     const html = render("EvLuxuryTemplate", [tier({ sold_out_label: CUSTOM, sold_out_badge_label: "COMING SOON" })]);
-    expect(html.split(CUSTOM).length - 1).toBe(1);
+    expect(html).toMatch(new RegExp(`border-red-500/30[^>]*>${CUSTOM}<`));
     expect(html).toContain("COMING SOON");
+  });
+
+  it("shows only the red box when no green text is set", () => {
+    const html = render("EvLuxuryTemplate", [tier({ sold_out_badge_label: null })]);
+    expect(html).toMatch(/border-red-500\/30[^>]*>SOLD OUT</);
+    expect(html).not.toContain("#86efac");
   });
 
   it("doesn't show while the tier is on sale", () => {
