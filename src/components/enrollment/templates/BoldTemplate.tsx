@@ -63,7 +63,7 @@ function ClassCard({
       {/* Status banner */}
       {overlayState === "full" && (
         <div className="bg-gray-700 px-4 py-1.5 text-center text-xs font-bold tracking-widest text-white">
-          {soldOutLabel(cls) ?? <>FULL / <span className="font-myanmar font-normal">နေရာပြည့်သွားပြီ</span></>}
+          {(soldOutLabel(cls) && <span className="normal-case tracking-normal">{soldOutLabel(cls)}</span>) ?? <>FULL / <span className="font-myanmar font-normal">နေရာပြည့်သွားပြီ</span></>}
         </div>
       )}
       {overlayState === "not_open" && (
