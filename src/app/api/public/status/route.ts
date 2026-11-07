@@ -7,6 +7,39 @@ import type { Enrollment, Class, Intake, Payment } from "@/types/database";
 import type { PaymentStatus } from "@/types/database";
 import { loadPartialPayment } from "@/server/payments/partialPayment";
 import { enrollmentStatusLabels, statusNotFoundMessage } from "@/lib/enrollment/orderWording";
+import { clientIpFrom, publicEnrollmentLookupLimiter } from "@/lib/rateLimit";
+
+// The answer is about one buyer's order, so no shared cache may keep a copy.
+const NO_STORE = { "Cache-Control": "no-store" };
+
+function noStore<T extends Response>(res: T): T {
+  res.headers.set("Cache-Control", "no-store");
+  return res;
+}
+
+// Same budget as /api/public/enrollment/[ref]: both routes answer for the same
+// references, so a miss on either spends it.
+function throttled(clientIp: string) {
+  return NextResponse.json(
+    { error: "Too Many Requests", message: "Too many failed lookups. Try again later." },
+    {
+      status: 429,
+      headers: { ...NO_STORE, "Retry-After": String(publicEnrollmentLookupLimiter.retryAfter(clientIp)) },
+    },
+  );
+}
+
+// Only "no such row" counts. A database fault is not a miss, or an outage would
+// spend the budget of callers whose references are valid. PGRST116 is what
+// PostgREST returns from .single() when no row matched.
+function recordIfDefinitelyAbsent(clientIp: string, error: unknown): void {
+  const code = (error as { code?: string } | null)?.code;
+  if (!error || code === "PGRST116") {
+    publicEnrollmentLookupLimiter.recordMiss(clientIp);
+    return;
+  }
+  console.error("[status] enrollment lookup failed, not counted as a miss:", code ?? "unknown");
+}
 
 // ─── Bilingual status labels ──────────────────────────────────────────────────
 
@@ -66,17 +99,29 @@ type PaymentResult    = { data: Pick<Payment, "id" | "status" | "created_at" | "
 //     submitted_at:     string | null
 //   } | null
 // }
+//
+// The reference is the only credential here, so failed lookups are throttled
+// per client address on the shared enrollment-lookup budget. Only misses count:
+// the payment page polls this route with a valid reference, and those polls
+// must never be refused. Once the budget is spent every request from that
+// address is refused, hits included. Do not remove that without replacing it.
 
 export async function GET(request: NextRequest) {
+  // Cheapest possible rejection, so a spent address costs no tenant lookup.
+  const clientIp = clientIpFrom(request.headers);
+  if (publicEnrollmentLookupLimiter.isBlocked(clientIp)) {
+    return throttled(clientIp);
+  }
+
   const tenantId = await resolveTenantId();
-  if (tenantId instanceof NextResponse) return tenantId;
+  if (tenantId instanceof NextResponse) return noStore(tenantId);
 
   const ref = request.nextUrl.searchParams.get("ref")?.trim();
 
   if (!ref) {
     return NextResponse.json(
       { error: "Bad Request", message: "Query parameter 'ref' is required." },
-      { status: 400 },
+      { status: 400, headers: NO_STORE },
     );
   }
 
@@ -91,6 +136,12 @@ export async function GET(request: NextRequest) {
     .single() as EnrollmentResult;
 
   if (enrollmentError || !enrollment) {
+    recordIfDefinitelyAbsent(clientIp, enrollmentError);
+
+    // The lookup is scoped to this tenant, so a reference that belongs to
+    // another tenant gets exactly this answer too. Nothing below depends on
+    // the reference: the wording comes from the current tenant only.
+    //
     // The not-found screens have no order to take the tenant's wording from.
     // A failed read stays unknown, the same as the success response below.
     const { data: tenantOrg } = await supabase
@@ -102,7 +153,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json(
       { error: "Not Found", message: statusNotFoundMessage(orgType), org_type: orgType },
-      { status: 404 },
+      { status: 404, headers: NO_STORE },
     );
   }
 
@@ -256,5 +307,5 @@ export async function GET(request: NextRequest) {
     platform_fee_mode: tenantInfo?.platform_fee_mode ?? "none",
     platform_fee_amount: tenantInfo?.platform_fee_amount ?? 0,
     mmqr_provider: tenantInfo?.mmqr_provider ?? "abank",
-  });
+  }, { headers: NO_STORE });
 }

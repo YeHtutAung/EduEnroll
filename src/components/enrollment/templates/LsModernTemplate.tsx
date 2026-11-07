@@ -1,13 +1,13 @@
 "use client";
 
 import type { TemplateProps, TemplateClass } from "./types";
-import { getCardState, fmtDate } from "./types";
+import { getCardState, fmtDate, soldOutLabel } from "./types";
 
 function ClassCard({ cls, primaryColor, onSelect }: { cls: TemplateClass; primaryColor: string; onSelect: (id: string) => void }) {
   const { isDisabled, overlayState } = getCardState(cls);
 
   const overlayLabel =
-    overlayState === "full" ? "Full" :
+    overlayState === "full" ? (soldOutLabel(cls) ?? "Full") :
     overlayState === "not_open" ? "Opening Soon" :
     overlayState === "closed" ? "Closed" : null;
 

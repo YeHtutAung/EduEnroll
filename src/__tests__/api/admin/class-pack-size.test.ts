@@ -96,6 +96,44 @@ describe("PATCH /api/classes/[id] — email image", () => {
   });
 });
 
+describe("PATCH /api/classes/[id] — sold-out text", () => {
+  it("stores trimmed text, and blank or null clears it", async () => {
+    const capture = { payload: null as Record<string, unknown> | null };
+    authWith(makeSupabase(baseClass, capture));
+    expect((await patch({ sold_out_label: "  Day 1 is full, see you on Day 2  " })).status).toBe(200);
+    expect(capture.payload).toEqual({ sold_out_label: "Day 1 is full, see you on Day 2" });
+
+    for (const value of ["   ", "", null]) {
+      authWith(makeSupabase(baseClass, capture));
+      expect((await patch({ sold_out_label: value })).status).toBe(200);
+      expect(capture.payload).toEqual({ sold_out_label: null });
+    }
+  });
+
+  it("accepts Burmese text at the 60-character limit", async () => {
+    const capture = { payload: null as Record<string, unknown> | null };
+    authWith(makeSupabase(baseClass, capture));
+    const label = "နေရာပြည့်".repeat(20).slice(0, 60);
+    expect((await patch({ sold_out_label: label })).status).toBe(200);
+    expect(capture.payload).toEqual({ sold_out_label: label });
+  });
+
+  it("leaves it alone when a save doesn't send it", async () => {
+    const capture = { payload: null as Record<string, unknown> | null };
+    authWith(makeSupabase(baseClass, capture));
+    await patch({ fee_amount: 1000 });
+    expect(capture.payload).not.toHaveProperty("sold_out_label");
+  });
+
+  it.each([["x".repeat(61)], [42], [{ text: "SOLD OUT" }]])("refuses %j", async (value) => {
+    const capture = { payload: null as Record<string, unknown> | null };
+    authWith(makeSupabase(baseClass, capture));
+    const res = await patch({ sold_out_label: value });
+    expect(res.status).toBe(400);
+    expect(capture.payload).toBeNull();
+  });
+});
+
 describe("PATCH /api/classes/[id] — package fields", () => {
   it("sets pack_size and compare_at_amount on a tier that has not sold", async () => {
     const capture = { payload: null as Record<string, unknown> | null };

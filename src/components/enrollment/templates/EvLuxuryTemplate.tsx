@@ -3,7 +3,7 @@
 import { useState, type CSSProperties } from "react";
 import { formatCurrency, formatAmount } from "@/lib/utils";
 import { eventFontCssUrl, eventFontStack } from "@/lib/eventFont";
-import { cartTicketCount, fmtEventDates, getCardState } from "./types";
+import { cartTicketCount, fmtEventDates, getCardState, soldOutLabel } from "./types";
 import PackBadge from "./PackBadge";
 import type { EventTemplateProps, TemplateClass } from "./types";
 
@@ -11,6 +11,8 @@ import type { EventTemplateProps, TemplateClass } from "./types";
 
 function EventSeatsBadge({ remaining, total, gold }: { remaining: number; total: number; gold: string }) {
   if (remaining === 0) {
+    // Stays "SOLD OUT" even with the organiser's text: the banner below carries
+    // that, and a long sentence doesn't fit this badge.
     return (
       <span className="text-[11px] tracking-wider px-2.5 py-1 rounded-sm border border-red-500/30 bg-red-500/10 text-red-300">
         SOLD OUT
@@ -91,7 +93,7 @@ function TicketCard({
       {/* Status banners */}
       {overlayState === "full" && (
         <div className="relative z-10 bg-white/5 px-6 py-2.5 text-center text-[11px] font-medium tracking-[3px] text-white/60 uppercase">
-          SOLD OUT / <span className="font-myanmar font-normal tracking-normal">နေရာပြည့်သွားပြီ</span>
+          {(soldOutLabel(cls) && <span className="normal-case tracking-normal">{soldOutLabel(cls)}</span>) ?? <>SOLD OUT / <span className="font-myanmar font-normal tracking-normal">နေရာပြည့်သွားပြီ</span></>}
         </div>
       )}
       {overlayState === "not_open" && (
