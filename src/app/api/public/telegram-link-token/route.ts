@@ -1,15 +1,42 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveTenantId } from "@/lib/api";
+import { clientIpFrom, publicEnrollmentLookupLimiter } from "@/lib/rateLimit";
 import crypto from "crypto";
 
 // ─── POST /api/public/telegram-link-token ────────────────────────────────────
 // Generates a one-time token for secure Telegram deep linking.
 // Input: { enrollment_ref }
 // Returns: { deepLink, expiresIn } or error.
+//
+// The reference is the only credential, so the lookup is scoped to the tenant
+// the request arrived on, and failed lookups spend the shared per-address
+// enrollment-lookup budget, the same one as the status and enrollment routes.
 
 const TOKEN_EXPIRY_MINUTES = 15;
 
+const NO_STORE = { "Cache-Control": "no-store" };
+
+function throttled(clientIp: string) {
+  return NextResponse.json(
+    // `error` is the text the payment page shows.
+    { error: "Too many failed lookups. Try again later." },
+    {
+      status: 429,
+      headers: { ...NO_STORE, "Retry-After": String(publicEnrollmentLookupLimiter.retryAfter(clientIp)) },
+    },
+  );
+}
+
 export async function POST(request: NextRequest) {
+  const clientIp = clientIpFrom(request.headers);
+  if (publicEnrollmentLookupLimiter.isBlocked(clientIp)) {
+    return throttled(clientIp);
+  }
+
+  const tenantId = await resolveTenantId();
+  if (tenantId instanceof NextResponse) return tenantId;
+
   let body: { enrollment_ref?: string };
   try {
     body = await request.json();
@@ -27,11 +54,12 @@ export async function POST(request: NextRequest) {
 
   const supabase = createAdminClient();
 
-  // ── Find enrollment (enrollment_ref is globally unique) ───────
-  const { data: enrollment } = (await supabase
+  // ── Find enrollment on this tenant only ─────────────────────────
+  const { data: enrollment, error: lookupError } = (await supabase
     .from("enrollments")
     .select("id, tenant_id, status, telegram_chat_id")
-    .eq("enrollment_ref", enrollment_ref)
+    .eq("enrollment_ref", String(enrollment_ref).trim())
+    .eq("tenant_id", tenantId)
     .single()) as {
     data: {
       id: string;
@@ -43,7 +71,16 @@ export async function POST(request: NextRequest) {
   };
 
   if (!enrollment) {
-    return NextResponse.json({ error: "Enrollment not found." }, { status: 404 });
+    // A database fault is not a miss, or an outage would spend the budget of
+    // callers whose references are valid. PGRST116 is .single()'s "no rows".
+    const code = (lookupError as { code?: string } | null)?.code;
+    if (!lookupError || code === "PGRST116") {
+      publicEnrollmentLookupLimiter.recordMiss(clientIp);
+    } else {
+      console.error("[telegram-link-token] enrollment lookup failed, not counted as a miss:", code ?? "unknown");
+    }
+    // Same answer whether the reference is absent or belongs to another tenant.
+    return NextResponse.json({ error: "Enrollment not found." }, { status: 404, headers: NO_STORE });
   }
 
   // Block if payment not yet submitted
@@ -101,5 +138,5 @@ export async function POST(request: NextRequest) {
 
   const deepLink = `https://t.me/${enrollmentBot.bot_username}?start=${token}`;
 
-  return NextResponse.json({ deepLink, expiresIn: TOKEN_EXPIRY_MINUTES * 60 });
+  return NextResponse.json({ deepLink, expiresIn: TOKEN_EXPIRY_MINUTES * 60 }, { headers: NO_STORE });
 }
