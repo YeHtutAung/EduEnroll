@@ -31,6 +31,8 @@ interface PublicClassView {
   max_tickets_per_person: number;
   pack_size: number;
   compare_at_amount: number | null;
+  sold_out_label: string | null;
+  sold_out_badge_label: string | null;
 }
 
 interface TenantLabelsView {
@@ -155,7 +157,7 @@ export async function GET(
     // Still fetch classes so payment page can show promotions
     const { data: closedClasses } = await supabase
       .from("classes")
-      .select("id, level, fee_amount, seat_remaining, seat_total, enrollment_open_at, enrollment_close_at, status, mode, event_date, start_time, end_time, venue, image_url, max_tickets_per_person, pack_size, compare_at_amount")
+      .select("id, level, fee_amount, seat_remaining, seat_total, enrollment_open_at, enrollment_close_at, status, mode, event_date, start_time, end_time, venue, image_url, max_tickets_per_person, pack_size, compare_at_amount, sold_out_label, sold_out_badge_label")
       .eq("intake_id", intake.id)
       .eq("tenant_id", tenantId)
       .in("status", ["open", "full"])
@@ -169,6 +171,8 @@ export async function GET(
       event_date: c.event_date ?? null, start_time: c.start_time ?? null, end_time: c.end_time ?? null,
       venue: c.venue ?? null, image_url: c.image_url ?? null, max_tickets_per_person: c.max_tickets_per_person ?? 1,
       pack_size: c.pack_size ?? 1, compare_at_amount: c.compare_at_amount ?? null,
+      sold_out_label: c.sold_out_label ?? null,
+      sold_out_badge_label: c.sold_out_badge_label ?? null,
     }));
 
     return NextResponse.json(
@@ -198,7 +202,7 @@ export async function GET(
   // ── Fetch all visible classes (open + full) ──────────────────
   const { data: classes, error: classError } = await supabase
     .from("classes")
-    .select("id, level, fee_amount, seat_remaining, seat_total, enrollment_open_at, enrollment_close_at, status, mode, event_date, start_time, end_time, venue, image_url, max_tickets_per_person, pack_size, compare_at_amount")
+    .select("id, level, fee_amount, seat_remaining, seat_total, enrollment_open_at, enrollment_close_at, status, mode, event_date, start_time, end_time, venue, image_url, max_tickets_per_person, pack_size, compare_at_amount, sold_out_label, sold_out_badge_label")
     .eq("intake_id", intake.id)
     .eq("tenant_id", tenantId)
     .in("status", ["open", "full"])
@@ -233,6 +237,8 @@ export async function GET(
     max_tickets_per_person: c.max_tickets_per_person ?? 1,
     pack_size:            c.pack_size ?? 1,
     compare_at_amount:    c.compare_at_amount ?? null,
+    sold_out_label:       c.sold_out_label ?? null,
+    sold_out_badge_label: c.sold_out_badge_label ?? null,
   }));
 
   // Tiers the priority window still covers: those with a future

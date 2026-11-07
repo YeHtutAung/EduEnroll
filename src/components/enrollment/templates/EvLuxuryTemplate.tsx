@@ -3,18 +3,33 @@
 import { useState, type CSSProperties } from "react";
 import { formatCurrency, formatAmount } from "@/lib/utils";
 import { eventFontCssUrl, eventFontStack } from "@/lib/eventFont";
-import { cartTicketCount, fmtEventDates, getCardState } from "./types";
+import { cartTicketCount, fmtEventDates, getCardState, soldOutLabel, soldOutBadgeLabel } from "./types";
 import PackBadge from "./PackBadge";
 import type { EventTemplateProps, TemplateClass } from "./types";
 
 // ─── Seat badge ───────────────────────────────────────────────────────────────
 
-function EventSeatsBadge({ remaining, total, gold }: { remaining: number; total: number; gold: string }) {
+function EventSeatsBadge({ remaining, total, gold, label, badgeLabel }: {
+  remaining: number; total: number; gold: string; label: string | null; badgeLabel: string | null;
+}) {
   if (remaining === 0) {
+    // Always the red sold-out box: the organiser's sold-out text as typed
+    // (letter spacing pulls Burmese marks apart), or SOLD OUT. Below it, only
+    // when the organiser set one, their green box (e.g. "COMING SOON") in the
+    // same green as a tier with plenty left. Long text wraps inside its box.
     return (
-      <span className="text-[11px] tracking-wider px-2.5 py-1 rounded-sm border border-red-500/30 bg-red-500/10 text-red-300">
-        SOLD OUT
-      </span>
+      <div className="flex flex-col items-end gap-1 max-w-[60%] text-right">
+        <span className={`text-[11px] px-2.5 py-1 rounded-sm border border-red-500/30 bg-red-500/10 text-red-300 break-words ${
+          label ? "" : "tracking-wider"}`}>
+          {label ?? "SOLD OUT"}
+        </span>
+        {badgeLabel && (
+          <span className="text-[11px] tracking-wider px-2.5 py-1 rounded-sm border break-words"
+            style={{ borderColor: "rgba(74,222,128,0.2)", backgroundColor: "rgba(74,222,128,0.08)", color: "#86efac" }}>
+            {badgeLabel}
+          </span>
+        )}
+      </div>
     );
   }
   const pctLeft = total > 0 ? (remaining / total) * 100 : 100;
@@ -91,7 +106,7 @@ function TicketCard({
       {/* Status banners */}
       {overlayState === "full" && (
         <div className="relative z-10 bg-white/5 px-6 py-2.5 text-center text-[11px] font-medium tracking-[3px] text-white/60 uppercase">
-          SOLD OUT / <span className="font-myanmar font-normal tracking-normal">နေရာပြည့်သွားပြီ</span>
+          {(soldOutLabel(cls) && <span className="normal-case tracking-normal">{soldOutLabel(cls)}</span>) ?? <>SOLD OUT / <span className="font-myanmar font-normal tracking-normal">နေရာပြည့်သွားပြီ</span></>}
         </div>
       )}
       {overlayState === "not_open" && (
@@ -116,12 +131,12 @@ function TicketCard({
       )}
 
       <div className={`relative z-10 px-8 ${cls.image_url ? "pt-6 pb-10" : "py-10"} sm:px-10 ${cls.image_url ? "sm:pt-8 sm:pb-12" : "sm:py-12"}`}>
-        <div className="flex items-start justify-between mb-8">
+        <div className="flex items-start justify-between gap-3 mb-8">
           <span className={`text-[11px] font-medium tracking-[3px] uppercase px-3 py-1.5 rounded-sm border`}
             style={isHighestTier ? { borderColor: `${gold}66`, color: gold } : { borderColor: "rgba(255,255,255,0.1)", color: "#888880" }}>
             {cls.level}
           </span>
-          <EventSeatsBadge remaining={cls.seat_remaining} total={cls.seat_total} gold={gold} />
+          <EventSeatsBadge remaining={cls.seat_remaining} total={cls.seat_total} gold={gold} label={soldOutLabel(cls)} badgeLabel={soldOutBadgeLabel(cls)} />
         </div>
 
         <div className="mb-8">

@@ -51,6 +51,9 @@ interface PublicClass {
   pack_size?: number;
   /** Display only: regular price of the package as single tickets. */
   compare_at_amount?: number | null;
+  /** Organiser's own sold-out wording, shown in place of the template's. */
+  sold_out_label?: string | null;
+  sold_out_badge_label?: string | null;
 }
 
 interface PublicIntake {

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { EventTemplateProps, TemplateClass } from "./types";
-import { cartTicketCount, getCardState, fmtDate, fmtEventDates } from "./types";
+import { cartTicketCount, getCardState, fmtDate, fmtEventDates, soldOutLabel } from "./types";
 import PackBadge from "./PackBadge";
 import { eventFontCssUrl, eventFontStyle } from "@/lib/eventFont";
 
@@ -30,7 +30,7 @@ function TicketCard({
   const isSoldOut = overlayState === "full";
 
   const overlayLabel =
-    overlayState === "full" ? "SOLD OUT" :
+    overlayState === "full" ? (soldOutLabel(cls) ?? "SOLD OUT") :
     overlayState === "not_open" ? "COMING SOON" :
     overlayState === "closed" ? "ENDED" : null;
 
