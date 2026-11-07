@@ -95,6 +95,20 @@ describe.each(DEFAULTS)("%s", (name, fallback) => {
   });
 });
 
+// Luxury says it twice: the banner over the poster and the seats badge.
+describe("EvLuxuryTemplate seats badge", () => {
+  it("uses the organiser's text too, so no SOLD OUT is left", () => {
+    const html = render("EvLuxuryTemplate", [tier({ sold_out_label: CUSTOM })]);
+    expect(html.split(CUSTOM).length - 1).toBe(2);
+    expect(html).not.toContain("SOLD OUT");
+  });
+
+  it("keeps SOLD OUT in both places without it", () => {
+    const html = render("EvLuxuryTemplate", [tier({ sold_out_label: null })]);
+    expect(html.split("SOLD OUT").length - 1).toBe(2);
+  });
+});
+
 // These badges space out and capitalise their own wording. The organiser's text
 // is shown as typed: wide letter spacing pulls Burmese marks apart.
 describe.each([
