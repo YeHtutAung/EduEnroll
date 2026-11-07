@@ -281,6 +281,7 @@ export interface Class {
   email_image_url: string | null;
   /** Shown on the enrollment page in place of "SOLD OUT" once the tier is full. */
   sold_out_label: string | null;
+  sold_out_badge_label: string | null;
   max_tickets_per_person: number;
   /** Admissions issued per unit sold; 1 for an ordinary tier, 3 for a "3-Pack". */
   pack_size: number;

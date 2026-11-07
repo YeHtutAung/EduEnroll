@@ -3,13 +3,25 @@
 import { useState, type CSSProperties } from "react";
 import { formatCurrency, formatAmount } from "@/lib/utils";
 import { eventFontCssUrl, eventFontStack } from "@/lib/eventFont";
-import { cartTicketCount, fmtEventDates, getCardState, soldOutLabel } from "./types";
+import { cartTicketCount, fmtEventDates, getCardState, soldOutLabel, soldOutBadgeLabel } from "./types";
 import PackBadge from "./PackBadge";
 import type { EventTemplateProps, TemplateClass } from "./types";
 
 // ─── Seat badge ───────────────────────────────────────────────────────────────
 
-function EventSeatsBadge({ remaining, total, gold, label }: { remaining: number; total: number; gold: string; label: string | null }) {
+function EventSeatsBadge({ remaining, total, gold, label, badgeLabel }: {
+  remaining: number; total: number; gold: string; label: string | null; badgeLabel: string | null;
+}) {
+  if (remaining === 0 && badgeLabel) {
+    // The organiser's own text for this box (e.g. "COMING SOON"), in the same
+    // green as a tier with plenty left, so it reads as "more is on the way".
+    return (
+      <span className="text-[11px] tracking-wider px-2.5 py-1 rounded-sm border max-w-[60%] text-right break-words"
+        style={{ borderColor: "rgba(74,222,128,0.2)", backgroundColor: "rgba(74,222,128,0.08)", color: "#86efac" }}>
+        {badgeLabel}
+      </span>
+    );
+  }
   if (remaining === 0) {
     // The organiser's own text, as typed: letter spacing pulls Burmese marks
     // apart. Longer text wraps inside the badge instead of pushing the tier name.
@@ -124,7 +136,7 @@ function TicketCard({
             style={isHighestTier ? { borderColor: `${gold}66`, color: gold } : { borderColor: "rgba(255,255,255,0.1)", color: "#888880" }}>
             {cls.level}
           </span>
-          <EventSeatsBadge remaining={cls.seat_remaining} total={cls.seat_total} gold={gold} label={soldOutLabel(cls)} />
+          <EventSeatsBadge remaining={cls.seat_remaining} total={cls.seat_total} gold={gold} label={soldOutLabel(cls)} badgeLabel={soldOutBadgeLabel(cls)} />
         </div>
 
         <div className="mb-8">

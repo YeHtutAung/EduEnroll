@@ -23,6 +23,8 @@ export interface TemplateClass {
   compare_at_amount?: number | null;
   /** Organiser's own sold-out wording; see soldOutLabel(). */
   sold_out_label?: string | null;
+  /** Organiser's text for the green box in place of "N left"; see soldOutBadgeLabel(). */
+  sold_out_badge_label?: string | null;
   /**
    * This visitor holds a priority-access token and the event's priority window
    * has opened, so the tier's "not open yet" shutter does not apply to them.
@@ -103,6 +105,18 @@ export const SOLD_OUT_LABEL_MAX = 60;
  */
 export function soldOutLabel(cls: Pick<TemplateClass, "sold_out_label">): string | null {
   const label = cls.sold_out_label?.trim();
+  return label ? label : null;
+}
+
+/** Matches the classes_sold_out_badge_label_length check in the database. */
+export const SOLD_OUT_BADGE_LABEL_MAX = 30;
+
+/**
+ * The organiser's text for a sold-out tier's seats box (e.g. "COMING SOON"),
+ * shown in green where "N left" would be. Null when none is set.
+ */
+export function soldOutBadgeLabel(cls: Pick<TemplateClass, "sold_out_badge_label">): string | null {
+  const label = cls.sold_out_badge_label?.trim();
   return label ? label : null;
 }
 

@@ -17,7 +17,7 @@ import { createClient } from "@/lib/supabase/client";
 import { mm } from "@/lib/mm-labels";
 import { EMAIL_TERMS_MAX, ORGANISER_TERMS_MAX } from "@/lib/legal/terms";
 import { telegramBotIsReady } from "@/lib/telegram/telegramBotIsReady";
-import { SOLD_OUT_LABEL_MAX } from "@/components/enrollment/templates/types";
+import { SOLD_OUT_LABEL_MAX, SOLD_OUT_BADGE_LABEL_MAX } from "@/components/enrollment/templates/types";
 import type { Class, ClassChannel, ClassMode, ClassStatus, Intake, IntakeStatus } from "@/types/database";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -128,6 +128,7 @@ interface EditForm {
   pack_size: string;
   compare_at_amount: string;
   sold_out_label: string;
+  sold_out_badge_label: string;
 }
 
 function classToForm(cls: Class): EditForm {
@@ -146,6 +147,7 @@ function classToForm(cls: Class): EditForm {
     pack_size: String(cls.pack_size ?? 1),
     compare_at_amount: cls.compare_at_amount ? String(cls.compare_at_amount) : "",
     sold_out_label: cls.sold_out_label ?? "",
+    sold_out_badge_label: cls.sold_out_badge_label ?? "",
   };
 }
 
@@ -265,6 +267,10 @@ function EditClassModal({
       const soldOutLabel = form.sold_out_label.trim();
       if (soldOutLabel !== (cls.sold_out_label ?? "")) {
         payload.sold_out_label = soldOutLabel || null;
+      }
+      const soldOutBadgeLabel = form.sold_out_badge_label.trim();
+      if (soldOutBadgeLabel !== (cls.sold_out_badge_label ?? "")) {
+        payload.sold_out_badge_label = soldOutBadgeLabel || null;
       }
       if (showEventFields) {
         // Sent only when changed: the route refuses any pack_size change once
@@ -435,6 +441,24 @@ function EditClassModal({
               Shown on the ticket card once it sells out. Leave empty to show the page&apos;s usual wording. {form.sold_out_label.trim().length}/{SOLD_OUT_LABEL_MAX}
             </p>
           </div>
+
+          {/* Seats box text (optional) — the green box in place of "N left" */}
+          {tl.orgType === "event" && (
+            <div>
+              <label className={labelClass}>Seats box text when sold out (optional)</label>
+              <input
+                type="text"
+                value={form.sold_out_badge_label}
+                onChange={(e) => set("sold_out_badge_label", e.target.value)}
+                maxLength={SOLD_OUT_BADGE_LABEL_MAX}
+                placeholder="COMING SOON"
+                className={inputClass}
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                Shown in a green box where &quot;N left&quot; would be, once the ticket sells out (Luxury design). Leave empty to keep the red sold-out box. {form.sold_out_badge_label.trim().length}/{SOLD_OUT_BADGE_LABEL_MAX}
+              </p>
+            </div>
+          )}
 
           {/* Mode toggle — hidden for event org */}
           {tl.orgType !== "event" && (
