@@ -6,6 +6,7 @@ import type { TenantAppearance } from "@/types/database";
 import { DEFAULT_APPEARANCE } from "@/types/database";
 import BrandHeader from "@/components/enrollment/BrandHeader";
 import SizePicker from "@/components/enrollment/SizePicker";
+import type { SizeNote } from "@/lib/enrollment/sizeChart";
 import { readableTextColor } from "@/lib/readableText";
 import {
   INTEREST_ANSWER_MAX,
@@ -16,7 +17,7 @@ import {
 } from "@/lib/interest/interestFields";
 
 /** Plus `size_chart_url`, set by the API on a size field (@/lib/enrollment/sizeChart). */
-type InterestFieldDef = BaseInterestFieldDef & { size_chart_url?: string };
+type InterestFieldDef = BaseInterestFieldDef & { size_chart_url?: string; size_note?: SizeNote };
 
 // ─── Register interest in an event's priority window ────────────────────────
 //
@@ -221,6 +222,7 @@ function CustomField({
           onChange={onChange}
           required={field.is_required}
           chartUrl={field.size_chart_url}
+          note={field.size_note}
           labelClassName="text-sm font-medium text-gray-700"
           requiredMark={field.is_required && <span className="ml-1 text-red-500">*</span>}
         />

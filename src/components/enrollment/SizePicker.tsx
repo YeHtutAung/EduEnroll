@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { groupSizeOptions, type SizeOption } from "@/lib/enrollment/sizeChart";
+import { groupSizeOptions, type SizeNote, type SizeOption } from "@/lib/enrollment/sizeChart";
 
 // Size buttons plus a "View size chart" link, standing in for a size dropdown
 // on the public forms. Only drawn for fields the server marked with
@@ -31,6 +31,7 @@ export default function SizePicker({
   labelClassName,
   labelStyle,
   requiredMark,
+  note,
 }: {
   /** Radio group name — the field_key. */
   name: string;
@@ -45,6 +46,8 @@ export default function SizePicker({
   labelStyle?: React.CSSProperties;
   /** Shown after the label, e.g. a red asterisk or "(optional)". */
   requiredMark?: React.ReactNode;
+  /** Organiser's notice under the buttons (e.g. a change fee), English + Burmese. */
+  note?: SizeNote | null;
 }) {
   const [chartOpen, setChartOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -183,6 +186,16 @@ export default function SizePicker({
       <p className="text-[11px] mt-2" style={{ color: MUTED }}>
         {selected ? `Selected: ${selected.value}` : "Choose a size"}
       </p>
+
+      {note && (
+        <div
+          className="mt-2 rounded-[7px] px-3 py-2 text-[12px] leading-relaxed"
+          style={{ background: "#fffbeb", border: "1px solid #fde68a", color: "#92400e" }}
+        >
+          <p>{note.en}</p>
+          <p className="font-myanmar mt-1">{note.mm}</p>
+        </div>
+      )}
 
       {chartOpen && (
         <div

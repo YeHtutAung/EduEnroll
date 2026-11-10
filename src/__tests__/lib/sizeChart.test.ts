@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupSizeOptions, sizeChartUrlFor } from "@/lib/enrollment/sizeChart";
+import { groupSizeOptions, sizeChartUrlFor, sizeNoteFor } from "@/lib/enrollment/sizeChart";
 
 const jersey = {
   field_label: "Jersey Size",
@@ -74,5 +74,23 @@ describe("groupSizeOptions", () => {
     const { kids, adult } = groupSizeOptions(["S", "M", "L"]);
     expect(kids).toEqual([]);
     expect(adult).toHaveLength(3);
+  });
+});
+
+describe("sizeNoteFor", () => {
+  it("gives The Beats Run's change-fee note in both languages", () => {
+    const note = sizeNoteFor("beatsrun", jersey);
+    expect(note?.en).toBe(
+      "Changing from 10KM to 5KM, or changing your jersey size after purchase, costs 15,000 MMK.",
+    );
+    expect(note?.mm).toContain("15,000 ကျပ်");
+  });
+
+  it("uses the same match as the chart", () => {
+    expect(sizeNoteFor("beatsrun", { ...jersey, field_label: "  jersey size " })).not.toBeNull();
+    expect(sizeNoteFor("skyfestival", jersey)).toBeNull();
+    expect(sizeNoteFor("beatsrun", { ...jersey, field_label: "Shoe Size" })).toBeNull();
+    expect(sizeNoteFor("beatsrun", { ...jersey, options: [] })).toBeNull();
+    expect(sizeNoteFor(null, jersey)).toBeNull();
   });
 });
