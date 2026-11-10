@@ -12,6 +12,7 @@ import { TERMS_VERSION } from "@/lib/legal/terms";
 import { readableTextColor } from "@/lib/readableText";
 import EmailTypoHint from "@/components/enrollment/EmailTypoHint";
 import SizePicker from "@/components/enrollment/SizePicker";
+import type { SizeNote } from "@/lib/enrollment/sizeChart";
 import { emailBlockedFor, emailBlockedMessage, emailTypoToConfirm } from "@/lib/enrollment/emailAddress";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -58,6 +59,7 @@ interface FormFieldDef {
   is_default: boolean;
   /** Set by the API for an organiser's size field — see @/lib/enrollment/sizeChart. */
   size_chart_url?: string;
+  size_note?: SizeNote;
 }
 
 // ─── Phone validation (Myanmar + international) ─────────────────────────────
@@ -251,6 +253,7 @@ function DynamicField({
           onChange={onChange}
           required={field.is_required}
           chartUrl={field.size_chart_url}
+          note={field.size_note}
           labelClassName="text-sm font-medium text-gray-700"
           requiredMark={field.is_required && <span className="ml-1 text-red-500">*</span>}
         />

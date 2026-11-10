@@ -13,33 +13,69 @@
 // The answer saved is unchanged: the option text exactly as the organiser
 // typed it (for example "Kids 6"), same as the dropdown would have saved.
 
+/** A short notice shown under the size buttons, in English and Burmese. */
+export interface SizeNote {
+  en: string;
+  mm: string;
+}
+
 interface SizeChartConfig {
   /** Field label as typed in the form editor; compared trimmed, case-insensitive. */
   fieldLabel: string;
   /** Image under /public. */
   imageUrl: string;
+  /** Optional notice under the buttons, worded by the organiser. */
+  note?: SizeNote;
 }
 
 const SIZE_CHARTS: Record<string, SizeChartConfig[]> = {
   // The Beats Run — organiser's chart for The Beats Run 2026, requested 2026-11-06.
-  beatsrun: [{ fieldLabel: "Jersey Size", imageUrl: "/tenants/beatsrun/size-chart.webp" }],
+  // The change-fee note was requested 2026-11-10; wording approved by the owner.
+  beatsrun: [
+    {
+      fieldLabel: "Jersey Size",
+      imageUrl: "/tenants/beatsrun/size-chart.webp",
+      note: {
+        en: "Changing from 10KM to 5KM, or changing your jersey size after purchase, costs 15,000 MMK.",
+        mm: "ဝယ်ယူပြီးနောက် 10KM မှ 5KM သို့ ပြောင်းခြင်း သို့မဟုတ် Jersey size ပြောင်းလဲခြင်းအတွက် 15,000 ကျပ် ကောက်ခံပါမည်။",
+      },
+    },
+  ],
 };
 
 /** Field types whose answer is one of `options`, so size buttons can stand in. */
 const CHOICE_TYPES = new Set(["select", "radio"]);
 
-export function sizeChartUrlFor(
+type SizeFieldLike = { field_label: string; field_type: string; options: unknown };
+
+function findSizeChart(
   tenantSlug: string | null | undefined,
-  field: { field_label: string; field_type: string; options: unknown },
-): string | null {
+  field: SizeFieldLike,
+): SizeChartConfig | null {
   if (!tenantSlug) return null;
   if (!CHOICE_TYPES.has(field.field_type)) return null;
   if (!Array.isArray(field.options) || field.options.length === 0) return null;
   const label = field.field_label.trim().toLowerCase();
-  const match = SIZE_CHARTS[tenantSlug.toLowerCase()]?.find(
-    (c) => c.fieldLabel.trim().toLowerCase() === label,
+  return (
+    SIZE_CHARTS[tenantSlug.toLowerCase()]?.find(
+      (c) => c.fieldLabel.trim().toLowerCase() === label,
+    ) ?? null
   );
-  return match?.imageUrl ?? null;
+}
+
+export function sizeChartUrlFor(
+  tenantSlug: string | null | undefined,
+  field: SizeFieldLike,
+): string | null {
+  return findSizeChart(tenantSlug, field)?.imageUrl ?? null;
+}
+
+/** The organiser's notice for this size field, if any. Same match as the chart. */
+export function sizeNoteFor(
+  tenantSlug: string | null | undefined,
+  field: SizeFieldLike,
+): SizeNote | null {
+  return findSizeChart(tenantSlug, field)?.note ?? null;
 }
 
 export interface SizeOption {
