@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
-import { sizeChartUrlFor } from "@/lib/enrollment/sizeChart";
+import { sizeChartUrlFor, sizeNoteFor } from "@/lib/enrollment/sizeChart";
 
 // ─── GET /api/public/form-fields?intake_id=UUID ──────────────────────────────
 // Public — returns form fields for an intake, ordered by sort_order.
@@ -61,7 +61,11 @@ export async function GET(request: NextRequest) {
   return NextResponse.json(
     (fields ?? []).map((f) => {
       const sizeChartUrl = sizeChartUrlFor(tenant?.subdomain, f);
-      return sizeChartUrl ? { ...f, size_chart_url: sizeChartUrl } : f;
+      if (!sizeChartUrl) return f;
+      const sizeNote = sizeNoteFor(tenant?.subdomain, f);
+      return sizeNote
+        ? { ...f, size_chart_url: sizeChartUrl, size_note: sizeNote }
+        : { ...f, size_chart_url: sizeChartUrl };
     }),
   );
 }
