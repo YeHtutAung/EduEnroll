@@ -8,12 +8,14 @@
 //   node --env-file=<env file> --experimental-strip-types --import ./scripts/lib/register-alias.mjs \
 //     scripts/export-ticket-qr.ts <tenant-subdomain> <intake-slug> --out <file.csv>
 //
-// Read-only. Columns: ticket_ref, ticket_id, tier, admits, seat_no, expires_at, qr_text.
+// Read-only. Columns: ticket_ref, customer_name, phone, email, ticket_id, tier,
+// admits, seat_no, expires_at, qr_text.
 // qr_text is built by the same code as the order page and the e-ticket email:
 // the bare ticket id on a 'uuid' event, the signed token on a 'jwt' event.
 //
 // Every row is a working entry pass. The file is refused inside the repository
-// so it can never be committed; keep it private and delete it when done.
+// so it can never be committed. It also holds buyers' names, phones and
+// emails. Keep it private and delete it when done.
 //
 // Included: status 'valid' tickets on 'confirmed' enrollments that are not
 // internal tests. Unlike export-scanner-tickets.ts, any QR format is accepted.
@@ -100,7 +102,10 @@ async function main() {
   for (let from = 0; ; from += PAGE) {
     const { data, error } = (await supabase
       .from("tickets")
-      .select("id, intake_id, tier, admits, seat_no, exp, enrollments!inner(enrollment_ref, status, internal_test_at)")
+      .select(
+        "id, intake_id, tier, admits, seat_no, exp, " +
+          "enrollments!inner(enrollment_ref, status, internal_test_at, student_name_en, phone, email)",
+      )
       .eq("intake_id", intake.id)
       .eq("status", "valid")
       .order("id")
@@ -128,7 +133,7 @@ async function main() {
   console.log(`Excluded (not confirmed / internal test): ${rows.length - admissible.length}`);
   console.log(`Exported: ${admissible.length} tickets across ${orders} orders`);
   console.log(`Written:  ${outPath}`);
-  console.log("Every row is a working entry pass. Keep the file private and delete it when done.");
+  console.log("Every row is a working entry pass with the buyer's contact details. Keep the file private and delete it when done.");
 }
 
 main().catch((err) => {

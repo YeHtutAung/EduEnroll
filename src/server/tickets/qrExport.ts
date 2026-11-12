@@ -1,7 +1,8 @@
 // ─── Ticket QR export (CSV) ──────────────────────────────────────────────────
 //
 // Builds a CSV of an event's admissible tickets with the exact text each
-// ticket's QR encodes. Used by scripts/export-ticket-qr.ts.
+// ticket's QR encodes, plus the buyer's name, phone and email. Used by
+// scripts/export-ticket-qr.ts.
 //
 // The QR text is produced the same way the order page and the e-ticket email
 // produce it: ticketQrPayload() over signTicketJwt() with the same claims. Ed25519
@@ -18,7 +19,14 @@ export type QrExportTicket = {
   admits: number;
   seat_no: number;
   exp: string;
-  enrollments: { enrollment_ref: string; status: string; internal_test_at: string | null } | null;
+  enrollments: {
+    enrollment_ref: string;
+    status: string;
+    internal_test_at: string | null;
+    student_name_en: string | null;
+    phone: string | null;
+    email: string | null;
+  } | null;
 };
 
 /** Valid tickets on confirmed, non-test orders, by order ref then seat. */
@@ -44,23 +52,39 @@ export function ticketQrText(format: TicketQrFormat, t: QrExportTicket): string 
   );
 }
 
-export const QR_EXPORT_HEADER = "ticket_ref,ticket_id,tier,admits,seat_no,expires_at,qr_text";
+export const QR_EXPORT_HEADER =
+  "ticket_ref,customer_name,phone,email,ticket_id,tier,admits,seat_no,expires_at,qr_text";
+
+// Excel opens a BOM-less UTF-8 CSV in the local code page, which garbles
+// Burmese names. The BOM makes it read the file as UTF-8.
+const UTF8_BOM = "\uFEFF";
 
 export function qrExportCsv(format: TicketQrFormat, tickets: QrExportTicket[]): string {
-  const lines = tickets.map((t) =>
-    [
-      t.enrollments!.enrollment_ref,
-      t.id,
-      t.tier,
-      String(t.admits),
-      String(t.seat_no),
-      new Date(t.exp).toISOString(),
-      ticketQrText(format, t),
-    ]
-      .map(csvField)
-      .join(","),
-  );
-  return [QR_EXPORT_HEADER, ...lines].join("\r\n") + "\r\n";
+  const lines = tickets.map((t) => {
+    const e = t.enrollments!;
+    return [
+      csvField(e.enrollment_ref),
+      csvField(asText(e.student_name_en ?? "")),
+      csvField(asText(e.phone ?? "")),
+      csvField(asText(e.email ?? "")),
+      csvField(t.id),
+      csvField(t.tier),
+      csvField(String(t.admits)),
+      csvField(String(t.seat_no)),
+      csvField(new Date(t.exp).toISOString()),
+      csvField(ticketQrText(format, t)),
+    ].join(",");
+  });
+  return UTF8_BOM + [QR_EXPORT_HEADER, ...lines].join("\r\n") + "\r\n";
+}
+
+/**
+ * Buyer-typed values are untrusted. A spreadsheet runs a cell that starts with
+ * = + - @ (or a tab / CR) as a formula, and turns "+959…" into a number. A
+ * leading apostrophe makes the cell plain text.
+ */
+function asText(value: string): string {
+  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
 }
 
 function csvField(value: string): string {
