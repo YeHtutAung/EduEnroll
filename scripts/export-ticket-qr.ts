@@ -80,10 +80,18 @@ async function main() {
   // Fail before reading tickets if a jwt event has no key to sign with.
   let kid: string | null = null;
   if (format === "jwt") {
+    if (!process.env.TICKET_SIGNING_KEY || !process.env.TICKET_KID) {
+      console.error("TICKET_SIGNING_KEY / TICKET_KID are not set in this env file. Nothing written.");
+      process.exit(1);
+    }
     try {
       kid = loadSigningKey().kid;
     } catch {
-      console.error("TICKET_SIGNING_KEY / TICKET_KID are not set in this env file. Nothing written.");
+      // Never print the value. A swapped pair (kid in the key line) lands here.
+      console.error(
+        "TICKET_SIGNING_KEY is set but is not a valid private key (pkcs8, base64). " +
+          "Check it is the key and not the kid. Nothing written.",
+      );
       process.exit(1);
     }
   }
