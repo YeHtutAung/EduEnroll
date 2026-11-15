@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { loadEmailRunners } from "@/server/notifications/eventEmailRunners";
 import { tenantLinkOrigin } from "@/lib/origin";
 import { sendEmail, enrollmentApprovedEmail } from "@/lib/email";
 import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
@@ -185,6 +186,7 @@ export async function notifyEnrollmentConfirmed(enrollmentId: string): Promise<v
       totalPaidFormatted,
       ticketCount,
       eventTerms: await loadEventEmailTerms(enrollmentId),
+      runners: await loadEmailRunners(enrollmentId),
       eventImages: await loadEventEmailImages(enrollmentId),
       orgType: tenantInfo?.org_type,
       tenantName: tenantInfo?.name,
