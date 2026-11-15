@@ -138,3 +138,76 @@ export function attendeeTotals(
     .map(([value, count]) => ({ value, count }))
     .sort((x, y) => (rank(x.value) === rank(y.value) ? 0 : rank(x.value) < rank(y.value) ? -1 : 1));
 }
+
+/**
+ * Field types whose answer is one short string, so they can be asked once per
+ * ticket. Mirrors the CHECK intake_form_fields_per_attendee_type
+ * (20261115120000): a checkbox's "false" would pass "required", and a file has
+ * no per-ticket upload path.
+ */
+export const PER_ATTENDEE_TYPES: readonly string[] = ["text", "select", "radio", "date", "phone"];
+
+/**
+ * Why a field can't be asked per ticket, or null when it can. Contact fields
+ * (is_default) are the buyer's and are asked once per order. The database
+ * enforces both rules; this gives the editor a readable answer first.
+ */
+export function perAttendeeProblem(field: { field_type: string; is_default: boolean }): string | null {
+  if (field.is_default) return "Contact fields are asked once per order.";
+  if (!PER_ATTENDEE_TYPES.includes(field.field_type)) return "This kind of field can't be asked per ticket.";
+  return null;
+}
+
+// ─── Browser helpers for the runner cards ───────────────────────────────────
+
+/** "class_id:seat_no" — how runner cards and their answers are keyed. */
+export function slotKey(slot: AttendeeSlot): string {
+  return `${slot.class_id}:${slot.seat_no}`;
+}
+
+/**
+ * Per-card, per-field messages for the runner cards, so every problem shows at
+ * once. Same rules as validateAttendees (which the server applies and which
+ * stays the authority); an empty result means the cards are complete.
+ */
+export function attendeeFieldErrors(
+  values: Record<string, Record<string, string>>,
+  slots: AttendeeSlot[],
+  fields: AttendeeField[],
+): Record<string, Record<string, string>> {
+  const errors: Record<string, Record<string, string>> = {};
+  for (const slot of slots) {
+    const key = slotKey(slot);
+    const answers = values[key] ?? {};
+    for (const f of fields) {
+      const v = (answers[f.field_key] ?? "").trim();
+      let message: string | null = null;
+      if (!v) {
+        if (f.is_required) message = `${f.field_label} is required.`;
+      } else if (v.length > ANSWER_MAX) {
+        message = `${f.field_label} is too long.`;
+      } else if (CHOICE_TYPES.has(f.field_type) && Array.isArray(f.options) && !f.options.includes(v)) {
+        message = `Choose a ${f.field_label} from the list.`;
+      }
+      if (message) (errors[key] ??= {})[f.field_key] = message;
+    }
+  }
+  return errors;
+}
+
+/** The `attendees` array sent with an order, in slot order. */
+export function attendeesPayload(
+  values: Record<string, Record<string, string>>,
+  slots: AttendeeSlot[],
+  fields: AttendeeField[],
+): { class_id: string; seat_no: number; answers: Record<string, string> }[] {
+  return slots.map((slot) => {
+    const given = values[slotKey(slot)] ?? {};
+    const answers: Record<string, string> = {};
+    for (const f of fields) {
+      const v = (given[f.field_key] ?? "").trim();
+      if (v) answers[f.field_key] = v;
+    }
+    return { class_id: slot.class_id, seat_no: slot.seat_no, answers };
+  });
+}

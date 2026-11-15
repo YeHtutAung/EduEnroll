@@ -5,6 +5,10 @@ import {
   attendeeLabel,
   attendeeTotals,
   MAX_ATTENDEES,
+  perAttendeeProblem,
+  slotKey,
+  attendeeFieldErrors,
+  attendeesPayload,
   type AttendeeField,
 } from "@/lib/enrollment/attendees";
 
@@ -117,5 +121,53 @@ describe("attendeeTotals", () => {
   it("puts values no longer in the option list last", () => {
     const list = [{ answers: { jersey: "XS" } }, { answers: { jersey: "M" } }];
     expect(attendeeTotals(list, SIZE).map((t) => t.value)).toEqual(["M", "XS"]);
+  });
+});
+
+describe("perAttendeeProblem", () => {
+  it("allows the one-string types on a custom field", () => {
+    for (const t of ["text", "select", "radio", "date", "phone"]) {
+      expect(perAttendeeProblem({ field_type: t, is_default: false })).toBeNull();
+    }
+  });
+  it("refuses contact fields", () => {
+    expect(perAttendeeProblem({ field_type: "text", is_default: true })).toMatch(/once per order/);
+  });
+  it("refuses file, checkbox, email and address", () => {
+    for (const t of ["file", "checkbox", "email", "address"]) {
+      expect(perAttendeeProblem({ field_type: t, is_default: false })).toMatch(/can't be asked per ticket/);
+    }
+  });
+});
+
+describe("runner card helpers", () => {
+  const slots = [{ class_id: A, seat_no: 1 }, { class_id: A, seat_no: 2 }];
+
+  it("keys a slot as class_id:seat_no", () => {
+    expect(slotKey({ class_id: A, seat_no: 2 })).toBe(`${A}:2`);
+  });
+
+  it("lists every missing or invalid answer per card", () => {
+    const errors = attendeeFieldErrors({ [`${A}:1`]: { runner_name: "Ko Aung", jersey: "XXL" } }, slots, FIELDS);
+    expect(errors).toEqual({
+      [`${A}:1`]: { jersey: "Choose a Jersey Size from the list." },
+      [`${A}:2`]: { runner_name: "Runner Name is required.", jersey: "Jersey Size is required." },
+    });
+  });
+
+  it("has no errors when every card is complete", () => {
+    const values = { [`${A}:1`]: { runner_name: "A", jersey: "S" }, [`${A}:2`]: { runner_name: "B", jersey: "M" } };
+    expect(attendeeFieldErrors(values, slots, FIELDS)).toEqual({});
+  });
+
+  it("builds the payload the server validates, trimmed, in slot order", () => {
+    const values = { [`${A}:2`]: { runner_name: " B ", jersey: "M" }, [`${A}:1`]: { runner_name: "A", jersey: "", other: "x" } };
+    const payload = attendeesPayload(values, slots, FIELDS);
+    expect(payload).toEqual([
+      { class_id: A, seat_no: 1, answers: { runner_name: "A" } },
+      { class_id: A, seat_no: 2, answers: { runner_name: "B", jersey: "M" } },
+    ]);
+    const optionalSize = [NAME, { ...SIZE, is_required: false }];
+    expect(validateAttendees(payload, slots, optionalSize).ok).toBe(true);
   });
 });

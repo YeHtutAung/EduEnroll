@@ -25,6 +25,7 @@ import { useToast } from "@/components/ui/Toast";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
 import { mm } from "@/lib/mm-labels";
 import type { IntakeStatus } from "@/types/database";
+import { PER_ATTENDEE_TYPES } from "@/lib/enrollment/attendees";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -38,6 +39,8 @@ interface FormField {
   options: string[] | null;
   sort_order: number;
   is_default: boolean;
+  /** Asked once per ticket (runner) rather than once per order. */
+  per_attendee: boolean;
 }
 
 type FieldType =
@@ -143,6 +146,7 @@ function SortableField({
         <p className="text-xs text-gray-400">
           {typeInfo?.label ?? field.field_type}
           {field.is_required && " · Required"}
+          {field.per_attendee && " · Each ticket"}
         </p>
       </div>
 
@@ -190,7 +194,15 @@ function FieldConfigPanel({
         <label className="block text-xs font-medium text-gray-500 mb-1">Type</label>
         <select
           value={field.field_type}
-          onChange={(e) => onUpdate({ field_type: e.target.value as FieldType })}
+          onChange={(e) => {
+            const type = e.target.value as FieldType;
+            // A type that can't be asked per ticket switches the flag off with it.
+            onUpdate(
+              PER_ATTENDEE_TYPES.includes(type)
+                ? { field_type: type }
+                : { field_type: type, per_attendee: false },
+            );
+          }}
           className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#1a3f8a] focus:border-transparent bg-white"
         >
           {FIELD_TYPES.map((t) => (
@@ -217,6 +229,34 @@ function FieldConfigPanel({
           />
         </button>
       </div>
+
+      {/* Ask for each ticket — custom one-answer fields only */}
+      {!field.is_default && PER_ATTENDEE_TYPES.includes(field.field_type) && (
+        <div>
+          <div className="flex items-center justify-between">
+            <label className="text-xs font-medium text-gray-500">Ask for each ticket</label>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={field.per_attendee}
+              aria-label="Ask for each ticket"
+              onClick={() => onUpdate({ per_attendee: !field.per_attendee })}
+              className={`relative w-10 h-5 rounded-full transition-colors ${
+                field.per_attendee ? "bg-[#1a3f8a]" : "bg-gray-200"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${
+                  field.per_attendee ? "translate-x-5" : ""
+                }`}
+              />
+            </button>
+          </div>
+          <p className="mt-1 text-xs text-gray-400">
+            Each ticket in the order answers this, for example runner name or T-shirt size.
+          </p>
+        </div>
+      )}
 
       {/* Options for select/radio */}
       {hasOptions && (
@@ -625,6 +665,7 @@ export default function FormBuilderPage() {
       options: type === "select" || type === "radio" ? [] : null,
       sort_order: fields.length + 1,
       is_default: false,
+      per_attendee: false,
     };
 
     setFields((prev) => [...prev, newField]);
@@ -677,18 +718,19 @@ export default function FormBuilderPage() {
               is_required: field.is_required,
               options: field.options,
               sort_order: field.sort_order,
+              per_attendee: field.per_attendee,
             }),
           });
           if (!res.ok) {
             const err = await res.json();
-            throw new Error(err.error ?? "Failed to create field.");
+            throw new Error(err.message ?? err.error ?? "Failed to create field.");
           }
         }
       }
 
       for (const field of fields) {
         if (!field.id.startsWith("temp-")) {
-          await fetch(`/api/intakes/${intakeId}/form-fields`, {
+          const res = await fetch(`/api/intakes/${intakeId}/form-fields`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -698,8 +740,15 @@ export default function FormBuilderPage() {
               is_required: field.is_required,
               options: field.options,
               sort_order: field.sort_order,
+              per_attendee: field.per_attendee,
             }),
           });
+          // Previously ignored: a refused change (e.g. "Ask for each ticket" on
+          // a field that can't take it) must not report "saved".
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.message ?? err.error ?? `Failed to save "${field.field_label}".`);
+          }
         }
       }
 
