@@ -416,7 +416,11 @@ export async function PATCH(
     runners = check.attendees;
   }
 
-  const { error: updateError } = (await supabase
+  // The pending check above is a read; payment can settle between it and this
+  // write (checkout in one tab, payment in another). Ticket issuing copies the
+  // runners once and never rewrites a ticket, so the write itself must refuse
+  // a confirmed order, or the order and its tickets would disagree.
+  const { data: updated, error: updateError } = (await supabase
     .from("enrollments")
     .update({
       student_name_en: student_name_en.trim(),
@@ -424,9 +428,15 @@ export async function PATCH(
       ...(form_data && Object.keys(form_data).length > 0 ? { form_data } : {}),
       ...(runners.length > 0 ? { attendees: runners } : {}),
     } as never)
-    .eq("id", enrollment.id)) as { error: { code?: string } | null };
+    .eq("id", enrollment.id)
+    .eq("status", "pending_payment")
+    .select("id")) as { data: { id: string }[] | null; error: { code?: string } | null };
   if (updateError) {
     console.error(`[enrollment] details NOT saved for enrollment ${enrollment.id}:`, updateError.code ?? "unknown");
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+  }
+  if (!updated || updated.length === 0) {
+    return NextResponse.json({ error: "Conflict", message: "This order is no longer pending." }, { status: 409 });
   }
 
   return NextResponse.json({ enrollment_ref: params.ref, status: enrollment.status });
