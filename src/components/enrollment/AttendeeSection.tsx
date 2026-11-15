@@ -38,7 +38,16 @@ export default function AttendeeSection<F extends AttendeeField>({
   onChange,
   renderField,
   accentColor = "#0f1f42",
+  onRemove,
+  canRemove,
 }: {
+  /**
+   * Drops this ticket from the order, when the page can still change the
+   * quantity (the order isn't created yet). Omitted where it can't.
+   */
+  onRemove?: (slot: AttendeeCardSlot) => void;
+  /** Whether this card may be removed (e.g. not the last ticket, not a pack). */
+  canRemove?: (slot: AttendeeCardSlot) => boolean;
   slots: AttendeeCardSlot[];
   fields: F[];
   /** slotKey → field_key → answer */
@@ -115,26 +124,38 @@ export default function AttendeeSection<F extends AttendeeField>({
               className="rounded-xl border bg-white"
               style={{ borderColor: hasError ? "#dc2626" : open ? accentColor : "#e5e7eb" }}
             >
-              <button
-                type="button"
-                onClick={() => onOpen(open ? "" : key)}
-                aria-expanded={open}
-                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-              >
-                <span className="min-w-0">
-                  <span className="block text-sm font-semibold text-gray-900">
-                    Runner {i + 1} · {slot.tierLabel}
-                  </span>
-                  {!open && (
-                    <span className={`block truncate text-xs ${hasError ? "text-red-600" : "text-gray-500"}`}>
-                      {hasError ? "Some details are missing" : summary || "Not filled in yet"}
+              <div className="flex items-center">
+                <button
+                  type="button"
+                  onClick={() => onOpen(open ? "" : key)}
+                  aria-expanded={open}
+                  className="flex min-w-0 flex-1 items-center justify-between gap-3 px-4 py-3 text-left"
+                >
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold text-gray-900">
+                      Runner {i + 1} · {slot.tierLabel}
                     </span>
-                  )}
-                </span>
-                <span className="shrink-0 text-xs font-medium" style={{ color: complete ? "#15803d" : "#6b7280" }}>
-                  {complete ? "✓ Done" : open ? "" : "Fill in"}
-                </span>
-              </button>
+                    {!open && (
+                      <span className={`block truncate text-xs ${hasError ? "text-red-600" : "text-gray-500"}`}>
+                        {hasError ? "Some details are missing" : summary || "Not filled in yet"}
+                      </span>
+                    )}
+                  </span>
+                  <span className="shrink-0 text-xs font-medium" style={{ color: complete ? "#15803d" : "#6b7280" }}>
+                    {complete ? "✓ Done" : open ? "" : "Fill in"}
+                  </span>
+                </button>
+                {onRemove && (canRemove?.(slot) ?? true) && (
+                  <button
+                    type="button"
+                    onClick={() => onRemove(slot)}
+                    aria-label={`Remove runner ${i + 1} (${slot.tierLabel})`}
+                    className="shrink-0 px-3 py-3 text-xs font-medium text-red-600 hover:text-red-700"
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
 
               {open && (
                 <div className="border-t border-gray-100 px-4 pt-4">

@@ -142,4 +142,41 @@ describe("enrollmentApprovedEmail", () => {
       expect(enrollmentApprovedEmail({ ...base, eventTerms }).html).toBe(withTerms);
     });
   });
+
+  describe("runners", () => {
+    const base = {
+      studentName: "Yehtut Aung",
+      enrollmentRef: "TBR-1115-2BAP4L",
+      classLevel: "Early Bird - 5KM x2",
+      statusUrl: "https://beatsrun.kuunyi.com/status?ref=TBR-1115-2BAP4L",
+      orgType: "event",
+    };
+
+    it("lists every runner with their tier, in order", () => {
+      const { html } = enrollmentApprovedEmail({
+        ...base,
+        runners: [
+          { tier: "Early Bird - 5KM", label: "Ko Aung · M" },
+          { tier: "Early Bird - 5KM", label: "Ma Su · Kids 10" },
+        ],
+      });
+      expect(html).toContain("Runners (2)");
+      expect(html).toContain("1. Early Bird - 5KM");
+      expect(html).toContain("Ko Aung · M");
+      expect(html).toContain("2. Early Bird - 5KM");
+      expect(html.indexOf("Ko Aung · M")).toBeLessThan(html.indexOf("Ma Su · Kids 10"));
+    });
+
+    it("escapes buyer-typed names", () => {
+      const { html } = enrollmentApprovedEmail({ ...base, runners: [{ tier: "5KM", label: "<b>x</b> · M" }] });
+      expect(html).toContain("&lt;b&gt;x&lt;/b&gt; · M");
+      expect(html).not.toContain("<b>x</b>");
+    });
+
+    it("leaves the email unchanged without runners", () => {
+      const before = enrollmentApprovedEmail(base).html;
+      expect(enrollmentApprovedEmail({ ...base, runners: [] }).html).toBe(before);
+      expect(enrollmentApprovedEmail({ ...base, runners: null }).html).toBe(before);
+    });
+  });
 });

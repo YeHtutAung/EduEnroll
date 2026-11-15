@@ -1,4 +1,5 @@
 import { sendEmail, enrollmentApprovedEmail } from "@/lib/email";
+import { loadEmailRunners } from "@/server/notifications/eventEmailRunners";
 import { sendSms } from "@/lib/sms";
 import { sendStatusNotification } from "@/lib/messenger/notify";
 import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
@@ -46,6 +47,7 @@ export async function dispatchPaymentApproved(input: ApprovalNotificationInput):
       statusUrl: input.statusUrl,
       feeFormatted: input.feeFormatted,
       eventTerms: await loadEventEmailTerms(input.enrollmentId),
+      runners: await loadEmailRunners(input.enrollmentId),
       eventImages: await loadEventEmailImages(input.enrollmentId),
       orgType: input.orgType,
       tenantName: input.tenantName,
