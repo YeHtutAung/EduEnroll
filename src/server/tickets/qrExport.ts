@@ -19,6 +19,8 @@ export type QrExportTicket = {
   admits: number;
   seat_no: number;
   exp: string;
+  /** This ticket's runner, {label, answers}, when the event asks per-ticket questions. */
+  attendee?: { label?: unknown } | null;
   enrollments: {
     enrollment_ref: string;
     status: string;
@@ -53,7 +55,8 @@ export function ticketQrText(format: TicketQrFormat, t: QrExportTicket): string 
 }
 
 export const QR_EXPORT_HEADER =
-  "ticket_ref,customer_name,phone,email,ticket_id,tier,admits,seat_no,expires_at,qr_text";
+  // runner is last, so the columns before it stay where existing readers expect them.
+  "ticket_ref,customer_name,phone,email,ticket_id,tier,admits,seat_no,expires_at,qr_text,runner";
 
 // Excel opens a BOM-less UTF-8 CSV in the local code page, which garbles
 // Burmese names. The BOM makes it read the file as UTF-8.
@@ -73,6 +76,7 @@ export function qrExportCsv(format: TicketQrFormat, tickets: QrExportTicket[]): 
       csvField(String(t.seat_no)),
       csvField(new Date(t.exp).toISOString()),
       csvField(ticketQrText(format, t)),
+      csvField(asText(typeof t.attendee?.label === "string" ? t.attendee.label : "")),
     ].join(",");
   });
   return UTF8_BOM + [QR_EXPORT_HEADER, ...lines].join("\r\n") + "\r\n";

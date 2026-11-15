@@ -93,8 +93,19 @@ describe("qrExportCsv", () => {
         "\r\n" +
         "SF2-1105-AAAAAA,Aung Aung,09123456789,buyer@example.com," +
         '11111111-1111-1111-1111-111111111111,"VIP, ""Gold""",1,1,2026-11-24T17:29:59.000Z,' +
-        "11111111-1111-1111-1111-111111111111\r\n",
+        "11111111-1111-1111-1111-111111111111,\r\n",
     );
+  });
+
+  it("ends each row with the ticket's runner, guarded like other typed values", () => {
+    const csv = qrExportCsv("uuid", [
+      ticket({ attendee: { label: "Ma Su · Kids 8" } }),
+      ticket({ seat_no: 2, attendee: { label: "=cmd · M" } }),
+    ]);
+    const [, first, second] = csv.split("\r\n");
+    expect(first.split(",").at(-1)).toBe("Ma Su · Kids 8");
+    expect(second.split(",").at(-1)).toBe("'=cmd · M");
+    expect(QR_EXPORT_HEADER.split(",").at(-1)).toBe("runner");
   });
 
   it("writes empty cells for missing contact details", () => {
