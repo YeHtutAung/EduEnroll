@@ -81,8 +81,9 @@ export function validateAttendees(raw: unknown, slots: AttendeeSlot[], fields: A
     if (typeof class_id !== "string" || !Number.isInteger(seat_no)) {
       return { ok: false, message: INVALID };
     }
+    // Lower-case: slots carry the database's canonical (lower-case) UUIDs.
     sent.set(
-      `${class_id}:${seat_no}`,
+      `${class_id.toLowerCase()}:${seat_no}`,
       answers && typeof answers === "object" ? (answers as Record<string, unknown>) : {},
     );
   }

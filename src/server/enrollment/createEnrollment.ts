@@ -104,12 +104,8 @@ export async function createEnrollment(
   }
 
   if (attendees?.length) {
-    await saveAttendees(
-      supabase,
-      successPayload.enrollment_id,
-      [{ class_id, quantity: successPayload.quantity }],
-      attendees,
-    );
+    // Reads the order's own class back: a replay may have sent another one.
+    await saveAttendees(supabase, successPayload.enrollment_id, attendees);
   }
 
   return { ok: true, result: successPayload };

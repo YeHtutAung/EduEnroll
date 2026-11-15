@@ -583,6 +583,17 @@ describe("POST /api/public/enroll — runners", () => {
 
   it("saves validated runners, with their labels, on the new order", async () => {
     withRunnerFields();
+    // saveAttendees reads the order's stored lines back before writing.
+    const withFields = mockFrom.getMockImplementation()!;
+    mockFrom.mockImplementation((table: string) => {
+      if (table !== "enrollments") return withFields(table);
+      const chain = makeChain({ data: { class_id: CLASS_ID, quantity: 2, enrollment_items: [] }, error: null });
+      chain.update = vi.fn((payload: Record<string, unknown>) => {
+        enrollmentUpdates.push(payload);
+        return makeChain({ data: null, error: null });
+      });
+      return chain;
+    });
     mockRpc.mockResolvedValue({
       data: {
         success: true, enrollment_id: "enroll-1", enrollment_ref: "NM-2026-0001", class_level: "5KM",

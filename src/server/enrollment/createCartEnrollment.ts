@@ -139,15 +139,10 @@ export async function createCartEnrollment(
       .eq("id", successPayload.enrollment_id);
   }
 
-  // The order's own lines, not the request's: a replay returns the original
-  // order whatever this retry sent.
+  // saveAttendees reads the order's own lines back: a replay returns the
+  // original order whatever this retry sent.
   if (attendees?.length) {
-    await saveAttendees(
-      supabase,
-      successPayload.enrollment_id,
-      successPayload.items.map((i) => ({ class_id: i.class_id, quantity: i.quantity })),
-      attendees,
-    );
+    await saveAttendees(supabase, successPayload.enrollment_id, attendees);
   }
 
   return { ok: true, result: successPayload };

@@ -49,6 +49,10 @@ export async function loadAttendeeContext(supabase: Client, lines: AttendeeLine[
     }
   }
 
+  // Postgres accepts a UUID in any case and returns it lower-case. Canonicalise
+  // here, so an upper-case id can't miss its class in the map below and skip
+  // the runner check.
+  lines = lines.map((l) => ({ ...l, class_id: l.class_id.toLowerCase() }));
   const ids = Array.from(new Set(lines.map((l) => l.class_id)));
   const { data: classes, error: classError } = (await supabase
     .from("classes")
@@ -109,10 +113,12 @@ export async function loadAttendeeContext(supabase: Client, lines: AttendeeLine[
  * Stores validated runners on an order the RPC just returned.
  *
  * The RPCs are idempotent: a retry with the same key returns the EXISTING
- * order, whatever lines the retry sent, and that order may since have been
- * paid. So the runners are written only when the slots rebuilt from the
- * order's own lines are exactly the runners' slots, and only while the order
- * still awaits payment. Otherwise the stored runners are left alone.
+ * order, whatever class and lines the retry sent, and that order may since
+ * have been paid. So the order's lines are read back from the database — never
+ * taken from the request or the RPC's echo — and the runners are written only
+ * when the slots rebuilt from those lines are exactly the runners' slots, and
+ * only while the order still awaits payment. Otherwise the stored runners are
+ * left alone.
  *
  * Never throws: the order exists and holds its seats, so a failure is logged
  * (with the enrollment id only — no names or answers) rather than undoing it.
@@ -121,11 +127,11 @@ export async function loadAttendeeContext(supabase: Client, lines: AttendeeLine[
 export async function saveAttendees(
   supabase: Client,
   enrollmentId: string,
-  orderLines: AttendeeLine[],
   attendees: Attendee[],
 ): Promise<boolean> {
   if (attendees.length === 0) return false;
   try {
+    const orderLines = await loadOrderLines(supabase, enrollmentId);
     const ctx = await loadAttendeeContext(supabase, orderLines);
     const key = (s: AttendeeSlot) => `${s.class_id}:${s.seat_no}`;
     const expected = ctx.ok ? ctx.slots.map(key).sort().join(",") : "";
@@ -148,6 +154,30 @@ export async function saveAttendees(
     console.error(`[enroll] runners NOT saved for enrollment ${enrollmentId}: lookup failed`);
     return false;
   }
+}
+
+/**
+ * An order's ticket lines as stored: enrollment_items for a cart order, else
+ * the order's own class_id and quantity — the same source ticket issuing uses.
+ */
+export async function loadOrderLines(supabase: Client, enrollmentId: string): Promise<AttendeeLine[]> {
+  const { data, error } = (await supabase
+    .from("enrollments")
+    .select("class_id, quantity, enrollment_items(class_id, quantity)")
+    .eq("id", enrollmentId)
+    .maybeSingle()) as {
+    data: {
+      class_id: string | null;
+      quantity: number | null;
+      enrollment_items: { class_id: string; quantity: number }[] | null;
+    } | null;
+    error: unknown;
+  };
+  if (error || !data) throw new Error("attendeeContext: order lookup failed");
+  if (data.enrollment_items && data.enrollment_items.length > 0) {
+    return data.enrollment_items.map((i) => ({ class_id: i.class_id, quantity: i.quantity }));
+  }
+  return data.class_id ? [{ class_id: data.class_id, quantity: data.quantity ?? 1 }] : [];
 }
 
 /** Loads the order's context and validates the runners sent with it. */
