@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { orderTotals, type RunnerRow } from "@/lib/enrollment/attendees";
+import { orderTotals, runnerExportCells, type RunnerRow } from "@/lib/enrollment/attendees";
 import StatusBadge from "@/components/ui/StatusBadge";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import { useToast } from "@/components/ui/Toast";
@@ -1106,25 +1106,18 @@ export default function StudentsPage() {
           ["Ref", tl.class, "Runner #", ...runnerFields.map((f) => f.field_label), "Status"],
         ];
         for (const s of rows) {
-          if (s.runners && s.runners.length > 0) {
-            s.runners.forEach((r, i) => {
-              runnerData.push([
-                s.enrollment_ref,
-                r.tier,
-                i + 1,
-                ...runnerFields.map((f) => r.answers[f.field_key] ?? ""),
-                s.status,
-              ]);
-            });
-          } else if (runnerFields.some((f) => s.form_data?.[f.field_key])) {
+          // A field no runner answered keeps its order-level answer on the
+          // first row (see runnerExportCells), as the Sizes sheet counts it.
+          const runners = s.runners ?? [];
+          runnerExportCells(runners, s.form_data, runnerFields).forEach((cells, i) => {
             runnerData.push([
               s.enrollment_ref,
-              s.class_level,
-              1,
-              ...runnerFields.map((f) => s.form_data?.[f.field_key] ?? ""),
+              runners[i]?.tier ?? s.class_level,
+              i + 1,
+              ...cells,
               s.status,
             ]);
-          }
+          });
         }
         const runnersWs = XLSX.utils.aoa_to_sheet(runnerData);
         runnersWs["!cols"] = [

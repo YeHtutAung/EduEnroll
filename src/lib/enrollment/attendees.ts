@@ -272,3 +272,33 @@ export function orderTotals(
   }
   return attendeeTotals(answers, field);
 }
+
+/**
+ * The Runners sheet's answer cells for one order: one row per runner, or one
+ * row for an order with no runners. A field no runner answered keeps the
+ * order's form_data answer (asked once, before the field was switched to
+ * per-ticket) on the FIRST row only, so it is shown but not multiplied across
+ * tickets — the same rule orderTotals counts by.
+ */
+export function runnerExportCells(
+  runners: { answers: Record<string, string> }[],
+  formData: Record<string, string> | null,
+  fields: { field_key: string }[],
+): string[][] {
+  if (runners.length === 0) {
+    if (!fields.some((f) => formData?.[f.field_key])) return [];
+    return [fields.map((f) => formData?.[f.field_key] ?? "")];
+  }
+  const answeredByRunner = new Set(
+    fields.filter((f) => runners.some((r) => r.answers[f.field_key])).map((f) => f.field_key),
+  );
+  return runners.map((r, i) =>
+    fields.map((f) =>
+      answeredByRunner.has(f.field_key)
+        ? (r.answers[f.field_key] ?? "")
+        : i === 0
+        ? (formData?.[f.field_key] ?? "")
+        : "",
+    ),
+  );
+}

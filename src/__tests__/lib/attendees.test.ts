@@ -11,6 +11,7 @@ import {
   attendeesPayload,
   runnerRows,
   orderTotals,
+  runnerExportCells,
   type AttendeeField,
 } from "@/lib/enrollment/attendees";
 
@@ -211,5 +212,31 @@ describe("orderTotals", () => {
       { attendees: [{ class_id: A, seat_no: 1, label: "Ko Aung", answers: { runner_name: "Ko Aung" } }], form_data: { jersey: "M" } },
     ];
     expect(orderTotals(orders, SIZE)).toEqual([{ value: "M", count: 1 }]);
+  });
+});
+
+describe("runnerExportCells", () => {
+  const fields = [{ field_key: "runner_name" }, { field_key: "jersey" }];
+
+  it("one row per runner with their own answers", () => {
+    expect(runnerExportCells(
+      [{ answers: { runner_name: "A", jersey: "M" } }, { answers: { runner_name: "B", jersey: "S" } }],
+      { jersey: "XL" },
+      fields,
+    )).toEqual([["A", "M"], ["B", "S"]]);
+  });
+
+  it("keeps an order-level size nobody answered per ticket, on the first row only", () => {
+    expect(runnerExportCells(
+      [{ answers: { runner_name: "A" } }, { answers: { runner_name: "B" } }],
+      { jersey: "M" },
+      fields,
+    )).toEqual([["A", "M"], ["B", ""]]);
+  });
+
+  it("one row from form_data for an order with no runners, none when it has no answers", () => {
+    expect(runnerExportCells([], { runner_name: "A", jersey: "L" }, fields)).toEqual([["A", "L"]]);
+    expect(runnerExportCells([], { other: "x" }, fields)).toEqual([]);
+    expect(runnerExportCells([], null, fields)).toEqual([]);
   });
 });
