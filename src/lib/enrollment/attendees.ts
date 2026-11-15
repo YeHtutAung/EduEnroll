@@ -302,3 +302,28 @@ export function runnerExportCells(
     ),
   );
 }
+
+/**
+ * The runner answers after the buyer removes one ticket of a tier. Seats are
+ * numbered 1..N per tier, so removing seat k shifts that tier's later
+ * runners down one seat (k+1 → k …) with their answers; other tiers are
+ * untouched. Pure: returns a new map.
+ */
+export function removeRunnerValues(
+  values: Record<string, Record<string, string>>,
+  slots: AttendeeSlot[],
+  removed: AttendeeSlot,
+): Record<string, Record<string, string>> {
+  const next: Record<string, Record<string, string>> = {};
+  for (const [key, answers] of Object.entries(values)) {
+    if (!key.startsWith(`${removed.class_id}:`)) next[key] = answers;
+  }
+  const seats = slots
+    .filter((s) => s.class_id === removed.class_id && s.seat_no !== removed.seat_no)
+    .sort((a, b) => a.seat_no - b.seat_no);
+  seats.forEach((s, i) => {
+    const answers = values[slotKey(s)];
+    if (answers) next[slotKey({ class_id: removed.class_id, seat_no: i + 1 })] = answers;
+  });
+  return next;
+}

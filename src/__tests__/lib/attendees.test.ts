@@ -12,6 +12,7 @@ import {
   runnerRows,
   orderTotals,
   runnerExportCells,
+  removeRunnerValues,
   type AttendeeField,
 } from "@/lib/enrollment/attendees";
 
@@ -238,5 +239,41 @@ describe("runnerExportCells", () => {
     expect(runnerExportCells([], { runner_name: "A", jersey: "L" }, fields)).toEqual([["A", "L"]]);
     expect(runnerExportCells([], { other: "x" }, fields)).toEqual([]);
     expect(runnerExportCells([], null, fields)).toEqual([]);
+  });
+});
+
+describe("removeRunnerValues", () => {
+  const slots = [
+    { class_id: A, seat_no: 1 }, { class_id: A, seat_no: 2 }, { class_id: A, seat_no: 3 },
+    { class_id: B, seat_no: 1 },
+  ];
+  const values = {
+    [`${A}:1`]: { runner_name: "One" },
+    [`${A}:2`]: { runner_name: "Two" },
+    [`${A}:3`]: { runner_name: "Three" },
+    [`${B}:1`]: { runner_name: "Bee" },
+  };
+
+  it("drops the runner and shifts that tier's later runners down a seat", () => {
+    expect(removeRunnerValues(values, slots, { class_id: A, seat_no: 2 })).toEqual({
+      [`${A}:1`]: { runner_name: "One" },
+      [`${A}:2`]: { runner_name: "Three" },
+      [`${B}:1`]: { runner_name: "Bee" },
+    });
+  });
+
+  it("removing the last seat just drops it; other tiers are untouched", () => {
+    expect(removeRunnerValues(values, slots, { class_id: A, seat_no: 3 })).toEqual({
+      [`${A}:1`]: { runner_name: "One" },
+      [`${A}:2`]: { runner_name: "Two" },
+      [`${B}:1`]: { runner_name: "Bee" },
+    });
+  });
+
+  it("keeps an unfilled seat unfilled after the shift", () => {
+    const partial = { [`${A}:1`]: { runner_name: "One" }, [`${A}:3`]: { runner_name: "Three" } };
+    expect(removeRunnerValues(partial, slots, { class_id: A, seat_no: 1 })).toEqual({
+      [`${A}:2`]: { runner_name: "Three" },
+    });
   });
 });
