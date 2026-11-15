@@ -211,3 +211,61 @@ export function attendeesPayload(
     return { class_id: slot.class_id, seat_no: slot.seat_no, answers };
   });
 }
+
+// ─── Admin views ────────────────────────────────────────────────────────────
+
+export interface RunnerRow {
+  class_id: string;
+  seat_no: number;
+  /** Tier name, from the order's own lines. */
+  tier: string;
+  label: string;
+  answers: Record<string, string>;
+}
+
+/**
+ * enrollments.attendees as rows for the admin pages, in seat order. Defensive:
+ * an entry that isn't the stored shape is skipped rather than breaking the
+ * page.
+ */
+export function runnerRows(attendees: unknown, tierOf: (classId: string) => string): RunnerRow[] {
+  if (!Array.isArray(attendees)) return [];
+  const rows: RunnerRow[] = [];
+  for (const a of attendees) {
+    if (!a || typeof a !== "object") continue;
+    const { class_id, seat_no, label, answers } = a as Record<string, unknown>;
+    if (typeof class_id !== "string" || !Number.isInteger(seat_no)) continue;
+    if (!answers || typeof answers !== "object" || Array.isArray(answers)) continue;
+    rows.push({
+      class_id,
+      seat_no: seat_no as number,
+      tier: tierOf(class_id),
+      label: typeof label === "string" ? label : "",
+      answers: answers as Record<string, string>,
+    });
+  }
+  return rows.sort((x, y) => x.class_id.localeCompare(y.class_id) || x.seat_no - y.seat_no);
+}
+
+/**
+ * Totals per option of a per-ticket choice field across orders, for the
+ * export's "Sizes" sheet. An order with runners counts each runner. An order
+ * from before the organiser switched the field to per-ticket has no runners
+ * and its one answer in form_data: it counts once, or the totals would miss
+ * every earlier buyer.
+ */
+export function orderTotals(
+  orders: { attendees: unknown; form_data: Record<string, string> | null }[],
+  field: AttendeeField,
+): { value: string; count: number }[] {
+  const answers: { answers: Record<string, string> }[] = [];
+  for (const o of orders) {
+    const rows = runnerRows(o.attendees, () => "");
+    if (rows.length > 0) {
+      for (const r of rows) answers.push({ answers: r.answers });
+    } else if (o.form_data?.[field.field_key]) {
+      answers.push({ answers: { [field.field_key]: o.form_data[field.field_key] } });
+    }
+  }
+  return attendeeTotals(answers, field);
+}

@@ -9,6 +9,8 @@ import {
   slotKey,
   attendeeFieldErrors,
   attendeesPayload,
+  runnerRows,
+  orderTotals,
   type AttendeeField,
 } from "@/lib/enrollment/attendees";
 
@@ -169,5 +171,38 @@ describe("runner card helpers", () => {
     ]);
     const optionalSize = [NAME, { ...SIZE, is_required: false }];
     expect(validateAttendees(payload, slots, optionalSize).ok).toBe(true);
+  });
+});
+
+describe("runnerRows", () => {
+  it("returns stored runners in seat order with their tier", () => {
+    const rows = runnerRows(
+      [
+        { class_id: B, seat_no: 1, label: "C · S", answers: { runner_name: "C", jersey: "S" } },
+        { class_id: A, seat_no: 2, label: "B · M", answers: { runner_name: "B", jersey: "M" } },
+        { class_id: A, seat_no: 1, label: "A · M", answers: { runner_name: "A", jersey: "M" } },
+      ],
+      (id) => (id === A ? "10KM" : "5KM"),
+    );
+    expect(rows.map((r) => `${r.tier} ${r.seat_no} ${r.label}`)).toEqual(["10KM 1 A · M", "10KM 2 B · M", "5KM 1 C · S"]);
+  });
+  it("skips malformed entries and non-arrays", () => {
+    expect(runnerRows(null, () => "")).toEqual([]);
+    expect(runnerRows([null, "x", { class_id: A, seat_no: "1", answers: {} }, { class_id: A, seat_no: 1, answers: [] }], () => "")).toEqual([]);
+  });
+});
+
+describe("orderTotals", () => {
+  it("counts runners, and orders from before the switch once from form_data", () => {
+    const orders: { attendees: unknown; form_data: Record<string, string> | null }[] = [
+      { attendees: [
+        { class_id: A, seat_no: 1, label: "", answers: { jersey: "M" } },
+        { class_id: A, seat_no: 2, label: "", answers: { jersey: "Kids 8" } },
+      ], form_data: { jersey: "S" } },
+      { attendees: [], form_data: { jersey: "M" } },
+      { attendees: [], form_data: {} },
+      { attendees: [], form_data: null },
+    ];
+    expect(orderTotals(orders, SIZE)).toEqual([{ value: "Kids 8", count: 1 }, { value: "M", count: 2 }]);
   });
 });

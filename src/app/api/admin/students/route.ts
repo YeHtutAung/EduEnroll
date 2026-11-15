@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { runnerRows, type RunnerRow } from "@/lib/enrollment/attendees";
 import { requireAuth, badRequest } from "@/lib/api";
 import type { EnrollmentStatus, JlptLevel } from "@/types/database";
 
@@ -31,6 +32,8 @@ export interface StudentRow {
   telegram_linked: boolean;
   telegram_phone:  string | null;
   telegram_channel_name: string | null;
+  /** Per-ticket answers (runner name, jersey size…), one row per ticket; empty without. */
+  runners:         RunnerRow[];
 }
 
 // ─── GET /api/admin/students ──────────────────────────────────────────────────
@@ -82,6 +85,7 @@ export async function GET(request: NextRequest) {
       student_name_mm,
       phone,
       form_data,
+      attendees,
       status,
       enrolled_at,
       quantity,
@@ -94,7 +98,7 @@ export async function GET(request: NextRequest) {
         intake_id,
         intakes ( name )
       ),
-      enrollment_items ( quantity, fee_amount, classes ( level, intake_id, intakes ( name ) ) )
+      enrollment_items ( class_id, quantity, fee_amount, classes ( level, intake_id, intakes ( name ) ) )
     `,
       { count: "exact" },
     )
@@ -169,6 +173,7 @@ export async function GET(request: NextRequest) {
       student_name_mm: string | null;
       phone:           string;
       form_data:       Record<string, string> | null;
+      attendees:       unknown;
       status:          EnrollmentStatus;
       enrolled_at:     string;
       quantity:        number | null;
@@ -182,6 +187,7 @@ export async function GET(request: NextRequest) {
         intakes:   { name: string } | null;
       } | null;
       enrollment_items: {
+        class_id: string;
         quantity: number;
         fee_amount: number;
         classes: { level: string; intake_id: string; intakes: { name: string } | null } | null;
@@ -256,6 +262,11 @@ export async function GET(request: NextRequest) {
       telegram_linked: !!row.telegram_chat_id,
       telegram_phone:  row.telegram_phone ?? null,
       telegram_channel_name: row.class_id ? (channelMap[row.class_id] ?? null) : null,
+      runners:         runnerRows(row.attendees, (classId) =>
+        classId === row.class_id
+          ? (row.classes?.level ?? "")
+          : (row.enrollment_items?.find((ei) => ei.class_id === classId)?.classes?.level ?? ""),
+      ),
     };
   });
 
