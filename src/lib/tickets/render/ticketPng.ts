@@ -13,6 +13,7 @@ import {
   TICKET_CARD,
   TICKET_FONT,
   qrTop,
+  ticketIdLine,
 } from "@/lib/tickets/ticketLayout";
 import { loadImage, roundRectPath, drawCanvasSponsor } from "./primitives";
 import type { QrMap, TicketData, TicketRenderContext } from "./types";
@@ -169,9 +170,13 @@ export async function renderTicketPng(
   // glyph box: at 87px the tier's box starts at y=141, and the index's ended
   // at y=156 — 15px of overlap, horizontally too. Baseline ordering is not
   // separation.
-  const idLine = showIndex
-    ? `Ticket #${ticket.jti.slice(0, 8)} · ${i + 1} of ${n}`
-    : `Ticket #${ticket.jti.slice(0, 8)}`;
+  const idLine = ticketIdLine({
+    jti: ticket.jti,
+    index: i,
+    count: showIndex ? n : 1,
+    holder: ticket.holder,
+    sep: " · ",
+  });
   ctx.fillText(
     fitText(idLine, W - padX * 2, TICKET_FONT.ticketId),
     padX,

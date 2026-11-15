@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { runnerRows } from "@/lib/enrollment/attendees";
 import { requireAuth, notFound } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Enrollment, Class, Intake, Payment } from "@/types/database";
@@ -67,6 +68,9 @@ export async function GET(
 
   // ── Cart enrollment: fetch items + intake from enrollment_items ──
   let cartItems: { class_level: string; quantity: number; fee_amount: number; subtotal: number }[] | null = null;
+  // class_id → tier name, for the runners list.
+  const tierByClass = new Map<string, string>();
+  if (row.class_id && row.classes?.level) tierByClass.set(row.class_id, row.classes.level);
   let cartIntakeName: string | null = null;
   let cartIntakeId: string | null = null;
   let cartTotalFee: number | null = null;
@@ -74,13 +78,14 @@ export async function GET(
   if (row.class_id === null) {
     const { data: items } = await supabase
       .from("enrollment_items")
-      .select("quantity, fee_amount, classes(level, intake_id, intakes(name))")
+      .select("class_id, quantity, fee_amount, classes(level, intake_id, intakes(name))")
       .eq("enrollment_id", row.id) as {
-      data: { quantity: number; fee_amount: number; classes: { level: string; intake_id: string; intakes: { name: string } | null } | null }[] | null;
+      data: { class_id: string; quantity: number; fee_amount: number; classes: { level: string; intake_id: string; intakes: { name: string } | null } | null }[] | null;
       error: unknown;
     };
 
     if (items && items.length > 0) {
+      for (const i of items) if (i.classes?.level) tierByClass.set(i.class_id, i.classes.level);
       cartItems = items.map((i) => ({
         class_level: i.classes?.level ?? "Unknown",
         quantity: i.quantity,
@@ -106,11 +111,11 @@ export async function GET(
       })()
     : cartIntakeId;
 
-  let formFieldDefs: { field_key: string; field_label: string; field_type: string }[] = [];
+  let formFieldDefs: { field_key: string; field_label: string; field_type: string; per_attendee: boolean }[] = [];
   if (intakeId) {
     const { data: fields } = await supabase
       .from("intake_form_fields")
-      .select("field_key, field_label, field_type")
+      .select("field_key, field_label, field_type, per_attendee")
       .eq("intake_id", intakeId)
       .order("sort_order", { ascending: true }) as {
       data: typeof formFieldDefs | null;
@@ -146,6 +151,10 @@ export async function GET(
     intake_name:     intakeName,
     fee_amount:         feeAmount,
     items:           cartItems,
+    runners:         runnerRows(
+      (row as unknown as Record<string, unknown>).attendees,
+      (classId) => tierByClass.get(classId) ?? "",
+    ),
     payment: payment
       ? {
           id:               payment.id,
