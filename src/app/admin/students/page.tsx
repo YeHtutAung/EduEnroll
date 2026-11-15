@@ -1085,8 +1085,19 @@ export default function StudentsPage() {
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, `${tl.student}s`);
 
-      // ── Runners and sizes: only when the event asks per-ticket questions ──
-      const runnerFields = formFields.filter((f) => f.per_attendee);
+      // ── Runners and sizes: only for ONE chosen event that asks per-ticket
+      // questions. Its questions are loaded here for that event, never taken
+      // from `formFields` (which may belong to another event, or be the
+      // fallback for "All"): mixing events would total sizes under the wrong
+      // questions.
+      let runnerFields: FormFieldDef[] = [];
+      if (filters.intakeId) {
+        const fieldsRes = await fetch(`/api/public/form-fields?intake_id=${filters.intakeId}`);
+        if (!fieldsRes.ok) throw new Error(`${fieldsRes.status}`);
+        runnerFields = ((await fieldsRes.json()) as FormFieldDef[]).filter((f) => f.per_attendee);
+      } else if (rows.some((s) => s.runners && s.runners.length > 0)) {
+        toast.info("Choose one event to also export its Runners and Sizes sheets.");
+      }
       if (runnerFields.length > 0) {
         // One row per runner. An order from before the field was switched to
         // per-ticket has no runners: it gets one row from its form_data, so

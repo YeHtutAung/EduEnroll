@@ -205,4 +205,11 @@ describe("orderTotals", () => {
     ];
     expect(orderTotals(orders, SIZE)).toEqual([{ value: "Kids 8", count: 1 }, { value: "M", count: 2 }]);
   });
+
+  it("falls back per field: runners with only a name still count the order's size", () => {
+    const orders: { attendees: unknown; form_data: Record<string, string> | null }[] = [
+      { attendees: [{ class_id: A, seat_no: 1, label: "Ko Aung", answers: { runner_name: "Ko Aung" } }], form_data: { jersey: "M" } },
+    ];
+    expect(orderTotals(orders, SIZE)).toEqual([{ value: "M", count: 1 }]);
+  });
 });

@@ -260,9 +260,12 @@ export function orderTotals(
 ): { value: string; count: number }[] {
   const answers: { answers: Record<string, string> }[] = [];
   for (const o of orders) {
-    const rows = runnerRows(o.attendees, () => "");
-    if (rows.length > 0) {
-      for (const r of rows) answers.push({ answers: r.answers });
+    // Per field, not per order: an order can have runners for one question
+    // (name) while this one (size) was still asked once, in form_data, when
+    // it was placed.
+    const withField = runnerRows(o.attendees, () => "").filter((r) => r.answers[field.field_key]);
+    if (withField.length > 0) {
+      for (const r of withField) answers.push({ answers: r.answers });
     } else if (o.form_data?.[field.field_key]) {
       answers.push({ answers: { [field.field_key]: o.form_data[field.field_key] } });
     }
