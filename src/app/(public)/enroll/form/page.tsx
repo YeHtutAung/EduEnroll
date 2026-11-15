@@ -15,7 +15,14 @@ import SizePicker from "@/components/enrollment/SizePicker";
 import type { SizeNote } from "@/lib/enrollment/sizeChart";
 import { emailBlockedFor, emailBlockedMessage, emailTypoToConfirm } from "@/lib/enrollment/emailAddress";
 import AttendeeSection, { AttendeeTotals, type AttendeeCardSlot } from "@/components/enrollment/AttendeeSection";
-import { attendeeFieldErrors, attendeeLabel, attendeeSlots, attendeesPayload, slotKey } from "@/lib/enrollment/attendees";
+import {
+  attendeeFieldErrors,
+  attendeeLabel,
+  attendeeSlots,
+  attendeesPayload,
+  removeRunnerValues,
+  slotKey,
+} from "@/lib/enrollment/attendees";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -441,7 +448,9 @@ function EnrollmentFormPage() {
   const router = useRouter();
   const classId = searchParams.get("class_id");
   const slug = searchParams.get("slug");
-  const quantity = Math.max(1, Number(searchParams.get("quantity")) || 1);
+  // The buyer can still lower it here ("Remove" on a runner card) until the
+  // order is created at Confirm Purchase.
+  const [quantity, setQuantity] = useState(() => Math.max(1, Number(searchParams.get("quantity")) || 1));
   const cartKey = searchParams.get("cart_key");
   const messengerPsid = searchParams.get("psid");
 
@@ -651,6 +660,46 @@ function EnrollmentFormPage() {
     if (firstBad) setOpenRunner(slotKey(firstBad));
 
     return Object.keys(errors).length === 0 && !firstBad;
+  }
+
+  // ── Remove a runner ──────────────────────────────────────────────────────
+  // Nothing is reserved until Confirm Purchase, so dropping a ticket here is
+  // only lowering a number: the tier's quantity goes down by one and that
+  // runner's answers go, the later runners of the tier move up a seat with
+  // theirs. A package tier sells whole packs, so its runners aren't removed
+  // one by one; and the last ticket stays (go Back to leave).
+  function canRemoveRunner(slot: AttendeeCardSlot): boolean {
+    return runnerSlots.length > 1 && (packSizes.get(slot.class_id) ?? 1) === 1;
+  }
+
+  function removeRunner(slot: AttendeeCardSlot) {
+    if (!canRemoveRunner(slot)) return;
+    setRunnerValues((prev) => removeRunnerValues(prev, runnerSlots, slot));
+    setRunnerErrors({});
+    setOpenRunner(null);
+    // A different order now: never let a retry replay the old one.
+    idempotencyKeyRef.current = randomId();
+
+    if (isCartMode) {
+      const next = cartItems
+        .map((item) => (item.class_id === slot.class_id ? { ...item, quantity: item.quantity - 1 } : item))
+        .filter((item) => item.quantity > 0);
+      setCartItems(next);
+      // Kept in step, so a reload shows the same order.
+      if (cartKey) {
+        try {
+          sessionStorage.setItem(cartKey, JSON.stringify(next));
+        } catch {
+          /* storage refused: the page still has the new cart */
+        }
+      }
+    } else {
+      const nextQty = Math.max(1, quantity - 1);
+      setQuantity(nextQty);
+      const url = new URL(window.location.href);
+      url.searchParams.set("quantity", String(nextQty));
+      window.history.replaceState(window.history.state, "", url.toString());
+    }
   }
 
   function updateRunner(key: string, fieldKey: string, value: string) {
@@ -929,6 +978,8 @@ function EnrollmentFormPage() {
           openKey={openRunner ?? (runnerSlots[0] ? slotKey(runnerSlots[0]) : null)}
           onOpen={setOpenRunner}
           onChange={updateRunner}
+          onRemove={removeRunner}
+          canRemove={canRemoveRunner}
           accentColor={primaryColor}
           renderField={(field, value, onChange, error) => (
             <DynamicField field={field} value={value} error={error} onChange={onChange} />
