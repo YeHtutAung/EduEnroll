@@ -193,3 +193,23 @@ describe("renderEticketPdf", () => {
     expect(Buffer.from(attachment!.content, "base64").subarray(0, 5).toString()).toBe("%PDF-");
   });
 });
+
+describe("renderEticketPdf — runners", () => {
+  it("prints each ticket's runner on its id line", async () => {
+    const pdf = Buffer.from(
+      await renderEticketPdf("TBR-1115-2XU5D9", [
+        { ...ticket(1), attendee: { label: "Ko Aung · M" } },
+        { ...ticket(2), attendee: { label: "Ma Su · Kids 10" } },
+      ]),
+      "base64",
+    ).toString("latin1");
+
+    expect(pdf).toContain("Ko Aung - M - #e063be0c");
+    expect(pdf).toContain("Ma Su - Kids 10 - #e063be0c");
+  });
+
+  it("prints the plain id when there is no runner", async () => {
+    const pdf = Buffer.from(await renderEticketPdf("LM-0904-FY6A", [ticket(1)]), "base64").toString("latin1");
+    expect(pdf).toContain("Ticket #e063be0c");
+  });
+});

@@ -17,6 +17,8 @@ export type TicketData = {
   jwt: string;
   /** What the QR encodes, decided by the server from the event's format. */
   qr: string;
+  /** This ticket's runner ("Ma Su · Kids 8"), when the organiser asked per-ticket questions. */
+  holder?: string | null;
 };
 
 export type TicketRenderContext = {

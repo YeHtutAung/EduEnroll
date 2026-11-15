@@ -213,12 +213,12 @@ export async function GET(
   const bankAccounts = bankResult.data ?? [];
 
   // Build signed ticket JWTs for confirmed enrollments only.
-  let tickets: { jti: string; tier: string; admits: number; jwt: string; qr: string }[] = [];
+  let tickets: { jti: string; tier: string; admits: number; jwt: string; qr: string; holder: string | null }[] = [];
   if (enrollment.status === "confirmed") {
     const loadTicketRows = async () =>
       ((await supabase
         .from("tickets")
-        .select("id, intake_id, tier, admits, exp, status")
+        .select("id, intake_id, tier, admits, exp, status, class_id, seat_no, attendee")
         .eq("enrollment_id", enrollment.id)) as unknown as {
         data: TicketRow[] | null;
         error: unknown;
@@ -233,7 +233,12 @@ export async function GET(
       ticketRows = await loadTicketRows();
     }
 
-    const validRows = (ticketRows ?? []).filter((t) => t.status === "valid");
+    // Seat order: "1 of 3" and each runner then follow the order entered.
+    const validRows = (ticketRows ?? [])
+      .filter((t) => t.status === "valid")
+      .sort((a, b) =>
+        (a.class_id ?? "").localeCompare(b.class_id ?? "") || (a.seat_no ?? 0) - (b.seat_no ?? 0),
+      );
 
     // What each QR encodes is chosen per event. A separate query, not a column
     // on the enrollment select above, so that if this code ever runs ahead of
@@ -262,6 +267,7 @@ export async function GET(
         admits: t.admits,
         jwt,
         qr: ticketQrPayload(formats.get(t.intake_id)!, t.id, () => jwt),
+        holder: typeof t.attendee?.label === "string" ? t.attendee.label : null,
       };
     });
   }
@@ -502,6 +508,10 @@ interface TicketRow {
   admits: number;
   exp: string;
   status: string;
+  class_id?: string;
+  seat_no?: number;
+  /** {label, answers} copied from the order's runners at issue; null without. */
+  attendee?: { label?: unknown } | null;
 }
 
 interface EnrollmentRow {

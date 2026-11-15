@@ -23,6 +23,8 @@ interface TicketData {
   jwt: string;
   /** What the QR encodes — the signed token or the bare ticket UUID, per event. */
   qr: string;
+  /** This ticket's runner, when the organiser asked per-ticket questions. */
+  holder?: string | null;
 }
 
 interface EnrollmentData {
