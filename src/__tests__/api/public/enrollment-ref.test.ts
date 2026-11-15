@@ -525,3 +525,99 @@ describe("PATCH /api/public/enrollment/[ref] — miss throttling", () => {
     expect((await PATCH(patchFrom("8.8.8.8"), routeParams)).status).toBe(429);
   });
 });
+
+// ─── PATCH: runners (per-ticket answers) ──────────────────────────────────────
+
+describe("PATCH /api/public/enrollment/[ref] — runners", () => {
+  const CLASS = "11111111-1111-1111-1111-111111111111";
+  const FIELDS = [
+    { intake_id: "i1", field_key: "runner_name", field_label: "Runner Name", field_type: "text", is_required: true, options: null },
+  ];
+
+  /**
+   * Thenable chain per table; records every enrollments update payload. An
+   * update resolves to `updateRows` — what the status-guarded write matched.
+   */
+  function runnerMock(fields: unknown[], updateRows: unknown[] = [{ id: "e1" }]) {
+    const updates: Record<string, unknown>[] = [];
+    const updateFilters: unknown[][] = [];
+    const chain = (result: unknown, onUpdate?: (p: Record<string, unknown>) => void) => {
+      const c: Record<string, unknown> = {};
+      let isUpdate = false;
+      for (const m of ["select", "in", "order", "single"]) c[m] = () => c;
+      c.eq = (...args: unknown[]) => {
+        if (isUpdate) updateFilters.push(args);
+        return c;
+      };
+      c.update = (p: Record<string, unknown>) => {
+        isUpdate = true;
+        onUpdate?.(p);
+        return c;
+      };
+      c.then = (resolve: (v: unknown) => unknown) =>
+        Promise.resolve(isUpdate ? { data: updateRows, error: null } : result).then(resolve);
+      return c;
+    };
+    const client = {
+      from: (table: string) => {
+        if (table === "classes") return chain({ data: [{ id: CLASS, intake_id: "i1", pack_size: 1 }], error: null });
+        if (table === "intake_form_fields") return chain({ data: fields, error: null });
+        return chain(
+          {
+            data: { id: "e1", status: "pending_payment", class_id: null, quantity: 0, enrollment_items: [{ class_id: CLASS, quantity: 2 }] },
+            error: null,
+          },
+          (p) => updates.push(p),
+        );
+      },
+    };
+    return { client, updates, updateFilters };
+  }
+
+  const details = { student_name_en: "Buyer", email: "b@example.com", form_data: { name_en: "Buyer" } };
+
+  beforeEach(() => {
+    vi.mocked(resolveTenantId).mockResolvedValue("tenant-uuid");
+    publicEnrollmentLookupLimiter.reset();
+  });
+
+  it("refuses details without runners and writes nothing", async () => {
+    const { client, updates } = runnerMock(FIELDS);
+    vi.mocked(createAdminClient).mockReturnValue(client as never);
+    const res = await PATCH(makeRequest("PATCH", details) as never, routeParams);
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBe("ATTENDEES_INVALID");
+    expect(updates).toEqual([]);
+  });
+
+  it("writes form_data and runners together, keyed by the order's own lines", async () => {
+    const { client, updates } = runnerMock(FIELDS);
+    vi.mocked(createAdminClient).mockReturnValue(client as never);
+    const attendees = [1, 2].map((seat_no) => ({ class_id: CLASS, seat_no, answers: { runner_name: `R${seat_no}` } }));
+    const res = await PATCH(makeRequest("PATCH", { ...details, attendees }) as never, routeParams);
+    expect(res.status).toBe(200);
+    expect(updates).toHaveLength(1);
+    expect(updates[0].form_data).toEqual({ name_en: "Buyer" });
+    expect(updates[0].attendees).toEqual([
+      { class_id: CLASS, seat_no: 1, answers: { runner_name: "R1" }, label: "R1" },
+      { class_id: CLASS, seat_no: 2, answers: { runner_name: "R2" }, label: "R2" },
+    ]);
+  });
+
+  it("is unchanged for an event without per-ticket fields", async () => {
+    const { client, updates } = runnerMock([]);
+    vi.mocked(createAdminClient).mockReturnValue(client as never);
+    const res = await PATCH(makeRequest("PATCH", details) as never, routeParams);
+    expect(res.status).toBe(200);
+    expect("attendees" in updates[0]).toBe(false);
+  });
+
+  it("refuses to write when payment settled after the pending check", async () => {
+    // The status-guarded update matched no row: the order was confirmed in between.
+    const { client, updateFilters } = runnerMock([], []);
+    vi.mocked(createAdminClient).mockReturnValue(client as never);
+    const res = await PATCH(makeRequest("PATCH", details) as never, routeParams);
+    expect(res.status).toBe(409);
+    expect(updateFilters).toContainEqual(["status", "pending_payment"]);
+  });
+});

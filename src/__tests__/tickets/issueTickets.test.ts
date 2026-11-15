@@ -9,6 +9,8 @@ let enrollmentData: {
   class_id: string | null;
   quantity: number | null;
   status: string;
+  // Per-ticket runners stored at purchase; absent in pre-feature fixtures.
+  attendees?: unknown;
 } | null = null;
 // Configurable so the enrollment-load failure branch can be exercised: a DB
 // error must throw, not be mistaken for "no tickets needed".
@@ -497,5 +499,54 @@ describe("purchase conversion hook", () => {
 
     expect(mockWaitUntil).toHaveBeenCalledTimes(1);
     errorSpy.mockRestore();
+  });
+});
+
+describe("issueTicketsForEnrollment — runners", () => {
+  const rowsOf = () => mockUpsert.mock.calls[0][0] as Record<string, unknown>[];
+
+  it("puts each runner on the ticket with the same class and seat", async () => {
+    enrollmentData = {
+      id: "e1", tenant_id: "t1", class_id: null, quantity: null, status: "confirmed",
+      attendees: [
+        { class_id: "c2", seat_no: 1, answers: { runner_name: "Ma Su", jersey: "Kids 8" }, label: "Ma Su · Kids 8" },
+        { class_id: "c1", seat_no: 2, answers: { runner_name: "Ko Min", jersey: "S" }, label: "Ko Min · S" },
+        { class_id: "c1", seat_no: 1, answers: { runner_name: "Ko Aung", jersey: "M" }, label: "Ko Aung · M" },
+      ],
+    };
+    enrollmentItemsData = [{ class_id: "c1", quantity: 2 }, { class_id: "c2", quantity: 1 }];
+    classesData = [
+      { id: "c1", level: "10KM", intake_id: "i1", event_date: "2026-12-06" },
+      { id: "c2", level: "5KM", intake_id: "i1", event_date: "2026-12-06" },
+    ];
+
+    await issueTicketsForEnrollment("e1");
+
+    const byKey = new Map(rowsOf().map((r) => [`${r.class_id}:${r.seat_no}`, r.attendee]));
+    expect(byKey.get("c1:1")).toEqual({ label: "Ko Aung · M", answers: { runner_name: "Ko Aung", jersey: "M" } });
+    expect(byKey.get("c1:2")).toEqual({ label: "Ko Min · S", answers: { runner_name: "Ko Min", jersey: "S" } });
+    expect(byKey.get("c2:1")).toEqual({ label: "Ma Su · Kids 8", answers: { runner_name: "Ma Su", jersey: "Kids 8" } });
+  });
+
+  it("issues runner-less tickets exactly as before", async () => {
+    enrollmentData = { id: "e1", tenant_id: "t1", class_id: "c1", quantity: 2, status: "confirmed", attendees: [] };
+    classesData = [{ id: "c1", level: "GA", intake_id: "i1", event_date: "2026-07-12" }];
+
+    await issueTicketsForEnrollment("e1");
+
+    expect(rowsOf().map((r) => r.attendee)).toEqual([null, null]);
+  });
+
+  it("still issues every ticket when a stored runner is malformed", async () => {
+    enrollmentData = {
+      id: "e1", tenant_id: "t1", class_id: "c1", quantity: 2, status: "confirmed",
+      attendees: [{ class_id: "c1", seat_no: 1, answers: "nope", label: "X" }, null, "junk"],
+    };
+    classesData = [{ id: "c1", level: "GA", intake_id: "i1", event_date: "2026-07-12" }];
+
+    await issueTicketsForEnrollment("e1");
+
+    expect(rowsOf()).toHaveLength(2);
+    expect(rowsOf().map((r) => r.attendee)).toEqual([null, null]);
   });
 });
