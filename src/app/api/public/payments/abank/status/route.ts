@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { loadEmailRunners } from "@/server/notifications/eventEmailRunners";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { tenantLinkOrigin } from "@/lib/origin";
 import abank from "@/lib/abank";
@@ -196,6 +197,7 @@ export async function GET(request: NextRequest) {
             statusUrl,
             feeFormatted,
             eventTerms: await loadEventEmailTerms(payment.enrollment_id),
+            runners: await loadEmailRunners(payment.enrollment_id),
             eventImages: await loadEventEmailImages(payment.enrollment_id),
             orgType: tenantInfo?.org_type,
             tenantName: tenantInfo?.name,

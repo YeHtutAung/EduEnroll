@@ -315,6 +315,30 @@ function escapeEmailText(text: string): string {
     .replace(/'/g, "&#39;");
 }
 
+/**
+ * One line per runner (per-ticket answers), as entered at checkout. Nothing at
+ * all for an order without runners, so other events' emails are unchanged.
+ * The labels are buyer-typed, so they are escaped.
+ */
+function runnersSection(runners: { tier: string; label: string }[] | null | undefined): string {
+  const list = (runners ?? []).filter((r) => r.label.trim() !== "");
+  if (list.length === 0) return "";
+  const rows = list
+    .map(
+      (r, i) =>
+        `<div style="display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid #f3f4f6; font-size: 14px;">
+          <span style="color: #6b7280; min-width: 100px;">${i + 1}. ${escapeEmailText(r.tier)}</span>
+          <span style="font-weight: 600; color: #1f2937; text-align: right;">${escapeEmailText(r.label)}</span>
+        </div>`,
+    )
+    .join("\n        ");
+  return `
+      <div style="margin: 20px 0;">
+        <p style="margin: 0 0 4px; font-size: 13px; font-weight: 600; color: #374151;">${list.length === 1 ? "Runner" : `Runners (${list.length})`} <span style="font-family: 'Noto Sans Myanmar', sans-serif; font-weight: 400; color: #9ca3af;">/ ပြေးသူ</span></p>
+        ${rows}
+      </div>`;
+}
+
 /** Images an organiser uploaded for the tiers bought. Nothing at all when there are none. */
 function eventImagesSection(images: { url: string; alt: string }[] | null | undefined): string {
   const safe = (images ?? []).filter((image) => image.url.startsWith("https://"));
@@ -354,6 +378,8 @@ export function enrollmentApprovedEmail(params: {
   eventTerms?: string | null;
   /** Images for the tiers bought, from classes.email_image_url. */
   eventImages?: { url: string; alt: string }[] | null;
+  /** One per ticket when the event asks per-ticket questions (runner name, size). */
+  runners?: { tier: string; label: string }[] | null;
   orgType?: string;
   tenantName?: string;
   logoUrl?: string;
@@ -370,6 +396,7 @@ export function enrollmentApprovedEmail(params: {
     ticketCount,
     eventTerms,
     eventImages,
+    runners,
     orgType,
     tenantName,
     logoUrl,
@@ -448,7 +475,7 @@ export function enrollmentApprovedEmail(params: {
         </div>
         ${ticketRows}
         ${paymentRows}
-      </div>
+      </div>${runnersSection(runners)}
 
       <div style="text-align: center; margin: 24px 0;">
         <a href="${statusUrl}" style="display: inline-block; padding: 12px 28px; background: #1a6b3c; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px;">View ${l.enrollLabel} Details</a>

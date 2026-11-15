@@ -32,6 +32,13 @@ vi.mock("@/server/notifications/eventEmailImages", () => ({
   loadEventEmailImages: (...args: unknown[]) => mockLoadEventEmailImages(...args),
 }));
 
+const RUNNERS = [{ tier: "Early Bird - 5KM", label: "Ko Aung · M" }];
+const mockLoadEmailRunners = vi.fn().mockResolvedValue(RUNNERS);
+
+vi.mock("@/server/notifications/eventEmailRunners", () => ({
+  loadEmailRunners: (...args: unknown[]) => mockLoadEmailRunners(...args),
+}));
+
 const mockSendSms = vi.fn().mockResolvedValue(true);
 
 vi.mock("@/lib/sms", () => ({
@@ -123,12 +130,14 @@ describe("dispatchPaymentApproved", () => {
       feeFormatted: "50,000 MMK",
       eventTerms: "Non-Refundable.",
       eventImages: IMAGES,
+      runners: RUNNERS,
       orgType: "language_school",
       tenantName: "Nihon Moment",
       logoUrl: undefined,
     });
     expect(mockLoadEventEmailTerms).toHaveBeenCalledWith("enroll-1");
     expect(mockLoadEventEmailImages).toHaveBeenCalledWith("enroll-1");
+    expect(mockLoadEmailRunners).toHaveBeenCalledWith("enroll-1");
   });
 
   it("calls sendEmail with the email address and template output", async () => {
