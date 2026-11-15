@@ -33,7 +33,7 @@ export async function GET(request: NextRequest) {
 
   const { data: fields } = await supabase
     .from("intake_form_fields")
-    .select("id, field_key, field_label, field_type, is_required, options, sort_order, is_default")
+    .select("id, field_key, field_label, field_type, is_required, options, sort_order, is_default, per_attendee")
     .eq("intake_id", intakeId)
     .order("sort_order", { ascending: true })
     // Tie-break on the (intake_id, field_key) unique key so equal sort_orders
@@ -48,6 +48,7 @@ export async function GET(request: NextRequest) {
       options: string[] | null;
       sort_order: number;
       is_default: boolean;
+      per_attendee: boolean;
     }[] | null;
     error: unknown;
   };

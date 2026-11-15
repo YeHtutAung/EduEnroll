@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth, badRequest, notFound } from "@/lib/api";
+import { perAttendeeProblem } from "@/lib/enrollment/attendees";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -19,6 +20,8 @@ interface FormField {
   options: unknown;
   sort_order: number;
   is_default: boolean;
+  /** Asked once per ticket (runner) rather than once per order. */
+  per_attendee: boolean;
   created_at: string;
 }
 
@@ -72,7 +75,7 @@ export async function GET(
 
 // ─── POST /api/intakes/[id]/form-fields ──────────────────────────────────────
 // Add a new custom field.
-// Body: { field_key, field_label, field_type, is_required?, options?, sort_order? }
+// Body: { field_key, field_label, field_type, is_required?, options?, sort_order?, per_attendee? }
 
 export async function POST(
   request: NextRequest,
@@ -93,7 +96,7 @@ export async function POST(
     return badRequest("Request body must be valid JSON.");
   }
 
-  const { field_key, field_label, field_type, is_required, options, sort_order } =
+  const { field_key, field_label, field_type, is_required, options, sort_order, per_attendee } =
     body as Record<string, unknown>;
 
   if (!field_key || typeof field_key !== "string" || field_key.trim() === "") {
@@ -104,6 +107,10 @@ export async function POST(
   }
   if (!VALID_FIELD_TYPES.includes(field_type as FieldType)) {
     return badRequest(`field_type must be one of: ${VALID_FIELD_TYPES.join(", ")}.`);
+  }
+  if (per_attendee === true) {
+    const problem = perAttendeeProblem({ field_type: field_type as string, is_default: false });
+    if (problem) return badRequest(problem);
   }
 
   const { data, error } = await supabase
@@ -117,6 +124,7 @@ export async function POST(
       options: options ?? null,
       sort_order: typeof sort_order === "number" ? sort_order : 99,
       is_default: false,
+      per_attendee: per_attendee === true,
     } as never)
     .select()
     .single() as FieldResult;
@@ -134,7 +142,7 @@ export async function POST(
 
 // ─── PATCH /api/intakes/[id]/form-fields ─────────────────────────────────────
 // Update an existing field.
-// Body: { id, field_label?, field_type?, is_required?, options?, sort_order? }
+// Body: { id, field_label?, field_type?, is_required?, options?, sort_order?, per_attendee? }
 
 export async function PATCH(
   request: NextRequest,
@@ -155,7 +163,7 @@ export async function PATCH(
     return badRequest("Request body must be valid JSON.");
   }
 
-  const { id: fieldId, field_label, field_type, is_required, options, sort_order } =
+  const { id: fieldId, field_label, field_type, is_required, options, sort_order, per_attendee } =
     body as Record<string, unknown>;
 
   if (!fieldId || typeof fieldId !== "string") {
@@ -179,9 +187,32 @@ export async function PATCH(
   if (is_required !== undefined) update.is_required = !!is_required;
   if (options !== undefined) update.options = options;
   if (sort_order !== undefined) update.sort_order = sort_order;
+  if (per_attendee !== undefined) update.per_attendee = per_attendee === true;
 
   if (Object.keys(update).length === 0) {
     return badRequest("No valid fields provided for update.");
+  }
+
+  // A per-ticket field must stay a custom one-string field. Checked against
+  // the row as it will be after this update (type and flag can change
+  // together), so the editor gets a readable 400 instead of the database's
+  // CHECK violation surfacing as "not found".
+  if (update.per_attendee !== undefined || update.field_type !== undefined) {
+    const { data: current } = await supabase
+      .from("intake_form_fields")
+      .select("field_type, is_default, per_attendee")
+      .eq("id", fieldId)
+      .eq("intake_id", params.id)
+      .maybeSingle() as { data: Pick<FormField, "field_type" | "is_default" | "per_attendee"> | null; error: unknown };
+    if (!current) return notFound("Form field");
+    const willBePerAttendee = (update.per_attendee as boolean | undefined) ?? current.per_attendee;
+    if (willBePerAttendee) {
+      const problem = perAttendeeProblem({
+        field_type: (update.field_type as string | undefined) ?? current.field_type,
+        is_default: current.is_default,
+      });
+      if (problem) return badRequest(problem);
+    }
   }
 
   const { data, error } = await supabase

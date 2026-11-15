@@ -5,6 +5,7 @@ import {
   attendeeLabel,
   attendeeTotals,
   MAX_ATTENDEES,
+  perAttendeeProblem,
   type AttendeeField,
 } from "@/lib/enrollment/attendees";
 
@@ -117,5 +118,21 @@ describe("attendeeTotals", () => {
   it("puts values no longer in the option list last", () => {
     const list = [{ answers: { jersey: "XS" } }, { answers: { jersey: "M" } }];
     expect(attendeeTotals(list, SIZE).map((t) => t.value)).toEqual(["M", "XS"]);
+  });
+});
+
+describe("perAttendeeProblem", () => {
+  it("allows the one-string types on a custom field", () => {
+    for (const t of ["text", "select", "radio", "date", "phone"]) {
+      expect(perAttendeeProblem({ field_type: t, is_default: false })).toBeNull();
+    }
+  });
+  it("refuses contact fields", () => {
+    expect(perAttendeeProblem({ field_type: "text", is_default: true })).toMatch(/once per order/);
+  });
+  it("refuses file, checkbox, email and address", () => {
+    for (const t of ["file", "checkbox", "email", "address"]) {
+      expect(perAttendeeProblem({ field_type: t, is_default: false })).toMatch(/can't be asked per ticket/);
+    }
   });
 });

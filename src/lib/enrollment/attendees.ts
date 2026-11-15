@@ -138,3 +138,22 @@ export function attendeeTotals(
     .map(([value, count]) => ({ value, count }))
     .sort((x, y) => (rank(x.value) === rank(y.value) ? 0 : rank(x.value) < rank(y.value) ? -1 : 1));
 }
+
+/**
+ * Field types whose answer is one short string, so they can be asked once per
+ * ticket. Mirrors the CHECK intake_form_fields_per_attendee_type
+ * (20261115120000): a checkbox's "false" would pass "required", and a file has
+ * no per-ticket upload path.
+ */
+export const PER_ATTENDEE_TYPES: readonly string[] = ["text", "select", "radio", "date", "phone"];
+
+/**
+ * Why a field can't be asked per ticket, or null when it can. Contact fields
+ * (is_default) are the buyer's and are asked once per order. The database
+ * enforces both rules; this gives the editor a readable answer first.
+ */
+export function perAttendeeProblem(field: { field_type: string; is_default: boolean }): string | null {
+  if (field.is_default) return "Contact fields are asked once per order.";
+  if (!PER_ATTENDEE_TYPES.includes(field.field_type)) return "This kind of field can't be asked per ticket.";
+  return null;
+}
