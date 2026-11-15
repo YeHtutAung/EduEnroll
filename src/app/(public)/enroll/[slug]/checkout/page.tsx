@@ -7,6 +7,8 @@ import EmailTypoHint from "@/components/enrollment/EmailTypoHint";
 import SizePicker from "@/components/enrollment/SizePicker";
 import type { SizeNote } from "@/lib/enrollment/sizeChart";
 import { emailBlockedFor, emailBlockedMessage, emailTypoToConfirm } from "@/lib/enrollment/emailAddress";
+import AttendeeSection, { AttendeeTotals, type AttendeeCardSlot } from "@/components/enrollment/AttendeeSection";
+import { attendeeFieldErrors, attendeeSlots, attendeesPayload, slotKey } from "@/lib/enrollment/attendees";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -14,7 +16,7 @@ interface EnrollmentSummary {
   enrollment_ref: string;
   status: string;
   total_amount: number;
-  items: { level: string; quantity: number; fee_amount: number }[];
+  items: { class_id: string | null; level: string; quantity: number; fee_amount: number; pack_size?: number }[];
   event_name: string;
   intake_id: string | null;
   logo_url: string | null;
@@ -33,6 +35,8 @@ interface FormField {
   /** Set by the API for an organiser's size field — see @/lib/enrollment/sizeChart. */
   size_chart_url?: string;
   size_note?: SizeNote;
+  /** Asked once per ticket (runner) rather than once per order. */
+  per_attendee?: boolean;
 }
 
 // ─── Dynamic field renderer ───────────────────────────────────────────────────
@@ -255,6 +259,12 @@ function CheckoutForm() {
   const [submitting, setSubmitting] = useState(false);
   const emailTyposQueried = useRef(new Set<string>());
 
+  // Runner details: questions the organiser asks once per ticket. Keyed by
+  // slotKey (class_id:seat_no), numbered like the tickets they end up on.
+  const [runnerValues, setRunnerValues] = useState<Record<string, Record<string, string>>>({});
+  const [runnerErrors, setRunnerErrors] = useState<Record<string, Record<string, string>>>({});
+  const [openRunner, setOpenRunner] = useState<string | null>(null);
+
   useEffect(() => {
     if (!ref) { setLoadError("Missing order reference."); return; }
     fetch(`/api/public/enrollment/${ref}`)
@@ -298,6 +308,37 @@ function CheckoutForm() {
     setFormError(null);
   }
 
+  // Order fields are asked once (the buyer); runner fields once per ticket.
+  const orderFields = fields.filter((f) => !f.per_attendee);
+  const runnerFields = fields.filter((f) => f.per_attendee);
+  let runnerSlots: AttendeeCardSlot[] = [];
+  if (summary && runnerFields.length > 0) {
+    const lines = summary.items.filter((i): i is typeof i & { class_id: string } => !!i.class_id);
+    const levelOf = new Map(lines.map((l) => [l.class_id, l.level]));
+    try {
+      runnerSlots = attendeeSlots(
+        lines.map((l) => ({ class_id: l.class_id, admissions: l.quantity * (l.pack_size ?? 1) })),
+      ).map((slot) => ({ ...slot, tierLabel: levelOf.get(slot.class_id) ?? "Ticket" }));
+    } catch {
+      runnerSlots = [];
+    }
+  }
+
+  function updateRunner(key: string, fieldKey: string, value: string) {
+    setRunnerValues((prev) => ({ ...prev, [key]: { ...prev[key], [fieldKey]: value } }));
+    setFormError(null);
+    if (runnerErrors[key]?.[fieldKey]) {
+      setRunnerErrors((prev) => {
+        const card = { ...prev[key] };
+        delete card[fieldKey];
+        const next = { ...prev };
+        if (Object.keys(card).length > 0) next[key] = card;
+        else delete next[key];
+        return next;
+      });
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
@@ -327,6 +368,16 @@ function CheckoutForm() {
       return;
     }
 
+    const runnerProblems = attendeeFieldErrors(runnerValues, runnerSlots, runnerFields);
+    setRunnerErrors(runnerProblems);
+    const firstBad = runnerSlots.find((s) => runnerProblems[slotKey(s)]);
+    if (firstBad) {
+      setOpenRunner(slotKey(firstBad));
+      setFormError("Some runner details are missing.");
+      setSubmitting(false);
+      return;
+    }
+
     const emailSuggestion = emailTypoToConfirm(email, emailTyposQueried.current);
     if (emailSuggestion) {
       setFormError(
@@ -338,7 +389,7 @@ function CheckoutForm() {
 
     // Save all field values to form_data (including name/email) so admin listing can display them
     const form_data: Record<string, string> = {};
-    fields.forEach((f) => {
+    orderFields.forEach((f) => {
       const v = (values[f.field_key] ?? "").trim();
       if (v) form_data[f.field_key] = v;
     });
@@ -348,7 +399,14 @@ function CheckoutForm() {
       const patchRes = await fetch(`/api/public/enrollment/${ref}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ student_name_en, email, form_data }),
+        body: JSON.stringify({
+          student_name_en,
+          email,
+          form_data,
+          ...(runnerFields.length > 0
+            ? { attendees: attendeesPayload(runnerValues, runnerSlots, runnerFields) }
+            : {}),
+        }),
       });
       if (!patchRes.ok) {
         const d = await patchRes.json();
@@ -440,14 +498,32 @@ function CheckoutForm() {
 
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         {fields.length > 0 ? (
-          fields.map((field) => (
-            <DynamicField
-              key={field.id}
-              field={field}
-              value={values[field.field_key] ?? ""}
-              onChange={(v) => setValue(field.field_key, v)}
+          <>
+            {orderFields.map((field) => (
+              <DynamicField
+                key={field.id}
+                field={field}
+                value={values[field.field_key] ?? ""}
+                onChange={(v) => setValue(field.field_key, v)}
+              />
+            ))}
+            <AttendeeSection
+              slots={runnerSlots}
+              fields={runnerFields}
+              values={runnerValues}
+              errors={runnerErrors}
+              openKey={openRunner ?? (runnerSlots[0] ? slotKey(runnerSlots[0]) : null)}
+              onOpen={setOpenRunner}
+              onChange={updateRunner}
+              renderField={(field, value, onChange, error) => (
+                <div className="mb-4">
+                  <DynamicField field={field} value={value} onChange={onChange} />
+                  {error && <p className="mt-1 text-[11px]" style={{ color: "#b91c1c" }}>{error}</p>}
+                </div>
+              )}
             />
-          ))
+            <AttendeeTotals fields={runnerFields} values={runnerValues} slots={runnerSlots} />
+          </>
         ) : (
           /* Fallback while fields load or if intake has no fields */
           <div className="flex items-center justify-center py-4">

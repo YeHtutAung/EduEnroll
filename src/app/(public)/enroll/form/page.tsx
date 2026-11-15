@@ -14,6 +14,8 @@ import EmailTypoHint from "@/components/enrollment/EmailTypoHint";
 import SizePicker from "@/components/enrollment/SizePicker";
 import type { SizeNote } from "@/lib/enrollment/sizeChart";
 import { emailBlockedFor, emailBlockedMessage, emailTypoToConfirm } from "@/lib/enrollment/emailAddress";
+import AttendeeSection, { AttendeeTotals, type AttendeeCardSlot } from "@/components/enrollment/AttendeeSection";
+import { attendeeFieldErrors, attendeeLabel, attendeeSlots, attendeesPayload, slotKey } from "@/lib/enrollment/attendees";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -60,6 +62,8 @@ interface FormFieldDef {
   /** Set by the API for an organiser's size field — see @/lib/enrollment/sizeChart. */
   size_chart_url?: string;
   size_note?: SizeNote;
+  /** Asked once per ticket (runner) rather than once per order. */
+  per_attendee?: boolean;
 }
 
 // ─── Phone validation (Myanmar + international) ─────────────────────────────
@@ -479,6 +483,12 @@ function EnrollmentFormPage() {
   const [organiserTerms, setOrganiserTerms] = useState<string | null>(null);
   const [organiserTermsSha256, setOrganiserTermsSha256] = useState<string | null>(null);
 
+  // Runner details: questions the organiser asks once per ticket. Keyed by
+  // slotKey (class_id:seat_no), numbered like the tickets they end up on.
+  const [runnerValues, setRunnerValues] = useState<Record<string, Record<string, string>>>({});
+  const [runnerErrors, setRunnerErrors] = useState<Record<string, Record<string, string>>>({});
+  const [openRunner, setOpenRunner] = useState<string | null>(null);
+
   // ── Read cart from sessionStorage ──────────────────────────────
   useEffect(() => {
     if (cartKey) {
@@ -515,6 +525,28 @@ function EnrollmentFormPage() {
     cartTotalQty,
   );
   const grandTotal = cartTotalFee + platformFee;
+
+  // Order fields are asked once (the buyer); runner fields once per ticket.
+  const orderFields = formFields.filter((f) => !f.per_attendee);
+  const runnerFields = formFields.filter((f) => f.per_attendee);
+  const orderLines: { class_id: string; level: string; quantity: number }[] = isCartMode
+    ? cartItems.map((i) => ({ class_id: i.class_id, level: i.level, quantity: i.quantity }))
+    : classInfo
+    ? [{ class_id: classInfo.id, level: classInfo.level, quantity }]
+    : [];
+  let runnerSlots: AttendeeCardSlot[] = [];
+  if (runnerFields.length > 0) {
+    const levelOf = new Map(orderLines.map((l) => [l.class_id, l.level]));
+    try {
+      runnerSlots = attendeeSlots(
+        orderLines.map((l) => ({ class_id: l.class_id, admissions: l.quantity * (packSizes.get(l.class_id) ?? 1) })),
+      ).map((slot) => ({ ...slot, tierLabel: levelOf.get(slot.class_id) ?? "Ticket" }));
+    } catch {
+      // More tickets than one order can carry runners for: the server refuses
+      // it with a message, which the review step shows.
+      runnerSlots = [];
+    }
+  }
 
   // ── Fetch intake + class + form fields ────────────────────────
   useEffect(() => {
@@ -581,7 +613,7 @@ function EnrollmentFormPage() {
   function validateStep1(): boolean {
     const errors: Record<string, string> = {};
 
-    for (const field of formFields) {
+    for (const field of orderFields) {
       const val = (formData[field.field_key] ?? "").trim();
 
       if (field.is_required && !val) {
@@ -612,7 +644,27 @@ function EnrollmentFormPage() {
     }
 
     setFieldErrors(errors);
-    return Object.keys(errors).length === 0;
+
+    const runnerProblems = attendeeFieldErrors(runnerValues, runnerSlots, runnerFields);
+    setRunnerErrors(runnerProblems);
+    const firstBad = runnerSlots.find((s) => runnerProblems[slotKey(s)]);
+    if (firstBad) setOpenRunner(slotKey(firstBad));
+
+    return Object.keys(errors).length === 0 && !firstBad;
+  }
+
+  function updateRunner(key: string, fieldKey: string, value: string) {
+    setRunnerValues((prev) => ({ ...prev, [key]: { ...prev[key], [fieldKey]: value } }));
+    if (runnerErrors[key]?.[fieldKey]) {
+      setRunnerErrors((prev) => {
+        const card = { ...prev[key] };
+        delete card[fieldKey];
+        const next = { ...prev };
+        if (Object.keys(card).length > 0) next[key] = card;
+        else delete next[key];
+        return next;
+      });
+    }
   }
 
   function handleNext() {
@@ -637,9 +689,10 @@ function EnrollmentFormPage() {
     setSubmitting(true);
     setSubmitError(null);
 
-    // Build form_data from dynamic fields
+    // Build form_data from the order-level fields; runner answers go in
+    // `attendees`, one entry per ticket.
     const dynamicData: Record<string, string> = {};
-    for (const field of formFields) {
+    for (const field of orderFields) {
       const val = (formData[field.field_key] ?? "").trim();
       if (val) dynamicData[field.field_key] = val;
     }
@@ -659,12 +712,16 @@ function EnrollmentFormPage() {
       organiser_terms_sha256: organiserTermsSha256,
     };
 
+    const runners =
+      runnerFields.length > 0 ? { attendees: attendeesPayload(runnerValues, runnerSlots, runnerFields) } : {};
+
     // Build payload based on mode
     const payload = isCartMode
       ? {
           ...termsAcceptance,
           items: cartItems.map((item) => ({ class_id: item.class_id, quantity: item.quantity })),
           form_data: dynamicData,
+          ...runners,
           idempotency_key: idempotencyKeyRef.current,
           ...(messengerPsid ? { messenger_psid: messengerPsid } : {}),
           ...(hpValue ? { __hp: hpValue } : {}),
@@ -674,6 +731,7 @@ function EnrollmentFormPage() {
           ...termsAcceptance,
           class_id: classInfo!.id,
           form_data: dynamicData,
+          ...runners,
           idempotency_key: idempotencyKeyRef.current,
           quantity,
           ...(messengerPsid ? { messenger_psid: messengerPsid } : {}),
@@ -853,7 +911,7 @@ function EnrollmentFormPage() {
           Personal Information / <span className="font-myanmar">ကိုယ်ရေးအချက်အလက်</span>
         </h2>
 
-        {formFields.map((field) => (
+        {orderFields.map((field) => (
           <DynamicField
             key={field.id}
             field={field}
@@ -862,6 +920,20 @@ function EnrollmentFormPage() {
             onChange={(val) => updateField(field.field_key, val)}
           />
         ))}
+
+        <AttendeeSection
+          slots={runnerSlots}
+          fields={runnerFields}
+          values={runnerValues}
+          errors={runnerErrors}
+          openKey={openRunner ?? (runnerSlots[0] ? slotKey(runnerSlots[0]) : null)}
+          onOpen={setOpenRunner}
+          onChange={updateRunner}
+          accentColor={primaryColor}
+          renderField={(field, value, onChange, error) => (
+            <DynamicField field={field} value={value} error={error} onChange={onChange} />
+          )}
+        />
 
         <TermsConsent
           checked={termsAccepted}
@@ -955,7 +1027,7 @@ function EnrollmentFormPage() {
           Your Information
         </h3>
         <dl className="space-y-2.5 text-sm">
-          {formFields.map((field) => {
+          {orderFields.map((field) => {
             const val = (formData[field.field_key] ?? "").trim();
             if (!val) return null;
             return (
@@ -978,6 +1050,28 @@ function EnrollmentFormPage() {
           </div>
         )}
       </div>
+
+      {/* Runners: one line per ticket, then totals per size (choice) question */}
+      {runnerFields.length > 0 && runnerSlots.length > 0 && (
+        <div className="mb-6 rounded-xl border border-gray-200 bg-white p-5">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+            {runnerSlots.length === 1 ? "Runner" : "Runners"}
+          </h3>
+          <ol className="space-y-1.5 text-sm">
+            {runnerSlots.map((slot, i) => (
+              <li key={slotKey(slot)} className="flex justify-between gap-3">
+                <span className="text-gray-500">
+                  {runnerSlots.length > 1 ? `${i + 1}. ` : ""}{slot.tierLabel}
+                </span>
+                <span className="text-right font-medium text-gray-900">
+                  {attendeeLabel(runnerValues[slotKey(slot)] ?? {}, runnerFields)}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+      <AttendeeTotals fields={runnerFields} values={runnerValues} slots={runnerSlots} />
 
       {/* Error message */}
       {submitError && (
