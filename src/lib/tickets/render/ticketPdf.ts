@@ -16,6 +16,8 @@ import {
   TICKET_CARD,
   TICKET_FONT,
   qrTop,
+  pdfHolder,
+  ticketIdLine,
 } from "@/lib/tickets/ticketLayout";
 import { imageDataUrl } from "./primitives";
 import type { QrMap, TicketData, TicketRenderContext } from "./types";
@@ -227,9 +229,13 @@ export async function buildTicketPdf(
     pdf.setFont("helvetica", "normal");
     pdf.setTextColor(138, 144, 165);
     pdf.setFontSize(TICKET_FONT.ticketId);
-    const pdfIdLine = pdfShowIndex
-      ? `Ticket #${ticket.jti.slice(0, 8)} - ${i + 1} of ${tickets.length}`
-      : `Ticket #${ticket.jti.slice(0, 8)}`;
+    const pdfIdLine = ticketIdLine({
+      jti: ticket.jti,
+      index: i,
+      count: pdfShowIndex ? tickets.length : 1,
+      holder: pdfHolder(ticket.holder),
+      sep: " - ",
+    });
     pdf.text(fitPdf(pdfIdLine, W - padX * 2, TICKET_FONT.ticketId), padX, m + TICKET_ROWS.ticketId);
 
     // QR on a white chip, centered near the bottom of the card

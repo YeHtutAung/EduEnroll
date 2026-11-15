@@ -211,3 +211,94 @@ export function attendeesPayload(
     return { class_id: slot.class_id, seat_no: slot.seat_no, answers };
   });
 }
+
+// ─── Admin views ────────────────────────────────────────────────────────────
+
+export interface RunnerRow {
+  class_id: string;
+  seat_no: number;
+  /** Tier name, from the order's own lines. */
+  tier: string;
+  label: string;
+  answers: Record<string, string>;
+}
+
+/**
+ * enrollments.attendees as rows for the admin pages, in seat order. Defensive:
+ * an entry that isn't the stored shape is skipped rather than breaking the
+ * page.
+ */
+export function runnerRows(attendees: unknown, tierOf: (classId: string) => string): RunnerRow[] {
+  if (!Array.isArray(attendees)) return [];
+  const rows: RunnerRow[] = [];
+  for (const a of attendees) {
+    if (!a || typeof a !== "object") continue;
+    const { class_id, seat_no, label, answers } = a as Record<string, unknown>;
+    if (typeof class_id !== "string" || !Number.isInteger(seat_no)) continue;
+    if (!answers || typeof answers !== "object" || Array.isArray(answers)) continue;
+    rows.push({
+      class_id,
+      seat_no: seat_no as number,
+      tier: tierOf(class_id),
+      label: typeof label === "string" ? label : "",
+      answers: answers as Record<string, string>,
+    });
+  }
+  return rows.sort((x, y) => x.class_id.localeCompare(y.class_id) || x.seat_no - y.seat_no);
+}
+
+/**
+ * Totals per option of a per-ticket choice field across orders, for the
+ * export's "Sizes" sheet. An order with runners counts each runner. An order
+ * from before the organiser switched the field to per-ticket has no runners
+ * and its one answer in form_data: it counts once, or the totals would miss
+ * every earlier buyer.
+ */
+export function orderTotals(
+  orders: { attendees: unknown; form_data: Record<string, string> | null }[],
+  field: AttendeeField,
+): { value: string; count: number }[] {
+  const answers: { answers: Record<string, string> }[] = [];
+  for (const o of orders) {
+    // Per field, not per order: an order can have runners for one question
+    // (name) while this one (size) was still asked once, in form_data, when
+    // it was placed.
+    const withField = runnerRows(o.attendees, () => "").filter((r) => r.answers[field.field_key]);
+    if (withField.length > 0) {
+      for (const r of withField) answers.push({ answers: r.answers });
+    } else if (o.form_data?.[field.field_key]) {
+      answers.push({ answers: { [field.field_key]: o.form_data[field.field_key] } });
+    }
+  }
+  return attendeeTotals(answers, field);
+}
+
+/**
+ * The Runners sheet's answer cells for one order: one row per runner, or one
+ * row for an order with no runners. A field no runner answered keeps the
+ * order's form_data answer (asked once, before the field was switched to
+ * per-ticket) on the FIRST row only, so it is shown but not multiplied across
+ * tickets — the same rule orderTotals counts by.
+ */
+export function runnerExportCells(
+  runners: { answers: Record<string, string> }[],
+  formData: Record<string, string> | null,
+  fields: { field_key: string }[],
+): string[][] {
+  if (runners.length === 0) {
+    if (!fields.some((f) => formData?.[f.field_key])) return [];
+    return [fields.map((f) => formData?.[f.field_key] ?? "")];
+  }
+  const answeredByRunner = new Set(
+    fields.filter((f) => runners.some((r) => r.answers[f.field_key])).map((f) => f.field_key),
+  );
+  return runners.map((r, i) =>
+    fields.map((f) =>
+      answeredByRunner.has(f.field_key)
+        ? (r.answers[f.field_key] ?? "")
+        : i === 0
+        ? (formData?.[f.field_key] ?? "")
+        : "",
+    ),
+  );
+}

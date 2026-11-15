@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { orderTotals, runnerExportCells, type RunnerRow } from "@/lib/enrollment/attendees";
 import StatusBadge from "@/components/ui/StatusBadge";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
 import { useToast } from "@/components/ui/Toast";
@@ -30,6 +31,8 @@ interface StudentRow {
   telegram_linked: boolean;
   telegram_phone: string | null;
   telegram_channel_name: string | null;
+  /** Per-ticket answers (runner name, jersey size…), one row per ticket. */
+  runners?: RunnerRow[];
 }
 
 interface FormFieldDef {
@@ -37,6 +40,10 @@ interface FormFieldDef {
   field_label: string;
   field_type: string;
   sort_order: number;
+  is_required?: boolean;
+  options?: string[] | null;
+  /** Asked once per ticket (runner) rather than once per order. */
+  per_attendee?: boolean;
 }
 
 interface StudentDetail {
@@ -55,6 +62,7 @@ interface StudentDetail {
   intake_name: string | null;
   fee_amount: number | null;
   items?: { class_level: string; quantity: number; fee_amount: number; subtotal: number }[] | null;
+  runners?: RunnerRow[];
   payment: {
     id: string;
     status: PaymentStatus;
@@ -360,6 +368,22 @@ function StudentDetailModal({
                       <DetailRow label="Phone" value={<code className="text-sm">{detail.phone}</code>} />
                       {detail.email && <DetailRow label="Email" value={detail.email} />}
                     </>
+                  )}
+                  {/* Runners: answers asked once per ticket */}
+                  {detail.runners && detail.runners.length > 0 && (
+                    <DetailRow
+                      label={detail.runners.length === 1 ? "Runner" : `Runners (${detail.runners.length})`}
+                      value={
+                        <ol className="space-y-1">
+                          {detail.runners.map((r, i) => (
+                            <li key={`${r.class_id}:${r.seat_no}`} className="text-sm">
+                              <span className="text-gray-400">{i + 1}. {r.tier}</span>{" "}
+                              <span className="text-gray-800">{r.label}</span>
+                            </li>
+                          ))}
+                        </ol>
+                      }
+                    />
                   )}
                   <EditOrderEmail
                     enrollmentId={row.enrollment_id}
@@ -1060,6 +1084,67 @@ export default function StudentsPage() {
 
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, `${tl.student}s`);
+
+      // ── Runners and sizes: only for ONE chosen event that asks per-ticket
+      // questions. Its questions are loaded here for that event, never taken
+      // from `formFields` (which may belong to another event, or be the
+      // fallback for "All"): mixing events would total sizes under the wrong
+      // questions.
+      let runnerFields: FormFieldDef[] = [];
+      if (filters.intakeId) {
+        const fieldsRes = await fetch(`/api/public/form-fields?intake_id=${filters.intakeId}`);
+        if (!fieldsRes.ok) throw new Error(`${fieldsRes.status}`);
+        runnerFields = ((await fieldsRes.json()) as FormFieldDef[]).filter((f) => f.per_attendee);
+      } else if (rows.some((s) => s.runners && s.runners.length > 0)) {
+        toast.info("Choose one event to also export its Runners and Sizes sheets.");
+      }
+      if (runnerFields.length > 0) {
+        // One row per runner. An order from before the field was switched to
+        // per-ticket has no runners: it gets one row from its form_data, so
+        // the sheet still lists every buyer.
+        const runnerData: (string | number | null)[][] = [
+          ["Ref", tl.class, "Runner #", ...runnerFields.map((f) => f.field_label), "Status"],
+        ];
+        for (const s of rows) {
+          // A field no runner answered keeps its order-level answer on the
+          // first row (see runnerExportCells), as the Sizes sheet counts it.
+          const runners = s.runners ?? [];
+          runnerExportCells(runners, s.form_data, runnerFields).forEach((cells, i) => {
+            runnerData.push([
+              s.enrollment_ref,
+              runners[i]?.tier ?? s.class_level,
+              i + 1,
+              ...cells,
+              s.status,
+            ]);
+          });
+        }
+        const runnersWs = XLSX.utils.aoa_to_sheet(runnerData);
+        runnersWs["!cols"] = [
+          { wch: 18 }, { wch: 24 }, { wch: 9 },
+          ...runnerFields.map(() => ({ wch: 22 })),
+          { wch: 20 },
+        ];
+        XLSX.utils.book_append_sheet(wb, runnersWs, "Runners");
+
+        // Totals per option, confirmed orders only: what to order from the printer.
+        const choiceFields = runnerFields.filter((f) => f.field_type === "select" || f.field_type === "radio");
+        if (choiceFields.length > 0) {
+          const confirmed = rows.filter((s) => s.status === "confirmed");
+          const sizeData: (string | number | null)[][] = [["Question", "Answer", "Count"]];
+          for (const f of choiceFields) {
+            const totals = orderTotals(
+              confirmed.map((s) => ({ attendees: s.runners ?? [], form_data: s.form_data })),
+              { field_key: f.field_key, field_label: f.field_label, field_type: f.field_type, is_required: !!f.is_required, options: f.options ?? null },
+            );
+            for (const t of totals) sizeData.push([f.field_label, t.value, t.count]);
+            sizeData.push([f.field_label, "Total", totals.reduce((sum, t) => sum + t.count, 0)]);
+          }
+          const sizesWs = XLSX.utils.aoa_to_sheet(sizeData);
+          sizesWs["!cols"] = [{ wch: 22 }, { wch: 16 }, { wch: 8 }];
+          XLSX.utils.book_append_sheet(wb, sizesWs, "Sizes");
+        }
+      }
       const date = new Date().toISOString().slice(0, 10);
       XLSX.writeFile(wb, `${tl.student}s-${date}.xlsx`);
       toast.success(`Exported ${rows.length} student${rows.length !== 1 ? "s" : ""} to Excel.`);

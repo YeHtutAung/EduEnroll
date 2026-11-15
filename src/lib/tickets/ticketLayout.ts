@@ -186,3 +186,41 @@ export function qrTop(rowScale = 1): number {
   const belowIdLine = margin + TICKET_ROWS.ticketId + idLineDescender + idLineClearance;
   return Math.max(bottomAnchored, belowIdLine) * rowScale;
 }
+
+// ─── The ticket's id line ────────────────────────────────────────────────────
+//
+// "Ticket #b131e09c · 1 of 3", or with a runner (per-ticket answers, see
+// @/lib/enrollment/attendees) "Ko Aung · M · #b131e09c · 1 of 3". The runner
+// rides this existing row rather than a new one: the card has no spare
+// vertical room, and a new row would push the QR panel and its caption past
+// the card edge (see qrTop). Each renderer fits the line to the card width.
+
+export function ticketIdLine(opts: {
+  jti: string;
+  /** 0-based position among the order's tickets. */
+  index: number;
+  count: number;
+  holder?: string | null;
+  /** " · " on canvas, " - " in jsPDF's standard fonts. */
+  sep: string;
+}): string {
+  const short = opts.jti.slice(0, 8);
+  const holder = opts.holder?.trim();
+  const parts = holder ? [holder, `#${short}`] : [`Ticket #${short}`];
+  if (opts.count > 1) parts.push(`${opts.index + 1} of ${opts.count}`);
+  return parts.join(opts.sep);
+}
+
+/**
+ * The runner as jsPDF's standard Helvetica can draw it, or null. Those fonts
+ * only cover Latin-1, so a name in another script (Myanmar, for one) would print
+ * as garbage: it is left off the PDF instead; the PNG ticket, drawn with the
+ * system's fonts, still shows it. The label's " · " becomes " - ", matching the
+ * PDF's other separators.
+ */
+export function pdfHolder(holder: string | null | undefined): string | null {
+  const h = holder?.trim();
+  if (!h) return null;
+  if (/[^\u0020-\u00ff]/.test(h)) return null;
+  return h.replace(/ · /g, " - ");
+}

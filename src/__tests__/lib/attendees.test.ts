@@ -9,6 +9,9 @@ import {
   slotKey,
   attendeeFieldErrors,
   attendeesPayload,
+  runnerRows,
+  orderTotals,
+  runnerExportCells,
   type AttendeeField,
 } from "@/lib/enrollment/attendees";
 
@@ -169,5 +172,71 @@ describe("runner card helpers", () => {
     ]);
     const optionalSize = [NAME, { ...SIZE, is_required: false }];
     expect(validateAttendees(payload, slots, optionalSize).ok).toBe(true);
+  });
+});
+
+describe("runnerRows", () => {
+  it("returns stored runners in seat order with their tier", () => {
+    const rows = runnerRows(
+      [
+        { class_id: B, seat_no: 1, label: "C · S", answers: { runner_name: "C", jersey: "S" } },
+        { class_id: A, seat_no: 2, label: "B · M", answers: { runner_name: "B", jersey: "M" } },
+        { class_id: A, seat_no: 1, label: "A · M", answers: { runner_name: "A", jersey: "M" } },
+      ],
+      (id) => (id === A ? "10KM" : "5KM"),
+    );
+    expect(rows.map((r) => `${r.tier} ${r.seat_no} ${r.label}`)).toEqual(["10KM 1 A · M", "10KM 2 B · M", "5KM 1 C · S"]);
+  });
+  it("skips malformed entries and non-arrays", () => {
+    expect(runnerRows(null, () => "")).toEqual([]);
+    expect(runnerRows([null, "x", { class_id: A, seat_no: "1", answers: {} }, { class_id: A, seat_no: 1, answers: [] }], () => "")).toEqual([]);
+  });
+});
+
+describe("orderTotals", () => {
+  it("counts runners, and orders from before the switch once from form_data", () => {
+    const orders: { attendees: unknown; form_data: Record<string, string> | null }[] = [
+      { attendees: [
+        { class_id: A, seat_no: 1, label: "", answers: { jersey: "M" } },
+        { class_id: A, seat_no: 2, label: "", answers: { jersey: "Kids 8" } },
+      ], form_data: { jersey: "S" } },
+      { attendees: [], form_data: { jersey: "M" } },
+      { attendees: [], form_data: {} },
+      { attendees: [], form_data: null },
+    ];
+    expect(orderTotals(orders, SIZE)).toEqual([{ value: "Kids 8", count: 1 }, { value: "M", count: 2 }]);
+  });
+
+  it("falls back per field: runners with only a name still count the order's size", () => {
+    const orders: { attendees: unknown; form_data: Record<string, string> | null }[] = [
+      { attendees: [{ class_id: A, seat_no: 1, label: "Ko Aung", answers: { runner_name: "Ko Aung" } }], form_data: { jersey: "M" } },
+    ];
+    expect(orderTotals(orders, SIZE)).toEqual([{ value: "M", count: 1 }]);
+  });
+});
+
+describe("runnerExportCells", () => {
+  const fields = [{ field_key: "runner_name" }, { field_key: "jersey" }];
+
+  it("one row per runner with their own answers", () => {
+    expect(runnerExportCells(
+      [{ answers: { runner_name: "A", jersey: "M" } }, { answers: { runner_name: "B", jersey: "S" } }],
+      { jersey: "XL" },
+      fields,
+    )).toEqual([["A", "M"], ["B", "S"]]);
+  });
+
+  it("keeps an order-level size nobody answered per ticket, on the first row only", () => {
+    expect(runnerExportCells(
+      [{ answers: { runner_name: "A" } }, { answers: { runner_name: "B" } }],
+      { jersey: "M" },
+      fields,
+    )).toEqual([["A", "M"], ["B", ""]]);
+  });
+
+  it("one row from form_data for an order with no runners, none when it has no answers", () => {
+    expect(runnerExportCells([], { runner_name: "A", jersey: "L" }, fields)).toEqual([["A", "L"]]);
+    expect(runnerExportCells([], { other: "x" }, fields)).toEqual([]);
+    expect(runnerExportCells([], null, fields)).toEqual([]);
   });
 });

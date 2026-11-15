@@ -103,7 +103,7 @@ async function main() {
     const { data, error } = (await supabase
       .from("tickets")
       .select(
-        "id, intake_id, tier, admits, seat_no, exp, " +
+        "id, intake_id, tier, admits, seat_no, exp, attendee, " +
           "enrollments!inner(enrollment_ref, status, internal_test_at, student_name_en, phone, email)",
       )
       .eq("intake_id", intake.id)
