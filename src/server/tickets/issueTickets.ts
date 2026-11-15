@@ -43,7 +43,7 @@ async function issueTicketsInner(enrollmentId: string): Promise<void> {
   // failed".
   const { data: enrollment, error: enrollmentError } = (await supabase
     .from("enrollments")
-    .select("id, tenant_id, class_id, quantity, status, internal_test_at")
+    .select("id, tenant_id, class_id, quantity, status, internal_test_at, attendees")
     .eq("id", enrollmentId)
     .maybeSingle()) as unknown as {
     data: {
@@ -53,6 +53,7 @@ async function issueTicketsInner(enrollmentId: string): Promise<void> {
       quantity: number | null;
       status: string;
       internal_test_at: string | null;
+      attendees: unknown;
     } | null;
     error: unknown;
   };
@@ -196,6 +197,12 @@ async function issueTicketsInner(enrollmentId: string): Promise<void> {
 
   const { kid } = loadSigningKey();
 
+  // Each ticket's runner, when the organiser asked per-ticket questions. Keyed
+  // exactly like the rows below — seats 1..N per class — which is how
+  // @/lib/enrollment/attendees numbered them at purchase. The label was fixed
+  // then too, so editing the form later never changes an issued ticket.
+  const runners = runnersBySeat(enrollment.attendees);
+
   const rows: Record<string, unknown>[] = [];
   for (const [classId, quantity] of Array.from(admissions.entries())) {
     const c = byId.get(classId)!;
@@ -209,6 +216,7 @@ async function issueTicketsInner(enrollmentId: string): Promise<void> {
         tier: c.level,
         admits: 1,
         seat_no: seat,
+        attendee: runners.get(`${classId}:${seat}`) ?? null,
         exp: expIso,
         kid,
         status: "valid",
@@ -249,4 +257,24 @@ export async function voidTicketsForEnrollment(enrollmentId: string): Promise<vo
     .from("tickets")
     .update({ status: "void" } as never)
     .eq("enrollment_id", enrollmentId);
+}
+
+/**
+ * enrollments.attendees as a (class_id:seat_no) map of what a ticket stores.
+ * An entry that isn't the expected shape is skipped: a ticket without its
+ * runner still admits its holder, a ticket that fails to issue does not.
+ */
+function runnersBySeat(
+  attendees: unknown,
+): Map<string, { label: string; answers: Record<string, string> }> {
+  const map = new Map<string, { label: string; answers: Record<string, string> }>();
+  if (!Array.isArray(attendees)) return map;
+  for (const a of attendees) {
+    if (!a || typeof a !== "object") continue;
+    const { class_id, seat_no, label, answers } = a as Record<string, unknown>;
+    if (typeof class_id !== "string" || !Number.isInteger(seat_no) || typeof label !== "string") continue;
+    if (!answers || typeof answers !== "object" || Array.isArray(answers)) continue;
+    map.set(`${class_id}:${seat_no}`, { label, answers: answers as Record<string, string> });
+  }
+  return map;
 }
