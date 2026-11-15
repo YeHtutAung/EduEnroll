@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { checkAttendees, loadAttendeeContext, normaliseQuantity } from "@/server/enrollment/attendeeContext";
+import { checkAttendees, loadAttendeeContext, normaliseQuantity, saveAttendees } from "@/server/enrollment/attendeeContext";
 
 const A = "11111111-1111-1111-1111-111111111111";
 const B = "22222222-2222-2222-2222-222222222222";
@@ -12,16 +12,22 @@ type Row = Record<string, unknown>;
  */
 function fakeSupabase(tables: Record<string, { data: Row[] | null; error: unknown }>) {
   const reads: string[] = [];
+  const calls: { table: string; method: string; args: unknown[] }[] = [];
   const from = vi.fn((table: string) => {
     reads.push(table);
     const result = tables[table] ?? { data: [], error: null };
     const builder: Record<string, unknown> = {};
-    for (const m of ["select", "in", "eq", "order"]) builder[m] = () => builder;
+    for (const m of ["select", "in", "eq", "order", "update"]) {
+      builder[m] = (...args: unknown[]) => {
+        calls.push({ table, method: m, args });
+        return builder;
+      };
+    }
     builder.then = (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
       Promise.resolve(result).then(resolve, reject);
     return builder;
   });
-  return { client: { from }, reads };
+  return { client: { from }, reads, calls };
 }
 
 const NAME = { field_key: "runner_name", field_label: "Runner Name", field_type: "text", is_required: true, options: null, intake_id: "i1" };
@@ -76,10 +82,11 @@ describe("loadAttendeeContext", () => {
     expect(reads).toEqual([]);
   });
 
-  it("refuses a class that does not exist", async () => {
-    const { client } = fakeSupabase({ classes: { data: [], error: null } });
+  it("leaves a class that does not exist to the RPC (no fields, no slots)", async () => {
+    const { client, reads } = fakeSupabase({ classes: { data: [], error: null } });
     const ctx = await loadAttendeeContext(client, [{ class_id: A, quantity: 1 }]);
-    expect(ctx.ok).toBe(false);
+    expect(ctx).toEqual({ ok: true, fields: [], slots: [] });
+    expect(reads).toEqual(["classes"]);
   });
 
   it("refuses a cart spanning two events when either asks per-ticket questions", async () => {
@@ -114,9 +121,50 @@ describe("checkAttendees", () => {
     expect(bad.ok).toBe(false);
   });
 
-  it("passes the context's own refusal through", async () => {
+  it("passes the context's own refusal through, without loading anything", async () => {
     const { client } = fakeSupabase({});
     const r = await checkAttendees(client, [{ class_id: "nope", quantity: 1 }], []);
     expect(r.ok).toBe(false);
+  });
+});
+
+describe("saveAttendees", () => {
+  const runner = { class_id: A, seat_no: 1, answers: { runner_name: "Ko Aung", jersey: "M" }, label: "Ko Aung · M" };
+  const tables = {
+    classes: { data: [{ id: A, intake_id: "i1", pack_size: 1 }], error: null },
+    intake_form_fields: { data: [NAME, SIZE], error: null },
+    enrollments: { data: null, error: null },
+  };
+
+  it("writes the runners only while the order awaits payment", async () => {
+    const { client, calls } = fakeSupabase(tables);
+    expect(await saveAttendees(client, "e1", [{ class_id: A, quantity: 1 }], [runner])).toBe(true);
+    const upd = calls.filter((c) => c.table === "enrollments");
+    expect(upd[0]).toEqual({ table: "enrollments", method: "update", args: [{ attendees: [runner] }] });
+    expect(upd.slice(1).map((c) => c.args)).toEqual([["id", "e1"], ["status", "pending_payment"]]);
+  });
+
+  it("leaves a replayed order alone when its lines differ from the runners", async () => {
+    const { client, calls } = fakeSupabase(tables);
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await saveAttendees(client, "e1", [{ class_id: A, quantity: 2 }], [runner])).toBe(false);
+    expect(calls.some((c) => c.method === "update")).toBe(false);
+    expect(spy.mock.calls[0][0]).toMatch(/e1/);
+    expect(JSON.stringify(spy.mock.calls)).not.toMatch(/Ko Aung/);
+    spy.mockRestore();
+  });
+
+  it("logs a failed write instead of throwing", async () => {
+    const { client } = fakeSupabase({ ...tables, enrollments: { data: null, error: { code: "42501" } } });
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await saveAttendees(client, "e1", [{ class_id: A, quantity: 1 }], [runner])).toBe(false);
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining("e1"), "42501");
+    spy.mockRestore();
+  });
+
+  it("does nothing with no runners", async () => {
+    const { client, reads } = fakeSupabase(tables);
+    expect(await saveAttendees(client, "e1", [{ class_id: A, quantity: 1 }], [])).toBe(false);
+    expect(reads).toEqual([]);
   });
 });

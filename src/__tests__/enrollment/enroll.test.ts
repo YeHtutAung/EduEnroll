@@ -528,3 +528,111 @@ describe("POST /api/public/enroll: ad context capture", () => {
     expect(mockCapture).not.toHaveBeenCalled();
   });
 });
+
+// ─── Runners (per-ticket answers) ─────────────────────────────────────────────
+
+describe("POST /api/public/enroll — runners", () => {
+  const RUNNER_FIELDS = [
+    { intake_id: "intake-1", field_key: "runner_name", field_label: "Runner Name", field_type: "text", is_required: true, options: null },
+    { intake_id: "intake-1", field_key: "jersey", field_label: "Jersey Size", field_type: "select", is_required: true, options: ["S", "M"] },
+  ];
+  const runner = (seat_no: number, name: string) => ({
+    class_id: CLASS_ID,
+    seat_no,
+    answers: { runner_name: name, jersey: "M" },
+  });
+
+  /** The usual tables, plus per-ticket fields on the event. */
+  function withRunnerFields(fields: unknown[] = RUNNER_FIELDS, fieldsError: unknown = null) {
+    setupFromSuccess();
+    const base = mockFrom.getMockImplementation()!;
+    mockFrom.mockImplementation((table: string) =>
+      table === "intake_form_fields" ? makeChain({ data: fields, error: fieldsError }) : base(table),
+    );
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("refuses an order without runners before reserving a seat, and says to reload", async () => {
+    withRunnerFields();
+    mockRpcSuccess();
+    const res = await POST(makeRequest({ class_id: CLASS_ID, form_data: { name_en: "A" } }));
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.code).toBe("ATTENDEES_INVALID");
+    expect(body.message).toMatch(/reload/i);
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it("lets a draft order (items only, details later by PATCH) through", async () => {
+    withRunnerFields();
+    mockRpc.mockResolvedValue({
+      data: {
+        success: true, enrollment_id: "enroll-1", enrollment_ref: "NM-2026-0001", tenant_id: "tenant-abc",
+        total_fee: 50000, quantity: 1,
+        items: [{ class_id: CLASS_ID, class_level: "5KM", quantity: 1, fee_amount: 50000, subtotal: 50000 }],
+      },
+      error: null,
+    });
+    const res = await POST(makeRequest({ items: [{ class_id: CLASS_ID, quantity: 1 }] }));
+    expect(res.status).toBe(201);
+    expect(enrollmentUpdates.some((u) => "attendees" in u)).toBe(false);
+  });
+
+  it("saves validated runners, with their labels, on the new order", async () => {
+    withRunnerFields();
+    mockRpc.mockResolvedValue({
+      data: {
+        success: true, enrollment_id: "enroll-1", enrollment_ref: "NM-2026-0001", class_level: "5KM",
+        fee_amount: 50000, quantity: 2, tenant_id: "tenant-abc",
+      },
+      error: null,
+    });
+    const res = await POST(makeRequest({
+      class_id: CLASS_ID, quantity: 2, form_data: { name_en: "A" },
+      attendees: [runner(1, " Ko Aung "), runner(2, "Ma Su")],
+    }));
+    expect(res.status).toBe(201);
+    const saved = enrollmentUpdates.find((u) => "attendees" in u);
+    expect(saved?.attendees).toEqual([
+      { class_id: CLASS_ID, seat_no: 1, answers: { runner_name: "Ko Aung", jersey: "M" }, label: "Ko Aung · M" },
+      { class_id: CLASS_ID, seat_no: 2, answers: { runner_name: "Ma Su", jersey: "M" }, label: "Ma Su · M" },
+    ]);
+  });
+
+  it("refuses a forged quantity without building runner slots", async () => {
+    withRunnerFields();
+    mockRpcSuccess();
+    const res = await POST(makeRequest({ class_id: CLASS_ID, quantity: 1e9, form_data: {}, attendees: [] }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).message).toMatch(/too many/i);
+    expect(mockRpc).not.toHaveBeenCalled();
+  });
+
+  it("answers a failed lookup with a JSON 500", async () => {
+    withRunnerFields(RUNNER_FIELDS, { message: "boom" });
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const res = await POST(makeRequest({ class_id: CLASS_ID, form_data: {}, attendees: [runner(1, "A")] }));
+    expect(res.status).toBe(500);
+    expect((await res.json()).error).toBe("Internal Server Error");
+    expect(mockRpc).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("leaves a non-UUID class id to the existing 400", async () => {
+    withRunnerFields();
+    const res = await POST(makeRequest({ class_id: "nope", form_data: {} }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).code).toBeUndefined();
+  });
+
+  it("changes nothing for an event without per-ticket fields", async () => {
+    withRunnerFields([]);
+    mockRpcSuccess();
+    const res = await POST(makeRequest({ class_id: CLASS_ID, form_data: { name_en: "A" } }));
+    expect(res.status).toBe(201);
+    expect(enrollmentUpdates.some((u) => "attendees" in u)).toBe(false);
+  });
+});

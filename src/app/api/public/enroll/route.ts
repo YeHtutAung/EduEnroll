@@ -10,6 +10,8 @@ import { hashPriorityToken } from "@/lib/interest/token";
 import { captureAdContext } from "@/server/conversions/captureAdContext";
 import { sendEnrollmentConfirmationEmail } from "@/server/enrollment/enrollmentEmails";
 import { checkTermsAcceptance, type TermsEvidence } from "@/server/legal/organiserRules";
+import { checkAttendees, isUuid } from "@/server/enrollment/attendeeContext";
+import type { Attendee, AttendeeResult } from "@/lib/enrollment/attendees";
 import type { BankAccount } from "@/types/database";
 
 export async function POST(request: NextRequest) {
@@ -26,7 +28,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { class_id, form_data, idempotency_key, quantity, items, messenger_psid, __hp, priority_token } =
+  const { class_id, form_data, idempotency_key, quantity, items, messenger_psid, __hp, priority_token, attendees } =
     body as Record<string, unknown>;
 
   // Hash immediately — the raw token must never be logged, stored, or echoed
@@ -70,6 +72,43 @@ export async function POST(request: NextRequest) {
 
   const supabase = createAdminClient();
 
+  // Runners: answers the organiser asks once per ticket (e.g. name, jersey
+  // size). Checked before the RPC, so a refused order holds no seat.
+  //
+  // A draft order carries neither form_data nor attendees: the tickets page
+  // (trustedOfficialCheckout) creates the order first and sends the details
+  // later by PATCH /api/public/enrollment/[ref], which checks runners then.
+  // Malformed class ids are left to createEnrollment / createCartEnrollment,
+  // which answer with their own 400.
+  let runners: Attendee[] = [];
+  if (fd !== null || attendees !== undefined) {
+    const lines = Array.isArray(items)
+      ? (items as { class_id?: unknown; quantity?: unknown }[]).map((i) => ({
+          class_id: i?.class_id as string,
+          quantity: i?.quantity,
+        }))
+      : [{ class_id: class_id as string, quantity }];
+    if (lines.length > 0 && lines.every((l) => isUuid(l.class_id))) {
+      let check: AttendeeResult;
+      try {
+        check = await checkAttendees(supabase, lines, attendees);
+      } catch {
+        console.error("[enroll] runner check failed");
+        return NextResponse.json(
+          { error: "Internal Server Error", message: "Enrollment failed. Please try again." },
+          { status: 500 },
+        );
+      }
+      if (!check.ok) {
+        return NextResponse.json(
+          { error: "Bad Request", message: check.message, code: "ATTENDEES_INVALID" },
+          { status: 400 },
+        );
+      }
+      runners = check.attendees;
+    }
+  }
+
   // Cart checkout
   if (Array.isArray(items)) {
     const outcome = await createCartEnrollment({
@@ -78,6 +117,7 @@ export async function POST(request: NextRequest) {
       messenger_psid: typeof messenger_psid === "string" ? messenger_psid : null,
       priority_token_hash: priorityTokenHash,
       idempotency_key: typeof idempotency_key === "string" ? idempotency_key : null,
+      attendees: runners,
     });
 
     if (!outcome.ok) {
@@ -146,6 +186,7 @@ export async function POST(request: NextRequest) {
     quantity: typeof quantity === "number" ? quantity : 1,
     messenger_psid: typeof messenger_psid === "string" ? messenger_psid : null,
     priority_token_hash: priorityTokenHash,
+    attendees: runners,
   });
 
   if (!outcome.ok) {

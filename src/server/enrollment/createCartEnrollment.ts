@@ -1,5 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { buildEnrollmentUpdatePayload, fetchFieldTypeMap } from "./formDataMapper";
+import { saveAttendees } from "./attendeeContext";
+import type { Attendee } from "@/lib/enrollment/attendees";
 import type { SubmitCartEnrollmentResult } from "@/types/database";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -17,6 +19,8 @@ export interface CartEnrollmentInput {
   priority_token_hash?: string | null;
   /** Client-held key per cart attempt; a retry with the same key returns the original order. */
   idempotency_key?: string | null;
+  /** Runners already validated by the route; written only to a pending order whose lines match. */
+  attendees?: Attendee[];
 }
 
 // Use Extract to narrow to the success branch
@@ -49,7 +53,7 @@ export type CartEnrollmentOutcome = CartEnrollmentSuccess | CartEnrollmentError;
 export async function createCartEnrollment(
   input: CartEnrollmentInput,
 ): Promise<CartEnrollmentOutcome> {
-  const { items, form_data, messenger_psid, priority_token_hash, idempotency_key } = input;
+  const { items, form_data, messenger_psid, priority_token_hash, idempotency_key, attendees } = input;
 
   // ── Validate items ────────────────────────────────────────────
   if (!Array.isArray(items) || items.length === 0) {
@@ -133,6 +137,17 @@ export async function createCartEnrollment(
       .from("enrollments")
       .update(updatePayload as never)
       .eq("id", successPayload.enrollment_id);
+  }
+
+  // The order's own lines, not the request's: a replay returns the original
+  // order whatever this retry sent.
+  if (attendees?.length) {
+    await saveAttendees(
+      supabase,
+      successPayload.enrollment_id,
+      successPayload.items.map((i) => ({ class_id: i.class_id, quantity: i.quantity })),
+      attendees,
+    );
   }
 
   return { ok: true, result: successPayload };
