@@ -1,5 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { buildEnrollmentUpdatePayload, fetchFieldTypeMap } from "./formDataMapper";
+import { saveAttendees } from "./attendeeContext";
+import type { Attendee } from "@/lib/enrollment/attendees";
 import type { SubmitEnrollmentResult } from "@/types/database";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -12,6 +14,8 @@ export interface SingleEnrollmentInput {
   messenger_psid?: string | null;
   /** SHA-256 hash of the raw priority-access token, or null if none was presented. */
   priority_token_hash?: string | null;
+  /** Runners already validated by the route; written only to a pending order whose lines match. */
+  attendees?: Attendee[];
 }
 
 // Use Extract to narrow to the success branch
@@ -44,7 +48,7 @@ export type SingleEnrollmentOutcome = SingleEnrollmentSuccess | SingleEnrollment
 export async function createEnrollment(
   input: SingleEnrollmentInput,
 ): Promise<SingleEnrollmentOutcome> {
-  const { class_id, form_data, idempotency_key, quantity, messenger_psid, priority_token_hash } = input;
+  const { class_id, form_data, idempotency_key, quantity, messenger_psid, priority_token_hash, attendees } = input;
 
   if (!class_id || !UUID_RE.test(class_id)) {
     return { ok: false, status: 400, error: "Validation Error", message: "class_id must be a valid UUID." };
@@ -97,6 +101,11 @@ export async function createEnrollment(
       .from("enrollments")
       .update(updatePayload as never)
       .eq("id", successPayload.enrollment_id);
+  }
+
+  if (attendees?.length) {
+    // Reads the order's own class back: a replay may have sent another one.
+    await saveAttendees(supabase, successPayload.enrollment_id, attendees);
   }
 
   return { ok: true, result: successPayload };

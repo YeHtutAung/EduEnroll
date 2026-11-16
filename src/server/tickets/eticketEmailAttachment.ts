@@ -4,7 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { signTicketJwt } from "@/lib/tickets/sign";
 import { isTicketQrFormat, ticketQrPayload, type TicketQrFormat } from "@/lib/tickets/qrPayload";
 import type { EmailAttachment } from "@/lib/email";
-import { TICKET_CARD, TICKET_FONT, TICKET_ROWS, qrTop } from "@/lib/tickets/ticketLayout";
+import { TICKET_CARD, TICKET_FONT, TICKET_ROWS, pdfHolder, qrTop, ticketIdLine } from "@/lib/tickets/ticketLayout";
 
 type TicketRow = {
   id: string;
@@ -12,6 +12,10 @@ type TicketRow = {
   tier: string;
   admits: number;
   exp: string;
+  class_id?: string;
+  seat_no?: number;
+  /** {label, answers} copied from the order's runners at issue; null without. */
+  attendee?: { label?: unknown } | null;
 };
 
 type EmailTicket = TicketRow & { eventName: string; qrFormat: TicketQrFormat };
@@ -30,7 +34,7 @@ export async function buildEticketEmailAttachment(
     supabase.from("enrollments").select("enrollment_ref").eq("id", enrollmentId).maybeSingle(),
     supabase
       .from("tickets")
-      .select("id, intake_id, tier, admits, exp")
+      .select("id, intake_id, tier, admits, exp, class_id, seat_no, attendee")
       .eq("enrollment_id", enrollmentId)
       .eq("status", "valid"),
   ]);
@@ -47,7 +51,8 @@ export async function buildEticketEmailAttachment(
   if (ticketError) throw new Error("could not load issued tickets for e-ticket attachment");
   if (!enrollment || !rows?.length) return null;
 
-  const ticketRows = rows as TicketRow[];
+  // Seat order, so each runner's page follows the order they were entered in.
+  const ticketRows = [...(rows as TicketRow[])].sort(bySeat);
   const intakeIds = [...new Set(ticketRows.map((ticket) => ticket.intake_id))];
   const intakeResult = await supabase
     .from("intakes")
@@ -146,7 +151,17 @@ export async function renderEticketPdf(
     pdf.setFont("helvetica", "normal");
     pdf.setTextColor(138, 144, 165);
     pdf.setFontSize(TICKET_FONT.ticketId);
-    pdf.text(`Ticket #${ticket.id.slice(0, 8)}`, padX, margin + TICKET_ROWS.ticketId);
+    const holder = typeof ticket.attendee?.label === "string" ? ticket.attendee.label : null;
+    pdf.text(
+      fitText(
+        pdf,
+        ticketIdLine({ jti: ticket.id, index, count: 1, holder: pdfHolder(holder), sep: " - " }),
+        width - padX * 2,
+        TICKET_FONT.ticketId,
+      ),
+      padX,
+      margin + TICKET_ROWS.ticketId,
+    );
 
     const qrSize = TICKET_CARD.qrSize;
     const qrX = (width - qrSize) / 2;
@@ -190,4 +205,9 @@ function fitText(pdf: jsPDF, value: string, maxWidth: number, size: number): str
 
 function safeFilename(value: string): string {
   return value.replace(/[^a-z0-9_-]/gi, "_");
+}
+
+function bySeat(a: TicketRow, b: TicketRow): number {
+  const byClass = (a.class_id ?? "").localeCompare(b.class_id ?? "");
+  return byClass !== 0 ? byClass : (a.seat_no ?? 0) - (b.seat_no ?? 0);
 }

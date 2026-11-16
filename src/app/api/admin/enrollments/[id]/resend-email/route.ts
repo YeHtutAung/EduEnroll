@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { loadEmailRunners } from "@/server/notifications/eventEmailRunners";
 import { requireAuth, badRequest, notFound } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadPartialPayment } from "@/server/payments/partialPayment";
@@ -129,6 +130,7 @@ export async function POST(
       statusUrl,
       feeFormatted,
       eventTerms: await loadEventEmailTerms(enrollment.id),
+      runners: await loadEmailRunners(enrollment.id),
       eventImages: await loadEventEmailImages(enrollment.id),
       orgType,
       tenantName,

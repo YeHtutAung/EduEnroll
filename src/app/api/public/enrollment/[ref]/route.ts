@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { checkAttendees } from "@/server/enrollment/attendeeContext";
+import type { Attendee, AttendeeResult } from "@/lib/enrollment/attendees";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
 import { getStripe } from "@/lib/stripe";
@@ -78,7 +80,8 @@ export async function GET(
     .from("enrollments")
     .select(`
       id, enrollment_ref, status, student_name_en, email,
-      enrollment_items(quantity, fee_amount, classes(level, pack_size, intakes(id, name, slug))),
+      enrollment_items(class_id, quantity, fee_amount, classes(level, pack_size, intakes(id, name, slug))),
+      class_id,
       classes(level, fee_amount, pack_size, intakes(id, name, slug)),
       quantity,
       payments(stripe_payment_intent_id, status, payment_method, card_brand, card_last4, amount, platform_fee, received_amount, created_at)
@@ -102,6 +105,8 @@ export async function GET(
   const items =
     enrollment.enrollment_items && enrollment.enrollment_items.length > 0
       ? enrollment.enrollment_items.map((i) => ({
+          // Keys each runner card on the checkout page (seats 1..N per class).
+          class_id: i.class_id,
           level: (i.classes as { level: string } | null)?.level ?? "Ticket",
           quantity: i.quantity,
           fee_amount: i.fee_amount,
@@ -109,6 +114,7 @@ export async function GET(
         }))
       : enrollment.classes
       ? [{
+          class_id: enrollment.class_id,
           level: enrollment.classes.level,
           quantity: enrollment.quantity ?? 1,
           fee_amount: enrollment.classes.fee_amount,
@@ -207,12 +213,12 @@ export async function GET(
   const bankAccounts = bankResult.data ?? [];
 
   // Build signed ticket JWTs for confirmed enrollments only.
-  let tickets: { jti: string; tier: string; admits: number; jwt: string; qr: string }[] = [];
+  let tickets: { jti: string; tier: string; admits: number; jwt: string; qr: string; holder: string | null }[] = [];
   if (enrollment.status === "confirmed") {
     const loadTicketRows = async () =>
       ((await supabase
         .from("tickets")
-        .select("id, intake_id, tier, admits, exp, status")
+        .select("id, intake_id, tier, admits, exp, status, class_id, seat_no, attendee")
         .eq("enrollment_id", enrollment.id)) as unknown as {
         data: TicketRow[] | null;
         error: unknown;
@@ -227,7 +233,12 @@ export async function GET(
       ticketRows = await loadTicketRows();
     }
 
-    const validRows = (ticketRows ?? []).filter((t) => t.status === "valid");
+    // Seat order: "1 of 3" and each runner then follow the order entered.
+    const validRows = (ticketRows ?? [])
+      .filter((t) => t.status === "valid")
+      .sort((a, b) =>
+        (a.class_id ?? "").localeCompare(b.class_id ?? "") || (a.seat_no ?? 0) - (b.seat_no ?? 0),
+      );
 
     // What each QR encodes is chosen per event. A separate query, not a column
     // on the enrollment select above, so that if this code ever runs ahead of
@@ -256,6 +267,7 @@ export async function GET(
         admits: t.admits,
         jwt,
         qr: ticketQrPayload(formats.get(t.intake_id)!, t.id, () => jwt),
+        holder: typeof t.attendee?.label === "string" ? t.attendee.label : null,
       };
     });
   }
@@ -337,14 +349,14 @@ export async function PATCH(
   const tenantId = await resolveTenantId();
   if (tenantId instanceof NextResponse) return tenantId;
 
-  let body: { student_name_en?: string; email?: string; form_data?: Record<string, string> };
+  let body: { student_name_en?: string; email?: string; form_data?: Record<string, string>; attendees?: unknown };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "Bad Request", message: "Invalid JSON." }, { status: 400 });
   }
 
-  const { student_name_en, email, form_data } = body;
+  const { student_name_en, email, form_data, attendees } = body;
   if (!student_name_en || !email) {
     return NextResponse.json({ error: "Bad Request", message: "student_name_en and email are required." }, { status: 400 });
   }
@@ -362,10 +374,19 @@ export async function PATCH(
 
   const { data: enrollment, error: lookupError } = (await supabase
     .from("enrollments")
-    .select("id, status")
+    .select("id, status, class_id, quantity, enrollment_items(class_id, quantity)")
     .eq("enrollment_ref", params.ref.trim())
     .eq("tenant_id", tenantId)
-    .single()) as { data: { id: string; status: string } | null; error: unknown };
+    .single()) as {
+    data: {
+      id: string;
+      status: string;
+      class_id: string | null;
+      quantity: number | null;
+      enrollment_items: { class_id: string; quantity: number }[] | null;
+    } | null;
+    error: unknown;
+  };
 
   if (!enrollment) {
     recordIfDefinitelyAbsent(clientIp, lookupError, "PATCH");
@@ -375,14 +396,54 @@ export async function PATCH(
     return NextResponse.json({ error: "Conflict", message: "This order is no longer pending." }, { status: 409 });
   }
 
-  await supabase
+  // Runners: checked against the order's OWN lines (the same source ticket
+  // issuing uses), before anything is written.
+  const lines =
+    enrollment.enrollment_items && enrollment.enrollment_items.length > 0
+      ? enrollment.enrollment_items.map((i) => ({ class_id: i.class_id, quantity: i.quantity }))
+      : enrollment.class_id
+      ? [{ class_id: enrollment.class_id, quantity: enrollment.quantity ?? 1 }]
+      : [];
+  let runners: Attendee[] = [];
+  if (lines.length > 0) {
+    let check: AttendeeResult;
+    try {
+      check = await checkAttendees(supabase, lines, attendees);
+    } catch {
+      console.error("[enrollment] runner check failed");
+      return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    }
+    if (!check.ok) {
+      return NextResponse.json(
+        { error: "Bad Request", message: check.message, code: "ATTENDEES_INVALID" },
+        { status: 400 },
+      );
+    }
+    runners = check.attendees;
+  }
+
+  // The pending check above is a read; payment can settle between it and this
+  // write (checkout in one tab, payment in another). Ticket issuing copies the
+  // runners once and never rewrites a ticket, so the write itself must refuse
+  // a confirmed order, or the order and its tickets would disagree.
+  const { data: updated, error: updateError } = (await supabase
     .from("enrollments")
     .update({
       student_name_en: student_name_en.trim(),
       email: email.trim(),
       ...(form_data && Object.keys(form_data).length > 0 ? { form_data } : {}),
+      ...(runners.length > 0 ? { attendees: runners } : {}),
     } as never)
-    .eq("id", enrollment.id);
+    .eq("id", enrollment.id)
+    .eq("status", "pending_payment")
+    .select("id")) as { data: { id: string }[] | null; error: { code?: string } | null };
+  if (updateError) {
+    console.error(`[enrollment] details NOT saved for enrollment ${enrollment.id}:`, updateError.code ?? "unknown");
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+  }
+  if (!updated || updated.length === 0) {
+    return NextResponse.json({ error: "Conflict", message: "This order is no longer pending." }, { status: 409 });
+  }
 
   return NextResponse.json({ enrollment_ref: params.ref, status: enrollment.status });
 }
@@ -447,6 +508,10 @@ interface TicketRow {
   admits: number;
   exp: string;
   status: string;
+  class_id?: string;
+  seat_no?: number;
+  /** {label, answers} copied from the order's runners at issue; null without. */
+  attendee?: { label?: unknown } | null;
 }
 
 interface EnrollmentRow {
@@ -456,7 +521,8 @@ interface EnrollmentRow {
   student_name_en: string | null;
   email: string | null;
   quantity: number | null;
-  enrollment_items: { quantity: number; fee_amount: number; classes: { level: string; pack_size: number | null; intakes: { id: string; name: string; slug: string } | null } | null }[] | null;
+  class_id: string | null;
+  enrollment_items: { class_id: string; quantity: number; fee_amount: number; classes: { level: string; pack_size: number | null; intakes: { id: string; name: string; slug: string } | null } | null }[] | null;
   classes: { level: string; fee_amount: number; pack_size: number | null; intakes: { id: string; name: string; slug: string } | null } | null;
   payments: PaymentRow[] | null;
 }

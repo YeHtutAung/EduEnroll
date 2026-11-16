@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { runnerRows, type RunnerRow } from "@/lib/enrollment/attendees";
 import { requireAuth, badRequest } from "@/lib/api";
 import type { EnrollmentStatus, JlptLevel } from "@/types/database";
 
@@ -31,6 +32,8 @@ export interface StudentRow {
   telegram_linked: boolean;
   telegram_phone:  string | null;
   telegram_channel_name: string | null;
+  /** Per-ticket answers (runner name, jersey size…), one row per ticket; empty without. */
+  runners:         RunnerRow[];
 }
 
 // ─── GET /api/admin/students ──────────────────────────────────────────────────
@@ -70,18 +73,37 @@ export async function GET(request: NextRequest) {
     return badRequest(`status must be one of: ${VALID_STATUSES.join(", ")}.`);
   }
 
+  // Event / tier filter: resolve the matching ticket types first. A cart order
+  // has class_id NULL and its ticket types in enrollment_items, so filtering
+  // the table on class_id dropped every cart order of the event. The
+  // enrollments_for_classes() function returns single and cart orders alike
+  // (20261116120000); its ids travel in the POST body, not the URL.
+  //
+  // Resolved by id, not with eq("classes.level", …): the select has two
+  // "classes" embeds (top-level and inside enrollment_items) and a filter on
+  // one may resolve to the wrong one.
+  let classFilterIds: string[] | null = null;
+  if (class_level || intake_id) {
+    let clsQ = supabase.from("classes").select("id").eq("tenant_id", tenantId);
+    if (class_level) clsQ = clsQ.eq("level", class_level);
+    if (intake_id)   clsQ = clsQ.eq("intake_id", intake_id);
+    const { data: cls, error: clsError } = (await clsQ) as { data: { id: string }[] | null; error: unknown };
+    if (clsError) {
+      return NextResponse.json({ error: "Could not load ticket types." }, { status: 500 });
+    }
+    classFilterIds = (cls ?? []).map((c) => c.id);
+  }
+
   // Build query — join to classes (for level + fee) and intakes (for name)
   // Use left join so cart enrollments (class_id=NULL) are included
-  let query = supabase
-    .from("enrollments")
-    .select(
-      `
+  const columns = `
       id,
       enrollment_ref,
       student_name_en,
       student_name_mm,
       phone,
       form_data,
+      attendees,
       status,
       enrolled_at,
       quantity,
@@ -94,31 +116,36 @@ export async function GET(request: NextRequest) {
         intake_id,
         intakes ( name )
       ),
-      enrollment_items ( quantity, fee_amount, classes ( level, intake_id, intakes ( name ) ) )
-    `,
-      { count: "exact" },
-    )
+      enrollment_items ( class_id, quantity, fee_amount, classes ( level, intake_id, intakes ( name ) ) )
+    `;
+  // The function returns enrollments rows, so the same embeds, filters,
+  // ordering, range and count apply to either source.
+  // Called as a method on the client (a detached `rpc` loses `this`); the
+  // cast only names a function the generated types don't list.
+  type RpcClient = {
+    rpc: (
+      fn: "enrollments_for_classes",
+      args: { p_class_ids: string[] },
+      opts: { count: "exact" },
+    ) => { select: (cols: string) => ReturnType<typeof enrollmentsTable> };
+  };
+  let query = (
+    classFilterIds
+      ? (supabase as unknown as RpcClient)
+          .rpc("enrollments_for_classes", { p_class_ids: classFilterIds }, { count: "exact" })
+          .select(columns)
+      : enrollmentsTable()
+  )
     .eq("tenant_id", tenantId)
     .is("internal_test_at", null);
+
+  function enrollmentsTable() {
+    return supabase.from("enrollments").select(columns, { count: "exact" });
+  }
 
   // ── Filters ────────────────────────────────────────────────────────────────
   if (status) query = query.eq("status", status);
 
-  // class_level / intake_id: filter via class_id lookup to avoid PostgREST
-  // ambiguity — the select has two "classes" embeds (top-level and inside
-  // enrollment_items) and eq("classes.level", …) may resolve to the wrong one.
-  if (class_level || intake_id) {
-    let clsQ = supabase.from("classes").select("id").eq("tenant_id", tenantId);
-    if (class_level) clsQ = clsQ.eq("level", class_level);
-    if (intake_id)   clsQ = clsQ.eq("intake_id", intake_id);
-    const { data: cls } = (await clsQ) as { data: { id: string }[] | null; error: unknown };
-    const ids = (cls ?? []).map((c) => c.id);
-    if (ids.length > 0) {
-      query = query.in("class_id", ids);
-    } else {
-      query = query.eq("class_id", "00000000-0000-0000-0000-000000000000");
-    }
-  }
   if (telegram === "linked")     query = query.not("telegram_chat_id", "is", null);
   if (telegram === "not_linked") query = query.is("telegram_chat_id", null);
 
@@ -169,6 +196,7 @@ export async function GET(request: NextRequest) {
       student_name_mm: string | null;
       phone:           string;
       form_data:       Record<string, string> | null;
+      attendees:       unknown;
       status:          EnrollmentStatus;
       enrolled_at:     string;
       quantity:        number | null;
@@ -182,6 +210,7 @@ export async function GET(request: NextRequest) {
         intakes:   { name: string } | null;
       } | null;
       enrollment_items: {
+        class_id: string;
         quantity: number;
         fee_amount: number;
         classes: { level: string; intake_id: string; intakes: { name: string } | null } | null;
@@ -256,6 +285,11 @@ export async function GET(request: NextRequest) {
       telegram_linked: !!row.telegram_chat_id,
       telegram_phone:  row.telegram_phone ?? null,
       telegram_channel_name: row.class_id ? (channelMap[row.class_id] ?? null) : null,
+      runners:         runnerRows(row.attendees, (classId) =>
+        classId === row.class_id
+          ? (row.classes?.level ?? "")
+          : (row.enrollment_items?.find((ei) => ei.class_id === classId)?.classes?.level ?? ""),
+      ),
     };
   });
 

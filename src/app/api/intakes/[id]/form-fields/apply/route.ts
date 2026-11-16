@@ -62,7 +62,7 @@ export async function POST(
   // Fetch ALL fields from source (both default and custom)
   const { data: sourceFields } = await admin
     .from("intake_form_fields")
-    .select("field_key, field_label, field_type, is_required, options, sort_order, is_default")
+    .select("field_key, field_label, field_type, is_required, options, sort_order, is_default, per_attendee")
     .eq("intake_id", params.id)
     .order("sort_order", { ascending: true }) as {
     data: {
@@ -73,6 +73,7 @@ export async function POST(
       options: unknown;
       sort_order: number;
       is_default: boolean;
+      per_attendee: boolean;
     }[] | null;
     error: unknown;
   };
@@ -105,6 +106,7 @@ export async function POST(
             options: f.options,
             sort_order: f.sort_order,
             is_default: f.is_default,
+            per_attendee: f.per_attendee,
           })) as never[],
         );
 
