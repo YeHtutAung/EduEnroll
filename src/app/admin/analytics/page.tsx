@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   LineChart,
   Line,
@@ -154,6 +155,12 @@ function AnalyticsContent() {
           <p className="text-sm text-gray-400 font-myanmar">
             စာရင်းအင်းခွဲခြမ်းစိတ်ဖြာခြင်း
           </p>
+          <Link
+            href="/admin/analytics/sales"
+            className="inline-block mt-1 text-sm font-medium text-[#1a3f8a] hover:underline"
+          >
+            Sales Analytics →
+          </Link>
         </div>
         <div className="flex gap-1 bg-white rounded-lg border border-gray-200 p-1">
           {RANGE_OPTIONS.map((opt) => (
