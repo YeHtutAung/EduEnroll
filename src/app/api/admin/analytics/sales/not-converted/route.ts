@@ -64,8 +64,8 @@ export async function GET(request: NextRequest) {
     ),
   ];
   // BOM so Excel reads UTF-8 (Myanmar names) correctly.
-  const body = `﻿${lines.join("\r\n")}\r\n`;
-  const stamp = new Date().toISOString().slice(0, 10);
+  const body = `\ufeff${lines.join("\r\n")}\r\n`;
+  const stamp = toMMT(new Date().toISOString()).date;
 
   return new NextResponse(body, {
     status: 200,

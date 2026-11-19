@@ -249,12 +249,22 @@ function SalesAnalyticsContent() {
         <div className="bg-white rounded-xl border border-red-200 p-8 text-center" role="alert">
           <p className="text-sm font-medium text-red-700">Couldn&apos;t load sales analytics.</p>
           <p className="text-xs text-gray-500 mt-1">{error}</p>
-          <button
-            onClick={fetchData}
-            className="mt-4 px-4 py-2 text-sm bg-[#1a3f8a] text-white rounded-lg hover:bg-blue-900"
-          >
-            Retry
-          </button>
+          <div className="mt-4 flex justify-center gap-2">
+            <button
+              onClick={fetchData}
+              className="px-4 py-2 text-sm bg-[#1a3f8a] text-white rounded-lg hover:bg-blue-900"
+            >
+              Retry
+            </button>
+            {qs && (
+              <Link
+                href="/admin/analytics/sales"
+                className="px-4 py-2 text-sm border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+              >
+                Clear filters
+              </Link>
+            )}
+          </div>
         </div>
       )}
 
@@ -319,7 +329,9 @@ function KpiRow({ m }: { m: SalesMetrics }) {
             ? `${change >= 0 ? "▲ +" : "▼ "}${change.toFixed(1)}% vs prior 7 days (${l7.prevAvg!.toFixed(1)}/day)`
             : l7.lastAvg === null
               ? "Not enough days after launch"
-              : "No prior 7 days to compare"
+              : l7.prevAvg === 0
+                ? "Prior 7 days: 0/day, no % change"
+                : "No prior 7 days to compare"
         }
       />
       <Kpi
@@ -346,8 +358,8 @@ function DailyByType({ m, colorOf }: { m: SalesMetrics; colorOf: (t: string) => 
               tickLine={false}
               axisLine={{ stroke: "#d1d5db" }}
               tickFormatter={(v: string) => v.slice(5)}
-              interval={many ? "preserveStartEnd" : 0}
-              minTickGap={8}
+              interval="preserveStartEnd"
+              minTickGap={many ? 12 : 6}
             />
             <YAxis tick={AXIS} tickLine={false} axisLine={false} allowDecimals={false} width={40} />
             <Tooltip
@@ -380,7 +392,13 @@ function DailyByType({ m, colorOf }: { m: SalesMetrics; colorOf: (t: string) => 
                 );
               }}
             />
-            <Legend iconType="square" iconSize={10} wrapperStyle={{ fontSize: 12, color: "#374151" }} />
+            <Legend
+              iconType="square"
+              iconSize={10}
+              itemSorter={null}
+              wrapperStyle={{ fontSize: 12 }}
+              formatter={(value: string) => <span style={{ color: "#374151" }}>{value}</span>}
+            />
             {m.types.map((t) => (
               <Bar key={t} dataKey={t} stackId="day" fill={colorOf(t)} stroke="#ffffff" strokeWidth={1} maxBarSize={36} />
             ))}
@@ -412,7 +430,7 @@ function MixTable({ m, colorOf }: { m: SalesMetrics; colorOf: (t: string) => str
             <tbody className="divide-y divide-gray-50 tabular-nums">
               {m.mix.map((r) => (
                 <tr key={r.type}>
-                  <td className="py-2 px-4 sm:px-2">
+                  <td className="py-2 px-4 sm:px-2 whitespace-nowrap">
                     <span className="flex items-center gap-2">
                       <Swatch color={colorOf(r.type)} />
                       {r.type}
@@ -464,7 +482,7 @@ function PriceTierTable({ m }: { m: SalesMetrics }) {
             <tbody className="divide-y divide-gray-50 tabular-nums">
               {m.priceTiers.map((r) => (
                 <tr key={`${r.type}-${r.unit_price}`}>
-                  <td className="py-2 px-4 sm:px-2">{r.type}</td>
+                  <td className="py-2 px-4 sm:px-2 whitespace-nowrap">{r.type}</td>
                   <td className="py-2 px-2 text-right whitespace-nowrap">{formatMMK(Number(r.unit_price))}</td>
                   <td className="py-2 px-2 text-right">{num(Number(r.tickets))}</td>
                   <td className="py-2 px-2 whitespace-nowrap">{r.first_date}</td>
@@ -692,7 +710,7 @@ function NotConverted({ qs, intakeId }: { qs: string; intakeId: string | null })
             </button>
           </div>
         )}
-        {!error && rows && rows.length === 0 && <EmptyNote>Every buyer with a rejected order also has another order.</EmptyNote>}
+        {!error && rows && rows.length === 0 && <EmptyNote>No buyers to follow up for these filters.</EmptyNote>}
         {!error && rows && rows.length > 0 && (
           <>
             <p className="text-xs text-gray-500 mb-2">
