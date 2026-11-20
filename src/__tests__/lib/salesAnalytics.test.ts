@@ -112,7 +112,13 @@ describe("parseSalesFilters", () => {
 });
 
 describe("helpers", () => {
-  it("defaults to Sky Festival 2026, else the newest event", () => {
+  it("defaults to the event with the latest confirmed sale", () => {
+    const events = [{ id: "test", name: "Test Event" }, { id: "run", name: "The Beats Run 2026" }];
+    expect(pickDefaultIntake(events, "run")?.id).toBe("run");
+    // An id that is not one of the caller's events is ignored.
+    expect(pickDefaultIntake(events, "elsewhere")?.id).toBe("test");
+  });
+  it("with no sales, defaults to Sky Festival 2026, else the newest event", () => {
     expect(pickDefaultIntake([{ id: "a", name: "Other" }, { id: "b", name: "Sky Festival 2026" }])?.id).toBe("b");
     expect(pickDefaultIntake([{ id: "a", name: "Other" }])?.id).toBe("a");
     expect(pickDefaultIntake([])).toBeNull();
