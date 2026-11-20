@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+import { isPasswordSession } from "@/lib/authMethod";
 import type { User } from "@/types/database";
 
 export type SuperadminAuth = { error: NextResponse } | { profile: User };
@@ -17,6 +18,12 @@ export async function requireSuperadmin(): Promise<SuperadminAuth> {
 
   if (!user) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
+  }
+
+  // Password sign-ins only; see src/lib/authMethod.ts.
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (!isPasswordSession(sessionData.session?.access_token)) {
+    return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
 
   const { data: profile } = (await supabase
