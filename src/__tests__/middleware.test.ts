@@ -2,12 +2,23 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { middleware } from "@/middleware";
 
-// Middleware calls Supabase auth.getUser(); stub it so these stay offline and
-// deterministic. Without this, tests fail inside createServerClient() before
-// reaching any tenant assertion.
+// Middleware calls Supabase auth.getUser() and, for a signed-in user,
+// auth.getSession(). Stub both so these stay offline and deterministic.
+// Default: signed out. Tests that need a session set authState and the
+// afterEach below resets it.
+const authState = vi.hoisted(() => ({
+  user: null as null | { id: string },
+  accessToken: null as string | null,
+}));
+
 vi.mock("@supabase/ssr", () => ({
   createServerClient: () => ({
-    auth: { getUser: async () => ({ data: { user: null } }) },
+    auth: {
+      getUser: async () => ({ data: { user: authState.user } }),
+      getSession: async () => ({
+        data: { session: authState.accessToken ? { access_token: authState.accessToken } : null },
+      }),
+    },
   }),
 }));
 
@@ -33,6 +44,8 @@ function restoreEnv(key: (typeof ENV_KEYS)[number]) {
 
 afterEach(() => {
   for (const k of ENV_KEYS) restoreEnv(k);
+  authState.user = null;
+  authState.accessToken = null;
 });
 
 // ─── Host-aware request factory — REQUIRED, do not inline NextRequest ────────
@@ -449,5 +462,52 @@ describe("middleware — forged tenant header is not honoured (#164)", () => {
     process.env.VERCEL_ENV = "production";
     const res = await forged("https://kuunyi.com/api/admin/payments/pending");
     expect(slug(res)).toBe("victim");
+  });
+});
+
+// ─── Staff pages need a password session (account-bound tickets spec §4.4) ───
+describe("middleware — staff pages need a password session", () => {
+  function sessionToken(method: string): string {
+    const enc = (v: unknown) => Buffer.from(JSON.stringify(v)).toString("base64url");
+    return `${enc({ alg: "HS256" })}.${enc({ sub: "u1", amr: [{ method, timestamp: 1 }] })}.sig`;
+  }
+  function signIn(method: string) {
+    authState.user = { id: "u1" };
+    authState.accessToken = sessionToken(method);
+  }
+  function devGet(path: string) {
+    process.env.NEXT_PUBLIC_DEV_TENANT = "nihon-moment";
+    return middleware(middlewareRequest(`http://localhost:3005${path}`));
+  }
+  const location = (res: Response) => res.headers.get("location");
+
+  it("lets a password session into /admin", async () => {
+    signIn("password");
+    const res = await devGet("/admin/dashboard");
+    expect(location(res)).toBeNull();
+  });
+
+  it("sends an email-code session from /admin to /login", async () => {
+    signIn("otp");
+    const res = await devGet("/admin/dashboard");
+    expect(location(res)).toContain("/login");
+  });
+
+  it("redirects a password session away from /login", async () => {
+    signIn("password");
+    const res = await devGet("/login");
+    expect(location(res)).toContain("/admin/dashboard");
+  });
+
+  it("leaves an email-code session on /login so the person can sign in with a password", async () => {
+    signIn("otp");
+    const res = await devGet("/login");
+    expect(location(res)).toBeNull();
+  });
+
+  it("sends an email-code session from /onboarding to /login", async () => {
+    signIn("otp");
+    const res = await devGet("/onboarding");
+    expect(location(res)).toContain("/login");
   });
 });
