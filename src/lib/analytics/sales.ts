@@ -44,11 +44,17 @@ export function parseSalesFilters(
   return { filters: { intakeId, from, to, classId } };
 }
 
-/** Event chosen when none is given: the named default, else the newest. */
+/** Event chosen when none is given: the latest sale's event, else the named default, else the newest. */
 export function pickDefaultIntake<T extends { id: string; name: string }>(
   intakes: T[],
+  latestSaleIntakeId: string | null = null,
 ): T | null {
-  return intakes.find((i) => i.name.trim() === DEFAULT_EVENT_NAME) ?? intakes[0] ?? null;
+  return (
+    intakes.find((i) => i.id === latestSaleIntakeId) ??
+    intakes.find((i) => i.name.trim() === DEFAULT_EVENT_NAME) ??
+    intakes[0] ??
+    null
+  );
 }
 
 // ─── Raw shape returned by public.sales_analytics ───────────────────────────

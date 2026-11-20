@@ -31,7 +31,8 @@ const WALLETS = [{ method: "kbzpay_mmqr", wallet: "AB", orders: 1, payments: 1, 
 const rpcCalls: { fn: string; args: unknown }[] = [];
 function builder(result: unknown) {
   const b: Record<string, unknown> = {};
-  for (const m of ["select", "eq", "order"]) b[m] = () => b;
+  for (const m of ["select", "eq", "order", "is", "limit"]) b[m] = () => b;
+  b.maybeSingle = () => Promise.resolve(result);
   b.then = (resolve: (v: unknown) => unknown) => Promise.resolve(result).then(resolve);
   return b;
 }
@@ -39,7 +40,9 @@ const supabase = {
   from: vi.fn((table: string) =>
     table === "intakes"
       ? builder({ data: [{ id: OTHER, name: "Newer Event" }, { id: SKY, name: "Sky Festival 2026" }], error: null })
-      : builder({ data: [{ id: DAY1, level: "Day 1" }], error: null }),
+      : table === "enrollments"
+        ? builder(latestSale)
+        : builder({ data: [{ id: DAY1, level: "Day 1" }], error: null }),
   ),
   rpc: vi.fn(async (fn: string, args: unknown) => {
     rpcCalls.push({ fn, args });
@@ -51,6 +54,7 @@ const supabase = {
 
 let authResult: unknown;
 let walletResult: { data: unknown; error: unknown };
+let latestSale: { data: unknown; error: unknown };
 vi.mock("@/lib/api", () => ({
   requireAuth: vi.fn(async () => authResult),
   badRequest: (message: string) => NextResponse.json({ error: "Bad Request", message }, { status: 400 }),
@@ -69,6 +73,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   asRole("staff");
   walletResult = { data: WALLETS, error: null };
+  latestSale = { data: null, error: null };
 });
 
 describe("GET /api/admin/analytics/sales", () => {
@@ -87,6 +92,24 @@ describe("GET /api/admin/analytics/sales", () => {
     // No contact details anywhere in the aggregate response.
     expect(JSON.stringify(body)).not.toMatch(/email|phone|student_name/i);
     expect(res.headers.get("cache-control")).toContain("no-store");
+  });
+
+  it("defaults to the event of the latest confirmed sale (single or cart order)", async () => {
+    latestSale = { data: { classes: { intake_id: OTHER }, enrollment_items: [] }, error: null };
+    let body = await (await getSales(req("/api/admin/analytics/sales"))).json();
+    expect(body.filters.selected.intakeId).toBe(OTHER);
+
+    rpcCalls.length = 0;
+    latestSale = { data: { classes: null, enrollment_items: [{ classes: { intake_id: OTHER } }] }, error: null };
+    body = await (await getSales(req("/api/admin/analytics/sales"))).json();
+    expect(body.filters.selected.intakeId).toBe(OTHER);
+  });
+
+  it("falls back to the name rule when the latest-sale lookup fails", async () => {
+    latestSale = { data: null, error: { code: "XX000" } };
+    const res = await getSales(req("/api/admin/analytics/sales"));
+    expect(res.status).toBe(200);
+    expect((await res.json()).filters.selected.intakeId).toBe(SKY);
   });
 
   it("passes the filters through", async () => {
