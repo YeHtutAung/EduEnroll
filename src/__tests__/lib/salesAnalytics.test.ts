@@ -4,6 +4,7 @@ import {
   csvCell,
   deriveSalesMetrics,
   formatMMK,
+  paymentMethodLabel,
   parseSalesFilters,
   pickDefaultIntake,
   toMMT,
@@ -131,5 +132,40 @@ describe("helpers", () => {
   it("neutralises formula injection in CSV cells", () => {
     expect(csvCell("=HYPERLINK(1)")).toBe(`"'=HYPERLINK(1)"`);
     expect(csvCell('a "b"')).toBe(`"a ""b"""`);
+  });
+});
+
+describe("payment wallets", () => {
+  const wallets = [
+    { method: "kbzpay_mmqr", wallet: null, orders: 20, payments: 20, amount: 900_000 },
+    { method: "kbzpay_mmqr", wallet: "AB", orders: 5, payments: 5, amount: 300_000 },
+    { method: "", wallet: null, orders: 1, payments: 1, amount: 41_000 },
+    { method: "none", wallet: null, orders: 1, payments: 0, amount: 0 },
+  ];
+
+  it("labels methods and never invents a wallet name", () => {
+    const p = deriveSalesMetrics(raw(), wallets).payments;
+    expect(p.rows.map((r) => [r.methodLabel, r.wallet])).toEqual([
+      ["KBZPay MMQR", "Not reported"],
+      ["KBZPay MMQR", "AB"],
+      ["Manual upload", "Not reported"],
+      ["No verified payment", "—"],
+    ]);
+    expect(p.rows[1].walletReported).toBe(true);
+    expect(p.rows[0].walletReported).toBe(false);
+  });
+
+  it("shares orders against confirmed orders and counts wallet coverage", () => {
+    const p = deriveSalesMetrics(raw(), wallets).payments;
+    expect(p.rows[0].orderShare).toBeCloseTo(20 / 27);
+    expect(p.paidOrders).toBe(26);
+    expect(p.reportedOrders).toBe(5);
+    expect(p.unpaidOrders).toBe(1);
+    expect(p.amount).toBe(1_241_000);
+  });
+
+  it("keeps an unknown method code as is and defaults to no rows", () => {
+    expect(paymentMethodLabel("new_gateway")).toBe("new_gateway");
+    expect(deriveSalesMetrics(raw()).payments.rows).toEqual([]);
   });
 });
