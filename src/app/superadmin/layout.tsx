@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
+import { isPasswordSession } from "@/lib/authMethod";
 import SuperadminLogoutButton from "@/components/admin/SuperadminLogoutButton";
 import type { User } from "@/types/database";
 
@@ -14,6 +15,12 @@ export default async function SuperadminLayout({
   } = await supabase.auth.getUser();
 
   if (!user) {
+    redirect("/login");
+  }
+
+  // Password sign-ins only; see src/lib/authMethod.ts.
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (!isPasswordSession(sessionData.session?.access_token)) {
     redirect("/login");
   }
 

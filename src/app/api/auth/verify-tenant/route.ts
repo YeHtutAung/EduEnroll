@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { resolveTenantId } from "@/lib/api";
+import { isPasswordSession } from "@/lib/authMethod";
 import type { User } from "@/types/database";
 
 // ─── GET /api/auth/verify-tenant ──────────────────────────────────────────────
@@ -22,6 +23,15 @@ export async function GET() {
     return NextResponse.json(
       { error: "Unauthorized", message: "Not logged in." },
       { status: 401 },
+    );
+  }
+
+  // Password sign-ins only; see src/lib/authMethod.ts.
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (!isPasswordSession(sessionData.session?.access_token)) {
+    return NextResponse.json(
+      { error: "Forbidden", message: "Staff must sign in with a password." },
+      { status: 403 },
     );
   }
 
