@@ -53,3 +53,29 @@ describe("sales analytics migration", () => {
     expect(SQL).toContain("REVOKE ALL ON FUNCTION public.sales_not_converted(uuid, date, date, uuid) FROM PUBLIC, anon;");
   });
 });
+
+describe("sales payment wallets migration", () => {
+  const W = fs.readFileSync(
+    path.join(process.cwd(), "supabase", "migrations", "20261120154237_sales_payment_wallets.sql"),
+    "utf8",
+  );
+  const body = W.slice(W.indexOf("CREATE OR REPLACE FUNCTION public.sales_payment_wallets("), W.indexOf("$$;"));
+
+  it("runs as the caller, read-only, over verified payments of confirmed visible orders", () => {
+    expect(body).toContain("SECURITY INVOKER");
+    expect(body).toContain("STABLE");
+    expect(body).not.toMatch(/\b(INSERT|UPDATE|DELETE)\b/);
+    expect(body).toContain("e.status = 'confirmed'");
+    expect(body).toContain("e.internal_test_at IS NULL");
+    expect(body).toContain("p.status = 'verified'");
+    expect(body).toContain("p.tenant_id = o.tenant_id");
+  });
+
+  it("returns no buyer details", () => {
+    expect(body).not.toMatch(/email|phone|student_name/);
+  });
+
+  it("is closed to anon", () => {
+    expect(W).toMatch(/REVOKE ALL ON FUNCTION public\.sales_payment_wallets\(uuid, date, date, uuid\) FROM PUBLIC, anon;/);
+  });
+});
