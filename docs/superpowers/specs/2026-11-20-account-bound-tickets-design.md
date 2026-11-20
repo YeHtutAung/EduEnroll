@@ -2,8 +2,9 @@
 
 Date: 2026-11-20
 Status: revised 2026-11-20 for compatibility with the KuuNyi mobile backend contract
-(`kuunyi-app/docs/specs/eduenroll-mobile-backend.md`, "the mobile spec" below). **One open owner
-decision blocks building: sign-in identity (section 4.1).**
+(`kuunyi-app/docs/specs/eduenroll-mobile-backend.md`, "the mobile spec" below). Sign-in identity
+decided by the owner 2026-11-20: **email for both web and app** (section 4.1 (a)). The mobile spec
+must be updated to match before either side builds buyer sign-in (section 4.1, "What this changes").
 
 ## 1. Goal
 
@@ -27,7 +28,7 @@ page, which organisers may choose to do):
 | Question | Decision |
 |---|---|
 | Where the buyer opens the ticket | Web profile now; the KuuNyi mobile app adopts the same scheme later |
-| Sign-in identity | **Open owner decision** (section 4.1). The owner first chose email code, but the app is built on phone sign-in |
+| Sign-in identity | Email code (Supabase Auth email OTP), shared by web and app — owner decision 2026-11-20, option (a) in section 4.1 |
 | When the buyer signs in | Before checkout, on protected events |
 | Live QR method | Phone-bound key: non-extractable WebCrypto key, QR re-signed every 15 s |
 | Transfers | None |
@@ -52,51 +53,50 @@ The QR format in section 6.2 (P-256, raw r||s) is chosen so both kinds of key ca
 Buyer accounts are shared with the KuuNyi mobile app. Everything here must stay compatible with the
 mobile spec sections 4.3, 4.4, 6.1, 7 and 11.
 
-### 4.1 Sign-in identity — OPEN OWNER DECISION
+### 4.1 Sign-in identity — decided: email for web and app
 
-The mobile app is built on phone sign-in: Supabase phone OTP through the SmsPoh Send SMS Hook,
-`buyer_profiles.phone_e164 NOT NULL UNIQUE`, an App Review test phone number with a fixed code, and
-web account deletion by phone code (mobile spec 4.1, 4.4, 11.2). This spec's first draft chose email
-code. **Not decided here.** The options:
+**Owner decision, 2026-11-20: option (a).** Buyers sign in with a 6-digit email code (Supabase Auth
+email OTP) on the web and in the app. One person, one account, one ticket list.
 
-**(a) Email is the shared identity for web and app.**
-- The app's sign-in is rebuilt around email OTP: mobile spec 4.1 (SMS hook, rate limits), 4.4
-  (`phone_e164` no longer the required unique key), and 11.2 (web deletion by email code) all change.
-- App Review needs a new reviewer route: Supabase's fixed-code test numbers are for phone only.
-- Web checkout stays as section 5 describes. No SMS cost per sign-in. Buyers outside Myanmar can
-  sign in.
-- Supabase Auth SMTP must be set to Resend (the default mailer allows only a few emails per hour).
+- Supabase Auth SMTP is set to Resend in each project (the default mailer allows only a few emails
+  per hour). Dev first.
+- The verified email on the auth user is the identity. `buyer_profiles.email` copies it; the order
+  email for a protected event is this email (section 5).
+- **Email change is not supported** in this version, mirroring the mobile spec's rule for phone:
+  `auth.updateUser({ email })` is blocked for buyers, and `requireBuyer` rejects a token whose auth
+  email differs from `buyer_profiles.email`.
+- Phone becomes an optional, unverified contact field (`buyer_profiles.phone_e164`), used to pre-fill
+  forms. It is no longer unique or required.
+- No SMS cost per sign-in, and buyers without a Myanmar number can sign in.
 
-**(b) Phone stays the identity; protected events also need a verified email on the same account.**
-- The app is unchanged. Web sign-in is phone OTP through the same SMS hook, so every web sign-in
-  costs one SmsPoh SMS, and only `+959…` numbers can sign in, which shuts buyers without a Myanmar
-  number out of protected events.
-- Before a protected checkout, the buyer verifies an email once (Supabase email change confirmation,
-  or our own code). `buyer_profiles` gains `email_verified_at`. The mobile spec's "email unverified in
-  MVP" stays true for the app; only protected checkout requires the verified one.
-- The order email is the verified account email (section 5).
-- Resend SMTP is still needed for the verification email.
+**What this changes in the mobile spec** (must be updated before either side builds buyer sign-in;
+that is the app team's document, not edited by this work):
+- 4.1: phone OTP and the SmsPoh Send SMS Hook are replaced by email OTP. The durable OTP caps move to
+  per-email and per-IP. `signInWithOtp({ email })` / `verifyOtp({ email, token, type: 'email' })`.
+- 4.1 App Review: Supabase's fixed-code test numbers are phone-only, so the reviewer account needs
+  another way in (for example a reviewer address on a domain we control, read by us, or a
+  superadmin-issued reviewer code). To be designed in the mobile spec.
+- 4.2: "phone change not supported" becomes "email change not supported".
+- 4.3: `requireBuyer` matches on email, not phone, and returns `email`.
+- 4.4: `email` NOT NULL UNIQUE (from the auth user, verified); `phone_e164` nullable, not unique.
+- 4.5: `POST /me` takes the email from the auth user, never the body; `phone` moves to the editable
+  fields.
+- 11.2: web deletion is by email code (`signInWithOtp({ email, options: { shouldCreateUser: false } })`),
+  with the same "if an account exists, it has been deleted" answer.
 
-**(c) Separate web and app accounts.**
-- Web uses email accounts, the app uses phone accounts, in the same `auth.users`. One person can
-  have two accounts that never see each other's tickets.
-- `buyer_profiles.phone_e164` must allow null for web rows (or web uses its own table), and
-  `requireBuyer` and deletion must handle both kinds.
-- Simplest for this feature; worst for buyers who use both. Protected events still stay out of the
-  app (section 8.2).
-
-Until this is decided, sections 5 and 9 say "signs in" without naming the method. Section 12 step 2
-is this decision.
+**Options not chosen**, kept for the record: (b) phone stays the identity and protected events add a
+verified email on the same account (SMS cost per web sign-in, `+959` numbers only); (c) separate web
+and app accounts (two unconnected accounts per person).
 
 ### 4.2 Tables
 
 If this work lands before #451, it creates `buyer_profiles` and `enrollments.buyer_id` in **the full
-mobile spec 4.4 / 7.1 shape**, not a reduced one:
+mobile spec 4.4 / 7.1 shape**, adjusted for email identity, not a reduced one:
 
-- `buyer_profiles`: `id` (PK, FK `auth.users(id)` ON DELETE CASCADE), `phone_e164`, `name`,
-  `email`, `locale` (`my` | `en`, default `my`), `created_at`, `updated_at`, `deleted_at`,
-  `is_reviewer` (default false, superadmin-set). Nullability and uniqueness of `phone_e164` and
-  `email` follow the decision in 4.1; under (b), add `email_verified_at`.
+- `buyer_profiles`: `id` (PK, FK `auth.users(id)` ON DELETE CASCADE), `email` (NOT NULL UNIQUE,
+  from the verified auth user), `phone_e164` (nullable, not unique), `name`, `locale` (`my` | `en`,
+  default `my`), `created_at`, `updated_at`, `deleted_at`, `is_reviewer` (default false,
+  superadmin-set).
 - `enrollments.buyer_id uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL`, index
   `(buyer_id, enrolled_at DESC)`, and the `p_buyer_id` parameter on `submit_enrollment` /
   `submit_cart_enrollment` with the idempotency rule from mobile spec 7.1.
@@ -114,11 +114,11 @@ spec 4.3:
   403 `bad_jwt`, `session_not_found`, `user_not_found`, expired).
 - `503` with code `SERVER` when Auth is unreachable, times out, answers 5xx, or answers 429. An Auth
   outage is never a 401, because the app signs the buyer out on 401.
-- Require a `buyer_profiles` row with `deleted_at IS NULL` (and the identity match the mobile spec
-  requires for the chosen identity).
+- Require a `buyer_profiles` row with `deleted_at IS NULL` whose `email` equals the auth user's
+  verified email.
 - A staff account (a `users` row exists) → `403 FORBIDDEN`.
 - Read `session_id` from the token only after `getUser` succeeds. A token without it → 401.
-- Returns `{ buyerId, phone, isReviewer, sessionId }` (plus the verified email under 4.1 (b)).
+- Returns `{ buyerId, email, isReviewer, sessionId }`.
 
 ### 4.4 Staff gates
 
@@ -130,6 +130,16 @@ directions:
   and `/admin` only stops signed-out users. Both must tell a buyer apart from staff (buyer on
   `/login` stays there or goes to `/account`; buyer on `/admin` goes to `/account`);
 - the admin and superadmin layouts.
+
+**Email codes and staff accounts.** Turning on email OTP turns it on for every user in the project,
+staff included, because staff also sign in by email. Without a rule, a staff account could be
+entered with only its inbox, without its password. So:
+- Every staff gate above (`requireAuth`, `requireOwner`, `requireSuperadmin`, middleware, layouts)
+  accepts a staff session only when the token's `amr` claim shows a `password` sign-in. A staff
+  session made with an email code is treated as signed out for admin and gets 403 on admin APIs.
+  The plan must confirm the `amr` contents on the dev project before relying on it.
+- `requireBuyer` already refuses staff (403), so a staff member who wants to buy a protected ticket
+  uses a different email. The sign-in page says so when a staff email asks for a code.
 
 ### 4.5 Sessions and ticket lists
 
@@ -144,8 +154,9 @@ The private security advisories that #451 says must be closed before buyer sign-
 
 ## 5. Checkout on a protected event
 
-1. The enrollment form first signs the buyer in (method per section 4.1) and, under 4.1 (b), makes
-   sure the account has a verified email. An already-signed-in buyer skips what they have done.
+1. The enrollment form first asks for the buyer's email and sends a code; the buyer enters it and is
+   signed in. An already-signed-in buyer skips this. A mistyped email can't receive the code, so
+   typo'd order emails cannot happen on protected events.
 2. The email field is filled from the account's verified email and read-only. The read-only field
    is only a convenience: the enroll routes (`src/app/api/public/enroll/route.ts`,
    `src/app/api/public/enroll/[slug]/route.ts`) overwrite the order email with the account's
@@ -314,7 +325,7 @@ and these rules are relaxed in that story, not before.
 ## 9. Pages and admin
 
 **Buyer:**
-- `/account`: sign-in (method per section 4.1), and sign-out.
+- `/account`: email code sign-in, and sign-out.
 - `/account/tickets`: the current tenant's tickets for this buyer, grouped by event.
 - `/account/tickets/[id]`: the live QR with a 15-second countdown, event and tier, the account email
   (and the attendee name where the order has one), and the "open before you arrive, keep this page
@@ -371,7 +382,11 @@ conventions).
   `/api/me/tickets/{id}/device` ownership and limit; the enroll routes overriding the email; Edit
   Email refused; `requireBuyer` vs every staff gate in section 4.4, including middleware, in both
   directions.
-- **`requireBuyer` (section 4.3):** Auth rejection → 401; Auth unreachable, timeout, 5xx and 429 →
+- **Staff and email codes (section 4.4):** a staff account signed in with an email code gets 403 on
+  admin and superadmin APIs and is sent away from `/admin`; the same account signed in with its
+  password is unaffected.
+- **`requireBuyer` (section 4.3):** auth email different from `buyer_profiles.email` → 401;
+  Auth rejection → 401; Auth unreachable, timeout, 5xx and 429 →
   503 `SERVER`, never 401; staff account → 403; deleted profile → 401; token without `session_id`
   → 401; claims never read before `getUser` succeeds.
 - **Mobile routes (section 8.2):** `GET /events` omits a protected event; `GET
@@ -388,10 +403,11 @@ conventions).
 ## 12. Dependencies and order
 
 1. Close the private security advisories (#451 prerequisite).
-2. **Owner decision (open): sign-in identity, section 4.1** — (a) email as the shared identity, with
-   the app's sign-in rebuilt; (b) phone stays the identity and protected events add a verified email
-   on the same account; or (c) separate web and app accounts. Nothing in step 5 starts before this.
-3. Resend SMTP set for Supabase Auth on dev, then staging (needed under all three options).
+2. Sign-in identity: **decided 2026-11-20, email for web and app** (section 4.1). The mobile spec
+   (kuunyi-app) and #451 are updated to email sign-in, including a new App Review reviewer route,
+   before either side builds buyer sign-in.
+3. Resend SMTP set for Supabase Auth on dev, then staging. Staff gates require a `password` sign-in
+   (section 4.4) **before** email OTP is turned on in any project.
 4. kuunyi-scanner: send `token`, accept `k2.`.
 5. This feature: migration, accounts, checkout, binding, scan path, surface closing, pages, admin.
 6. Staging phone test (section 11), then production through the normal dev → staging → main flow,
@@ -408,7 +424,9 @@ conventions).
 - **iOS storage deletion:** Safari can delete the IndexedDB key after 7 days without a visit
   (section 6.3), so early buyers may need a re-bind at the gate. Home Screen install and reminders
   reduce it; a help desk with admin reset covers the rest.
-- **Email deliverability:** sign-in or email verification depends on Resend reaching the buyer.
-  Code emails must be monitored on launch day.
+- **Email deliverability:** every buyer sign-in, web and app, depends on Resend reaching the buyer.
+  Code emails must be monitored on launch day, and a Resend outage stops new sign-ins everywhere.
+- **Staff accounts and email codes:** email OTP is project-wide, so staff gates must refuse
+  non-password sessions (section 4.4) before it is turned on.
 - **App and web drift:** until the app supports bound tickets, protected events are invisible in
   the app (section 8.2). A buyer may see an event on the web that the app doesn't list.
