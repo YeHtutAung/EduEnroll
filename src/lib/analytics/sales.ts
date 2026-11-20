@@ -118,7 +118,78 @@ export interface SalesMetrics {
   orderSizes: RawSalesAnalytics["order_sizes"];
   dailyRejection: { date: string; rate: number | null; rejected: number; confirmed: number }[];
   recovery: { rejectedBuyers: number; recoveredBuyers: number; rate: number | null };
+  payments: PaymentWallets;
   isEmpty: boolean;
+}
+
+// ─── How confirmed orders were paid ─────────────────────────────────────────
+/** One row of public.sales_payment_wallets(). */
+export interface RawWalletRow {
+  method: string; // payments.payment_method, '' when unset, 'none' = no verified payment
+  wallet: string | null; // payer_institution as the gateway reported it
+  orders: number;
+  payments: number;
+  amount: number;
+}
+
+export interface PaymentWallets {
+  rows: {
+    method: string;
+    methodLabel: string;
+    wallet: string;
+    walletReported: boolean;
+    orders: number;
+    orderShare: number | null; // of confirmed orders, 0..1
+    payments: number;
+    amount: number;
+  }[];
+  paidOrders: number; // orders with a verified payment (a split payment counts per method)
+  reportedOrders: number; // of those, orders whose wallet the gateway named
+  unpaidOrders: number; // confirmed with no verified payment
+  amount: number;
+}
+
+const METHOD_LABELS: Record<string, string> = {
+  kbzpay_mmqr: "KBZPay MMQR",
+  cb_mmqr: "CB Bank MMQR",
+  abank_mmqr: "ABank MMQR",
+  mmqr: "MMQR",
+  stripe: "Card (Stripe)",
+  hitpay: "HitPay",
+  paypay: "PayPay",
+  bank_transfer: "Bank transfer",
+  manual_upload: "Manual upload",
+  "": "Manual upload",
+  none: "No verified payment",
+};
+
+export function paymentMethodLabel(method: string): string {
+  return METHOD_LABELS[method] ?? method;
+}
+
+function shapeWallets(rows: RawWalletRow[], confirmedOrders: number): PaymentWallets {
+  const n = (v: number | null | undefined) => Number(v ?? 0);
+  const out: PaymentWallets = { rows: [], paidOrders: 0, reportedOrders: 0, unpaidOrders: 0, amount: 0 };
+  for (const r of rows) {
+    const orders = n(r.orders);
+    const unpaid = r.method === "none";
+    const reported = !unpaid && !!r.wallet;
+    out.rows.push({
+      method: r.method,
+      methodLabel: paymentMethodLabel(r.method),
+      wallet: unpaid ? "—" : r.wallet || "Not reported",
+      walletReported: reported,
+      orders,
+      orderShare: ratio(orders, confirmedOrders),
+      payments: n(r.payments),
+      amount: n(r.amount),
+    });
+    if (unpaid) out.unpaidOrders += orders;
+    else out.paidOrders += orders;
+    if (reported) out.reportedOrders += orders;
+    out.amount += n(r.amount);
+  }
+  return out;
 }
 
 const ratio = (num: number, den: number): number | null => (den > 0 ? num / den : null);
@@ -136,7 +207,7 @@ export function compareTicketTypes(a: string, b: string): number {
   return ga - gb || na - nb || sa.localeCompare(sb);
 }
 
-export function deriveSalesMetrics(raw: RawSalesAnalytics): SalesMetrics {
+export function deriveSalesMetrics(raw: RawSalesAnalytics, wallets: RawWalletRow[] = []): SalesMetrics {
   const k = raw.kpis;
   const n = (v: number | null | undefined) => Number(v ?? 0);
 
@@ -213,6 +284,7 @@ export function deriveSalesMetrics(raw: RawSalesAnalytics): SalesMetrics {
       recoveredBuyers: n(raw.recovery.recovered_buyers),
       rate: ratio(n(raw.recovery.recovered_buyers), n(raw.recovery.rejected_buyers)),
     },
+    payments: shapeWallets(wallets, confirmedOrders),
     isEmpty: confirmedOrders === 0 && rejectedOrders === 0,
   };
 }
