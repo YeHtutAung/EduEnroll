@@ -289,6 +289,7 @@ function SalesAnalyticsContent() {
             <MixTable m={m} colorOf={colorOf} />
             <PriceTierTable m={m} />
           </div>
+          <PaymentWallets m={m} typeFiltered={!!selected?.classId} />
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <ByHour m={m} />
             <OrderSizes m={m} />
@@ -489,6 +490,72 @@ function PriceTierTable({ m }: { m: SalesMetrics }) {
             </tbody>
           </table>
         </div>
+      )}
+    </Card>
+  );
+}
+
+// ─── 4b. How buyers paid ───────────────────────────────────────────────────
+function PaymentWallets({ m, typeFiltered }: { m: SalesMetrics; typeFiltered: boolean }) {
+  const p = m.payments;
+  return (
+    <Card
+      title="How buyers paid"
+      sub="Verified payments of confirmed orders, by payment method and the wallet or bank the payer used."
+    >
+      {p.rows.length === 0 ? (
+        <EmptyNote>No confirmed orders.</EmptyNote>
+      ) : (
+        <>
+          <p className="text-xs text-gray-600 mb-3">
+            Wallet named by the payment gateway for{" "}
+            <span className="font-semibold text-gray-800 tabular-nums">
+              {num(p.reportedOrders)} of {num(p.paidOrders)}
+            </span>{" "}
+            paid orders. &ldquo;Not reported&rdquo; means the gateway sent no wallet name.
+          </p>
+          <div className="overflow-x-auto -mx-4 sm:mx-0">
+            <table className="w-full min-w-[520px] text-sm">
+              <thead>
+                <tr className="text-left text-xs text-gray-500 border-b border-gray-100">
+                  <th className="py-2 px-4 sm:px-2 font-medium">Method</th>
+                  <th className="py-2 px-2 font-medium">Wallet / bank</th>
+                  <th className="py-2 px-2 font-medium text-right">Orders</th>
+                  <th className="py-2 px-2 font-medium text-right">Share</th>
+                  <th className="py-2 px-4 sm:px-2 font-medium text-right">Amount received</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50 tabular-nums">
+                {p.rows.map((r) => (
+                  <tr key={`${r.method}|${r.wallet}`}>
+                    <td className="py-2 px-4 sm:px-2 whitespace-nowrap">{r.methodLabel}</td>
+                    <td className={`py-2 px-2 whitespace-nowrap ${r.walletReported ? "" : "text-gray-400"}`}>
+                      {r.wallet}
+                    </td>
+                    <td className="py-2 px-2 text-right">{num(r.orders)}</td>
+                    <td className="py-2 px-2 text-right">{formatPct(r.orderShare)}</td>
+                    <td className="py-2 px-4 sm:px-2 text-right whitespace-nowrap">
+                      {r.payments > 0 ? formatMMK(r.amount) : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-gray-200 font-semibold tabular-nums">
+                  <td className="py-2 px-4 sm:px-2" colSpan={2}>Total</td>
+                  <td className="py-2 px-2 text-right">{num(p.paidOrders + p.unpaidOrders)}</td>
+                  <td className="py-2 px-2" />
+                  <td className="py-2 px-4 sm:px-2 text-right whitespace-nowrap">{formatMMK(p.amount)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+          <p className="text-xs text-gray-500 mt-3">
+            Amounts are whole-order payments, platform fee included
+            {typeFiltered ? ", for orders that include this ticket type" : ""}. An order paid in two
+            methods counts in both rows.
+          </p>
+        </>
       )}
     </Card>
   );
