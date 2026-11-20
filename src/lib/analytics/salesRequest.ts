@@ -57,7 +57,7 @@ export async function resolveSalesRequest(
     intake = intakes.find((i) => i.id === filters.intakeId) ?? null;
     if (!intake) return NextResponse.json({ error: "Not Found", message: "Event not found." }, { status: 404 });
   } else {
-    intake = pickDefaultIntake(intakes);
+    intake = pickDefaultIntake(intakes, await latestSaleIntakeId(supabase, tenantId));
   }
 
   let ticketTypes: { id: string; level: string }[] = [];
@@ -85,6 +85,40 @@ export async function resolveSalesRequest(
     ticketTypes,
     filters: { ...filters, intakeId: intake?.id ?? null },
   };
+}
+
+/**
+ * The event of the tenant's most recent confirmed, non-test order, so the page
+ * opens on the event that is selling now rather than the newest one created
+ * (often a test event). Single orders carry the ticket type on the enrollment;
+ * cart orders on their items. Null when there is no sale or the lookup fails —
+ * the default is a convenience, so it never fails the request.
+ */
+async function latestSaleIntakeId(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  supabase: SupabaseClient<any>,
+  tenantId: string,
+): Promise<string | null> {
+  const { data, error } = (await supabase
+    .from("enrollments")
+    .select("classes(intake_id), enrollment_items(classes(intake_id))")
+    .eq("tenant_id", tenantId)
+    .eq("status", "confirmed")
+    .is("internal_test_at", null)
+    .order("enrolled_at", { ascending: false })
+    .limit(1)
+    .maybeSingle()) as {
+    data: {
+      classes: { intake_id: string } | null;
+      enrollment_items: { classes: { intake_id: string } | null }[] | null;
+    } | null;
+    error: { code?: string } | null;
+  };
+  if (error) {
+    console.error("[sales-analytics] latest sale lookup failed:", error.code ?? "");
+    return null;
+  }
+  return data?.classes?.intake_id ?? data?.enrollment_items?.[0]?.classes?.intake_id ?? null;
 }
 
 /** RPC arguments shared by both functions. */
