@@ -300,9 +300,17 @@ describe("reporting", () => {
 
   it("R3 verified payment on a rejected enrollment is not revenue", async () => {
     await makeEnrollment({ status: "rejected", verifiedPayment: true });
-    const [r] = await sql<{ revenue: number }>(
-      `select public.get_tenant_revenue($1)::int revenue`, [tenantId],
-    );
+    // Run as the server-side (service role) caller this stands for.
+    const client = await pool.connect();
+    let r: { revenue: number };
+    try {
+      await client.query("begin");
+      await client.query(`select set_config('request.jwt.claims', '{"role":"service_role"}', true)`);
+      r = (await client.query(`select public.get_tenant_revenue($1)::int revenue`, [tenantId])).rows[0];
+    } finally {
+      await client.query("rollback").catch(() => {});
+      client.release();
+    }
     const [{ expected }] = await sql<{ expected: number }>(
       `select coalesce(sum(p.amount),0)::int expected
        from payments p join enrollments e on e.id=p.enrollment_id
