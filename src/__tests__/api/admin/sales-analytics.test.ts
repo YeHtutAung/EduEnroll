@@ -26,6 +26,8 @@ const NOT_CONVERTED = [
   { ref: "SF-1", name: "=cmd", email: "a@x.com", phone: "09", ticket_type: "Day 1", qty: 2, fee: 60000, enrolled_at: "2026-11-05T13:30:00Z" },
 ];
 
+const WALLETS = [{ method: "kbzpay_mmqr", wallet: "AB", orders: 1, payments: 1, amount: 30000 }];
+
 const rpcCalls: { fn: string; args: unknown }[] = [];
 function builder(result: unknown) {
   const b: Record<string, unknown> = {};
@@ -41,11 +43,14 @@ const supabase = {
   ),
   rpc: vi.fn(async (fn: string, args: unknown) => {
     rpcCalls.push({ fn, args });
-    return fn === "sales_analytics" ? { data: RAW, error: null } : { data: NOT_CONVERTED, error: null };
+    if (fn === "sales_analytics") return { data: RAW, error: null };
+    if (fn === "sales_payment_wallets") return walletResult;
+    return { data: NOT_CONVERTED, error: null };
   }),
 };
 
 let authResult: unknown;
+let walletResult: { data: unknown; error: unknown };
 vi.mock("@/lib/api", () => ({
   requireAuth: vi.fn(async () => authResult),
   badRequest: (message: string) => NextResponse.json({ error: "Bad Request", message }, { status: 400 }),
@@ -63,6 +68,7 @@ beforeEach(() => {
   rpcCalls.length = 0;
   vi.clearAllMocks();
   asRole("staff");
+  walletResult = { data: WALLETS, error: null };
 });
 
 describe("GET /api/admin/analytics/sales", () => {
@@ -70,9 +76,12 @@ describe("GET /api/admin/analytics/sales", () => {
     const res = await getSales(req("/api/admin/analytics/sales"));
     expect(res.status).toBe(200);
     const body = await res.json();
+    const args = { p_intake_id: SKY, p_from: null, p_to: null, p_class_id: null };
     expect(rpcCalls).toEqual([
-      { fn: "sales_analytics", args: { p_intake_id: SKY, p_from: null, p_to: null, p_class_id: null } },
+      { fn: "sales_analytics", args },
+      { fn: "sales_payment_wallets", args },
     ]);
+    expect(body.metrics.payments.rows[0]).toMatchObject({ methodLabel: "KBZPay MMQR", wallet: "AB", orders: 1 });
     expect(body.filters.selected.intakeId).toBe(SKY);
     expect(body.metrics.kpis.revenue).toBe(30000);
     // No contact details anywhere in the aggregate response.
@@ -82,7 +91,14 @@ describe("GET /api/admin/analytics/sales", () => {
 
   it("passes the filters through", async () => {
     await getSales(req("/api/admin/analytics/sales", `intake_id=${SKY}&from=2026-11-01&to=2026-11-10&class_id=${DAY1}`));
-    expect(rpcCalls[0].args).toEqual({ p_intake_id: SKY, p_from: "2026-11-01", p_to: "2026-11-10", p_class_id: DAY1 });
+    const want = { p_intake_id: SKY, p_from: "2026-11-01", p_to: "2026-11-10", p_class_id: DAY1 };
+    expect(rpcCalls.map((c) => c.args)).toEqual([want, want]);
+  });
+
+  it("fails the whole response when the wallet query fails", async () => {
+    walletResult = { data: null, error: { code: "42883" } };
+    const res = await getSales(req("/api/admin/analytics/sales"));
+    expect(res.status).toBe(500);
   });
 
   it("404s an event of another tenant without calling the database function", async () => {
