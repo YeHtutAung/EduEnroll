@@ -5,6 +5,7 @@ import { createClient as createBareClient, type SupabaseClient } from "@supabase
 import { createAdminClient } from "@/lib/supabase/admin";
 import { extractSubdomainFromHost, isPlatformRootHost } from "@/lib/tenant";
 import { verifyAgentSignature } from "@/lib/agent-auth";
+import { isPasswordSession } from "@/lib/authMethod";
 import type { User, Database } from "@/types/database";
 
 export interface AuthContext {
@@ -159,6 +160,7 @@ export async function requireAuth(rawBody = ""): Promise<AuthContext | NextRespo
 
   let supabase: SupabaseClient<Database>;
   let authUser: { id: string } | null = null;
+  let accessToken: string | null = null;
 
   if (authHeader?.startsWith("Bearer ")) {
     // Bearer token auth (API clients, CI) — create a client with the user's
@@ -175,6 +177,7 @@ export async function requireAuth(rawBody = ""): Promise<AuthContext | NextRespo
     const { data, error } = await tokenClient.auth.getUser(token);
     if (!error && data.user) {
       authUser = data.user;
+      accessToken = token;
     }
     supabase = tokenClient;
   } else {
@@ -183,6 +186,9 @@ export async function requireAuth(rawBody = ""): Promise<AuthContext | NextRespo
     const { data, error } = await supabase.auth.getUser();
     if (!error && data.user) {
       authUser = data.user;
+      // getUser() has just accepted this session, so its token is genuine.
+      const { data: sessionData } = await supabase.auth.getSession();
+      accessToken = sessionData.session?.access_token ?? null;
     }
   }
 
@@ -190,6 +196,17 @@ export async function requireAuth(rawBody = ""): Promise<AuthContext | NextRespo
     return NextResponse.json(
       { error: "Unauthorized", message: "Valid session required." },
       { status: 401 },
+    );
+  }
+
+  // Staff must sign in with a password. Email codes (for buyers) work for every
+  // account in the project, so a code session must not open a staff account.
+  // The database enforces the same rule (is_password_session()); this answers
+  // early and clearly. Spec: account-bound tickets, section 4.4.
+  if (!isPasswordSession(accessToken)) {
+    return NextResponse.json(
+      { error: "Forbidden", message: "Staff must sign in with a password." },
+      { status: 403 },
     );
   }
 
