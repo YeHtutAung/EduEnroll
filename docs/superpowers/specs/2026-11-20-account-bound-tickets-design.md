@@ -131,9 +131,8 @@ directions:
   `/login` stays there or goes to `/account`; buyer on `/admin` goes to `/account`);
 - the admin and superadmin layouts.
 
-**Email codes and staff accounts.** Turning on email OTP turns it on for every user in the project,
-staff included, because staff also sign in by email. Without a rule, a staff account could be
-entered with only its inbox, without its password. So:
+**Email codes and staff accounts.** Email OTP is a project-wide Supabase setting, and staff also
+have email addresses. Staff access is defined as requiring a password sign-in, so:
 - Every staff gate above (`requireAuth`, `requireOwner`, `requireSuperadmin`, middleware, layouts)
   accepts a staff session only when the token's `amr` claim shows a `password` sign-in. A staff
   session made with an email code is treated as signed out for admin and gets 403 on admin APIs.

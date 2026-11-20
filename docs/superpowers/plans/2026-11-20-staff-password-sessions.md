@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Staff (owner, staff, superadmin) can reach admin data only from a session created by a password sign-in, so turning on email-code sign-in for buyers can never open a staff account with just its inbox.
+**Goal:** Staff (owner, staff, superadmin) can reach admin data only from a session created by a password sign-in, so that buyer email-code sign-in and staff access stay separate.
 
 **Architecture:** The database is the main gate: `get_my_tenant_id()` and `get_my_role()` return NULL unless the JWT's `amr` claim shows a `password` sign-in, so every RLS policy built on them follows. The four policies that read `public.users` directly are rewritten to go through the same check. The app adds a second layer: `requireAuth`, `requireSuperadmin`, middleware and the admin and superadmin layouts refuse a session whose access token has no `password` method.
 
@@ -1102,10 +1102,8 @@ Task 9. End it with `🤖 Generated with [Claude Code](https://claude.com/claude
    data with a non-password token: report it before going further.
 5. **Required before production.** The migration goes to production **before** the code, as part of
    the normal staging → main promotion.
-6. **Optional.** In the Supabase dashboard (Authentication → Providers → Email), note whether email
-   code / magic-link sign-in is currently enabled on dev and production. This plan makes it safe
-   either way, but the answer tells you whether this fixes something that already exists or only
-   prepares for Plan 2.
+6. **Optional.** In the Supabase dashboard (Authentication → Providers → Email), note the current
+   email sign-in settings on dev and production before Plan 2 changes them.
 
 ## Not covered by this plan
 
