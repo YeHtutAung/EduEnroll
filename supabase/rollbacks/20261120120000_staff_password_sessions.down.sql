@@ -1,13 +1,29 @@
 -- Run by hand only (see MIGRATIONS.md). Restores the pre-20261120120000 state.
 
 CREATE OR REPLACE FUNCTION public.get_my_tenant_id()
-RETURNS uuid LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT tenant_id FROM public.users WHERE id = auth.uid() LIMIT 1;
+RETURNS uuid
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT tenant_id
+  FROM   public.users
+  WHERE  id = auth.uid()
+  LIMIT  1;
 $$;
 
 CREATE OR REPLACE FUNCTION public.get_my_role()
-RETURNS user_role LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT role FROM public.users WHERE id = auth.uid() LIMIT 1;
+RETURNS user_role
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT role
+  FROM   public.users
+  WHERE  id = auth.uid()
+  LIMIT  1;
 $$;
 
 DROP POLICY IF EXISTS "class_channels_select" ON public.class_channels;
@@ -46,5 +62,37 @@ CREATE POLICY "intake_form_fields_manage"
         AND u.role IN ('owner', 'staff')
     )
   );
+
+-- Original get_tenant_revenue guard (as in 20260723120000).
+create or replace function public.get_tenant_revenue(p_tenant_id uuid)
+returns bigint
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_total bigint;
+begin
+  if public.get_my_role() <> 'superadmin'
+     and p_tenant_id is distinct from public.get_my_tenant_id() then
+    raise exception 'not authorized to read revenue for this tenant'
+      using errcode = '42501';
+  end if;
+
+  select coalesce(sum(p.amount), 0)
+  into v_total
+  from public.payments p
+  join public.enrollments e on e.id = p.enrollment_id
+  where p.tenant_id = p_tenant_id
+    and p.status = 'verified'
+    and e.status = 'confirmed'
+    and e.internal_test_at is null;
+
+  return v_total;
+end;
+$$;
+
+grant execute on function public.get_tenant_revenue(uuid) to authenticated;
 
 DROP FUNCTION IF EXISTS public.is_password_session();

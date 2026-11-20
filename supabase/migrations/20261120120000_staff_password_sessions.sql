@@ -91,3 +91,39 @@ CREATE POLICY "intake_form_fields_manage"
         AND u.role IN ('owner', 'staff')
     )
   );
+
+-- Revenue guard: refuse callers that have no staff role (for example an email-code session).
+create or replace function public.get_tenant_revenue(p_tenant_id uuid)
+returns bigint
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  v_total bigint;
+begin
+  -- The service role (server-side callers such as the bot path of requireAuth)
+  -- is trusted as before; any other caller without a staff role is refused.
+  -- With <> a NULL role would have skipped the check.
+  if coalesce(auth.role(), '') <> 'service_role'
+     and public.get_my_role() is distinct from 'superadmin'
+     and p_tenant_id is distinct from public.get_my_tenant_id() then
+    raise exception 'not authorized to read revenue for this tenant'
+      using errcode = '42501';
+  end if;
+
+  select coalesce(sum(p.amount), 0)
+  into v_total
+  from public.payments p
+  join public.enrollments e on e.id = p.enrollment_id
+  where p.tenant_id = p_tenant_id
+    and p.status = 'verified'
+    and e.status = 'confirmed'
+    and e.internal_test_at is null;
+
+  return v_total;
+end;
+$$;
+
+grant execute on function public.get_tenant_revenue(uuid) to authenticated;
