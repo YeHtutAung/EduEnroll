@@ -39,6 +39,7 @@ describe("requireSuperadmin", () => {
     });
     const auth = await requireSuperadmin();
     expect("error" in auth && auth.error.status).toBe(403);
+    expect("error" in auth && (await auth.error.json())).toMatchObject({ code: "PASSWORD_SIGN_IN_REQUIRED" });
     expect(client.from).not.toHaveBeenCalled();
   });
 });

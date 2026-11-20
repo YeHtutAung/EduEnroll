@@ -23,7 +23,16 @@ export async function requireSuperadmin(): Promise<SuperadminAuth> {
   // Password sign-ins only; see src/lib/authMethod.ts.
   const { data: sessionData } = await supabase.auth.getSession();
   if (!isPasswordSession(sessionData.session?.access_token)) {
-    return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
+    return {
+      error: NextResponse.json(
+        {
+          error: "Forbidden",
+          code: "PASSWORD_SIGN_IN_REQUIRED",
+          message: "Staff must sign in with a password.",
+        },
+        { status: 403 },
+      ),
+    };
   }
 
   const { data: profile } = (await supabase

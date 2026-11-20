@@ -30,7 +30,11 @@ export async function GET() {
   const { data: sessionData } = await supabase.auth.getSession();
   if (!isPasswordSession(sessionData.session?.access_token)) {
     return NextResponse.json(
-      { error: "Forbidden", message: "Staff must sign in with a password." },
+      {
+        error: "Forbidden",
+        code: "PASSWORD_SIGN_IN_REQUIRED",
+        message: "Staff must sign in with a password.",
+      },
       { status: 403 },
     );
   }

@@ -205,7 +205,11 @@ export async function requireAuth(rawBody = ""): Promise<AuthContext | NextRespo
   // early and clearly. Spec: account-bound tickets, section 4.4.
   if (!isPasswordSession(accessToken)) {
     return NextResponse.json(
-      { error: "Forbidden", message: "Staff must sign in with a password." },
+      {
+        error: "Forbidden",
+        code: "PASSWORD_SIGN_IN_REQUIRED",
+        message: "Staff must sign in with a password.",
+      },
       { status: 403 },
     );
   }

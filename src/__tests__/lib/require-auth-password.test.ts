@@ -63,6 +63,7 @@ describe("requireAuth — cookie session", () => {
     const auth = await requireAuth();
     expect(auth).toBeInstanceOf(NextResponse);
     expect((auth as NextResponse).status).toBe(403);
+    expect(await (auth as NextResponse).json()).toMatchObject({ code: "PASSWORD_SIGN_IN_REQUIRED" });
     expect(cookieClient.from).not.toHaveBeenCalled();
   });
 
@@ -70,6 +71,7 @@ describe("requireAuth — cookie session", () => {
     cookieClient.auth.getSession.mockResolvedValue({ data: { session: null } });
     const auth = await requireAuth();
     expect((auth as NextResponse).status).toBe(403);
+    expect(await (auth as NextResponse).json()).toMatchObject({ code: "PASSWORD_SIGN_IN_REQUIRED" });
   });
 
   it("still returns 401 when there is no user at all", async () => {
@@ -90,6 +92,7 @@ describe("requireAuth — Bearer token", () => {
     headerMap.set("authorization", `Bearer ${CODE}`);
     const auth = await requireAuth();
     expect((auth as NextResponse).status).toBe(403);
+    expect(await (auth as NextResponse).json()).toMatchObject({ code: "PASSWORD_SIGN_IN_REQUIRED" });
     expect(bearerClient.from).not.toHaveBeenCalled();
   });
 });

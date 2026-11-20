@@ -493,6 +493,13 @@ describe("middleware — staff pages need a password session", () => {
     expect(location(res)).toContain("/login");
   });
 
+  it("sends a signed-in user with no readable session token from /admin to /login", async () => {
+    authState.user = { id: "u1" };
+    authState.accessToken = null;
+    const res = await devGet("/admin/dashboard");
+    expect(location(res)).toContain("/login");
+  });
+
   it("redirects a password session away from /login", async () => {
     signIn("password");
     const res = await devGet("/login");
