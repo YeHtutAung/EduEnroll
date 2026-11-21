@@ -1163,33 +1163,40 @@ git commit -m "feat(account): web profile route — GET via requireBuyer, POST v
 
 No new dependency. Verify with Node `crypto`, per the Standard Webhooks scheme Supabase uses:
 - headers `webhook-id`, `webhook-timestamp` (Unix seconds) and `webhook-signature` (space-separated `v1,<base64>` entries);
-- signed content is `${id}.${timestamp}.${rawBody}`, HMAC-SHA256, keyed with the base64-decoded secret after stripping a leading `v1,whsec_` or `whsec_`.
+- signed content is `${id}.${timestamp}.${rawBody}`, HMAC-SHA256, keyed with the base64-decoded secret after stripping a leading `v1,` and then `whsec_` (so `v1,whsec_…`, `whsec_…` and bare base64 all work). An empty key is refused: anyone could sign with it.
 
 - [ ] **Step 1: Write the failing tests**
 
   `standardWebhook.test.ts`: sign a body in the test with a known throwaway secret. Cases:
-  - accepts a valid signature;
-  - accepts the secret with and without the `v1,whsec_` prefix;
+  - accepts a valid signature, and a timestamp exactly 300 s away either side;
+  - accepts the secret with `v1,whsec_`, with `whsec_` only, and bare;
   - accepts when one of several entries matches;
-  - rejects a changed body, a wrong secret, a missing header, an entry without `v1,`, a timestamp more than 300 s old or more than 300 s in the future, and a non-numeric timestamp.
+  - rejects a changed body, a wrong secret, an empty secret (even against a signature made with an empty key), a missing header, an entry without `v1,` (or `v2,`, or `v1,` with nothing after), a timestamp more than 300 s old or more than 300 s in the future, and a non-numeric timestamp.
 
   The comparison must use `timingSafeEqual` on equal-length buffers; a length mismatch is false, not an exception.
 
-  `authEmailCopy.test.ts`:
-  - `signup` and `magiclink` produce a subject and HTML containing the 6-digit code, with Myanmar and English text in one email, and **no sign-in link**: no `/auth/v1/verify`, no `token_hash` value, no `redirect_to`. The plain footer link to `EMAIL_FOOTER_URL` is allowed;
-  - `recovery`, `invite` and `reauthentication` produce the staff copy;
-  - `email_change` produces two messages, each with its own code.
+  `authEmailCopy.test.ts`, against `authEmailMessages(payload, supabaseUrl) → Array<{ to, subject, html }> | null`:
+  - `signup` and `magiclink` produce one message to `user.email`, with the 6-digit code in the subject and HTML, Myanmar and English text in one email, and **no sign-in link**: no `/auth/v1/verify`, no `token_hash` value, no `redirect_to`, no `site_url`. The only `href` is the footer link to `EMAIL_FOOTER_URL`;
+  - a code that isn't 6–10 digits, or no `user.email`, → `null`;
+  - `recovery` and `invite` link to `${supabaseUrl}/auth/v1/verify?token=<token_hash>&type=<type>&redirect_to=<encoded>` (HTML-escaped in the `href`), never `site_url`, with different subjects; no `token_hash` or no Supabase URL → `null`;
+  - `reauthentication` shows the code and no link;
+  - `email_change` produces two messages, `token` to `user.email` and `token_new` to `user.new_email`, each with only its own code; a missing code or `new_email` → `null`;
+  - an unlisted type → `null`.
 
-  `send-email.test.ts`: mock `@/lib/email` `sendEmail` and the timed admin client's `rpc("consume_rate_limit")`. Cases:
-  - bad signature → 401 `{ error: { http_code: 401, … } }`, nothing sent, no rate-limit call;
-  - unlisted type (e.g. `password_changed_notification`) → 400, nothing sent;
-  - `signup` within limits → 200 `{}`, one email to `user.email` containing `email_data.token`;
+  `send-email.test.ts`: mock `@/lib/email` `sendEmail` (`importOriginal`, keeping `EMAIL_FOOTER_URL`) and `@/server/buyers/adminClient` so `createTimedAdminClient()` returns `{ rpc }`. Set the env with `vi.stubEnv`. Cases:
+  - `dynamic` is `"force-dynamic"`;
+  - bad signature or stale timestamp → 401 `{ error: { http_code: 401, … } }`, nothing sent, no rate-limit call;
+  - `SUPABASE_SEND_EMAIL_HOOK_SECRET` unset → 503, nothing sent, no rate-limit call;
+  - `RATE_LIMIT_HMAC_SECRET` unset → 503, nothing sent, no rate-limit call;
+  - unlisted type (e.g. `password_changed_notification`) → 400, nothing sent; a body that isn't JSON → 400;
+  - `signup` within limits → 200 `{}`, one email to `user.email` containing `email_data.token`, no verify link;
+  - the rate-limit keys are `authmail:signin:h:<hex>` (3600 s, 5) and `authmail:signin:d:<hex>` (86400 s, 20), and `<hex>` is the HMAC of the trimmed, lowercased address with `RATE_LIMIT_HMAC_SECRET`, **not** the address or its plain SHA-256;
   - hour cap reached (`consume_rate_limit` → false) → 429 `{ error: { http_code: 429 } }`, nothing sent;
-  - the rate-limit key is `authmail:signin:h:<hex>`, and `<hex>` is **not** the email or its plain SHA-256 (it's the HMAC with `RATE_LIMIT_HMAC_SECRET`);
-  - `recovery` counts under `staff`, not `signin`;
-  - `email_change` sends two emails, the current-address code (per the Task 1 finding) to `user.email` and the new-address code to `user.new_email`, with each address counted under its own `email_change` key (3 per day);
+  - RPC error (e.g. 22023), RPC throw (timeout), or `data` that isn't a boolean → 503, nothing sent;
+  - `recovery` counts under `staff`, not `signin`, and its link uses `NEXT_PUBLIC_SUPABASE_URL`;
+  - `email_change` sends two emails, `token` to `user.email` and `token_new` to `user.new_email` (Task 1 finding), with each address counted under its own `authmail:email_change:d:<hex>` key (86400 s, 3); without `token_new` → 400, nothing sent, no rate-limit call;
   - `sendEmail` returns false → 500 `{ error: { http_code: 500 } }`. This never answers success without sending;
-  - no `console.*` call contains the code or the address.
+  - no `console.*` call, on any path, contains a code, a `token_hash` or an address.
 
 - [ ] **Step 2: Run them and confirm they fail**
 
@@ -1213,6 +1220,8 @@ export function verifyStandardWebhook(opts: {
   if (Math.abs(now - Number(timestamp)) > TOLERANCE_S) return false;
 
   const key = Buffer.from(opts.secret.replace(/^v1,/, "").replace(/^whsec_/, ""), "base64");
+  // An empty key is a key anyone can sign with.
+  if (key.length === 0) return false;
   const expected = createHmac("sha256", key).update(`${id}.${timestamp}.${body}`).digest();
 
   return signature.split(" ").some((entry) => {
@@ -1237,6 +1246,10 @@ export const GROUP: Record<AuthEmailType, LimitGroup> = {
   email_change: "email_change",
 };
 
+export function isAuthEmailType(t: unknown): t is AuthEmailType {
+  return typeof t === "string" && Object.prototype.hasOwnProperty.call(GROUP, t);
+}
+
 /** [windowSeconds, limit, label]: mobile spec 4.1. */
 export const CAPS: Record<LimitGroup, Array<[number, number, string]>> = {
   signin: [[3600, 5, "h"], [86400, 20, "d"]],
@@ -1244,28 +1257,33 @@ export const CAPS: Record<LimitGroup, Array<[number, number, string]>> = {
   email_change: [[86400, 3, "d"]],
 };
 
-/** An HMAC, not a plain hash: a hash of an email address can be reversed. */
-export function emailKey(email: string): string {
-  return createHmac("sha256", process.env.RATE_LIMIT_HMAC_SECRET!).update(email.trim().toLowerCase()).digest("hex");
+/** An HMAC, not a plain hash: a hash of an email address can be reversed.
+ *  The caller passes the secret and refuses to run without one. */
+export function emailKey(email: string, secret: string): string {
+  return createHmac("sha256", secret).update(email.trim().toLowerCase()).digest("hex");
 }
 ```
 
-  `src/lib/auth/authEmailCopy.ts`: plain bilingual HTML using `FROM_EMAIL` and `EMAIL_FOOTER_URL` from `src/lib/email.ts`.
-  - Buyer code: subject `KuuNyi sign-in code / KuuNyi ဝင်ရောက်ရန်ကုဒ်: {code}`, a large code, "expires in 10 minutes", and "if you didn't ask for this, ignore this email". **No link.**
-  - Staff types: short copy. Recovery and invite include the verify link `${NEXT_PUBLIC_SUPABASE_URL}/auth/v1/verify?token=${token_hash}&type=${type}&redirect_to=${encodeURIComponent(redirect_to)}`. Use the Supabase URL, **not** `email_data.site_url`, which is the app's site URL. Reauthentication shows the code.
+  `src/lib/auth/authEmailCopy.ts`: `authEmailMessages(payload, supabaseUrl)` returns the messages to send, or `null` when the type isn't listed or the payload lacks what that type needs. Plain bilingual HTML with its own small layout (the one in `src/lib/email.ts` isn't exported) and the footer link to `EMAIL_FOOTER_URL`; the code and the link are HTML-escaped. Codes must match `^\d{6,10}$` (Supabase sends 6).
+  - Buyer code (`signup`, `magiclink`): subject `KuuNyi sign-in code / KuuNyi ဝင်ရောက်ရန်ကုဒ်: {code}`, a large code, "expires in 10 minutes", and "if you didn't ask for this, ignore this email; don't share this code". **No link.**
+  - Staff types: short copy. Recovery and invite include the verify link `${NEXT_PUBLIC_SUPABASE_URL}/auth/v1/verify?token=${token_hash}&type=${type}&redirect_to=${encodeURIComponent(redirect_to)}` (`redirect_to` left off when empty). Use the Supabase URL, **not** `email_data.site_url`, which is the app's site URL. Reauthentication shows the code.
+  - `email_change`: `email_data.token` → `user.email` (current), `email_data.token_new` → `user.new_email` (new), per the Task 1 finding. Both codes and both addresses are required, or `null`.
 
-  Use the same Myanmar wording style as the existing confirmation emails. Mark the new Myanmar strings for native review in the PR.
+  Myanmar wording follows the existing confirmation emails. Mark the new Myanmar strings for native review in the PR.
 
   `src/app/api/internal/auth/send-email/route.ts`:
   1. `export const dynamic = "force-dynamic"`.
   2. Read the body with `await request.text()`.
-  3. Verify the signature with `SUPABASE_SEND_EMAIL_HOOK_SECRET`. On failure → 401.
-  4. Parse the JSON. A type that isn't in `GROUP` → 400; log the type only.
-  5. For each recipient address, run every cap for its group via `rpc("consume_rate_limit", { p_key: \`authmail:${group}:${label}:${emailKey(addr)}\`, p_window_seconds, p_limit })`. Any false → 429. An RPC error → 503.
-  6. Send each message with `sendEmail`. Any false → 500.
-  7. Return `NextResponse.json({})`.
+  3. `SUPABASE_SEND_EMAIL_HOOK_SECRET` unset → 503. Verify the signature with it. On failure → 401.
+  4. `RATE_LIMIT_HMAC_SECRET` unset → 503 (`createHmac` with an undefined key would throw).
+  5. Parse the JSON (not JSON → 400). A type that isn't in `GROUP` → 400; log the type only, cut to `[a-z_]`, 40 chars. `authEmailMessages` → `null` → 400.
+  6. For each message's `to`, run every cap for its group via a typed `consumeRateLimit` wrapper around `admin.rpc("consume_rate_limit", { p_key: \`authmail:${group}:${label}:${emailKey(to, secret)}\`, p_window_seconds, p_limit })` on `createTimedAdminClient()` (supabase-js can't infer RPC types from the hand-written `Database`). Any false → 429. An RPC error, a throw, or `data` that isn't a boolean → 503, never "allowed". All caps are checked before anything is sent.
+  7. Send each message with `sendEmail`. Any false → 500.
+  8. Return `NextResponse.json({})`.
 
-  Errors are `NextResponse.json({ error: { http_code, message } }, { status: http_code })`.
+  Errors are `NextResponse.json({ error: { http_code, message } }, { status: http_code })` with fixed messages. Logs carry the type and fixed strings only.
+
+  `src/middleware.ts` runs on `/api/internal/*` (matcher `/api/:path*`) and needs no change: the path isn't tenant-skipped, but no redirect or 404 applies to it; it doesn't read the body; and with no cookies, `getUser()` returns without a network call. The hook URL must use `www` (the apex 307s, which Auth won't follow).
 
 - [ ] **Step 4: Run the tests and confirm they pass**
 
