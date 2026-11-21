@@ -143,13 +143,24 @@ describe("requireBuyer — cookie session read", () => {
 describe("requireBuyer — Auth answer", () => {
   beforeEach(() => headerMap.set("authorization", `Bearer ${GOOD}`));
 
-  it("returns 401 when Auth rejects the session (403 session_not_found)", async () => {
+  // auth-js turns a 403 session_not_found into AuthSessionMissingError.
+  it("returns 401 when the session has ended (AuthSessionMissingError)", async () => {
     bareClient.auth.getUser.mockResolvedValue({
       data: { user: null },
-      error: new AuthApiError("Session not found", 403, "session_not_found"),
+      error: new AuthSessionMissingError(),
     });
     await expectError(await requireBuyer(), 401, "UNAUTHENTICATED");
     expect(bareClient.auth.getUser).toHaveBeenCalledWith(GOOD);
+    expect(tokenClaimSpy).not.toHaveBeenCalled();
+    expect(adminFrom).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 when Auth answers a 403 AuthApiError (user_not_found)", async () => {
+    bareClient.auth.getUser.mockResolvedValue({
+      data: { user: null },
+      error: new AuthApiError("User not found", 403, "user_not_found"),
+    });
+    await expectError(await requireBuyer(), 401, "UNAUTHENTICATED");
     expect(tokenClaimSpy).not.toHaveBeenCalled();
     expect(adminFrom).not.toHaveBeenCalled();
   });

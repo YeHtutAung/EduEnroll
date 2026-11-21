@@ -4,6 +4,7 @@ import {
   AuthInvalidTokenResponseError,
   AuthRetryableFetchError,
   AuthSessionMissingError,
+  AuthUnknownError,
 } from "@supabase/supabase-js";
 
 // ─── sessionUser: the shared cookie read and Auth acceptance ────────────────
@@ -51,8 +52,7 @@ describe("readCookieToken", () => {
     ["AuthSessionMissingError", new AuthSessionMissingError()],
     ["AuthInvalidTokenResponseError", new AuthInvalidTokenResponseError()],
     ["AuthApiError 400", new AuthApiError("Invalid Refresh Token", 400, "refresh_token_not_found")],
-    ["AuthApiError 403", new AuthApiError("Session not found", 403, "session_not_found")],
-    ["a plain Error", new Error("odd")],
+    ["AuthApiError 403", new AuthApiError("User not found", 403, "user_not_found")],
   ])("%s with no session → none", async (_name, error) => {
     cookieClient.auth.getSession.mockResolvedValue({ data: { session: null }, error });
     expect(await readCookieToken()).toEqual({ kind: "none" });
@@ -63,6 +63,9 @@ describe("readCookieToken", () => {
     ["AuthApiError 500", new AuthApiError("boom", 500, "unexpected_failure")],
     ["AuthApiError 503", new AuthApiError("down", 503, "unexpected_failure")],
     ["AuthApiError 429", new AuthApiError("slow down", 429, "over_request_rate_limit")],
+    ["AuthUnknownError", new AuthUnknownError("odd", new Error("html"))],
+    ["a plain Error (not an AuthError)", new Error("odd")],
+    ["a non-error value", { message: "odd" }],
   ])("%s with no session → unavailable", async (_name, error) => {
     cookieClient.auth.getSession.mockResolvedValue({ data: { session: null }, error });
     expect(await readCookieToken()).toEqual({ kind: "unavailable" });
@@ -86,12 +89,30 @@ describe("acceptToken", () => {
     expect(createBare.mock.calls[0][2]).toEqual({ auth: { persistSession: false, autoRefreshToken: false } });
   });
 
-  it("a 4xx → rejected", async () => {
+  it("a 4xx AuthApiError (user_not_found) → rejected", async () => {
     bareClient.auth.getUser.mockResolvedValue({
       data: { user: null },
-      error: new AuthApiError("bad jwt", 403, "bad_jwt"),
+      error: new AuthApiError("User not found", 403, "user_not_found"),
     });
     expect(await acceptToken("t1")).toEqual({ kind: "rejected" });
+  });
+
+  it("an ended session (AuthSessionMissingError, auth-js's form of 403 session_not_found) → rejected", async () => {
+    bareClient.auth.getUser.mockResolvedValue({ data: { user: null }, error: new AuthSessionMissingError() });
+    expect(await acceptToken("t1")).toEqual({ kind: "rejected" });
+  });
+
+  it("a thrown AuthSessionMissingError → rejected", async () => {
+    bareClient.auth.getUser.mockRejectedValue(new AuthSessionMissingError());
+    expect(await acceptToken("t1")).toEqual({ kind: "rejected" });
+  });
+
+  it("AuthUnknownError → unavailable", async () => {
+    bareClient.auth.getUser.mockResolvedValue({
+      data: { user: null },
+      error: new AuthUnknownError("odd", new Error("html")),
+    });
+    expect(await acceptToken("t1")).toEqual({ kind: "unavailable" });
   });
 
   it.each([

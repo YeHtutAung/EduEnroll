@@ -39,24 +39,52 @@ export async function GET(): Promise<NextResponse> {
   return NextResponse.json({ email: ctx.email, name: row.name, locale: row.locale });
 }
 
-/** True when the body is acceptable: empty, or JSON without an `email` key. */
-async function bodyIsValid(request: Request): Promise<boolean> {
+const MAX_BODY_BYTES = 4096;
+
+type BodyCheck = "ok" | "too_large" | "invalid";
+
+/** Acceptable: empty, or JSON (at most 4 KB) without an `email` key. */
+async function checkBody(request: Request): Promise<BodyCheck> {
+  const declared = request.headers.get("content-length");
+  if (declared !== null && Number(declared) > MAX_BODY_BYTES) return "too_large";
   let text: string;
   try {
     text = await request.text();
   } catch {
-    return false;
+    return "invalid";
   }
-  if (text.trim() === "") return true;
+  if (new TextEncoder().encode(text).length > MAX_BODY_BYTES) return "too_large";
+  if (text.trim() === "") return "ok";
   try {
     const parsed: unknown = JSON.parse(text);
     if (parsed && typeof parsed === "object" && Object.prototype.hasOwnProperty.call(parsed, "email")) {
-      return false;
+      return "invalid";
     }
-    return true;
+    return "ok";
   } catch {
-    return false;
+    return "invalid";
   }
+}
+
+/**
+ * CSRF hardening: the cookie rides along on cross-site requests, so refuse a
+ * browser request that isn't same-origin. sec-fetch-site cross-site or
+ * same-site, or an Origin whose host isn't this request's Host, is refused.
+ * With neither header (not a browser) it's allowed: the cookie is still needed.
+ */
+function isCrossSite(request: Request): boolean {
+  const site = request.headers.get("sec-fetch-site");
+  if (site === "cross-site" || site === "same-site") return true;
+  const origin = request.headers.get("origin");
+  if (origin === null) return false;
+  const host = request.headers.get("host");
+  let originHost: string;
+  try {
+    originHost = new URL(origin).host;
+  } catch {
+    return true;
+  }
+  return !host || originHost.toLowerCase() !== host.toLowerCase();
 }
 
 function mapResult(result: EnsureResult): NextResponse {
@@ -73,7 +101,9 @@ function mapResult(result: EnsureResult): NextResponse {
             message:
               result.reason === "staff"
                 ? "Staff accounts can't use buyer pages."
-                : "Sign in with the code sent to your email.",
+                : result.reason === "unconfirmed"
+                  ? "Confirm your email with the code we sent, then try again."
+                  : "Sign in with the code sent to your email.",
             reason: result.reason,
           },
         },
@@ -88,9 +118,11 @@ function mapResult(result: EnsureResult): NextResponse {
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
-  if (!(await bodyIsValid(request))) {
-    return buyerError(422, "VALIDATION", "Email can't be set here.");
-  }
+  // Both checks come before any Auth call.
+  if (isCrossSite(request)) return buyerError(403, "FORBIDDEN", "Cross-site request refused.");
+  const body = await checkBody(request);
+  if (body === "too_large") return buyerError(413, "VALIDATION", "Request body too large.");
+  if (body === "invalid") return buyerError(422, "VALIDATION", "Email can't be set here.");
 
   const read = await readCookieToken();
   if (read.kind === "unavailable") {

@@ -1,7 +1,8 @@
 import {
   createClient as createBareClient,
   isAuthApiError,
-  isAuthRetryableFetchError,
+  isAuthError,
+  isAuthSessionMissingError,
 } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { classifyAuthError } from "./authErrors";
@@ -25,15 +26,18 @@ export type TokenAcceptance =
   | { kind: "unavailable" };
 
 /**
- * A getSession() error means Auth couldn't answer only when it is a
- * network/retryable fetch failure, or an Auth 5xx or 429. Anything else
- * (AuthSessionMissingError, AuthInvalidTokenResponseError, a 4xx) is a session
- * that isn't there, which is a 401, not an outage.
+ * With no session, a getSession() error is "none" (401) only when Auth itself
+ * said the session isn't there: AuthSessionMissingError,
+ * AuthInvalidTokenResponseError, or a 4xx AuthApiError other than 429.
+ * Everything else (a retryable fetch error, AuthUnknownError, an Auth 5xx or
+ * 429, or anything that isn't an AuthError) is an outage: 503, never 401.
  */
 function sessionErrorIsOutage(error: unknown): boolean {
-  if (isAuthRetryableFetchError(error)) return true;
+  if (!isAuthError(error)) return true;
+  if (isAuthSessionMissingError(error)) return false;
+  if (error.name === "AuthInvalidTokenResponseError") return false;
   if (isAuthApiError(error)) return error.status >= 500 || error.status === 429;
-  return false;
+  return true;
 }
 
 /**
@@ -47,7 +51,7 @@ export async function readCookieToken(): Promise<CookieTokenRead> {
     const { data, error } = await createClient().auth.getSession();
     const token = data?.session?.access_token;
     if (token) return { kind: "token", token };
-    if (error && sessionErrorIsOutage(error)) return { kind: "unavailable" };
+    if (error != null && sessionErrorIsOutage(error)) return { kind: "unavailable" };
     return { kind: "none" };
   } catch {
     return { kind: "unavailable" };
@@ -55,9 +59,21 @@ export async function readCookieToken(): Promise<CookieTokenRead> {
 }
 
 /**
+ * getUser's answer. auth-js turns a 403 session_not_found (an ended session,
+ * e.g. one ensureBuyerProfile signed out) into AuthSessionMissingError, not an
+ * AuthApiError, so that is a rejection here. Otherwise classifyAuthError
+ * decides: a 4xx other than 429 is rejected, anything else unavailable.
+ */
+function getUserFailure(error: unknown): TokenAcceptance {
+  if (isAuthSessionMissingError(error)) return { kind: "rejected" };
+  return classifyAuthError(error) === "rejected" ? { kind: "rejected" } : { kind: "unavailable" };
+}
+
+/**
  * Ask the Auth server whether it accepts this exact token. Never a local-only
  * JWT check. Uses a bare client that neither stores nor refreshes a session.
- * A 4xx (except 429) is "rejected"; anything else that fails is "unavailable".
+ * A 4xx (except 429) or an ended session is "rejected"; anything else that
+ * fails is "unavailable".
  */
 export async function acceptToken(token: string): Promise<TokenAcceptance> {
   try {
@@ -67,11 +83,9 @@ export async function acceptToken(token: string): Promise<TokenAcceptance> {
       { auth: { persistSession: false, autoRefreshToken: false } },
     );
     const { data, error } = await client.auth.getUser(token);
-    if (error || !data.user) {
-      return classifyAuthError(error) === "rejected" ? { kind: "rejected" } : { kind: "unavailable" };
-    }
+    if (error || !data.user) return getUserFailure(error);
     return { kind: "ok", user: data.user, token };
   } catch (err) {
-    return classifyAuthError(err) === "rejected" ? { kind: "rejected" } : { kind: "unavailable" };
+    return getUserFailure(err);
   }
 }

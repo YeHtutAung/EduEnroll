@@ -185,10 +185,16 @@ describe("POST — getUser", () => {
     expect(bareClient.auth.getUser).toHaveBeenCalledWith("session-token");
   });
 
-  it("a 4xx rejection → 401, ensureBuyerProfile not called", async () => {
+  it("an ended session (AuthSessionMissingError) → 401, ensureBuyerProfile not called", async () => {
+    bareClient.auth.getUser.mockResolvedValue({ data: { user: null }, error: new AuthSessionMissingError() });
+    await expectError(await POST(post()), 401, "UNAUTHENTICATED");
+    expect(ensureBuyerProfile).not.toHaveBeenCalled();
+  });
+
+  it("a 4xx AuthApiError (user_not_found) → 401, ensureBuyerProfile not called", async () => {
     bareClient.auth.getUser.mockResolvedValue({
       data: { user: null },
-      error: new AuthApiError("bad jwt", 403, "bad_jwt"),
+      error: new AuthApiError("User not found", 403, "user_not_found"),
     });
     await expectError(await POST(post()), 401, "UNAUTHENTICATED");
     expect(ensureBuyerProfile).not.toHaveBeenCalled();
@@ -243,6 +249,15 @@ describe("POST — ensureBuyerProfile", () => {
     expect(typeof json.error.message).toBe("string");
   });
 
+  it("each 403 reason has its own message", async () => {
+    const messages = new Set<string>();
+    for (const reason of ["staff", "unconfirmed", "not_email_code"] as const) {
+      ensureBuyerProfile.mockResolvedValue({ ok: false, status: 403, code: "FORBIDDEN", reason });
+      messages.add((await (await POST(post())).json()).error.message);
+    }
+    expect(messages.size).toBe(3);
+  });
+
   it("409 → DELETION_IN_PROGRESS", async () => {
     ensureBuyerProfile.mockResolvedValue({ ok: false, status: 409, code: "DELETION_IN_PROGRESS" });
     await expectError(await POST(post()), 409, "DELETION_IN_PROGRESS");
@@ -265,17 +280,81 @@ describe("POST — body", () => {
 
   it('{ "email": … } → 422 VALIDATION, nothing else called', async () => {
     await expectError(await POST(post(JSON.stringify({ email: "x@y.z" }))), 422, "VALIDATION");
+    expect(cookieClient.auth.getSession).not.toHaveBeenCalled();
     expect(ensureBuyerProfile).not.toHaveBeenCalled();
     expect(bareClient.auth.getUser).not.toHaveBeenCalled();
   });
 
   it('{ "email": null } still → 422 (the key alone is refused)', async () => {
     await expectError(await POST(post(JSON.stringify({ email: null }))), 422, "VALIDATION");
+    expect(cookieClient.auth.getSession).not.toHaveBeenCalled();
     expect(ensureBuyerProfile).not.toHaveBeenCalled();
   });
 
   it("malformed JSON → 422 VALIDATION", async () => {
     await expectError(await POST(post("{not json")), 422, "VALIDATION");
+    expect(cookieClient.auth.getSession).not.toHaveBeenCalled();
     expect(ensureBuyerProfile).not.toHaveBeenCalled();
+  });
+
+  it("a body over 4 KB → 413 VALIDATION, before any Auth call", async () => {
+    const big = JSON.stringify({ pad: "x".repeat(5000) });
+    await expectError(await POST(post(big)), 413, "VALIDATION");
+    expect(cookieClient.auth.getSession).not.toHaveBeenCalled();
+    expect(ensureBuyerProfile).not.toHaveBeenCalled();
+  });
+
+  it("a content-length over 4 KB → 413 without reading the body", async () => {
+    const req = new Request("http://localhost/api/account/profile", {
+      method: "POST",
+      body: "{}",
+      headers: { "content-type": "application/json", "content-length": "10000" },
+    });
+    await expectError(await POST(req), 413, "VALIDATION");
+    expect(cookieClient.auth.getSession).not.toHaveBeenCalled();
+  });
+
+  it("a body of exactly 4 KB is fine", async () => {
+    const body = JSON.stringify({ pad: "x".repeat(4096 - 10) });
+    expect(body.length).toBe(4096);
+    expect((await POST(post(body))).status).toBe(200);
+  });
+});
+
+describe("POST — cross-site refusal", () => {
+  function withHeaders(h: Record<string, string>): Request {
+    return new Request("http://localhost/api/account/profile", { method: "POST", headers: h });
+  }
+
+  it.each(["cross-site", "same-site"])("sec-fetch-site: %s → 403 FORBIDDEN, before any Auth call", async (site) => {
+    await expectError(await POST(withHeaders({ "sec-fetch-site": site })), 403, "FORBIDDEN");
+    expect(cookieClient.auth.getSession).not.toHaveBeenCalled();
+    expect(ensureBuyerProfile).not.toHaveBeenCalled();
+  });
+
+  it("an Origin whose host differs from Host → 403", async () => {
+    await expectError(
+      await POST(withHeaders({ origin: "https://evil.test", host: "kuunyi.com" })),
+      403,
+      "FORBIDDEN",
+    );
+    expect(cookieClient.auth.getSession).not.toHaveBeenCalled();
+  });
+
+  it("Origin \"null\" → 403", async () => {
+    await expectError(await POST(withHeaders({ origin: "null", host: "kuunyi.com" })), 403, "FORBIDDEN");
+    expect(cookieClient.auth.getSession).not.toHaveBeenCalled();
+  });
+
+  it("same-origin browser request (Origin host = Host, sec-fetch-site same-origin) → allowed", async () => {
+    const res = await POST(
+      withHeaders({ origin: "https://kuunyi.com", host: "kuunyi.com", "sec-fetch-site": "same-origin" }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it("no Origin and no sec-fetch-site (not a browser) → allowed; the cookie still decides", async () => {
+    expect((await POST(withHeaders({}))).status).toBe(200);
+    expect(cookieClient.auth.getSession).toHaveBeenCalled();
   });
 });
