@@ -13,6 +13,7 @@ function token(payload: unknown): string {
 }
 const GOOD = token({ sub: "u1", session_id: "s1", amr: [{ method: "otp", timestamp: 1 }] });
 const NO_SESSION = token({ sub: "u1", amr: [{ method: "otp", timestamp: 1 }] });
+const OTHER = token({ sub: "u2", session_id: "s2", amr: [{ method: "otp", timestamp: 1 }] });
 
 const headerMap = new Map<string, string>();
 vi.mock("next/headers", () => ({
@@ -80,6 +81,49 @@ beforeEach(() => {
 
 describe("requireBuyer — token", () => {
   it("returns 401 with no header and no cookie session, without asking Auth", async () => {
+    await expectError(await requireBuyer(), 401, "UNAUTHENTICATED");
+    expect(bareClient.auth.getUser).not.toHaveBeenCalled();
+    expect(adminFrom).not.toHaveBeenCalled();
+  });
+
+  it("prefers x-supabase-auth over authorization", async () => {
+    headerMap.set("x-supabase-auth", `Bearer ${GOOD}`);
+    headerMap.set("authorization", `Bearer ${OTHER}`);
+    expect(await requireBuyer()).not.toBeInstanceOf(NextResponse);
+    expect(bareClient.auth.getUser).toHaveBeenCalledTimes(1);
+    expect(bareClient.auth.getUser).toHaveBeenCalledWith(GOOD);
+  });
+
+  it("ignores a non-Bearer authorization header and returns 401 with no cookie session", async () => {
+    headerMap.set("authorization", "Basic xyz");
+    await expectError(await requireBuyer(), 401, "UNAUTHENTICATED");
+    expect(bareClient.auth.getUser).not.toHaveBeenCalled();
+  });
+});
+
+describe("requireBuyer — cookie session read", () => {
+  it("returns 503 SERVER when getSession's refresh can't reach Auth", async () => {
+    cookieClient.auth.getSession.mockResolvedValue({
+      data: { session: null },
+      error: new AuthRetryableFetchError("x", 0),
+    });
+    await expectError(await requireBuyer(), 503, "SERVER");
+    expect(bareClient.auth.getUser).not.toHaveBeenCalled();
+    expect(adminFrom).not.toHaveBeenCalled();
+  });
+
+  it("returns 503 SERVER when getSession throws", async () => {
+    cookieClient.auth.getSession.mockRejectedValue(new Error("boom"));
+    await expectError(await requireBuyer(), 503, "SERVER");
+    expect(bareClient.auth.getUser).not.toHaveBeenCalled();
+    expect(adminFrom).not.toHaveBeenCalled();
+  });
+
+  it("returns 401 when Auth rejects the refresh token and there is no session", async () => {
+    cookieClient.auth.getSession.mockResolvedValue({
+      data: { session: null },
+      error: new AuthApiError("x", 400, "refresh_token_not_found"),
+    });
     await expectError(await requireBuyer(), 401, "UNAUTHENTICATED");
     expect(bareClient.auth.getUser).not.toHaveBeenCalled();
     expect(adminFrom).not.toHaveBeenCalled();
@@ -159,11 +203,13 @@ describe("requireBuyer — staff and profile", () => {
   it("returns 401 when the profile is deleted", async () => {
     results.buyer_profiles = { data: { ...PROFILE, deleted_at: "2026-11-20T00:00:00Z" }, error: null };
     await expectError(await requireBuyer(), 401, "UNAUTHENTICATED");
+    expect(tablesRead()).toEqual(["users", "buyer_profiles"]);
   });
 
   it("returns 401 when the profile email differs from the Auth email", async () => {
     results.buyer_profiles = { data: { ...PROFILE, email: "other@example.test" }, error: null };
     await expectError(await requireBuyer(), 401, "UNAUTHENTICATED");
+    expect(tablesRead()).toEqual(["users", "buyer_profiles"]);
   });
 
   it("returns 503 SERVER when the buyer_profiles read fails", async () => {
@@ -187,5 +233,65 @@ describe("requireBuyer — success", () => {
     expect(await requireBuyer()).toEqual(EXPECTED);
     expect(bareClient.auth.getUser).toHaveBeenCalledWith(GOOD);
     expect(tokenClaimSpy).toHaveBeenCalledWith(GOOD, "session_id");
+  });
+});
+
+describe("requireBuyer — logging", () => {
+  it("logs on every 503 path without the token, email or user id", async () => {
+    const methods = ["log", "info", "warn", "error", "debug"] as const;
+    const spies = methods.map((m) => vi.spyOn(console, m).mockImplementation(() => {}));
+    try {
+      const scenarios: Array<() => void> = [
+        () => cookieClient.auth.getSession.mockResolvedValue({
+          data: { session: null }, error: new AuthRetryableFetchError("x", 0),
+        }),
+        () => cookieClient.auth.getSession.mockRejectedValue(new Error(`boom ${GOOD}`)),
+        () => {
+          headerMap.set("authorization", `Bearer ${GOOD}`);
+          bareClient.auth.getUser.mockResolvedValue({
+            data: { user: null }, error: new AuthApiError("boom", 500, "unexpected_failure"),
+          });
+        },
+        () => {
+          headerMap.set("authorization", `Bearer ${GOOD}`);
+          bareClient.auth.getUser.mockRejectedValue(new AuthRetryableFetchError("network", 0));
+        },
+        () => {
+          headerMap.set("authorization", `Bearer ${GOOD}`);
+          results.users = { data: null, error: { message: "db down b@example.test" } };
+        },
+        () => {
+          headerMap.set("authorization", `Bearer ${GOOD}`);
+          results.buyer_profiles = { data: null, error: { message: "db down b@example.test" } };
+        },
+      ];
+      let logged = 0;
+      for (const setup of scenarios) {
+        headerMap.clear();
+        cookieClient.auth.getSession.mockResolvedValue({ data: { session: null } });
+        bareClient.auth.getUser.mockResolvedValue({
+          data: { user: { id: "u1", email: "B@Example.test" } }, error: null,
+        });
+        results.users = { data: null, error: null };
+        results.buyer_profiles = { data: { ...PROFILE }, error: null };
+        setup();
+        const before = spies.reduce((n, s) => n + s.mock.calls.length, 0);
+        await expectError(await requireBuyer(), 503, "SERVER");
+        const after = spies.reduce((n, s) => n + s.mock.calls.length, 0);
+        expect(after).toBeGreaterThan(before);
+        logged = after;
+      }
+      expect(logged).toBeGreaterThan(0);
+      const text = spies
+        .flatMap((s) => s.mock.calls)
+        .map((args) => args.map((a) => (typeof a === "string" ? a : JSON.stringify(a) ?? String(a))).join(" "))
+        .join("\n")
+        .toLowerCase();
+      expect(text).not.toContain(GOOD.toLowerCase());
+      expect(text).not.toContain("b@example.test");
+      expect(text).not.toContain("u1");
+    } finally {
+      spies.forEach((s) => s.mockRestore());
+    }
   });
 });

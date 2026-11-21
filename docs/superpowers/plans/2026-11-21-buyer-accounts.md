@@ -770,7 +770,7 @@ git commit -m "feat(auth): token claim helpers and an Auth error classifier for 
 - Test: `src/__tests__/lib/buyers/requireBuyer.test.ts`
 
 Behaviour (mobile spec 4.3, design 4.3):
-1. The token comes from `x-supabase-auth` or `Authorization: Bearer …` (the app), or else the cookie session (the website). No token → 401 `UNAUTHENTICATED`.
+1. The token comes from `x-supabase-auth` or `Authorization: Bearer …` (the app), or else the cookie session (the website). No token → 401 `UNAUTHENTICATED`. `getSession()` may refresh a near-expiry session: if it returns an error `classifyAuthError` calls `unavailable`, or it throws, → 503 `SERVER` (never 401); a real rejection with no session stays 401.
 2. `getUser(token)` asks Auth. If it fails, `classifyAuthError` decides: `rejected` → 401 `UNAUTHENTICATED`; `unavailable` → 503 `SERVER`.
 3. Only after that, read `session_id` from the same token. Missing → 401.
 4. A `users` row exists (staff) → 403 `FORBIDDEN`.
@@ -785,14 +785,20 @@ The profile and staff reads use the service-role client: the tables have no poli
 
   Mock `next/headers` (as `require-auth-password.test.ts` does), `@/lib/supabase/server` (cookie client with `auth.getSession`), and `@/lib/supabase/admin` (`from("users")`, `from("buyer_profiles")` with `.select().eq().maybeSingle()`). Mock `@supabase/supabase-js` **with `importOriginal`**, replacing only `createClient` (the client that calls `getUser`), so `isAuthApiError` and the error classes stay real. Build tokens with a local `token(payload)` helper like the one in `authMethod.test.ts`. Cases, each asserting status, `error.code`, and that later reads did **not** happen when an earlier step failed:
   - no header and no cookie session → 401; `getUser` not called;
+  - `x-supabase-auth: Bearer GOOD` and `authorization: Bearer OTHER` both set → `getUser` gets `GOOD`;
+  - `authorization: Basic xyz` and no cookie session → 401; `getUser` not called;
+  - `getSession` resolves `{ session: null, error: AuthRetryableFetchError }` (a refresh that couldn't reach Auth) → 503 `SERVER`; `getUser` not called;
+  - `getSession` rejects → 503 `SERVER`; `getUser` not called;
+  - `getSession` returns `AuthApiError(400, "refresh_token_not_found")` with no session → 401; `getUser` not called;
   - Bearer, `getUser` → `AuthApiError(403, "session_not_found")` → 401;
   - Bearer, `getUser` → `AuthApiError(500)` → 503 `SERVER`;
   - Bearer, `getUser` throws `AuthRetryableFetchError` → 503;
   - Bearer, `getUser` → 429 → 503;
   - accepted token with no `session_id` → 401, and `from()` never called;
-  - staff (`users` row found) → 403;
-  - no profile → 401; `deleted_at` set → 401; email mismatch → 401;
+  - staff (`users` row found) → 403, `buyer_profiles` not read; `users` read returns `{ error }` → 503, `buyer_profiles` not read;
+  - no profile → 401; `deleted_at` set → 401; email mismatch → 401 (each reads exactly `users`, `buyer_profiles`);
   - `buyer_profiles` read returns `{ error }` → 503;
+  - every 503 path logs a fixed string, and no `console` call contains the token, the email or the user id;
   - happy path, Bearer: returns `{ buyerId: "u1", email: "b@example.test", isReviewer: false, sessionId: "s1" }`;
   - happy path, cookie: same result, and the token passed to `tokenClaim` is the cookie session's `access_token`.
 
@@ -821,22 +827,46 @@ export interface BuyerContext {
 
 type AuthUser = { id: string; email?: string | null };
 
-/** The bearer token, else the cookie session's token (website). */
-async function readToken(): Promise<string | null> {
+type TokenRead =
+  | { kind: "token"; token: string }
+  | { kind: "none" }
+  | { kind: "unavailable" };
+
+const unauthenticated = () => buyerError(401, "UNAUTHENTICATED", "Sign in required.");
+const authUnavailable = () => buyerError(503, "SERVER", "Sign-in service unavailable. Try again.");
+
+/**
+ * The bearer token, else the cookie session's token (website). getSession()
+ * may refresh a near-expiry session; if that refresh can't reach Auth, the
+ * answer is "unavailable" (503), never "none" (401).
+ */
+async function readToken(): Promise<TokenRead> {
   const h = headers();
   const header = h.get("x-supabase-auth") ?? h.get("authorization");
-  if (header?.startsWith("Bearer ")) return header.substring(7);
-  const { data } = await createClient().auth.getSession();
-  return data.session?.access_token ?? null;
+  if (header?.startsWith("Bearer ")) return { kind: "token", token: header.substring(7) };
+  try {
+    const { data, error } = await createClient().auth.getSession();
+    if (error && classifyAuthError(error) === "unavailable") return { kind: "unavailable" };
+    const token = data.session?.access_token;
+    return token ? { kind: "token", token } : { kind: "none" };
+  } catch {
+    return { kind: "unavailable" };
+  }
 }
 
 /**
  * Guard for every buyer route (web and mobile). Asks the Auth server; never a
  * local-only JWT check, so a deleted user or ended session fails at once.
+ * Logs fixed strings only: never a token, email or id.
  */
 export async function requireBuyer(): Promise<BuyerContext | NextResponse> {
-  const token = await readToken();
-  if (!token) return buyerError(401, "UNAUTHENTICATED", "Sign in required.");
+  const read = await readToken();
+  if (read.kind === "unavailable") {
+    console.error("[requireBuyer] cookie session read failed");
+    return authUnavailable();
+  }
+  if (read.kind === "none") return unauthenticated();
+  const token = read.token;
 
   let user: AuthUser;
   try {
@@ -847,25 +877,28 @@ export async function requireBuyer(): Promise<BuyerContext | NextResponse> {
     );
     const { data, error } = await client.auth.getUser(token);
     if (error || !data.user) {
-      return classifyAuthError(error) === "rejected"
-        ? buyerError(401, "UNAUTHENTICATED", "Sign in required.")
-        : buyerError(503, "SERVER", "Sign-in service unavailable. Try again.");
+      if (classifyAuthError(error) === "rejected") return unauthenticated();
+      console.error("[requireBuyer] Auth getUser unavailable");
+      return authUnavailable();
     }
     user = data.user;
   } catch (err) {
-    return classifyAuthError(err) === "rejected"
-      ? buyerError(401, "UNAUTHENTICATED", "Sign in required.")
-      : buyerError(503, "SERVER", "Sign-in service unavailable. Try again.");
+    if (classifyAuthError(err) === "rejected") return unauthenticated();
+    console.error("[requireBuyer] Auth getUser threw");
+    return authUnavailable();
   }
 
   // Read only after getUser has accepted this exact token.
   const sessionId = tokenClaim(token, "session_id");
-  if (!sessionId) return buyerError(401, "UNAUTHENTICATED", "Sign in required.");
+  if (!sessionId) return unauthenticated();
 
   const admin = createAdminClient();
 
   const staff = await admin.from("users").select("id").eq("id", user.id).maybeSingle();
-  if (staff.error) return buyerError(503, "SERVER", "Try again.");
+  if (staff.error) {
+    console.error("[requireBuyer] users lookup failed");
+    return buyerError(503, "SERVER", "Try again.");
+  }
   if (staff.data) return buyerError(403, "FORBIDDEN", "Staff accounts can't use buyer pages.");
 
   const profile = await admin
@@ -873,12 +906,13 @@ export async function requireBuyer(): Promise<BuyerContext | NextResponse> {
     .select("id, email, is_reviewer, deleted_at")
     .eq("id", user.id)
     .maybeSingle();
-  if (profile.error) return buyerError(503, "SERVER", "Try again.");
-  const p = profile.data as { id: string; email: string; is_reviewer: boolean; deleted_at: string | null } | null;
-  if (!p || p.deleted_at) return buyerError(401, "UNAUTHENTICATED", "Sign in required.");
-  if (p.email !== (user.email ?? "").toLowerCase()) {
-    return buyerError(401, "UNAUTHENTICATED", "Sign in required.");
+  if (profile.error) {
+    console.error("[requireBuyer] buyer_profiles lookup failed");
+    return buyerError(503, "SERVER", "Try again.");
   }
+  const p = profile.data as { id: string; email: string; is_reviewer: boolean; deleted_at: string | null } | null;
+  if (!p || p.deleted_at) return unauthenticated();
+  if (p.email !== (user.email ?? "").toLowerCase()) return unauthenticated();
 
   return { buyerId: p.id, email: p.email, isReviewer: p.is_reviewer, sessionId };
 }
