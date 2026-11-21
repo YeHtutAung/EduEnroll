@@ -15,7 +15,7 @@ vi.mock("@/lib/email", async (importOriginal) => {
 const rpc = vi.fn();
 vi.mock("@/server/buyers/adminClient", () => ({ createTimedAdminClient: () => ({ rpc }) }));
 
-import { POST, dynamic } from "@/app/api/internal/auth/send-email/route";
+import { POST, dynamic, DEADLINE_MS } from "@/app/api/internal/auth/send-email/route";
 
 // Throwaway test values, not real secrets.
 const RAW_KEY = Buffer.from("throwaway-hook-key-for-tests-only");
@@ -77,6 +77,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllEnvs();
   spies.splice(0).forEach((s) => s.mockRestore());
 });
@@ -274,5 +275,110 @@ describe("send-email hook route", () => {
     await POST(signedRequest(hookBody("signup"), { key: Buffer.from("wrong") }));
     expect(logs.length).toBeGreaterThan(0);
     expectCleanLogs();
+  });
+
+  it("NEXT_PUBLIC_SUPABASE_URL unset → 503 Hook not configured, nothing sent", async () => {
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
+    const res = await POST(signedRequest(hookBody("signup")));
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toEqual({ http_code: 503, message: "Hook not configured" });
+    expect(sendEmail).not.toHaveBeenCalled();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("hour cap allows but day cap refuses → 429, nothing sent", async () => {
+    rpc.mockImplementation(async (_n: string, a: { p_key: string }) => ({
+      data: !a.p_key.startsWith("authmail:signin:d:"),
+      error: null,
+    }));
+    const res = await POST(signedRequest(hookBody("signup")));
+    expect(res.status).toBe(429);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("email_change with the new address over its cap → nothing sent to the current address either", async () => {
+    const newHex = rlKeyHex("new@example.test");
+    rpc.mockImplementation(async (_n: string, a: { p_key: string }) => ({ data: !a.p_key.endsWith(newHex), error: null }));
+    const body = hookBody("email_change", { token: "111111", token_new: "222222" }, { email: "old@example.test", new_email: "new@example.test" });
+    const res = await POST(signedRequest(body));
+    expect(res.status).toBe(429);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("email_change checks both addresses' caps at once, not one after the other", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    rpc.mockImplementation(async () => {
+      await gate;
+      return { data: true, error: null };
+    });
+    const body = hookBody("email_change", { token: "111111", token_new: "222222" }, { email: "old@example.test", new_email: "new@example.test" });
+    const pending = POST(signedRequest(body));
+    await vi.waitFor(() => expect(rpc).toHaveBeenCalledTimes(2));
+    release();
+    expect((await pending).status).toBe(200);
+  });
+
+  it("invite through the route → 200, staff caps, a verify link on the Supabase URL", async () => {
+    const res = await POST(signedRequest(hookBody("invite")));
+    expect(res.status).toBe(200);
+    const keys = rpc.mock.calls.map((c) => (c[1] as { p_key: string }).p_key);
+    expect(keys.every((k) => k.startsWith("authmail:staff:"))).toBe(true);
+    const html = (sendEmail.mock.calls[0][0] as { html: string }).html;
+    expect(html).toContain("https://proj.supabase.test/auth/v1/verify?token=hashabcdef0123&amp;type=invite");
+    expect(html).not.toContain("site.example.test");
+  });
+
+  it("verifies the raw bytes: odd whitespace and key order still pass (no re-serialising)", async () => {
+    const raw = [
+      "{",
+      '  "metadata" : {},	"email_data":{ "email_action_type":"signup" ,"token" :"482913"},',
+      '   "user":{"email":"Buyer@Example.test" ,"id":"u1"}   }',
+      "",
+    ].join("\n");
+    expect(JSON.stringify(JSON.parse(raw))).not.toBe(raw);
+    const res = await POST(signedRequest(raw));
+    expect(res.status).toBe(200);
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it("a rate-limit RPC that hangs past the deadline → 503, nothing sent", async () => {
+    vi.useFakeTimers();
+    rpc.mockImplementation(() => new Promise(() => {}));
+    const pending = POST(signedRequest(hookBody("signup")));
+    await vi.advanceTimersByTimeAsync(DEADLINE_MS);
+    const res = await pending;
+    expect(res.status).toBe(503);
+    expect((await res.json()).error.http_code).toBe(503);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("a send that hangs past the deadline → 503 (never success), and its signal aborts", async () => {
+    vi.useFakeTimers();
+    let seen: AbortSignal | undefined;
+    sendEmail.mockImplementation((p: { signal?: AbortSignal }) => {
+      seen = p.signal;
+      return new Promise(() => {});
+    });
+    const pending = POST(signedRequest(hookBody("signup")));
+    await vi.advanceTimersByTimeAsync(DEADLINE_MS);
+    const res = await pending;
+    expect(res.status).toBe(503);
+    expect(seen?.aborted).toBe(true);
+  });
+
+  it("a send aborted by the deadline (sendEmail → false) → 503, not 500", async () => {
+    vi.useFakeTimers();
+    sendEmail.mockImplementation(
+      (p: { signal: AbortSignal }) =>
+        new Promise((resolve) => p.signal.addEventListener("abort", () => resolve(false), { once: true })),
+    );
+    const pending = POST(signedRequest(hookBody("signup")));
+    await vi.advanceTimersByTimeAsync(DEADLINE_MS);
+    expect((await pending).status).toBe(503);
+  });
+
+  it("DEADLINE_MS is under GoTrue's 5 s hook timeout", () => {
+    expect(DEADLINE_MS).toBeLessThan(5_000);
   });
 });
