@@ -1034,22 +1034,24 @@ git commit -m "feat(buyers): ensureBuyerProfile — claim, reset password, end o
 - Create: `src/app/api/account/profile/route.ts`
 - Test: `src/__tests__/api/account/profile.test.ts`
 
-- `GET` → `requireBuyer()` → `200 { email, name, locale }`. Errors pass through unchanged.
+- `GET` → `requireBuyer()`. Its error response passes through unchanged. On success, read `name, locale` from `buyer_profiles` (service-role admin client, `id = buyerId`) and answer `200 { email, name, locale }` (`email` from `requireBuyer`). A read error → 503 `SERVER`; no row (deleted meanwhile) → 401 `UNAUTHENTICATED`.
 - `POST` → the website's `POST /me`:
-  1. Cookie session only. Bearer is for the app's own route in #451.
-  2. `createClient().auth.getSession()`. No session → **401** `UNAUTHENTICATED`. Check this first: with no session, `getUser()` returns `AuthSessionMissingError`, which isn't an `AuthApiError` and would classify as "unavailable" (503).
-  3. `getUser(access_token)` with that exact token. On failure, `classifyAuthError` → 401 or 503. This way the token handed on is the one Auth accepted.
-  4. Call `ensureBuyerProfile({ userId, email: user.email, emailConfirmedAt: user.email_confirmed_at, accessToken })`.
-  5. Map the result: `ok` → its status with `{ email, name, locale }`. `FORBIDDEN` → 403 `FORBIDDEN`, with `reason` as an extra field so the page can show the staff message. 409 → `DELETION_IN_PROGRESS`. 503 → `SERVER`.
-  6. A request body with an `email` key → 422 `VALIDATION` (the mobile spec rule; the website sends no body).
+  1. Cookie session only. Bearer is for the app's own route in #451; a Bearer header is ignored.
+  2. A JSON body with an `email` key (any value) → 422 `VALIDATION`, checked before any Auth call. Malformed JSON → 422. An empty or absent body is fine.
+  3. `createClient().auth.getSession()`, same rule as `requireBuyer` (`d102fa6`): it throws, or `classifyAuthError(error) === "unavailable"` (a near-expiry refresh that couldn't reach Auth) → **503** `SERVER`. No session and no error, or a real 4xx rejection with no session → **401** `UNAUTHENTICATED`. Decide this before `getUser`: with no session, `getUser()` returns `AuthSessionMissingError`, which isn't an `AuthApiError` and would classify as "unavailable" (503).
+  4. `getUser(session.access_token)` with that exact token, on a bare non-persisting client as in `requireBuyer`. On failure (error, throw, or no user), `classifyAuthError` → 401 or 503. This way the token handed on is the one Auth accepted.
+  5. Only then call `ensureBuyerProfile({ user, accessToken })` with the Auth user `getUser` returned (`{ id, email, email_confirmed_at }`) and that token.
+  6. Map the `EnsureResult`: `ok` → its status (200 or 201) with `{ email, name, locale }` from the profile. `FORBIDDEN` → 403 `{ error: { code: "FORBIDDEN", message, reason } }`, `reason` being `staff`, `unconfirmed` or `not_email_code`, so the page can show the staff message. 409 → `DELETION_IN_PROGRESS`. 503 → `SERVER`.
+  7. Logs fixed strings only: never a token or an email.
 
 - [ ] **Step 1: Write the failing tests**
 
-  Mock `@/lib/supabase/server`, `@/lib/buyers/requireBuyer` and `@/server/buyers/ensureBuyerProfile`. Cover each branch above, plus:
-  - no session → 401, and neither `getUser` nor `ensureBuyerProfile` is called;
-  - `ensureBuyerProfile` receives the session's own token and the user's `email_confirmed_at`;
-  - a `getUser` 5xx → 503, and `ensureBuyerProfile` isn't called;
-  - a body `{ "email": "x@y.z" }` → 422, and `ensureBuyerProfile` isn't called.
+  Mock `@/lib/supabase/server`, `@supabase/supabase-js` (`importOriginal`, for the real error classes and a mocked `createClient`), `@/lib/buyers/requireBuyer`, `@/server/buyers/ensureBuyerProfile` and `@/lib/supabase/admin`. Cover each branch above, plus:
+  - each `getSession` outcome (unavailable error → 503, throw → 503, real rejection → 401, no session → 401), and in each neither `getUser` nor `ensureBuyerProfile` is called;
+  - `ensureBuyerProfile` receives `getUser`'s user and the session's own token;
+  - a `getUser` 4xx → 401, 5xx or throw → 503, and `ensureBuyerProfile` isn't called;
+  - a body `{ "email": "x@y.z" }` → 422, and `ensureBuyerProfile` isn't called;
+  - every `EnsureResult` mapping; `GET`'s pass-through, 200 and 503.
 
 - [ ] **Step 2: Run them and confirm they fail**
 
