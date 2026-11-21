@@ -86,9 +86,10 @@ email OTP) on the web and in the app. One person, one account, one ticket list.
   per hour). Dev first.
 - The verified email on the auth user is the identity. `buyer_profiles.email` copies it; the order
   email for a protected event is this email (section 5).
-- **Email change is not supported** in this version, mirroring the mobile spec's rule for phone:
-  `auth.updateUser({ email })` is blocked for buyers, and `requireBuyer` rejects a token whose auth
-  email differs from `buyer_profiles.email`.
+- **Email change is not offered**, but Supabase can't switch off `auth.updateUser({ email })`.
+  "Secure email change" stays on, so both addresses must confirm, and an `AFTER UPDATE OF email`
+  trigger on `auth.users` keeps `buyer_profiles.email` equal to the auth email in the same transaction
+  (mobile spec 4.2). `requireBuyer` still fails closed (401) if they ever differ.
 - Phone becomes an optional, unverified contact field (`buyer_profiles.phone_e164`), used to pre-fill
   forms. It is no longer unique or required. The **backup phone** below is a different, verified
   field on the auth user.
