@@ -1325,23 +1325,25 @@ git commit -m "feat(auth): Send Email Hook — signed, per-email capped, bilingu
 - Modify: `src/middleware.ts` (matcher only)
 - Test: `src/__tests__/account/accountFlow.test.ts`, `src/__tests__/account/AccountSignIn.test.tsx` (static render), `src/__tests__/middleware.test.ts` (extend)
 
-**No new dependency.** The repo has no Testing Library or DOM environment (`vitest.config.ts` runs `node`). Put every decision in a pure reducer, `accountFlow.ts`: `(state, event) => { state, effects }`, where effects are plain descriptions like `{ type: "signOutLocal" }` or `{ type: "postProfile", attempt: 2 }`. Unit-test the reducer. `AccountSignIn.tsx` only runs the effects (Supabase calls, `fetch`) and renders the state. Test it with `react-dom/server` static rendering, as the existing `.test.tsx` files do: each state renders its fields and bilingual text.
+**No new dependency.** The repo has no Testing Library or DOM environment (`vitest.config.ts` runs `node`). Every decision is in a pure reducer, `accountFlow.ts`: `accountReducer(state, event) => { state, effects }`, with `initialAccount()` returning `{ state: { step: "loading" }, effects: [{ type: "loadProfile" }] }`. Effects are plain descriptions: `loadProfile`, `sendCode { email }`, `verifyCode { email, token }`, `postProfile { attempt, delayMs }` and `signOutLocal`. Events from a step they don't belong to (or while `busy`) are ignored, so a late response can't move the page. `AccountSignIn.tsx` (client) only runs the effects (Supabase calls, `fetch`) and feeds the outcome back as events (`profileLoaded`, `codeSent`/`sendFailed`, `codeVerified`/`verifyFailed`, `profilePosted`, `signedOut`); it renders the presentational `AccountView({ state, onSubmitEmail, onSubmitCode, onResend, onUseAnotherEmail, onSignOut, onRetryLoad, onRetryProfile })`, exported from the same file. `page.tsx` is a thin server wrapper inside the `(public)` layout, which supplies tenant branding.
 
-States:
-1. **Loading.** On mount, `GET /api/account/profile`:
-   - 200 → state 4;
+States (`step` values in brackets):
+1. **Loading** [`loading`]. On mount, `GET /api/account/profile`:
+   - 200 with an email → state 4;
    - 401 → state 2;
-   - 403 `FORBIDDEN` → the staff message from state 3 (a staff member already signed in on this host), **without** signing out. That session is their admin session; signing it out would log them out of `/admin`;
-   - 503 → "try again".
-2. **Email.** A field (trimmed and lower-cased before sending) and "Send code". The button calls `createClient().auth.signInWithOtp({ email, options: { shouldCreateUser: true } })`. An error whose status is 429 shows "too many codes, try later". On success go to state 3.
-3. **Code.** A 6-digit field, plus "Use another email" and "Resend". Submitting calls `verifyOtp({ email, token, type: "email" })`, then `POST /api/account/profile`:
+   - 403 `FORBIDDEN` → [`staffSession`]: the staff message from state 3 (a staff member already signed in on this host), with no form and **no** sign-out. That session is their admin session; signing it out would log them out of `/admin`;
+   - 503, a network failure, or anything else → [`loadFailed`] "try again", which reloads.
+2. **Email** [`email`]. A field and "Send code". The email is trimmed and lower-cased; an obviously malformed one shows a notice without sending. The button calls `createClient().auth.signInWithOtp({ email, options: { shouldCreateUser: true } })`. An error whose status is 429 shows "too many codes, try later"; any other error a generic send failure. On success go to state 3.
+3. **Code** [`code`]. A 6-digit field (`inputMode="numeric"`, `autoComplete="one-time-code"`), plus "Use another email" (back to state 2, the address pre-filled, no sign-out: no session exists yet) and "Resend" (`sendCode` to the same email; 429 → "too many codes"). Anything but 6 digits shows a notice without a call. Submitting calls `verifyOtp({ email, token, type: "email" })`; an error stays in the code step ("wrong or expired", or "too many tries" on 429). On success, `POST /api/account/profile` (no body):
    - 200 or 201 → state 4;
-   - 403 with `reason: "staff"` → sign out locally and show: "This address belongs to a staff account. Use a different email to buy tickets." (design 4.4);
+   - 403 with `reason: "staff"` → sign out locally (`signOut({ scope: "local" })`: the code session this page just made) and show, on the email step: "This address belongs to a staff account. Use a different email to buy tickets." (design 4.4);
    - 403 for another reason → sign out locally, generic error;
-   - 503 → retry the `POST` up to twice with back-off, then "try again".
-4. **Signed in.** Shows the account email and a "Sign out" button, which calls `signOut({ scope: "local" })`.
+   - 409 `DELETION_IN_PROGRESS` → sign out locally, "this account is being deleted";
+   - 401 → sign out locally, "your sign-in expired"; any other status → sign out locally, generic error;
+   - 503 (or a network failure) → retry the `POST` twice, after 1 s and 2 s (`attempt` 1 and 2), then [`profileFailed`]: "Try again" re-posts the profile, "Use another email" signs the code session out locally.
+4. **Signed in** [`signedIn`]. Shows the account email and a "Sign out" button, which calls `signOut({ scope: "local" })` and then returns to state 2.
 
-All text is Myanmar and English, like `/status`. Never put the code in the URL or in logs.
+All text is Myanmar and English, like `/status`; the new Myanmar strings carry a "needs native review" comment. The code is read from the form on submit and passed straight to the reducer: it is never in reducer or React state, a URL, a log, or any effect but `verifyCode`. `AccountSignIn.tsx` logs nothing.
 
 - [ ] **Step 1: Write the failing tests**
   - `accountFlow.test.ts`: every transition above, through the reducer. Cover:
@@ -1350,16 +1352,17 @@ All text is Myanmar and English, like `/status`. Never put the code in the URL o
     - the email is trimmed and lower-cased in the `sendCode` effect;
     - a 429 from `sendCode` shows the "too many codes" state;
     - no state or effect ever carries the code except the single `verifyCode` effect.
-  - `AccountSignIn.test.tsx`: split the view into a presentational `AccountView({ state, on… })` that takes the state as a prop; effects don't run under `react-dom/server`. Static-render `AccountView` for each state (email, code, signed in, staff message) and check the expected fields and Myanmar + English text.
+    - also: the 409, 401 and other-403 paths, the 503 retry that succeeds, `retryProfile`, "Use another email" (from the code step: no effect; from `profileFailed`: `signOutLocal`), resend, the wrong-code and 6-digit checks, and that a late `signedOut` doesn't wipe the staff notice.
+  - `AccountSignIn.test.tsx`: the presentational `AccountView({ state, on… })` takes the state as a prop; effects don't run under `react-dom/server`. Static-render `AccountView` for each state (loading, email, code, signed in, staff message after a code, staff session on load, load failed, profile failed, deletion notice) and check the expected fields and Myanmar + English text. Also: the code field is never pre-filled, buttons are disabled while busy, and the source has the native-review comment and no `console.` or code-in-URL.
   - In the reducer test, also check that the state-1 403 produces **no** `signOutLocal` effect, while the state-3 staff 403 does.
   - The page is also listed in the `/account` row of Task 12's staging test, which is the real end-to-end check.
 
   **Note:** `(public)/layout.tsx` also renders `WalkInNotice` (the Sky Festival pop-up), so it appears on `/account` too. Leave it.
-  - `middleware.test.ts`: `config.matcher` includes `/account` and `/account/:path*`. A `GET /account` on a tenant host runs through the session refresh without a redirect: it's not a staff page, so #471's password rule doesn't apply.
+  - `middleware.test.ts`: `config.matcher` includes `/account` and `/account/:path*`. A `GET /account` on a tenant host runs through the session refresh (the Supabase mock counts `getUser()` calls) without a redirect, for a signed-out visitor, an email-code session and a password session alike: it's not a staff page, so #471's password rule doesn't apply. It's also served on a tenant's custom domain. Only the matcher test fails before Step 3: the tests call `middleware()` directly, so the others are guards.
 
 - [ ] **Step 2: Run them and confirm they fail**
 
-  Run: `npx vitest run src/__tests__/account src/__tests__/middleware.test.ts`. Expected: FAIL.
+  Run: `npx vitest run src/__tests__/account src/__tests__/middleware.test.ts`. Expected: FAIL (`AccountSignIn` missing; the matcher test).
 
 - [ ] **Step 3: Implement** the page and add `"/account", "/account/:path*"` to `config.matcher` in `src/middleware.ts`. Change nothing else in middleware.
 
