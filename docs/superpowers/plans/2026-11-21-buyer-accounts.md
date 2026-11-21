@@ -1383,26 +1383,31 @@ git commit -m "feat(account): email-code sign-in page for buyers"
 ### Task 10: Local Supabase config
 
 **Files:**
-- Modify: `supabase/config.toml`
+- Modify: `supabase/config.toml`, `supabase/.gitignore` (adds `.env`: it was **not** ignored before)
+- Create: `supabase/templates/email-code.html`
 
-- [ ] **Step 1: Set**
+- [x] **Step 1: Set**
   - `[auth.email] enable_confirmations = true`, `otp_length = 6`, `otp_expiry = 600`, `double_confirm_changes = true` (Secure email change).
-  - `[auth.rate_limit] email_sent = 30`, so local testing isn't stopped at 2 per hour.
-  - `[auth.hook.send_email]` with `uri = "http://host.docker.internal:3005/api/internal/auth/send-email"` and `secrets = "env(SUPABASE_SEND_EMAIL_HOOK_SECRET)"`, committed **commented out** with a note on how to turn it on. Task 1 found that while the block is present, `supabase stop`, `start` and `status` all fail if the variable is unset, even with `enabled = false`. A developer uncomments it locally to test the hook. The secret goes in a gitignored `supabase/.env` in `v1,whsec_<base64>` form, and the same value goes in `.env.local`. Never commit it or print it.
-  - Local templates `[auth.email.template.magic_link]` and `[auth.email.template.confirmation]` point to a committed `supabase/templates/email-code.html` that shows `{{ .Token }}`, so the hook-off path also sends a code and not a link.
+  - `[auth.rate_limit] email_sent = 30`, so local testing isn't stopped at 2 per hour. Locally this has no effect: without real SMTP the CLI sets `GOTRUE_RATE_LIMIT_EMAIL_SENT=360000` whatever it says (noted in a config comment).
+  - `[auth.hook.send_email]` with `uri = "http://host.docker.internal:3005/api/internal/auth/send-email"` and `secrets = "env(SUPABASE_SEND_EMAIL_HOOK_SECRET)"`, committed **commented out** with a note on how to turn it on. Task 1 found that while the block is present, `supabase stop`, `start` and `status` all fail if the variable is unset, even with `enabled = false`. A developer uncomments it locally to test the hook. The secret goes in a gitignored `supabase/.env` in `v1,whsec_<base64>` form, and the same value goes in `.env.local`; `RATE_LIMIT_HMAC_SECRET` goes in `.env.local` too. Never commit it or print it.
+  - No Before User Created hook line (finding B).
+  - Local templates `[auth.email.template.magic_link]` and `[auth.email.template.confirmation]` (subject `KuuNyi sign-in code / KuuNyi ဝင်ရောက်ရန်ကုဒ်`) point to a committed `supabase/templates/email-code.html`: a bilingual page with the `buyerCodeEmail` copy from `authEmailCopy.ts` that shows `{{ .Token }}` and no link, so the hook-off path also sends a code. The CLI serves them through Kong (`GOTRUE_MAILER_TEMPLATES_*=http://supabase_kong_EduEnroll:8088/email/...`).
 
-- [ ] **Step 2: Restart the local stack and sign in end to end**
+- [x] **Step 2: Restart the local stack and sign in end to end** (done 2026-11-21, local stack only, GoTrue v2.192.0, CLI 2.109.1)
 
-  `npx supabase stop && npx supabase start`, then `npm run dev`.
-  1. **Hook off** (the committed config): open `http://localhost:3005/account?tenant=brave` and sign in with a new `@example.test` address, reading the code in the local mail catcher. Confirm a `buyer_profiles` row exists.
-  2. **Hook on** (local only; put `RATE_LIMIT_HMAC_SECRET` in `.env.local` too, or `createHmac` throws first and you test the wrong failure): confirm the hook route receives the request and verifies its signature. With `RESEND_API_KEY` unset locally, `sendEmail` returns false and the hook answers 500. Sign-in then fails with an error, which is the correct "never answer success without sending" behaviour. Record what you saw. Real delivery is tested on staging (Task 12).
-  3. Confirm a staff password sign-in at `/login?tenant=brave` still reaches `/admin/dashboard`.
-  4. Confirm `/register` still creates a tenant. It creates its owner with the service role, so confirmations being on must not block it; if it does, stop and report.
+  `npx supabase stop && npx supabase start` both exit 0 with the committed config and no hook secret set. The auth container shows `GOTRUE_MAILER_AUTOCONFIRM=false`, `GOTRUE_MAILER_OTP_LENGTH=6`, `GOTRUE_MAILER_OTP_EXP=600`, `GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED=true`, and no `GOTRUE_HOOK_SEND_EMAIL_*`. The worktree's gitignored `.env.local` was written from `supabase status -o json` (local URL, anon and service-role keys, `NEXT_PUBLIC_DEV_TENANT=brave`); then `npx next dev -p 3005`.
+  1. **Hook off**, by script, not a browser: `@supabase/ssr` `createServerClient` with an in-memory cookie jar ran `signInWithOtp` for a new `@example.test` address. Mailpit got one email, subject as above, exactly one 6-digit code, no `href`, Myanmar text present. `verifyOtp(type: "email")` gave a session with `amr` `["otp"]` and set the real `sb-*-auth-token` cookie, which was sent to `POST http://localhost:3005/api/account/profile` (the route itself, no Origin header). A second `signInWithOtp` for the same, now-existing address (the `magic_link` template) also mailed one code and no link.
+     **Result: the route answered 503 `SERVER` and no `buyer_profiles` row was made.** The server logged `[ensureBuyerProfile] sign out others failed 400`. Cause, reproduced on its own: step 7's `admin.updateUserById(id, { password })` **deletes every `auth.sessions` row for the user** on this GoTrue, so step 8's `admin.signOut(accessToken, "others")` finds no session (`AuthSessionMissingError`, GoTrue logs "session id … doesn't exist", 403 `session_not_found`) and the buyer's own session is gone too (a following `GET /api/account/profile` was 401). `signOut(jwt, "others")` without the password update works, which is all Task 1 tested. **Every first buyer sign-in fails this way until `ensureBuyerProfile` is fixed** (for example, skip step 7 when the user has no password, or reorder so the caller's session survives); that is outside this task.
+  2. **Hook on**: not run in this task.
+  3. Staff password sign-in: the owner made by step 4 signed in with `signInWithPassword` (`amr` `["password"]`, email confirmed). The `/login` page to `/admin/dashboard` was not driven in a browser.
+  4. `POST /api/saas/register` answered 201 with confirmations on, making the tenant, an `owner` `users` row and a confirmed auth user.
 
-- [ ] **Step 3: Commit**
+  Throwaway users and the tenant were deleted afterwards; the dev server was stopped.
+
+- [x] **Step 3: Commit** (`833d688`)
 ```bash
-git add supabase/config.toml supabase/templates/email-code.html
-git status --short supabase/   # supabase/.env must NOT appear; add it to .gitignore if it does
+git add supabase/config.toml supabase/templates/email-code.html supabase/.gitignore
+git status --short supabase/   # supabase/.env must NOT appear
 git commit -m "chore(supabase): local email confirmations, 10-minute codes, Send Email Hook settings"
 ```
 
