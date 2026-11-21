@@ -4,18 +4,17 @@
 //
 // Online sales have closed; tells visitors walk-in tickets are sold at the
 // gate, with the doors time, a map link and the venue poster. See
-// src/lib/tenantNotice.ts for where it shows and why "seen" is a cookie.
+// src/lib/tenantNotice.ts for where it shows.
+//
+// Opens on every visit: every load, refresh or new tab. Nothing is stored
+// after Close; it stays closed only while the visitor moves between pages in
+// the same visit (in-app navigation), so it doesn't reopen on each click.
 // Closes on Escape, the backdrop, or either Close button.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { usePathname } from "next/navigation";
-import {
-  WALK_IN_NOTICE_COOKIE,
-  WALK_IN_NOTICE_COOKIE_MAX_AGE_S,
-  walkInNoticeApplies,
-  walkInNoticeSeen,
-} from "@/lib/tenantNotice";
+import { walkInNoticeApplies } from "@/lib/tenantNotice";
 
 const MAP_URL = "https://maps.app.goo.gl/PMzq7WBwPKRvTRip6";
 const POSTER_URL = "/tenants/skyfestival/venue-map.webp";
@@ -23,17 +22,18 @@ const POSTER_URL = "/tenants/skyfestival/venue-map.webp";
 export default function WalkInNotice({ tenantSlug }: { tenantSlug: string | null }) {
   const pathname = usePathname() ?? "/";
   const [open, setOpen] = useState(false);
+  const closedThisVisit = useRef(false);
   const closeRef = useRef<HTMLButtonElement>(null);
 
-  // Decided after mount: the cookie and the clock are the browser's.
+  // Decided after mount: the clock is the browser's. Re-checked on each page so
+  // it also closes when the visitor moves to an order or ticket page.
   useEffect(() => {
-    if (walkInNoticeApplies(tenantSlug, pathname, Date.now()) && !walkInNoticeSeen(document.cookie)) {
-      setOpen(true);
-    }
+    const applies = walkInNoticeApplies(tenantSlug, pathname, Date.now());
+    setOpen(applies && !closedThisVisit.current);
   }, [tenantSlug, pathname]);
 
   const close = useCallback(() => {
-    document.cookie = `${WALK_IN_NOTICE_COOKIE}=1; Max-Age=${WALK_IN_NOTICE_COOKIE_MAX_AGE_S}; Path=/; SameSite=Lax`;
+    closedThisVisit.current = true;
     setOpen(false);
   }, []);
 

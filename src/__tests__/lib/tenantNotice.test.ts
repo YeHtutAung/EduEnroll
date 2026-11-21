@@ -1,11 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  WALK_IN_NOTICE_COOKIE,
-  WALK_IN_NOTICE_ENDS_AT,
-  walkInNoticeApplies,
-  walkInNoticeSeen,
-} from "@/lib/tenantNotice";
-import { SAFE_STORAGE_KEYS } from "@/lib/tagManager";
+import { WALK_IN_NOTICE_ENDS_AT, walkInNoticeApplies } from "@/lib/tenantNotice";
 
 const DURING = Date.parse("2026-11-21T06:00:00Z");
 
@@ -34,19 +28,5 @@ describe("walkInNoticeApplies", () => {
     expect(walkInNoticeApplies("skyfestival", "/enroll", WALK_IN_NOTICE_ENDS_AT - 1)).toBe(true);
     expect(walkInNoticeApplies("skyfestival", "/enroll", WALK_IN_NOTICE_ENDS_AT)).toBe(false);
     expect(new Date(WALK_IN_NOTICE_ENDS_AT).toISOString()).toBe("2026-11-24T17:30:00.000Z");
-  });
-});
-
-describe("walkInNoticeSeen", () => {
-  it("reads its own cookie only", () => {
-    expect(walkInNoticeSeen("")).toBe(false);
-    expect(walkInNoticeSeen(`_fbp=fb.1.2; ${WALK_IN_NOTICE_COOKIE}=1`)).toBe(true);
-    expect(walkInNoticeSeen(`x${WALK_IN_NOTICE_COOKIE}=1`)).toBe(false);
-  });
-
-  it("uses a cookie name GTM's gate does not block on", () => {
-    // GTM turns off for any sb- cookie; storage keys are allowlisted separately.
-    expect(WALK_IN_NOTICE_COOKIE.startsWith("sb-")).toBe(false);
-    expect(SAFE_STORAGE_KEYS.length).toBeGreaterThan(0);
   });
 });
