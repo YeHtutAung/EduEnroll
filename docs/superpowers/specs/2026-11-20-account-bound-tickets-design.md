@@ -1,27 +1,43 @@
-# Account-bound, non-transferable e-tickets — design
+# Account-bound e-tickets, with seat sharing inside the order — design
 
 Date: 2026-11-20
 Status: revised 2026-11-20 for compatibility with the KuuNyi mobile backend contract
 (`kuunyi-app/docs/specs/eduenroll-mobile-backend.md`, "the mobile spec" below). Sign-in identity
 decided by the owner 2026-11-20: **email for both web and app** (section 4.1 (a)). The mobile spec
 must be updated to match before either side builds buyer sign-in (section 4.1, "What this changes").
+Revised 2026-11-22 to balance organisers and customers (owner decisions, section 2): group seats
+can be shared by link (section 6.4), phone moves are unlimited, and the bind limit, admin "Reset
+phone" and help-desk path are removed.
 
 ## 1. Goal
 
-Stop ticket resale for events that ask for it. A ticket for a protected event:
+Stop ticket resale for events that ask for it, without making group buyers arrive together. A
+ticket (a "seat") for a protected event:
 
-- belongs to one signed-in buyer account with a verified email, set before payment;
-- is shown only on that buyer's signed-in ticket page, never in email or on public order pages;
-- is presented at the gate as a QR that changes every 15 seconds and is signed by a key that never leaves the buyer's phone, so a screenshot or a copied page does not work;
-- cannot be transferred.
+- belongs to one signed-in buyer account with a verified email, set before payment (the order's
+  buyer, called "the leader" below);
+- is held either by the leader (mode A, the default) or by one other account the leader shared it
+  with by link (mode B, section 6.4);
+- is shown only on its holder's signed-in ticket page, never in email or on public order pages;
+- is presented at the gate as a QR that changes every 15 seconds and is signed by a key that never leaves the holder's phone, so a screenshot or a copied page does not work;
+- can move only inside the order: the leader shares a seat with one account, the holder cannot pass
+  it on, and all sharing and give-back close 24 hours before the event.
 
-Out of scope, accepted (both need a gate ID check against the account email shown on the ticket
-page, which organisers may choose to do):
+Out of scope, accepted:
 
 - a reseller who live-shares their screen on a video call while the new holder stands at the gate;
-- a reseller who hands over the account itself (the inbox, the SIM, or a forwarded sign-in code).
-  The sign-in factor is the only factor, so the new holder can sign in and bind their phone. Each bind emails the
-  account (section 6.1), and binds are limited, but this is a transfer the design cannot block.
+- a reseller who hands over the account itself (the inbox or a forwarded sign-in code). The
+  sign-in factor is the only factor, so the new holder can sign in and bind their phone. Each bind
+  emails the account (section 6.1), but this is a transfer the design cannot block;
+- **a leader who sells seat links.** Each claim is recorded with both accounts (section 6.4), so a
+  sale is traceable, but it is not capped: there is no per-account limit beyond today's per-tier
+  quantity caps;
+- **no entry without a working phone.** There is no manual, ID-only or help-desk entry. A holder
+  whose phone is lost, or who cannot sign in at the gate, does not get in. Refunds follow the
+  organiser's policy; there are no face-value returns through the platform.
+
+Organisers may still check ID against the account email shown on the ticket page; the design does
+not require it.
 
 ## 2. Decisions
 
@@ -31,7 +47,14 @@ page, which organisers may choose to do):
 | Sign-in identity | Email code (Supabase Auth email OTP), shared by web and app — owner decision 2026-11-20, option (a) in section 4.1 |
 | When the buyer signs in | Before checkout, on protected events |
 | Live QR method | Phone-bound key: non-extractable WebCrypto key, QR re-signed every 15 s |
-| Transfers | None |
+| Transfers | Inside the order only: the leader shares a seat by link with one account (one hop); the holder can give it back. Owner decision 2026-11-22 |
+| Group seats | Mode A: stays with the leader (default). Mode B: shared to a friend's phone by link. No attendee accounts or friends' details at checkout. Owner decision 2026-11-22 |
+| Sharing cutoff | Share, claim and give-back close 24 hours before the event (section 6.4). Owner decision 2026-11-22 |
+| Taking a seat back | A friend can give a claimed seat back before the cutoff. The leader can cancel an unclaimed link but never take back a claimed seat. Owner decision 2026-11-22 |
+| Phone moves | Unlimited, each emailed to the holder. No admin "Reset phone". Owner decision 2026-11-22 |
+| Per-account limit | None beyond today's per-tier caps (accepted risk, section 1). Owner decision 2026-11-22 |
+| No-phone entry | None: no ID seat, help desk or manual entry. The event page and checkout say "Smartphone required. Open your ticket before you arrive." Owner decision 2026-11-22 |
+| Returns | No face-value returns; refunds follow the organiser's policy. Owner decision 2026-11-22 |
 
 **The app later.** Until the app supports bound tickets, protected events are kept out of the app
 entirely (section 8.2). When the app does adopt them, it must not use WebCrypto: the key has to be
@@ -162,12 +185,17 @@ The private security advisories that #451 says must be closed before buyer sign-
    verified email on the server for protected intakes.
 3. The submit RPCs take `buyer_id` from the server-verified session, never from the request body.
    The route rejects a protected-event submission with no buyer session (401).
-4. All tickets in the order belong to the buyer. For orders with several attendees (for example
-   one per runner), everyone enters on the buyer's phone. Attendee names stay as data on the
-   ticket; they do not create accounts.
+4. All tickets in the order belong to the buyer (the leader) and start with the leader. Checkout
+   asks for no friends' accounts or contact details. Anyone arriving separately gets their seat by
+   a share link after purchase (section 6.4); everyone else enters on the leader's phone. Attendee
+   names (for example one per runner) stay as data on the ticket, unchanged by sharing; they do not
+   create accounts.
 5. Admin "Edit Email" (#425) is refused for protected orders in
    `src/app/api/admin/enrollments/[id]/email/route.ts` (409), and the button is hidden. The email
    is the identity.
+6. The protected event's public page and the checkout show, in Myanmar and English: "Smartphone
+   required. Open your ticket before you arrive." The leader's confirmation says seats can be shared
+   from My Tickets until 24 hours before the event.
 
 ## 6. Phone-bound QR
 
@@ -182,31 +210,30 @@ The private security advisories that #451 says must be closed before buyer sign-
 - The page exports the public key as `raw` (65-byte uncompressed point) and sends it base64url.
   The server stores it as-is and imports it with `crypto.createPublicKey` from a JWK built from
   the x/y halves. No point compression anywhere.
-- `POST /api/me/tickets/{ticketId}/device` with that public key. `requireBuyer()`; the ticket must
-  belong to the buyer, be valid, and be on a protected intake.
+- `POST /api/me/tickets/{ticketId}/device` with that public key. `requireBuyer()`; the buyer must be
+  the ticket's **current holder** (section 6.4: `tickets.holder_buyer_id`, or the order's buyer when
+  that is NULL), and the ticket must be valid and on a protected intake. Anyone else gets 404.
 - New table `ticket_devices`: `id`, `ticket_id`, `buyer_id` (FK `auth.users(id)` **ON DELETE SET
   NULL**, so rows outlive a deleted account), `public_key`, `created_at`, `revoked_at`, `revoked_by`
-  (`rebind` | `admin` | `account_deleted`). Partial unique index: one row with `revoked_at is null`
-  per ticket. Rows are never deleted; they are the audit trail.
-- Binding the key that is already active for the ticket is a no-op (returns the current token,
-  uses no bind).
-- Limit: 3 self-service binds per ticket, counted as the rows created after the ticket's latest
-  `revoked_by = 'admin'` row (or all rows if there is none). The 4th returns 429 with a message to
-  contact the organiser. Admin reset (section 9) revokes with `revoked_by = 'admin'`, which starts a
-  new count.
-- **A re-bind by the same account after the key was lost still counts.** To the server, "same
-  buyer, browser data wiped" and "account handed to someone else, new phone" look identical: the
-  same account, a browser with no key. Exempting the first would exempt the second, which is the
-  resale path the limit exists to slow. Instead, losing the key is made rarer and cheaper:
+  (`rebind` | `holder_changed` | `account_deleted`). Partial unique index: one row with
+  `revoked_at is null` per ticket. Rows are never deleted; they are the audit trail.
+- Binding the key that is already active for the ticket is a no-op (returns the current token).
+- **No bind limit** (owner decision 2026-11-22). A holder can move to a new phone any number of
+  times, including on event day; each move revokes the previous phone (`revoked_by = 'rebind'`), so
+  only one phone can show a working QR. There is no admin "Reset phone": a holder who changes or
+  loses a phone signs in on the new one and opens the ticket. Losing the key is still made rarer:
   - the ticket page asks iOS buyers to add it to the Home Screen, which keeps its storage out of
     Safari's 7-day deletion (section 6.3);
-  - every bind is emailed to the account, so an unexpected one is visible;
-  - the limit is 3, not 1, and admin reset (section 9) clears it at a help desk.
-- The limit check, revoking the old row and inserting the new one run in **one SQL function**
-  (service role only), locking the ticket row, so concurrent binds cannot exceed the limit or leave
-  two active rows. supabase-js has no transactions, so this cannot be done in the route.
-- Every successful bind after the first sends the account a short email ("Your ticket was opened on
-  a new phone").
+  - repeat binds are emailed to the holder (below), so an unexpected one is visible.
+- The holder check, revoking the old row and inserting the new one run in **one SQL function**
+  (service role only), locking the ticket row, so concurrent binds cannot leave two active rows,
+  and a bind racing a claim or give-back (section 6.4) cannot leave the previous holder's phone
+  active. supabase-js has no transactions, so this cannot be done in the route.
+- **Bind email:** the first bind per (ticket, holder) sends nothing; every later bind by that
+  holder sends them a short email ("Your ticket was opened on a new phone"). So a friend's first
+  bind after claiming, or the leader's after a give-back, is silent.
+- The route passes the host's tenant id; the function refuses a ticket whose `tenant_id` differs
+  (same 404).
 - Response: a bound ticket token, Ed25519-signed with the existing ticket key
   (`src/lib/tickets/sign.ts`), claims `{ jti, eid, tier, admits, exp, typ: "bound", dk }` where `dk`
   is the device public key. Stored in IndexedDB beside the key. Its `exp` is informational: the scan
@@ -238,8 +265,8 @@ Anything else is not a `k2` token.
   no signal for the life of the token.
 - Reloading the page with no signal fails. The ticket page says to open it before arriving and keep
   it open. An offline page cache (service worker) is a later improvement.
-- Clearing site data, or a private-browsing window, loses the key. The buyer binds again, which
-  counts toward the 3.
+- Clearing site data, or a private-browsing window, loses the key. The holder binds again, which
+  needs signal and the sign-in email.
 - **iOS Safari deletes script-written storage, IndexedDB included, after 7 days of Safari use
   without a visit to the site.** A buyer who binds a week or more before the event and doesn't open
   the page again can lose the key and arrive needing a re-bind, with signal. Mitigations: the ticket
@@ -248,6 +275,101 @@ Anything else is not a `k2` token.
   event day; and binding is deferred until the buyer first opens the ticket, not done at purchase.
   The plan must confirm the current WebKit behaviour on a real iPhone before relying on the Home
   Screen exemption.
+
+### 6.4 Sharing a seat
+
+For a group that does not arrive together. Only the leader shares, and only seats they still hold.
+
+**Data** (new):
+- `tickets.holder_buyer_id uuid NULL REFERENCES auth.users(id) ON DELETE SET NULL`. NULL means the
+  seat is with the order's buyer (`enrollments.buyer_id`). "Current holder" everywhere in this spec
+  means `coalesce(holder_buyer_id, enrollments.buyer_id)`.
+- `ticket_share_links`: `id`, `ticket_id`, `token_hash` (SHA-256 of the raw token, unique),
+  `created_by` (the leader, FK ON DELETE SET NULL), `created_at`, `expires_at` (the cutoff),
+  `claimed_by` (FK ON DELETE SET NULL), `claimed_at`, `cancelled_at`. Partial unique index: at most
+  one open link (not claimed, not cancelled) per ticket. **Only the hash is stored**; the raw token
+  exists only in the link the leader sends.
+- `ticket_holder_events`: `id`, `ticket_id`, `event` (`link_created` | `link_cancelled` | `claimed`
+  | `given_back` | `holder_deleted` | `voided`), `actor_buyer_id`, `from_buyer_id`, `to_buyer_id` (all FK ON
+  DELETE SET NULL), `created_at`. Never updated or deleted; the organiser's record of every move.
+- All three, and `ticket_devices` (section 10): RLS enabled with **no policies**, so only the
+  service role reads or writes them. Writes go only through the functions below; buyers and admins
+  read through the routes.
+
+**Cutoff:** `classes.event_date` is a DATE, so the cutoff is the start of that date in
+`Asia/Yangon` minus 24 hours, compared with database time (`now()`). The zone is fixed in SQL (plpgsql
+cannot read the `TICKET_TZ` env var, and a route must not pass it); a test asserts it equals the
+app's `TICKET_TZ` default. An event with no `event_date` offers no sharing (fails closed). Multi-day
+events use the first day. The cutoff is **recomputed from the current `event_date` under the lock**
+in every function; `ticket_share_links.expires_at` is display only, so an admin moving the date
+moves the cutoff with it.
+
+**Seat state checks** shared by create, claim and give-back: the ticket `status = 'valid'`, on a protected
+intake, `first_scan_at IS NULL` (never admitted), `tickets.tenant_id` equal to the tenant id the
+route passes from the host, and the time before the cutoff.
+
+**Database functions** (service role only; each locks the ticket row `FOR UPDATE` before deciding):
+- `create_share_link(ticket, tenant, leader, token_hash)`: the caller must be the order's buyer and
+  the seat unclaimed (`holder_buyer_id` NULL). Cancels any open link for the seat, inserts the new
+  one, logs `link_created`.
+- `cancel_share_link(ticket, tenant, leader)`: cancels the open link, logs `link_cancelled`. A
+  no-op if there is none. Checks only the tenant match and that the caller is the leader, so it
+  also works after the cutoff and on a voided or admitted seat.
+- `claim_share_link(token_hash, tenant, claimer)`: looks the link up by hash without locking, then
+  locks its ticket `FOR UPDATE` and **re-reads the link and the seat under the lock**, so a replace,
+  cancel or second claim racing it is seen. The link must be open, the seat still unclaimed, and
+  the claimer must not be the leader. Sets `holder_buyer_id`, marks the link claimed, revokes the
+  seat's active `ticket_devices` row (`holder_changed`), logs `claimed`. A claimer may hold several
+  seats; there is no per-account limit.
+- `give_back_seat(ticket, tenant, holder)`: the caller must be `holder_buyer_id`, and the order must
+  still have a buyer (`enrollments.buyer_id IS NOT NULL`): after the leader's account is deleted a
+  give-back would leave the seat with no one, so it is refused and the button hidden. Clears
+  `holder_buyer_id`, revokes the holder's active device row (`holder_changed`), logs `given_back`.
+  The seat is with the leader again and can be shared again.
+- Every function returns one generic failure to the route for any refused case, so a claim cannot
+  probe whether a link existed, was used or was cancelled.
+
+**Voided seats** (refund, cancellation: `voidTicketsForEnrollment` in
+`src/server/tickets/issueTickets.ts` sets `status = 'void'`): voiding also cancels the seat's open
+link and logs `voided` in `ticket_holder_events`, under the same ticket-row lock (one SQL function
+the void path calls, since supabase-js has no transactions). The holder is kept as a record and no
+email is sent. `/account/tickets` shows the seat as "Cancelled" to both leader and holder. The scan
+already refuses a void ticket.
+
+**Routes** (`requireBuyer()`, on the tenant's own host, passing the host's tenant id). Rate limits
+use the durable `consume_rate_limit(key, window, limit)` RPC that Plan 2 creates (section 12),
+never the in-memory `src/lib/rateLimit.ts`. Starting values, tunable in the plan: share and cancel
+20 per buyer per hour; claim 10 per buyer and 30 per IP per 15 minutes; give-back 10 per buyer per
+hour. Over the limit is 429:
+- `POST /api/me/tickets/{id}/share` → the share link, returned once. The route makes 32 random
+  bytes (base64url) and passes only the hash to the function. Calling it again replaces the old
+  link.
+- `DELETE /api/me/tickets/{id}/share` → cancels the open link.
+- `POST /api/me/tickets/{id}/give-back`.
+- `POST /api/me/tickets/claim` with `{ token }` → the claimed ticket's id. Any refusal is one 404
+  "This link no longer works".
+
+**Link format:** `https://<tenant host>/t/claim#<token>`. The token is in the fragment, so browsers
+never send it in a request to our servers or logs. Client-side scripts can still read
+`location.href`, so:
+- `/t/claim` loads **no** per-tenant GTM, Meta pixel or other analytics (the tag loader excludes the
+  path), and
+- the first inline script on the page, before any other script, copies the fragment into memory
+  and strips it with `history.replaceState`.
+The page then asks for email-code sign-in if needed (the token survives the sign-in step in
+`sessionStorage`, cleared as soon as the claim request returns, whether it succeeded or failed), shows the event and tier, and posts it on "Claim this
+seat".
+
+**Emails** (Myanmar and English, through the existing mailer):
+- To the leader: "Your seat was claimed by k***@gmail.com" and "A seat was given back to you".
+- To the holder: "Your ticket was opened on a new phone" (section 6.1).
+
+**Deleting an account** (section 9 adds this to the deletion steps):
+- A friend's account: their held seats get `holder_deleted` logged and their device rows revoked
+  (`account_deleted`); `holder_buyer_id` then becomes NULL by the FK, so **the seat returns to the
+  leader**, who can open or re-share it.
+- The leader's account: open links are cancelled; seats still with the leader stop working, as in
+  section 9; seats already claimed by friends keep working, since their holder still exists.
 
 ## 7. Scanning
 
@@ -268,6 +390,9 @@ Then the database:
    `ticket_protection` and its active `ticket_devices` row.
 5. The intake must be protected (a `k2` token on an unprotected intake is a 404), and `dk` must equal
    the active row's `public_key`. No active row, or a different key (a revoked phone), is a 404.
+   Because a claim, give-back or phone move always revokes the previous phone (sections 6.1, 6.4),
+   the active row should always be the current holder's. As defence in depth the scan also requires
+   the active row's `buyer_id` to equal the current holder; a mismatch is the same 404.
 6. Then the existing single-use or once-per-day admission update, with the existing 409 "already
    scanned" response unchanged.
 
@@ -325,17 +450,22 @@ and these rules are relaxed in that story, not before.
 
 **Buyer:**
 - `/account`: email code sign-in, and sign-out.
-- `/account/tickets`: the current tenant's tickets for this buyer, grouped by event.
+- `/account/tickets`: the current tenant's seats this buyer holds, grouped by event. For the
+  leader, seats they shared also appear, with their status ("Link sent", "Claimed by
+  k***@gmail.com") but no QR.
 - `/account/tickets/[id]`: the live QR with a 15-second countdown, event and tier, the account email
   (and the attendee name where the order has one), and the "open before you arrive, keep this page
-  open" notice. Myanmar and English text like the other public pages.
+  open" notice. Before the cutoff it also shows "Share this seat" (leader, unclaimed seat: create,
+  copy or cancel the link) or "Give back to <leader>" (friend). Myanmar and English text like the
+  other public pages.
+- `/t/claim`: section 6.4.
 
 **Admin:**
 - Event settings: the "Account-bound tickets" toggle, disabled once the event has orders, with an
   explanation.
-- Order or ticket view: the phone status (bound / not bound, last bound time, binds used).
-- "Reset phone" per ticket: revokes the active device (`revoked_by = admin`) and resets the bind
-  count. Logged to the existing admin audit trail if there is one, otherwise to `ticket_devices`.
+- Order or ticket view, read-only: each seat's current holder (masked email), link status, phone
+  status (bound / not bound, last bound time) and the `ticket_holder_events` history.
+- No "Reset phone" and no admin holder changes (owner decision 2026-11-22).
 
 **Account deletion is never blocked.** These are also the app's accounts, and Apple guideline
 5.1.1(v) and Google Play both require that users can delete their account in the app. Mobile spec
@@ -349,22 +479,30 @@ and these rules are relaxed in that story, not before.
 - **Server step**, added to mobile spec 11.1 after step 1 (`deleted_at` set) and before
   `auth.admin.deleteUser`: revoke every active `ticket_devices` row of the buyer with
   `revoked_by = 'account_deleted'`. Idempotent like the other steps, and also run by the 15-minute
-  sweep (11.1 step 6), so a deletion that fails part-way still revokes.
-- After `deleteUser`, `enrollments.buyer_id` and `ticket_devices.buyer_id` become NULL (SET NULL).
-  The ticket has no owner and no active phone, so it can never be bound or admitted again. The order,
-  payment and ticket rows stay as the organiser's records, under the retention rule in mobile
-  spec 11.
+  sweep (11.1 step 6), so a deletion that fails part-way still revokes. The same step logs
+  `holder_deleted` for seats the buyer holds as a friend and cancels open links the buyer created
+  (section 6.4).
+- After `deleteUser`, `enrollments.buyer_id`, `tickets.holder_buyer_id` and
+  `ticket_devices.buyer_id` become NULL (SET NULL). A seat whose current holder was the deleted
+  leader has no owner and no active phone, so it can never be bound or admitted again. A seat held
+  by a deleted friend returns to the leader. A seat a friend holds keeps working after the leader's
+  deletion. The order, payment and ticket rows stay as the organiser's records, under the retention
+  rule in mobile spec 11.
 - Any refund for the dead ticket is the organiser's call, as today. The warning says so.
 
 ## 10. Migrations
 
-One migration, applied to the dev DB first, and to production before the code that reads it:
-- `intakes.ticket_protection` plus check constraint plus lock trigger;
-- `buyer_profiles` and `enrollments.buyer_id` if #451 has not created them, in the full mobile spec
-  shape (section 4.2);
-- `ticket_devices` plus partial unique index plus RLS (buyer reads own rows; writes via service role
-  only);
-- submit RPC changes to accept and require `buyer_id` for protected intakes.
+One migration per plan (section 12), each applied to the dev DB first, and to production before the
+code that reads it:
+- Plan 2: `buyer_profiles` and `enrollments.buyer_id` if #451 has not created them, in the full
+  mobile spec shape (section 4.2), plus the durable `consume_rate_limit` RPC and its counter table
+  (service role only);
+- Plan 3: `intakes.ticket_protection` plus check constraint plus lock trigger; `ticket_devices` plus
+  partial unique index plus RLS with no policies (service role only, section 6.4); the bind
+  function; submit RPC changes to accept and require `buyer_id` for protected intakes;
+- Plan 4: `tickets.holder_buyer_id`, `ticket_share_links`, `ticket_holder_events` with RLS, the four
+  sharing functions and the void function (section 6.4), and the bind function updated to check
+  the current holder and tenant.
 
 Hash guards on function bodies must strip `chr(13)` (see the CRLF note in the repo's migration
 conventions).
@@ -374,11 +512,25 @@ conventions).
 - **Unit:** bound token sign and verify; `k2` envelope parse (wrong segment count, non-canonical
   `ts`); `devsig` verify against a key made by WebCrypto; the time window edges; a wrong `dk`; a
   plain token refused for a protected ticket.
-- **Database:** the bind function's limit, reset after an admin revoke, and two concurrent binds
-  leaving exactly one active row.
+- **Database:** two concurrent binds leave exactly one active row; a bind by anyone but the current
+  holder is refused; many re-binds in a row all succeed and leave one active row.
+- **Sharing (section 6.4):** create, cancel and replace a link (only one open); claim by the leader
+  refused; two concurrent claims of one link give one holder; a bind racing a claim leaves only the
+  new holder able to bind; give-back by anyone but the holder refused; share, claim and give-back
+  one second before and after the cutoff, and with no `event_date`; a claimed, cancelled, replaced,
+  expired and unknown token all give the same 404; a friend cannot share; deleting a friend's
+  account returns the seat to the leader; deleting the leader's account leaves a friend's seat
+  working and refuses its give-back; every move writes one `ticket_holder_events` row; voiding a
+  seat with an open link cancels the link, and a claim racing a void never leaves a claimed void
+  seat with an open link; a link from tenant X posted on tenant Y's host is refused (also for share,
+  give-back and bind); moving `event_date` moves the cutoff for an existing link; share, claim and
+  give-back refused on an admitted seat; the cutoff zone equals the `TICKET_TZ` default; `/t/claim`
+  loads no third-party tag and its URL has no fragment once the first script has run; a scan with
+  an active row whose `buyer_id` is not the current holder is a 404.
 - **Route:** `/api/scans` protected and unprotected paths, 404 vs 500 vs 409; `/api/public/enrollment/[ref]`
   omitting `jwt` and `qr`; each email caller sending no PDF for a protected order;
-  `/api/me/tickets/{id}/device` ownership and limit; the enroll routes overriding the email; Edit
+  `/api/me/tickets/{id}/device` holder check; the share routes' rate limits and that no route or
+  log line contains the raw link token; the enroll routes overriding the email; Edit
   Email refused; `requireBuyer` vs every staff gate in section 4.4, including middleware, in both
   directions.
 - **Staff and email codes (section 4.4):** a staff account signed in with an email code gets 403 on
@@ -397,7 +549,9 @@ conventions).
   revokes too.
 - **Staging, with real phones:** buy on a protected test event; bind phone A; scan succeeds. A
   screenshot of A's QR scanned after 60 s fails. Phone B binds, then A's live QR fails and B's
-  passes. Local runs are not evidence for the auth and RLS parts.
+  passes. The leader shares a second seat; a friend claims it on phone C; the leader's QR for that
+  seat fails and C's passes; the friend gives it back and C's fails. Local runs are not evidence for
+  the auth and RLS parts.
 
 ## 12. Dependencies and order
 
@@ -407,22 +561,42 @@ conventions).
    before either side builds buyer sign-in.
 3. Resend SMTP set for Supabase Auth on dev, then staging. Staff gates require a `password` sign-in
    (section 4.4) **before** email OTP is turned on in any project.
-4. kuunyi-scanner: send `token`, accept `k2.`.
-5. This feature: migration, accounts, checkout, binding, scan path, surface closing, pages, admin.
-6. Staging phone test (section 11), then production through the normal dev → staging → main flow,
-   with the migration applied to production before the code.
+4. **Plan 1** (#471): staff gates require a password session. Done on dev and staging.
+5. **Plan 2:** buyer email-code accounts (section 4). It also creates the durable
+   `consume_rate_limit` RPC that Plans 3 and 4 use.
+6. kuunyi-scanner: send `token`, accept `k2.`. Needed before any gate test of Plan 3.
+7. **Plan 3:** the leader's phone (mode A): scope switch, checkout, binding with no limit, the `k2`
+   QR, the scan path, closing the other QR surfaces, `/account/tickets`, the admin read-only view,
+   and the deletion step. Mode A works end to end.
+8. **Plan 4:** seat sharing (mode B, section 6.4): the tables and functions, the share, claim and
+   give-back routes, `/t/claim`, the emails and the holder history in admin. Built on Plan 3, since a
+   claim revokes a bound phone.
+9. Staging phone test (section 11) after each of Plans 3 and 4. Changes go dev → staging only while
+   the owner's release freeze on main (2026-11-21) holds; production later through the normal flow,
+   with each migration applied to production before its code.
 
 ## 13. Risks
 
 - **Live screen-sharing** defeats it (accepted, section 1).
-- **Lost or cleared phone at the gate** with no signal: the buyer cannot re-bind. Organisers need a
-  help-desk path (admin reset plus the buyer signs in on the spot with signal).
+- **Seat links can be sold** (accepted, section 1). Every claim is logged with both accounts, so
+  the organiser can see who passed seats to whom, but nothing caps it.
+- **Lost or cleared phone at the gate** with no signal: the holder cannot re-bind, and there is no
+  manual or help-desk entry (accepted, section 1). With signal and access to their email, they sign
+  in on any phone and bind it (no limit). Mitigations: the "Smartphone required" notice, the
+  reminder to open the ticket before arriving, and Home Screen install.
 - **Phone clock changed after the page loaded** (rare): the server-time offset taken on load
   (section 6.2) goes wrong and scans fail the window until the page is reloaded with signal.
-- **Account handover** is a transfer the design cannot block (section 1).
+- **Account handover** is a transfer the design cannot block (section 1); unlimited phone moves
+  make it easier. Each move emails the holder.
 - **iOS storage deletion:** Safari can delete the IndexedDB key after 7 days without a visit
-  (section 6.3), so early buyers may need a re-bind at the gate. Home Screen install and reminders
-  reduce it; a help desk with admin reset covers the rest.
+  (section 6.3), so early buyers may need a re-bind at the gate, which needs signal. Home Screen
+  install and reminders reduce it.
+- **A friend misses the cutoff:** a seat not claimed 24 hours before the event stays with the
+  leader, and the friend can enter only on the leader's phone. The share page and the leader's
+  reminder say when sharing closes.
+- **Organiser support load:** with no admin holder changes or reset, every seat problem is solved
+  by the buyers themselves (share, give-back, re-bind). Organisers need the read-only history
+  (section 9) to answer questions.
 - **Email deliverability:** every buyer sign-in, web and app, depends on Resend reaching the buyer.
   Code emails must be monitored on launch day, and a Resend outage stops new sign-ins everywhere.
 - **Staff accounts and email codes:** email OTP is project-wide, so staff gates must refuse
