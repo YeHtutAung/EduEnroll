@@ -9,19 +9,15 @@
 // (/enroll/payment/<ref>, /status): a buyer opening their QR at the gate must
 // not have it covered.
 //
-// "Seen" is a cookie, not localStorage: any storage key outside
-// SAFE_STORAGE_KEYS in tagManager.ts switches the tenant's GTM off, while
-// cookies only block GTM when they are Supabase's sb- ones.
+// Shown on every visit (owner decision 2026-11-21): with sales closed, this
+// is what visitors come for. Nothing is remembered after Close. Nothing goes
+// in localStorage or sessionStorage either: any key outside SAFE_STORAGE_KEYS
+// in tagManager.ts would switch the tenant's GTM off.
 
 export const WALK_IN_NOTICE_TENANT = "skyfestival";
 
 /** Hidden from the end of 24 Nov 2026 in Yangon, the festival's last day. */
 export const WALK_IN_NOTICE_ENDS_AT = Date.parse("2026-11-24T17:30:00Z");
-
-export const WALK_IN_NOTICE_COOKIE = "sf_walkin_notice_seen";
-
-/** Long enough that one visit isn't nagged, short enough to see it again next day. */
-export const WALK_IN_NOTICE_COOKIE_MAX_AGE_S = 12 * 60 * 60;
 
 const EXCLUDED_PREFIXES = ["/enroll/payment", "/status"];
 
@@ -29,10 +25,4 @@ export function walkInNoticeApplies(tenantSlug: string | null, pathname: string,
   if (tenantSlug !== WALK_IN_NOTICE_TENANT) return false;
   if (now >= WALK_IN_NOTICE_ENDS_AT) return false;
   return !EXCLUDED_PREFIXES.some((p) => pathname === p || pathname.startsWith(p + "/"));
-}
-
-export function walkInNoticeSeen(cookieHeader: string): boolean {
-  return cookieHeader
-    .split(";")
-    .some((c) => c.trim().split("=")[0] === WALK_IN_NOTICE_COOKIE);
 }
