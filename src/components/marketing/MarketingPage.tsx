@@ -64,7 +64,7 @@ export default function MarketingPage({ content }: { content: MarketingContent }
           sizes="100vw"
           className="object-cover"
         />
-        <div className="absolute inset-0 bg-gradient-to-r from-black/85 via-black/60 to-black/20" />
+        <div className="absolute inset-0 bg-gradient-to-r from-black/92 via-black/75 to-black/35" />
         <div className="absolute inset-x-0 bottom-0 h-40 bg-gradient-to-t from-black/60 to-transparent" />
 
         {/* Navbar */}
@@ -155,14 +155,14 @@ export default function MarketingPage({ content }: { content: MarketingContent }
             <ul className="mt-10 max-w-5xl mx-auto grid grid-cols-3 sm:grid-cols-6 gap-4 sm:gap-5">
               {visibleOrganizers.map((org) => (
                 <li key={org.id} className="flex flex-col items-center text-center">
-                  <div className="relative w-full aspect-square rounded-2xl overflow-hidden border border-slate-200 bg-white shadow-sm">
+                  <div className="relative w-full aspect-square rounded-2xl overflow-hidden border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
                     <Image
                       src={src(org.image)}
                       alt={org.name}
                       width={org.image.width}
                       height={org.image.height}
                       sizes="(min-width: 640px) 160px, 30vw"
-                      className="w-full h-full object-cover"
+                      className="w-full h-full object-contain"
                     />
                   </div>
                   <span className="mt-2.5 text-xs sm:text-sm font-semibold text-slate-700 leading-tight">{org.name}</span>
