@@ -3,6 +3,7 @@ import {
   accountReducer,
   initialAccount,
   MAX_PROFILE_RETRIES,
+  normalizeCode,
   type AccountEvent,
   type AccountState,
   type Transition,
@@ -49,11 +50,40 @@ describe("accountFlow — 1. loading", () => {
     expect(t.state).toEqual(emailState);
   });
 
-  it("403 → staff message WITHOUT signing out (that session is their admin session)", () => {
+  it("403 → staff screen WITHOUT signing out; it asks what kind of session it is", () => {
     const t = accountReducer({ step: "loading" }, { type: "profileLoaded", status: 403 });
-    expect(t.state).toEqual({ step: "staffSession" });
-    expect(t.effects).toEqual([]);
-    expect(t.effects.some((e) => e.type === "signOutLocal")).toBe(false);
+    expect(t.state).toEqual({ step: "staffSession", canSignOut: false, busy: false });
+    expect(t.effects).toEqual([{ type: "checkSession" }]);
+  });
+
+  it("staff screen: a password session gets no sign-out", () => {
+    const staff = accountReducer({ step: "loading" }, { type: "profileLoaded", status: 403 }).state;
+    const t = accountReducer(staff, { type: "sessionChecked", kind: "password" });
+    expect(t.state).toEqual({ step: "staffSession", canSignOut: false, busy: false });
+    // Even a forged click does nothing.
+    const click = accountReducer(t.state, { type: "signOut" });
+    expect(click.effects).toEqual([]);
+    expect(click.state).toEqual(t.state);
+  });
+
+  it("staff screen: no readable session gets no sign-out", () => {
+    const staff = accountReducer({ step: "loading" }, { type: "profileLoaded", status: 403 }).state;
+    expect(accountReducer(staff, { type: "sessionChecked", kind: "none" }).state).toMatchObject({
+      canSignOut: false,
+    });
+  });
+
+  it("staff screen: a left-over code session can be signed out locally", () => {
+    const staff = accountReducer({ step: "loading" }, { type: "profileLoaded", status: 403 }).state;
+    const [checked, out, done] = run(
+      staff,
+      { type: "sessionChecked", kind: "other" },
+      { type: "signOut" },
+      { type: "signedOut" },
+    );
+    expect(checked.state).toEqual({ step: "staffSession", canSignOut: true, busy: false });
+    expect(out.effects).toEqual([{ type: "signOutLocal" }]);
+    expect(done.state).toEqual(emailState);
   });
 
   it.each([503, 500, 0])("%i → try again, which reloads", (status) => {
@@ -115,6 +145,23 @@ describe("accountFlow — 3. code", () => {
     expect(t.state).toEqual({ ...codeState, busy: true });
   });
 
+  it("maps Myanmar digits to 0–9 before checking", () => {
+    const t = accountReducer(codeState, { type: "submitCode", code: "\u1044\u1048\u1042\u1049\u1041\u1043" });
+    expect(t.effects).toEqual([{ type: "verifyCode", email: "buyer@example.com", token: "482913" }]);
+  });
+
+  it.each(["482 913", "482-913", " 48 29 13 ", "\u1044\u1048\u1042 \u1049\u1041\u1043"])(
+    "strips spaces and dashes from %j",
+    (code) => {
+      const t = accountReducer(codeState, { type: "submitCode", code });
+      expect(t.effects).toEqual([{ type: "verifyCode", email: "buyer@example.com", token: "482913" }]);
+    },
+  );
+
+  it("normalizeCode leaves other characters for the 6-digit check to refuse", () => {
+    expect(normalizeCode("12a456")).toBe("12a456");
+  });
+
   it("refuses a code that isn't 6 digits", () => {
     for (const code of ["12345", "1234567", "abcdef", ""]) {
       const t = accountReducer(codeState, { type: "submitCode", code });
@@ -145,10 +192,49 @@ describe("accountFlow — 3. code", () => {
     expect(t.effects).toEqual([]);
   });
 
-  it("POST 403 staff → signOutLocal and the staff message", () => {
+  it("POST 403 staff → signOutLocal and the staff message, busy until signed out", () => {
     const t = accountReducer(posting(), { type: "profilePosted", status: 403, attempt: 0, reason: "staff" });
     expect(t.effects).toEqual([{ type: "signOutLocal" }]);
-    expect(t.state).toEqual({ step: "email", email: "", busy: false, notice: "staff" });
+    expect(t.state).toEqual({ step: "email", email: "", busy: true, notice: "staff", signingOut: true });
+    const done = accountReducer(t.state, { type: "signedOut" });
+    expect(done.state).toEqual({ step: "email", email: "", busy: false, notice: "staff" });
+  });
+
+  it("a new email can't be submitted until the local sign-out finishes", () => {
+    const t = accountReducer(posting(), { type: "profilePosted", status: 403, attempt: 0, reason: "staff" });
+    const early = accountReducer(t.state, { type: "submitEmail", email: "other@example.com" });
+    expect(early.effects).toEqual([]);
+    expect(early.state).toEqual(t.state);
+  });
+
+  it("POST 401 → keeps the email, 'expired', signOutLocal", () => {
+    const t = accountReducer(posting(), { type: "profilePosted", status: 401, attempt: 0 });
+    expect(t.effects).toEqual([{ type: "signOutLocal" }]);
+    expect(t.state).toEqual({
+      step: "email",
+      email: "buyer@example.com",
+      busy: true,
+      notice: "expired",
+      signingOut: true,
+    });
+    expect(accountReducer(t.state, { type: "signedOut" }).state).toEqual({
+      step: "email",
+      email: "buyer@example.com",
+      busy: false,
+      notice: "expired",
+    });
+  });
+
+  it.each([413, 422, 500])("POST %i → generic error and signOutLocal", (status) => {
+    const t = accountReducer(posting(), { type: "profilePosted", status, attempt: 0 });
+    expect(t.effects).toEqual([{ type: "signOutLocal" }]);
+    expect(t.state).toMatchObject({ step: "email", email: "buyer@example.com", notice: "generic" });
+  });
+
+  it("POST 200 without an email is not trusted: generic error and signOutLocal", () => {
+    const t = accountReducer(posting(), { type: "profilePosted", status: 200, attempt: 0 });
+    expect(t.effects).toEqual([{ type: "signOutLocal" }]);
+    expect(t.state).toMatchObject({ step: "email", email: "buyer@example.com", notice: "generic" });
   });
 
   it.each(["unconfirmed", "not_email_code", undefined])(
@@ -203,7 +289,13 @@ describe("accountFlow — 3. code", () => {
     const failed: AccountState = { step: "profileFailed", email: "buyer@example.com", busy: false };
     const t = accountReducer(failed, { type: "useAnotherEmail" });
     expect(t.effects).toEqual([{ type: "signOutLocal" }]);
-    expect(t.state).toMatchObject({ step: "email" });
+    expect(t.state).toMatchObject({ step: "email", busy: true, signingOut: true });
+    expect(accountReducer(t.state, { type: "signedOut" }).state).toEqual({
+      step: "email",
+      email: "buyer@example.com",
+      busy: false,
+      notice: null,
+    });
   });
 
   it("'use another email' from the code step goes back without a sign-out", () => {
@@ -215,6 +307,7 @@ describe("accountFlow — 3. code", () => {
   it("resend sends a new code to the same email", () => {
     const [sent, done] = run(codeState, { type: "resend" }, { type: "codeSent" });
     expect(sent.effects).toEqual([{ type: "sendCode", email: "buyer@example.com" }]);
+    expect(sent.state).toEqual({ ...codeState, busy: true, resending: true });
     expect(done.state).toEqual({ ...codeState, notice: "codeResent" });
   });
 
@@ -284,5 +377,38 @@ describe("accountFlow — the code never leaks", () => {
       { type: "verifyCode", email: "buyer@example.com", token: CODE },
       { type: "verifyCode", email: "buyer@example.com", token: CODE },
     ]);
+  });
+});
+
+describe("accountFlow — stale events change nothing", () => {
+  const sendingEmail: AccountState = { step: "email", email: "a@b.co", busy: true, notice: null };
+  const verifying: AccountState = { ...codeState, busy: true };
+  const signingOut: AccountState = { step: "email", email: "", busy: true, notice: "staff", signingOut: true };
+  const signedIn: AccountState = { step: "signedIn", email: "a@b.co", busy: false };
+  const failed: AccountState = { step: "profileFailed", email: "a@b.co", busy: true };
+
+  it.each<[string, AccountState, AccountEvent]>([
+    ["profileLoaded on the email step", emailState, { type: "profileLoaded", status: 200, email: "x@y.co" }],
+    ["profileLoaded when signed in", signedIn, { type: "profileLoaded", status: 401 }],
+    ["profileLoaded on the code step", codeState, { type: "profileLoaded", status: 403 }],
+    ["codeSent on an idle email step", emailState, { type: "codeSent" }],
+    ["codeSent on an idle code step", codeState, { type: "codeSent" }],
+    ["codeSent while verifying", verifying, { type: "codeSent" }],
+    ["codeSent while signing out", signingOut, { type: "codeSent" }],
+    ["sendFailed on an idle email step", emailState, { type: "sendFailed", status: 429 }],
+    ["sendFailed on an idle code step", codeState, { type: "sendFailed", status: 429 }],
+    ["sendFailed while signing out", signingOut, { type: "sendFailed" }],
+    ["profilePosted on an idle code step", codeState, { type: "profilePosted", status: 200, attempt: 0, email: "x@y.co" }],
+    ["profilePosted on the email step", emailState, { type: "profilePosted", status: 403, attempt: 0, reason: "staff" }],
+    ["profilePosted when signed in", signedIn, { type: "profilePosted", status: 503, attempt: 0 }],
+    ["useAnotherEmail while sending", sendingEmail, { type: "useAnotherEmail" }],
+    ["useAnotherEmail while verifying", verifying, { type: "useAnotherEmail" }],
+    ["useAnotherEmail while re-posting the profile", failed, { type: "useAnotherEmail" }],
+    ["sessionChecked outside the staff screen", emailState, { type: "sessionChecked", kind: "other" }],
+    ["signedOut on an idle email step", emailState, { type: "signedOut" }],
+  ])("%s", (_name, state, event) => {
+    const t = accountReducer(state, event);
+    expect(t.state).toBe(state);
+    expect(t.effects).toEqual([]);
   });
 });

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
-import { AccountView } from "@/app/(public)/account/AccountSignIn";
+import { AccountView, readProfileResponse } from "@/app/(public)/account/AccountSignIn";
 import type { AccountState } from "@/app/(public)/account/accountFlow";
 
 // Effects don't run under react-dom/server, so the presentational view is
@@ -60,19 +60,28 @@ describe("AccountView", () => {
     expect(html).toContain("ဝန်ထမ်းအကောင့်");
   });
 
-  it("staff session on load: the staff message, no form and no sign-out button", () => {
-    const html = render({ step: "staffSession" });
-    expect(html).toContain("This address belongs to a staff account.");
-    expect(html).toContain("ဝန်ထမ်းအကောင့်");
+  it("staff session on load: its own text, no form, and no sign-out for a password session", () => {
+    const html = render({ step: "staffSession", canSignOut: false, busy: false });
+    expect(html).toContain("signed in as staff on this site");
+    expect(html).toContain("use another browser");
+    expect(html).not.toContain("Use a different email");
+    expect(html).toContain("ဝန်ထမ်း");
     expect(html).not.toContain("<input");
-    expect(html).not.toContain("Sign out");
+    expect(html).not.toContain("<button");
+  });
+
+  it("staff session on load: a left-over code session gets a Sign out button", () => {
+    const html = render({ step: "staffSession", canSignOut: true, busy: false });
+    expect(html).toMatch(/<button[^>]*>Sign out/);
+    expect(html).toContain("ထွက်ရန်");
   });
 
   it("code step: a 6-digit field, Use another email and Resend", () => {
     const html = render({ step: "code", email: "buyer@example.com", busy: false, notice: null });
     expect(html).toMatch(/<input[^>]*inputMode="numeric"|<input[^>]*inputmode="numeric"/i);
     expect(html).toMatch(/<input[^>]*autoComplete="one-time-code"|<input[^>]*autocomplete="one-time-code"/i);
-    expect(html).toMatch(/<input[^>]*maxLength="6"|<input[^>]*maxlength="6"/i);
+    // Room for a pasted "482 913".
+    expect(html).toMatch(/<input[^>]*maxlength="12"/i);
     expect(html).toContain("buyer@example.com");
     expect(html).toContain("Use another email");
     expect(html).toContain("အခြား အီးမေးလ် သုံးရန်");
@@ -119,6 +128,53 @@ describe("AccountView", () => {
     expect(html.match(/<button[^>]*disabled/g)?.length).toBe(3);
   });
 
+  it("both forms post, never a native GET that would put input in the URL", () => {
+    for (const state of [
+      { step: "email", email: "", busy: false, notice: null },
+      { step: "code", email: "a@b.co", busy: false, notice: null },
+    ] as AccountState[]) {
+      expect(render(state)).toMatch(/<form[^>]*method="post"/);
+    }
+  });
+
+  it("forms carry aria-busy", () => {
+    expect(render({ step: "email", email: "a@b.co", busy: true, notice: null })).toMatch(
+      /<form[^>]*aria-busy="true"/,
+    );
+    expect(render({ step: "code", email: "a@b.co", busy: false, notice: null })).toMatch(
+      /<form[^>]*aria-busy="false"/,
+    );
+  });
+
+  it("shows Sending… while sending a code", () => {
+    const html = render({ step: "email", email: "a@b.co", busy: true, notice: null });
+    expect(html).toContain("Sending…");
+    expect(html).toMatch(MYANMAR);
+  });
+
+  it("shows Checking… while verifying, and Sending… on Resend", () => {
+    const verifying = render({ step: "code", email: "a@b.co", busy: true, notice: null });
+    expect(verifying).toContain("Checking…");
+    const resending = render({ step: "code", email: "a@b.co", busy: true, notice: null, resending: true });
+    expect(resending).toContain("Sending…");
+    expect(resending).not.toContain("Checking…");
+  });
+
+  it("does not say Sending… while signing out", () => {
+    const html = render({ step: "email", email: "", busy: true, notice: "staff", signingOut: true });
+    expect(html).not.toContain("Sending…");
+  });
+
+  it("focuses the code field, and the email field only on returning", () => {
+    expect(render({ step: "code", email: "a@b.co", busy: false, notice: null })).toMatch(
+      /<input[^>]*name="code"[^>]*autofocus|<input[^>]*autofocus[^>]*name="code"/i,
+    );
+    const first = render({ step: "email", email: "", busy: false, notice: null });
+    expect(first).not.toMatch(/autofocus/i);
+    const back = render({ step: "email", email: "a@b.co", busy: false, notice: null });
+    expect(back).toMatch(/autofocus/i);
+  });
+
   it("marks new Myanmar strings for native review", () => {
     const src = readFileSync(
       path.resolve(process.cwd(), "src/app/(public)/account/AccountSignIn.tsx"),
@@ -134,5 +190,37 @@ describe("AccountView", () => {
     );
     expect(src).not.toMatch(/console\./);
     expect(src).not.toMatch(/[?&]code=|searchParams/);
+  });
+});
+
+describe("readProfileResponse", () => {
+  it("reads the email from a profile", async () => {
+    const res = new Response(JSON.stringify({ email: "a@b.co", name: null, locale: "my" }), { status: 200 });
+    expect(await readProfileResponse(res)).toEqual({ email: "a@b.co", reason: undefined });
+  });
+
+  it("reads error.reason from a 403", async () => {
+    const res = new Response(
+      JSON.stringify({ error: { code: "FORBIDDEN", message: "x", reason: "staff" } }),
+      { status: 403 },
+    );
+    expect(await readProfileResponse(res)).toEqual({ email: undefined, reason: "staff" });
+  });
+
+  it("a missing or non-string email comes back undefined", async () => {
+    expect(await readProfileResponse(new Response(JSON.stringify({ name: "x" })))).toEqual({
+      email: undefined,
+      reason: undefined,
+    });
+    expect(await readProfileResponse(new Response(JSON.stringify({ email: 42 })))).toEqual({
+      email: undefined,
+      reason: undefined,
+    });
+  });
+
+  it("a non-JSON body never throws", async () => {
+    expect(await readProfileResponse(new Response("<html>502</html>", { status: 502 }))).toEqual({});
+    expect(await readProfileResponse(new Response("", { status: 503 }))).toEqual({});
+    expect(await readProfileResponse(new Response("null"))).toEqual({});
   });
 });

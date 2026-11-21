@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { isPasswordSession } from "@/lib/authMethod";
 import {
   accountReducer,
   initialAccount,
@@ -9,6 +10,7 @@ import {
   type AccountEvent,
   type AccountState,
   type Notice,
+  type SessionKind,
 } from "./accountFlow";
 
 // ─── /account: buyer sign-in with an email code ─────────────────────────────
@@ -42,6 +44,12 @@ const COPY = {
   signedInAs: { en: "Signed in as", mm: "ဝင်ရောက်ထားသော အကောင့်" },
   signOut: { en: "Sign out", mm: "ထွက်ရန်" },
   tryAgain: { en: "Try again", mm: "ထပ်မံကြိုးစားရန်" },
+  sending: { en: "Sending…", mm: "ပို့နေသည်…" },
+  checking: { en: "Checking…", mm: "စစ်ဆေးနေသည်…" },
+  staffSession: {
+    en: "You're signed in as staff on this site. Sign out of the admin, or use another browser, to buy tickets.",
+    mm: "ဤဆိုက်တွင် ဝန်ထမ်းအဖြစ် ဝင်ရောက်ထားပါသည်။ လက်မှတ်ဝယ်ရန် admin မှ ထွက်ပါ သို့မဟုတ် အခြား browser ကို သုံးပါ။",
+  },
   somethingWrong: {
     en: "Something went wrong. Please try again.",
     mm: "တစ်ခုခု မှားယွင်းနေပါသည်။ ထပ်မံကြိုးစားပါ။",
@@ -146,6 +154,14 @@ function NoticeBox({ notice }: { notice: Notice | null }) {
   );
 }
 
+function BusyLabel({ copy }: { copy: Bilingual }) {
+  return (
+    <>
+      {copy.en} / <span className="font-myanmar">{copy.mm}</span>
+    </>
+  );
+}
+
 function Card({ children }: { children: ReactNode }) {
   return <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">{children}</div>;
 }
@@ -178,7 +194,17 @@ function Body(props: AccountViewProps) {
     case "staffSession":
       return (
         <Card>
-          <NoticeBox notice="staff" />
+          <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+            <p>{COPY.staffSession.en}</p>
+            <p className="font-myanmar mt-0.5">{COPY.staffSession.mm}</p>
+          </div>
+          {/* Only a non-password (left-over code) session: a password session
+              is their admin session and is never signed out from here. */}
+          {state.canSignOut && (
+            <button type="button" onClick={props.onSignOut} disabled={state.busy} className={`mt-4 ${primaryButton}`}>
+              {COPY.signOut.en} / <span className="font-myanmar">{COPY.signOut.mm}</span>
+            </button>
+          )}
         </Card>
       );
 
@@ -196,7 +222,7 @@ function Body(props: AccountViewProps) {
             <Text copy={COPY.emailHelp} />
           </p>
           <NoticeBox notice={state.notice} />
-          <form onSubmit={onSubmit} noValidate>
+          <form method="post" onSubmit={onSubmit} noValidate aria-busy={state.busy}>
             <label htmlFor="account-email" className="mb-2 block text-sm font-medium text-gray-700">
               {COPY.emailLabel.en} / <span className="font-myanmar">{COPY.emailLabel.mm}</span>
             </label>
@@ -208,11 +234,20 @@ function Body(props: AccountViewProps) {
               inputMode="email"
               required
               defaultValue={state.email}
+              // On returning here (Use another email, or after a notice), not
+              // on first arrival.
+              autoFocus={state.email !== "" || state.notice !== null}
               disabled={state.busy}
               className={inputClass}
             />
             <button type="submit" disabled={state.busy} className={`mt-4 ${primaryButton}`}>
-              {COPY.sendCode.en} / <span className="font-myanmar">{COPY.sendCode.mm}</span>
+              {state.busy && !state.signingOut ? (
+                <BusyLabel copy={COPY.sending} />
+              ) : (
+                <>
+                  {COPY.sendCode.en} / <span className="font-myanmar">{COPY.sendCode.mm}</span>
+                </>
+              )}
             </button>
           </form>
         </Card>
@@ -234,7 +269,7 @@ function Body(props: AccountViewProps) {
             <span className="font-myanmar block">{COPY.codeSentTo.mm}</span>
           </p>
           <NoticeBox notice={state.notice} />
-          <form onSubmit={onSubmit} noValidate>
+          <form method="post" onSubmit={onSubmit} noValidate aria-busy={state.busy}>
             <label htmlFor="account-code" className="mb-2 block text-sm font-medium text-gray-700">
               {COPY.codeLabel.en} / <span className="font-myanmar">{COPY.codeLabel.mm}</span>
             </label>
@@ -244,14 +279,22 @@ function Body(props: AccountViewProps) {
               type="text"
               inputMode="numeric"
               autoComplete="one-time-code"
-              pattern="[0-9]{6}"
-              maxLength={6}
+              // Room for a pasted "482 913" or "482-913"; the reducer strips
+              // spaces and dashes and maps Myanmar digits before checking.
+              maxLength={12}
+              autoFocus
               required
               disabled={state.busy}
               className={`${inputClass} font-mono tracking-[0.4em]`}
             />
             <button type="submit" disabled={state.busy} className={`mt-4 ${primaryButton}`}>
-              {COPY.verify.en} / <span className="font-myanmar">{COPY.verify.mm}</span>
+              {state.busy && !state.resending ? (
+                <BusyLabel copy={COPY.checking} />
+              ) : (
+                <>
+                  {COPY.verify.en} / <span className="font-myanmar">{COPY.verify.mm}</span>
+                </>
+              )}
             </button>
           </form>
           <div className="mt-4 flex flex-wrap justify-between gap-2">
@@ -259,7 +302,13 @@ function Body(props: AccountViewProps) {
               {COPY.useAnotherEmail.en} / <span className="font-myanmar">{COPY.useAnotherEmail.mm}</span>
             </button>
             <button type="button" onClick={props.onResend} disabled={state.busy} className={secondaryButton}>
-              {COPY.resend.en} / <span className="font-myanmar">{COPY.resend.mm}</span>
+              {state.resending ? (
+                <BusyLabel copy={COPY.sending} />
+              ) : (
+                <>
+                  {COPY.resend.en} / <span className="font-myanmar">{COPY.resend.mm}</span>
+                </>
+              )}
             </button>
           </div>
         </Card>
@@ -316,7 +365,8 @@ export function AccountView(props: AccountViewProps) {
 
 const PROFILE_URL = "/api/account/profile";
 
-async function readProfileResponse(res: Response): Promise<{ email?: string; reason?: string }> {
+/** The fields the reducer needs from a profile response; never throws. */
+export async function readProfileResponse(res: Response): Promise<{ email?: string; reason?: string }> {
   try {
     const body: unknown = await res.json();
     if (!body || typeof body !== "object") return {};
@@ -389,8 +439,24 @@ export default function AccountSignIn() {
         }
         return;
       }
+      case "checkSession": {
+        // Decodes the local token only, to pick the screen: the server has
+        // already refused this session with 403. A failure offers no button.
+        let kind: SessionKind = "none";
+        try {
+          const { data } = await supabase().auth.getSession();
+          const token = data.session?.access_token;
+          if (token) kind = isPasswordSession(token) ? "password" : "other";
+        } catch {
+          kind = "none";
+        }
+        dispatch({ type: "sessionChecked", kind });
+        return;
+      }
       case "postProfile": {
         if (effect.delayMs > 0) await wait(effect.delayMs);
+        // The page may have gone during the back-off.
+        if (!mounted.current) return;
         try {
           // No body: the server takes the email from the verified session.
           const res = await fetch(PROFILE_URL, { method: "POST", credentials: "same-origin", cache: "no-store" });

@@ -21,17 +21,27 @@ export type Notice =
   | "expired"
   | "generic";
 
+/** What `getSession()` holds on this host, for the staff screen on load. */
+export type SessionKind = "password" | "other" | "none";
+
 export type AccountState =
   /** 1. GET /api/account/profile in flight. */
   | { step: "loading" }
   /** 1. The GET failed (503, network, anything unexpected). */
   | { step: "loadFailed" }
-  /** 1. 403 on GET: a staff session on this host. Never signed out from here. */
-  | { step: "staffSession" }
-  /** 2. Email entry. `email` pre-fills the field after "Use another email". */
-  | { step: "email"; email: string; busy: boolean; notice: Notice | null }
-  /** 3. Code entry for `email`. */
-  | { step: "code"; email: string; busy: boolean; notice: Notice | null }
+  /**
+   * 1. 403 on GET: a staff account is signed in on this host. A password
+   * session is their admin session and is never signed out from here;
+   * `canSignOut` is true only for a non-password (left-over code) session.
+   */
+  | { step: "staffSession"; canSignOut: boolean; busy: boolean }
+  /**
+   * 2. Email entry. `email` pre-fills the field after "Use another email".
+   * `signingOut`: busy waiting for a local sign-out, not for a send.
+   */
+  | { step: "email"; email: string; busy: boolean; notice: Notice | null; signingOut?: true }
+  /** 3. Code entry for `email`. `resending`: busy on Resend, not on a verify. */
+  | { step: "code"; email: string; busy: boolean; notice: Notice | null; resending?: true }
   /** 3. Code accepted, but creating the profile kept failing (503). */
   | { step: "profileFailed"; email: string; busy: boolean }
   /** 4. Signed in. */
@@ -39,6 +49,7 @@ export type AccountState =
 
 export type AccountEffect =
   | { type: "loadProfile" }
+  | { type: "checkSession" }
   | { type: "sendCode"; email: string }
   | { type: "verifyCode"; email: string; token: string }
   /** attempt 0 is the first POST; 1 and 2 are the retries after a 503. */
@@ -47,6 +58,7 @@ export type AccountEffect =
 
 export type AccountEvent =
   | { type: "profileLoaded"; status: number; email?: string }
+  | { type: "sessionChecked"; kind: SessionKind }
   | { type: "retryLoad" }
   | { type: "submitEmail"; email: string }
   | { type: "codeSent" }
@@ -80,6 +92,16 @@ export function normalizeEmail(raw: string): string {
   return raw.trim().toLowerCase();
 }
 
+/**
+ * Myanmar digits (U+1040–U+1049) become 0–9, and spaces and dashes go, so a
+ * code typed on a Myanmar keyboard or pasted as "482 913" still checks.
+ */
+export function normalizeCode(raw: string): string {
+  return raw
+    .replace(/[၀-၉]/g, (d) => String(d.charCodeAt(0) - 0x1040))
+    .replace(/[\s\-‐-―]/g, "");
+}
+
 // Deliberately loose: Supabase validates the address. This only stops an
 // obviously empty or malformed field from costing a send.
 function looksLikeEmail(email: string): boolean {
@@ -95,6 +117,16 @@ const emailStep = (email: string, notice: Notice | null): AccountState => ({
   notice,
 });
 
+/**
+ * Back to the email step behind a local sign-out. Stays busy until
+ * `signedOut` arrives, so a new sign-in can't start and then be cleared by
+ * the late sign-out.
+ */
+const signOutToEmail = (email: string, notice: Notice | null): Transition => ({
+  state: { step: "email", email, busy: true, notice, signingOut: true },
+  effects: [{ type: "signOutLocal" }],
+});
+
 export function accountReducer(state: AccountState, event: AccountEvent): Transition {
   switch (event.type) {
     // ── 1. Loading ──────────────────────────────────────────────────────────
@@ -104,11 +136,21 @@ export function accountReducer(state: AccountState, event: AccountEvent): Transi
         return stay({ step: "signedIn", email: event.email, busy: false });
       }
       if (event.status === 401) return stay(emailStep("", null));
-      // A staff member already signed in on this host. That session is their
-      // admin session: signing it out here would log them out of /admin.
-      if (event.status === 403) return stay({ step: "staffSession" });
+      // A staff account is already signed in on this host. If that is their
+      // password (admin) session, signing it out here would log them out of
+      // /admin, so first ask what kind of session it is.
+      if (event.status === 403) {
+        return {
+          state: { step: "staffSession", canSignOut: false, busy: false },
+          effects: [{ type: "checkSession" }],
+        };
+      }
       return stay({ step: "loadFailed" });
     }
+
+    case "sessionChecked":
+      if (state.step !== "staffSession" || state.busy) return stay(state);
+      return stay({ ...state, canSignOut: event.kind === "other" });
 
     case "retryLoad":
       if (state.step !== "loadFailed") return stay(state);
@@ -128,27 +170,32 @@ export function accountReducer(state: AccountState, event: AccountEvent): Transi
     }
 
     case "codeSent":
-      if (state.step === "email" && state.busy) {
+      if (state.step === "email" && state.busy && !state.signingOut) {
         return stay({ step: "code", email: state.email, busy: false, notice: null });
       }
-      if (state.step === "code" && state.busy) {
-        return stay({ ...state, busy: false, notice: "codeResent" });
+      if (state.step === "code" && state.busy && state.resending) {
+        return stay({ step: "code", email: state.email, busy: false, notice: "codeResent" });
       }
       return stay(state);
 
     case "sendFailed": {
-      if ((state.step !== "email" && state.step !== "code") || !state.busy) return stay(state);
       const notice: Notice = event.status === 429 ? "tooManyCodes" : "sendFailed";
-      return stay({ ...state, busy: false, notice });
+      if (state.step === "email" && state.busy && !state.signingOut) {
+        return stay({ step: "email", email: state.email, busy: false, notice });
+      }
+      if (state.step === "code" && state.busy && state.resending) {
+        return stay({ step: "code", email: state.email, busy: false, notice });
+      }
+      return stay(state);
     }
 
     // ── 3. Code ─────────────────────────────────────────────────────────────
     case "submitCode": {
       if (state.step !== "code" || state.busy) return stay(state);
-      const token = event.code.trim();
+      const token = normalizeCode(event.code);
       if (!CODE_PATTERN.test(token)) return stay({ ...state, notice: "invalidCode" });
       return {
-        state: { ...state, busy: true, notice: null },
+        state: { step: "code", email: state.email, busy: true, notice: null },
         effects: [{ type: "verifyCode", email: state.email, token }],
       };
     }
@@ -156,20 +203,18 @@ export function accountReducer(state: AccountState, event: AccountEvent): Transi
     case "resend":
       if (state.step !== "code" || state.busy) return stay(state);
       return {
-        state: { ...state, busy: true, notice: null },
+        state: { step: "code", email: state.email, busy: true, notice: null, resending: true },
         effects: [{ type: "sendCode", email: state.email }],
       };
 
     case "useAnotherEmail":
       if (state.step === "code" && !state.busy) return stay(emailStep(state.email, null));
       // The code was accepted here, so a session exists: drop it locally.
-      if (state.step === "profileFailed" && !state.busy) {
-        return { state: emailStep(state.email, null), effects: [{ type: "signOutLocal" }] };
-      }
+      if (state.step === "profileFailed" && !state.busy) return signOutToEmail(state.email, null);
       return stay(state);
 
     case "verifyFailed":
-      if (state.step !== "code" || !state.busy) return stay(state);
+      if (state.step !== "code" || !state.busy || state.resending) return stay(state);
       return stay({
         ...state,
         busy: false,
@@ -177,7 +222,7 @@ export function accountReducer(state: AccountState, event: AccountEvent): Transi
       });
 
     case "codeVerified":
-      if (state.step !== "code" || !state.busy) return stay(state);
+      if (state.step !== "code" || !state.busy || state.resending) return stay(state);
       return {
         state,
         effects: [{ type: "postProfile", attempt: 0, delayMs: 0 }],
@@ -192,7 +237,8 @@ export function accountReducer(state: AccountState, event: AccountEvent): Transi
 
     case "profilePosted": {
       const posting =
-        (state.step === "code" || state.step === "profileFailed") && state.busy;
+        (state.step === "code" && state.busy && !state.resending) ||
+        (state.step === "profileFailed" && state.busy);
       if (!posting) return stay(state);
       const { email } = state;
 
@@ -214,29 +260,26 @@ export function accountReducer(state: AccountState, event: AccountEvent): Transi
       // The code session was made a moment ago by this page, so signing it out
       // locally loses nothing else. (Contrast the 403 on load, above.)
       if (event.status === 403) {
-        return {
-          state: emailStep("", event.reason === "staff" ? "staff" : "generic"),
-          effects: [{ type: "signOutLocal" }],
-        };
+        return signOutToEmail("", event.reason === "staff" ? "staff" : "generic");
       }
-      if (event.status === 409) {
-        return { state: emailStep("", "deletion"), effects: [{ type: "signOutLocal" }] };
-      }
-      if (event.status === 401) {
-        return { state: emailStep(email, "expired"), effects: [{ type: "signOutLocal" }] };
-      }
-      return { state: emailStep(email, "generic"), effects: [{ type: "signOutLocal" }] };
+      if (event.status === 409) return signOutToEmail("", "deletion");
+      if (event.status === 401) return signOutToEmail(email, "expired");
+      // Anything else, including a 200/201 without an email, is not trusted.
+      return signOutToEmail(email, "generic");
     }
 
-    // ── 4. Signed in ────────────────────────────────────────────────────────
+    // ── 4. Signed in (and the staff screen's left-over code session) ───────
     case "signOut":
-      if (state.step !== "signedIn" || state.busy) return stay(state);
-      return { state: { ...state, busy: true }, effects: [{ type: "signOutLocal" }] };
+      if (state.step === "signedIn" && !state.busy) return signOutToEmail("", null);
+      if (state.step === "staffSession" && state.canSignOut && !state.busy) {
+        return signOutToEmail("", null);
+      }
+      return stay(state);
 
     case "signedOut":
-      // Only the Sign out button waits on this. The other local sign-outs have
-      // already moved to the email step with their own notice.
-      if (state.step === "signedIn" && state.busy) return stay(emailStep("", null));
+      if (state.step === "email" && state.signingOut) {
+        return stay(emailStep(state.email, state.notice));
+      }
       return stay(state);
 
     default:
