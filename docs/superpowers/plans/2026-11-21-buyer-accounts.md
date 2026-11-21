@@ -1185,16 +1185,13 @@ git commit -m "feat(account): email-code sign-in page for buyers"
 - [ ] **Step 1: Set**
   - `[auth.email] enable_confirmations = true`, `otp_length = 6`, `otp_expiry = 600`, `double_confirm_changes = true` (Secure email change).
   - `[auth.rate_limit] email_sent = 30`, so local testing isn't stopped at 2 per hour.
-  - `[auth.hook.send_email] enabled = false` **committed**, with `uri = "http://host.docker.internal:3005/api/internal/auth/send-email"` and `secrets = "env(SUPABASE_SEND_EMAIL_HOOK_SECRET)"` filled in. A developer turns it on locally when testing the hook. The secret goes in a gitignored `supabase/.env` in `v1,whsec_<base64>` form, and the same value goes in `.env.local`. Never commit it or print it.
+  - `[auth.hook.send_email]` with `uri = "http://host.docker.internal:3005/api/internal/auth/send-email"` and `secrets = "env(SUPABASE_SEND_EMAIL_HOOK_SECRET)"`, committed **commented out** with a note on how to turn it on. Task 1 found that while the block is present, `supabase stop`, `start` and `status` all fail if the variable is unset, even with `enabled = false`. A developer uncomments it locally to test the hook. The secret goes in a gitignored `supabase/.env` in `v1,whsec_<base64>` form, and the same value goes in `.env.local`. Never commit it or print it.
   - Local templates `[auth.email.template.magic_link]` and `[auth.email.template.confirmation]` point to a committed `supabase/templates/email-code.html` that shows `{{ .Token }}`, so the hook-off path also sends a code and not a link.
-  - If Task 3 Step 7 ran: `[auth.hook.before_user_created] enabled = true`, `uri = "pg-functions://postgres/public/hook_before_user_created"`.
 
 - [ ] **Step 2: Restart the local stack and sign in end to end**
 
   `npx supabase stop && npx supabase start`, then `npm run dev`.
   1. **Hook off** (the committed config): open `http://localhost:3005/account?tenant=brave` and sign in with a new `@example.test` address, reading the code in the local mail catcher. Confirm a `buyer_profiles` row exists.
-  Before Step 1, confirm `supabase start` accepts `secrets = "env(SUPABASE_SEND_EMAIL_HOOK_SECRET)"` while the hook is disabled and the variable is unset. If it doesn't, comment the line out in the committed config.
-
   2. **Hook on** (local only; put `RATE_LIMIT_HMAC_SECRET` in `.env.local` too, or `createHmac` throws first and you test the wrong failure): confirm the hook route receives the request and verifies its signature. With `RESEND_API_KEY` unset locally, `sendEmail` returns false and the hook answers 500. Sign-in then fails with an error, which is the correct "never answer success without sending" behaviour. Record what you saw. Real delivery is tested on staging (Task 12).
   3. Confirm a staff password sign-in at `/login?tenant=brave` still reaches `/admin/dashboard`.
   4. Confirm `/register` still creates a tenant. It creates its owner with the service role, so confirmations being on must not block it; if it does, stop and report.
@@ -1282,11 +1279,12 @@ npm run build; echo BUILD=$?    # no dev server running from this folder
 
 | Question | Result | Consequence |
 |---|---|---|
-| `amr` of a first-ever email-code session | | must be `otp` |
-| Is there any separate "email codes" switch, or does the Email provider alone allow `signInWithOtp`? | | gate wording |
-| Does the project-wide `email_sent` limit still apply with the Send Email Hook on? | | if yes, owner raises it (Task 12 step 7.5) |
-| Action type for a new email / an existing email | | `signup` / `magiclink` expected |
-| Types for reset, invite, email change | | |
-| Which `email_change` code goes to which address | | Task 8 routing |
-| Before User Created: can a public password sign-up be told apart? | | (A) build the hook / (B) skip |
-| `auth.admin.signOut(jwt, "others")` ends the other session and keeps this one | | must be yes |
+| `amr` of a first-ever email-code session | `["otp"]`, for a new and an existing email; the token has a `session_id` claim; the user is email-confirmed after `verifyOtp` | `isEmailCodeSession` rule holds |
+| Is there any separate "email codes" switch, or does the Email provider alone allow `signInWithOtp`? | No switch: `signInWithOtp` + `verifyOtp` worked with only the Email provider on | gate wording stands: the Send Email Hook is the switch |
+| Does the project-wide `email_sent` limit still apply with the Send Email Hook on? | **Can't be tested locally**: the CLI sets `GOTRUE_RATE_LIMIT_EMAIL_SENT=360000` whatever `email_sent` says (the setting needs real SMTP) | owner checks the dev project's limit (Task 12 step 7.5) |
+| Action type for a new email / an existing email | `signup` / `magiclink`, each with a 6-digit `email_data.token` | Task 8 groups as planned |
+| Types for reset, invite, email change | `recovery`, `invite`, `email_change` (6-digit codes); every request carries `webhook-signature` | as planned |
+| Which `email_change` code goes to which address | `email_data.token` → the **current** address (`user.email`); `email_data.token_new` → the **new** address (`user.new_email`). Verified: both `verifyOtp(type: "email_change")` calls succeed only with that pairing, and the email changes | Task 8 routing |
+| Before User Created: can a public password sign-up be told apart? | **No (B).** Its event has the same keys and values as an email-code sign-up; no password field is sent. `admin.createUser` doesn't fire the hook at all; `inviteUserByEmail` does | **skip Task 3 Step 7 and the hook line in Task 10**; `ensureBuyerProfile`'s reset covers it (mobile spec 4.1 allows this) |
+| `auth.admin.signOut(jwt, "others")` ends the other session and keeps this one | Yes: the other session's refresh fails, the caller's still works | step 8 of `ensureBuyerProfile` as planned |
+| Local config gotcha | With `[auth.hook.send_email]` present, `supabase stop`/`start`/`status` all **fail** if its `env()` secret is unset, even when the hook is disabled | Task 10: keep the whole `[auth.hook.send_email]` block **commented out** in the committed config, with instructions to uncomment |
