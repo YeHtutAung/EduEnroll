@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { isPasswordSession } from "@/lib/authMethod";
 import { forwardedClickQuery } from "@/lib/conversions/clickData";
 import {
   extractSubdomainFromHost,
@@ -204,7 +205,17 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  if (user && pathname === "/login") {
+  // Staff pages need a password sign-in. Email codes (buyer sign-in) work for
+  // every account, so a code session is "signed out" as far as staff pages go.
+  // getUser() above has verified the session; getSession() only hands us its
+  // token to read the sign-in method. Spec: account-bound tickets, §4.4.
+  let staffSession = false;
+  if (user) {
+    const { data: sessionData } = await supabase.auth.getSession();
+    staffSession = isPasswordSession(sessionData.session?.access_token);
+  }
+
+  if (staffSession && pathname === "/login") {
     // Check x-user-role cookie (set by LoginForm after auth) for superadmin redirect
     const userRole = request.cookies.get("x-user-role")?.value;
     const dest = userRole === "superadmin" ? "/superadmin" : "/admin/dashboard";
@@ -221,14 +232,14 @@ export async function middleware(request: NextRequest) {
     return loginRedirect;
   }
 
-  if (!user && pathname.startsWith("/admin")) {
+  if (!staffSession && pathname.startsWith("/admin")) {
     const loginUrl = new URL("/login", request.url);
     loginUrl.searchParams.set("next", pathname);
     return NextResponse.redirect(loginUrl);
   }
 
   // Onboarding requires auth
-  if (!user && pathname.startsWith("/onboarding")) {
+  if (!staffSession && pathname.startsWith("/onboarding")) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 

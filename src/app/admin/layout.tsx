@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
+import { isPasswordSession } from "@/lib/authMethod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import Sidebar from "@/components/admin/Sidebar";
 import { RoleProvider } from "@/components/admin/RoleContext";
@@ -22,6 +23,12 @@ export default async function AdminLayout({
   } = await supabase.auth.getUser();
 
   if (!user) {
+    redirect("/login");
+  }
+
+  // Password sign-ins only; see src/lib/authMethod.ts.
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (!isPasswordSession(sessionData.session?.access_token)) {
     redirect("/login");
   }
 
