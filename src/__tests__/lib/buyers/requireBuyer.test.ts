@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextResponse } from "next/server";
-import { AuthApiError, AuthRetryableFetchError } from "@supabase/supabase-js";
+import { AuthApiError, AuthRetryableFetchError, AuthSessionMissingError } from "@supabase/supabase-js";
 
 // ─── requireBuyer: Auth-checked buyer guard ─────────────────────────────────
 // 401 only for a real Auth rejection; an Auth or DB outage is 503 SERVER.
@@ -119,6 +119,16 @@ describe("requireBuyer — cookie session read", () => {
     expect(adminFrom).not.toHaveBeenCalled();
   });
 
+  it("returns 401 for AuthSessionMissingError with no session, without asking Auth", async () => {
+    cookieClient.auth.getSession.mockResolvedValue({
+      data: { session: null },
+      error: new AuthSessionMissingError(),
+    });
+    await expectError(await requireBuyer(), 401, "UNAUTHENTICATED");
+    expect(bareClient.auth.getUser).not.toHaveBeenCalled();
+    expect(adminFrom).not.toHaveBeenCalled();
+  });
+
   it("returns 401 when Auth rejects the refresh token and there is no session", async () => {
     cookieClient.auth.getSession.mockResolvedValue({
       data: { session: null },
@@ -233,6 +243,15 @@ describe("requireBuyer — success", () => {
     expect(await requireBuyer()).toEqual(EXPECTED);
     expect(bareClient.auth.getUser).toHaveBeenCalledWith(GOOD);
     expect(tokenClaimSpy).toHaveBeenCalledWith(GOOD, "session_id");
+  });
+
+  it("uses the session when getSession returns an error AND a session", async () => {
+    cookieClient.auth.getSession.mockResolvedValue({
+      data: { session: { access_token: GOOD } },
+      error: new AuthRetryableFetchError("x", 0),
+    });
+    expect(await requireBuyer()).toEqual(EXPECTED);
+    expect(bareClient.auth.getUser).toHaveBeenCalledWith(GOOD);
   });
 });
 

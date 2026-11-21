@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextResponse } from "next/server";
-import { AuthApiError, AuthRetryableFetchError } from "@supabase/supabase-js";
+import { AuthApiError, AuthRetryableFetchError, AuthSessionMissingError } from "@supabase/supabase-js";
 
 // ─── /api/account/profile: the website's profile route ──────────────────────
 // GET delegates to requireBuyer. POST takes the cookie session only, has Auth
@@ -147,6 +147,15 @@ describe("POST — cookie session", () => {
   it("getSession throwing → 503 SERVER", async () => {
     cookieClient.auth.getSession.mockRejectedValue(new Error("boom"));
     await expectError(await POST(post()), 503, "SERVER");
+    expectNoAuthAccepted();
+  });
+
+  it("AuthSessionMissingError with no session → 401", async () => {
+    cookieClient.auth.getSession.mockResolvedValue({
+      data: { session: null },
+      error: new AuthSessionMissingError(),
+    });
+    await expectError(await POST(post()), 401, "UNAUTHENTICATED");
     expectNoAuthAccepted();
   });
 

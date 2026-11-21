@@ -1,11 +1,9 @@
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-import { createClient as createBareClient } from "@supabase/supabase-js";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { tokenClaim } from "@/lib/authMethod";
-import { classifyAuthError } from "./authErrors";
 import { buyerError } from "./errors";
+import { acceptToken, readCookieToken, type AuthUser, type CookieTokenRead } from "./sessionUser";
 
 export interface BuyerContext {
   buyerId: string;
@@ -14,33 +12,18 @@ export interface BuyerContext {
   sessionId: string;
 }
 
-type AuthUser = { id: string; email?: string | null };
-
-type TokenRead =
-  | { kind: "token"; token: string }
-  | { kind: "none" }
-  | { kind: "unavailable" };
-
 const unauthenticated = () => buyerError(401, "UNAUTHENTICATED", "Sign in required.");
 const authUnavailable = () => buyerError(503, "SERVER", "Sign-in service unavailable. Try again.");
 
 /**
- * The bearer token, else the cookie session's token (website). getSession()
- * may refresh a near-expiry session; if that refresh can't reach Auth, the
- * answer is "unavailable" (503), never "none" (401).
+ * The bearer token, else the cookie session's token (website). The cookie
+ * read's 401/503 rule lives in readCookieToken (sessionUser.ts).
  */
-async function readToken(): Promise<TokenRead> {
+async function readToken(): Promise<CookieTokenRead> {
   const h = headers();
   const header = h.get("x-supabase-auth") ?? h.get("authorization");
   if (header?.startsWith("Bearer ")) return { kind: "token", token: header.substring(7) };
-  try {
-    const { data, error } = await createClient().auth.getSession();
-    if (error && classifyAuthError(error) === "unavailable") return { kind: "unavailable" };
-    const token = data.session?.access_token;
-    return token ? { kind: "token", token } : { kind: "none" };
-  } catch {
-    return { kind: "unavailable" };
-  }
+  return readCookieToken();
 }
 
 /**
@@ -57,25 +40,13 @@ export async function requireBuyer(): Promise<BuyerContext | NextResponse> {
   if (read.kind === "none") return unauthenticated();
   const token = read.token;
 
-  let user: AuthUser;
-  try {
-    const client = createBareClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      { auth: { persistSession: false, autoRefreshToken: false } },
-    );
-    const { data, error } = await client.auth.getUser(token);
-    if (error || !data.user) {
-      if (classifyAuthError(error) === "rejected") return unauthenticated();
-      console.error("[requireBuyer] Auth getUser unavailable");
-      return authUnavailable();
-    }
-    user = data.user;
-  } catch (err) {
-    if (classifyAuthError(err) === "rejected") return unauthenticated();
-    console.error("[requireBuyer] Auth getUser threw");
+  const accepted = await acceptToken(token);
+  if (accepted.kind === "rejected") return unauthenticated();
+  if (accepted.kind === "unavailable") {
+    console.error("[requireBuyer] Auth getUser unavailable");
     return authUnavailable();
   }
+  const user: AuthUser = accepted.user;
 
   // Read only after getUser has accepted this exact token.
   const sessionId = tokenClaim(token, "session_id");

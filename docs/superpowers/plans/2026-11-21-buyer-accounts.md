@@ -765,13 +765,15 @@ git commit -m "feat(auth): token claim helpers and an Auth error classifier for 
 ### Task 5: `requireBuyer`
 
 **Files:**
+- Create: `src/lib/buyers/sessionUser.ts` (shared with Task 7: cookie read and Auth acceptance)
 - Create: `src/lib/buyers/requireBuyer.ts`
 - Modify: `src/lib/api.ts` (one re-export line)
+- Test: `src/__tests__/lib/buyers/sessionUser.test.ts`
 - Test: `src/__tests__/lib/buyers/requireBuyer.test.ts`
 
 Behaviour (mobile spec 4.3, design 4.3):
-1. The token comes from `x-supabase-auth` or `Authorization: Bearer …` (the app), or else the cookie session (the website). No token → 401 `UNAUTHENTICATED`. `getSession()` may refresh a near-expiry session: if it returns an error `classifyAuthError` calls `unavailable`, or it throws, → 503 `SERVER` (never 401); a real rejection with no session stays 401.
-2. `getUser(token)` asks Auth. If it fails, `classifyAuthError` decides: `rejected` → 401 `UNAUTHENTICATED`; `unavailable` → 503 `SERVER`.
+1. The token comes from `x-supabase-auth` or `Authorization: Bearer …` (the app), or else the cookie session (the website), via `readCookieToken()` in `sessionUser.ts`. No token → 401 `UNAUTHENTICATED`. `getSession()` may refresh a near-expiry session. A session that comes back is used, even with an error beside it. With no session, only these count as **unavailable** → 503 `SERVER` (never 401): `isAuthRetryableFetchError(error)`, an `AuthApiError` with status ≥ 500 or 429, or a throw. Any other error with no session (`AuthSessionMissingError`, `AuthInvalidTokenResponseError`, a 4xx `AuthApiError`) is **none** → 401.
+2. `acceptToken(token)` in `sessionUser.ts` asks Auth with `getUser(token)` on a bare, non-persisting client. If it fails, `classifyAuthError` decides: `rejected` → 401 `UNAUTHENTICATED`; `unavailable` → 503 `SERVER`. `classifyAuthError` is unchanged and is used only for `getUser` results.
 3. Only after that, read `session_id` from the same token. Missing → 401.
 4. A `users` row exists (staff) → 403 `FORBIDDEN`.
 5. No `buyer_profiles` row, or `deleted_at` is set → 401 `UNAUTHENTICATED`.
@@ -783,13 +785,18 @@ The profile and staff reads use the service-role client: the tables have no poli
 
 - [ ] **Step 1: Write the failing tests**
 
-  Mock `next/headers` (as `require-auth-password.test.ts` does), `@/lib/supabase/server` (cookie client with `auth.getSession`), and `@/lib/supabase/admin` (`from("users")`, `from("buyer_profiles")` with `.select().eq().maybeSingle()`). Mock `@supabase/supabase-js` **with `importOriginal`**, replacing only `createClient` (the client that calls `getUser`), so `isAuthApiError` and the error classes stay real. Build tokens with a local `token(payload)` helper like the one in `authMethod.test.ts`. Cases, each asserting status, `error.code`, and that later reads did **not** happen when an earlier step failed:
+  Mock `next/headers` (as `require-auth-password.test.ts` does), `@/lib/supabase/server` (cookie client with `auth.getSession`), and `@/lib/supabase/admin` (`from("users")`, `from("buyer_profiles")` with `.select().eq().maybeSingle()`). Mock `@supabase/supabase-js` **with `importOriginal`**, replacing only `createClient` (the client that calls `getUser`), so `isAuthApiError` and the error classes stay real. Build tokens with a local `token(payload)` helper like the one in `authMethod.test.ts`.
+
+  `sessionUser.test.ts` (same mocks, minus `next/headers` and the admin client): `readCookieToken` returns the token, including when an error comes with a session; no session and no error → none; `AuthSessionMissingError`, `AuthInvalidTokenResponseError`, `AuthApiError` 400 / 403 and a plain `Error` with no session → none; a retryable fetch error, `AuthApiError` 500 / 503 / 429 → unavailable; a throw → unavailable. `acceptToken` returns `{ kind: "ok", user, token }` with the same token, builds its client with `{ persistSession: false, autoRefreshToken: false }`, maps a 4xx to rejected and a 5xx, 429, retryable fetch error, missing user or thrown network error to unavailable, and a thrown 4xx to rejected.
+
+  `requireBuyer.test.ts` cases, each asserting status, `error.code`, and that later reads did **not** happen when an earlier step failed:
   - no header and no cookie session → 401; `getUser` not called;
   - `x-supabase-auth: Bearer GOOD` and `authorization: Bearer OTHER` both set → `getUser` gets `GOOD`;
   - `authorization: Basic xyz` and no cookie session → 401; `getUser` not called;
   - `getSession` resolves `{ session: null, error: AuthRetryableFetchError }` (a refresh that couldn't reach Auth) → 503 `SERVER`; `getUser` not called;
   - `getSession` rejects → 503 `SERVER`; `getUser` not called;
   - `getSession` returns `AuthApiError(400, "refresh_token_not_found")` with no session → 401; `getUser` not called;
+  - `getSession` returns `AuthSessionMissingError` with no session → 401; `getUser` not called;
   - Bearer, `getUser` → `AuthApiError(403, "session_not_found")` → 401;
   - Bearer, `getUser` → `AuthApiError(500)` → 503 `SERVER`;
   - Bearer, `getUser` throws `AuthRetryableFetchError` → 503;
@@ -800,23 +807,104 @@ The profile and staff reads use the service-role client: the tables have no poli
   - `buyer_profiles` read returns `{ error }` → 503;
   - every 503 path logs a fixed string, and no `console` call contains the token, the email or the user id;
   - happy path, Bearer: returns `{ buyerId: "u1", email: "b@example.test", isReviewer: false, sessionId: "s1" }`;
-  - happy path, cookie: same result, and the token passed to `tokenClaim` is the cookie session's `access_token`.
+  - happy path, cookie: same result, and the token passed to `tokenClaim` is the cookie session's `access_token`;
+  - `getSession` returns an error **and** a session → that token goes to `getUser` and the buyer context comes back.
 
 - [ ] **Step 2: Run them and confirm they fail**
 
-  Run: `npx vitest run src/__tests__/lib/buyers/requireBuyer.test.ts`. Expected: FAIL (module not found).
+  Run: `npx vitest run src/__tests__/lib/buyers/sessionUser.test.ts src/__tests__/lib/buyers/requireBuyer.test.ts`. Expected: FAIL (module not found).
 
-- [ ] **Step 3: Implement `src/lib/buyers/requireBuyer.ts`**
+- [ ] **Step 3: Implement `src/lib/buyers/sessionUser.ts` and `src/lib/buyers/requireBuyer.ts`**
 
 ```ts
+// src/lib/buyers/sessionUser.ts
+import {
+  createClient as createBareClient,
+  isAuthApiError,
+  isAuthRetryableFetchError,
+} from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/server";
+import { classifyAuthError } from "./authErrors";
+
+// ─── Shared token reading for buyer routes ──────────────────────────────────
+//
+// requireBuyer and /api/account/profile both read the cookie session and both
+// have Auth accept a token. One copy here so the 401/503 rules can't drift.
+// Nothing here logs: callers log fixed strings. Never log a token or email.
+
+export type CookieTokenRead =
+  | { kind: "token"; token: string }
+  | { kind: "none" }
+  | { kind: "unavailable" };
+
+export type AuthUser = { id: string; email?: string | null; email_confirmed_at?: string | null };
+
+export type TokenAcceptance =
+  | { kind: "ok"; user: AuthUser; token: string }
+  | { kind: "rejected" }
+  | { kind: "unavailable" };
+
+/**
+ * A getSession() error means Auth couldn't answer only when it is a
+ * network/retryable fetch failure, or an Auth 5xx or 429. Anything else
+ * (AuthSessionMissingError, AuthInvalidTokenResponseError, a 4xx) is a session
+ * that isn't there, which is a 401, not an outage.
+ */
+function sessionErrorIsOutage(error: unknown): boolean {
+  if (isAuthRetryableFetchError(error)) return true;
+  if (isAuthApiError(error)) return error.status >= 500 || error.status === 429;
+  return false;
+}
+
+/**
+ * The website's cookie session token. getSession() may refresh a near-expiry
+ * session; if that refresh can't reach Auth, or getSession throws, the answer
+ * is "unavailable" (503), never "none" (401). A session that comes back is
+ * used even when an error comes with it.
+ */
+export async function readCookieToken(): Promise<CookieTokenRead> {
+  try {
+    const { data, error } = await createClient().auth.getSession();
+    const token = data?.session?.access_token;
+    if (token) return { kind: "token", token };
+    if (error && sessionErrorIsOutage(error)) return { kind: "unavailable" };
+    return { kind: "none" };
+  } catch {
+    return { kind: "unavailable" };
+  }
+}
+
+/**
+ * Ask the Auth server whether it accepts this exact token. Never a local-only
+ * JWT check. Uses a bare client that neither stores nor refreshes a session.
+ * A 4xx (except 429) is "rejected"; anything else that fails is "unavailable".
+ */
+export async function acceptToken(token: string): Promise<TokenAcceptance> {
+  try {
+    const client = createBareClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      { auth: { persistSession: false, autoRefreshToken: false } },
+    );
+    const { data, error } = await client.auth.getUser(token);
+    if (error || !data.user) {
+      return classifyAuthError(error) === "rejected" ? { kind: "rejected" } : { kind: "unavailable" };
+    }
+    return { kind: "ok", user: data.user, token };
+  } catch (err) {
+    return classifyAuthError(err) === "rejected" ? { kind: "rejected" } : { kind: "unavailable" };
+  }
+}
+```
+
+```ts
+// src/lib/buyers/requireBuyer.ts
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-import { createClient as createBareClient } from "@supabase/supabase-js";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { tokenClaim } from "@/lib/authMethod";
-import { classifyAuthError } from "./authErrors";
 import { buyerError } from "./errors";
+import { acceptToken, readCookieToken, type AuthUser, type CookieTokenRead } from "./sessionUser";
 
 export interface BuyerContext {
   buyerId: string;
@@ -825,33 +913,18 @@ export interface BuyerContext {
   sessionId: string;
 }
 
-type AuthUser = { id: string; email?: string | null };
-
-type TokenRead =
-  | { kind: "token"; token: string }
-  | { kind: "none" }
-  | { kind: "unavailable" };
-
 const unauthenticated = () => buyerError(401, "UNAUTHENTICATED", "Sign in required.");
 const authUnavailable = () => buyerError(503, "SERVER", "Sign-in service unavailable. Try again.");
 
 /**
- * The bearer token, else the cookie session's token (website). getSession()
- * may refresh a near-expiry session; if that refresh can't reach Auth, the
- * answer is "unavailable" (503), never "none" (401).
+ * The bearer token, else the cookie session's token (website). The cookie
+ * read's 401/503 rule lives in readCookieToken (sessionUser.ts).
  */
-async function readToken(): Promise<TokenRead> {
+async function readToken(): Promise<CookieTokenRead> {
   const h = headers();
   const header = h.get("x-supabase-auth") ?? h.get("authorization");
   if (header?.startsWith("Bearer ")) return { kind: "token", token: header.substring(7) };
-  try {
-    const { data, error } = await createClient().auth.getSession();
-    if (error && classifyAuthError(error) === "unavailable") return { kind: "unavailable" };
-    const token = data.session?.access_token;
-    return token ? { kind: "token", token } : { kind: "none" };
-  } catch {
-    return { kind: "unavailable" };
-  }
+  return readCookieToken();
 }
 
 /**
@@ -868,25 +941,13 @@ export async function requireBuyer(): Promise<BuyerContext | NextResponse> {
   if (read.kind === "none") return unauthenticated();
   const token = read.token;
 
-  let user: AuthUser;
-  try {
-    const client = createBareClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      { auth: { persistSession: false, autoRefreshToken: false } },
-    );
-    const { data, error } = await client.auth.getUser(token);
-    if (error || !data.user) {
-      if (classifyAuthError(error) === "rejected") return unauthenticated();
-      console.error("[requireBuyer] Auth getUser unavailable");
-      return authUnavailable();
-    }
-    user = data.user;
-  } catch (err) {
-    if (classifyAuthError(err) === "rejected") return unauthenticated();
-    console.error("[requireBuyer] Auth getUser threw");
+  const accepted = await acceptToken(token);
+  if (accepted.kind === "rejected") return unauthenticated();
+  if (accepted.kind === "unavailable") {
+    console.error("[requireBuyer] Auth getUser unavailable");
     return authUnavailable();
   }
+  const user: AuthUser = accepted.user;
 
   // Read only after getUser has accepted this exact token.
   const sessionId = tokenClaim(token, "session_id");
@@ -926,11 +987,11 @@ export { requireBuyer, type BuyerContext } from "@/lib/buyers/requireBuyer";
 
 - [ ] **Step 4: Run the tests and confirm they pass**
 
-  Run: `npx vitest run src/__tests__/lib/buyers/requireBuyer.test.ts`. Expected: PASS.
+  Run: `npx vitest run src/__tests__/lib/buyers/sessionUser.test.ts src/__tests__/lib/buyers/requireBuyer.test.ts`. Expected: PASS.
 
 - [ ] **Step 5: Commit**
 ```bash
-git add src/lib/buyers/requireBuyer.ts src/lib/api.ts src/__tests__/lib/buyers/requireBuyer.test.ts
+git add src/lib/buyers/sessionUser.ts src/lib/buyers/requireBuyer.ts src/lib/api.ts src/__tests__/lib/buyers/sessionUser.test.ts src/__tests__/lib/buyers/requireBuyer.test.ts
 git commit -m "feat(auth): requireBuyer — Auth-checked buyer guard; 401 only for real rejections"
 ```
 
@@ -1061,16 +1122,16 @@ git commit -m "feat(buyers): ensureBuyerProfile — claim, reset password, end o
 - `POST` → the website's `POST /me`:
   1. Cookie session only. Bearer is for the app's own route in #451; a Bearer header is ignored.
   2. A JSON body with an `email` key (any value) → 422 `VALIDATION`, checked before any Auth call. Malformed JSON → 422. An empty or absent body is fine.
-  3. `createClient().auth.getSession()`, same rule as `requireBuyer` (`d102fa6`): it throws, or `classifyAuthError(error) === "unavailable"` (a near-expiry refresh that couldn't reach Auth) → **503** `SERVER`. No session and no error, or a real 4xx rejection with no session → **401** `UNAUTHENTICATED`. Decide this before `getUser`: with no session, `getUser()` returns `AuthSessionMissingError`, which isn't an `AuthApiError` and would classify as "unavailable" (503).
-  4. `getUser(session.access_token)` with that exact token, on a bare non-persisting client as in `requireBuyer`. On failure (error, throw, or no user), `classifyAuthError` → 401 or 503. This way the token handed on is the one Auth accepted.
-  5. Only then call `ensureBuyerProfile({ user, accessToken })` with the Auth user `getUser` returned (`{ id, email, email_confirmed_at }`) and that token.
+  3. `readCookieToken()` from `@/lib/buyers/sessionUser` (Task 5), the same rule as `requireBuyer`: a session that comes back is used; with no session, a retryable fetch error, an `AuthApiError` ≥ 500 or 429, or a throw → **503** `SERVER`; any other error (`AuthSessionMissingError`, `AuthInvalidTokenResponseError`, a 4xx) or none → **401** `UNAUTHENTICATED`. This is decided before any `getUser` call.
+  4. `acceptToken(token)` from the same module: `getUser` with that exact token on a bare non-persisting client. `rejected` → 401, `unavailable` → 503. This way the token handed on is the one Auth accepted.
+  5. Only then call `ensureBuyerProfile({ user: accepted.user, accessToken: accepted.token })` with the Auth user `getUser` returned (`{ id, email, email_confirmed_at }`) and that token.
   6. Map the `EnsureResult`: `ok` → its status (200 or 201) with `{ email, name, locale }` from the profile. `FORBIDDEN` → 403 `{ error: { code: "FORBIDDEN", message, reason } }`, `reason` being `staff`, `unconfirmed` or `not_email_code`, so the page can show the staff message. 409 → `DELETION_IN_PROGRESS`. 503 → `SERVER`.
   7. Logs fixed strings only: never a token or an email.
 
 - [ ] **Step 1: Write the failing tests**
 
   Mock `@/lib/supabase/server`, `@supabase/supabase-js` (`importOriginal`, for the real error classes and a mocked `createClient`), `@/lib/buyers/requireBuyer`, `@/server/buyers/ensureBuyerProfile` and `@/lib/supabase/admin`. Cover each branch above, plus:
-  - each `getSession` outcome (unavailable error → 503, throw → 503, real rejection → 401, no session → 401), and in each neither `getUser` nor `ensureBuyerProfile` is called;
+  - each `getSession` outcome (unavailable error → 503, 429 → 503, throw → 503, real rejection → 401, `AuthSessionMissingError` → 401, no session → 401), and in each neither `getUser` nor `ensureBuyerProfile` is called;
   - `ensureBuyerProfile` receives `getUser`'s user and the session's own token;
   - a `getUser` 4xx → 401, 5xx or throw → 503, and `ensureBuyerProfile` isn't called;
   - a body `{ "email": "x@y.z" }` → 422, and `ensureBuyerProfile` isn't called;
