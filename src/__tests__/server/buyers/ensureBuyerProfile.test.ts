@@ -24,6 +24,7 @@ function token(methods: string[]): string {
 }
 const OTP = token(["otp"]);
 const PASSWORD = token(["password"]);
+const PASSWORD_AND_OTP = token(["password", "otp"]);
 
 const EMAIL = "buyer.secret@example.test";
 const CLAIM = "11111111-2222-4333-8444-555555555555";
@@ -63,6 +64,7 @@ interface FakeOpts {
 
 function makeFake(opts: FakeOpts = {}) {
   const calls: string[] = [];
+  const filters: { table: string; column: string; value: unknown }[] = [];
   const profileReads = [...(opts.profiles ?? [ok(null)])];
   const run = (o: Outcome | undefined, fallback: Result): Result =>
     o === undefined ? fallback : typeof o === "function" ? o() : o;
@@ -70,7 +72,10 @@ function makeFake(opts: FakeOpts = {}) {
   const from = vi.fn((table: string) => {
     const q: Record<string, unknown> = {};
     q.select = vi.fn(() => q);
-    q.eq = vi.fn(() => q);
+    q.eq = vi.fn((column: string, value: unknown) => {
+      filters.push({ table, column, value });
+      return q;
+    });
     q.maybeSingle = vi.fn(async () => {
       if (table === "users") {
         calls.push("read:users");
@@ -106,6 +111,7 @@ function makeFake(opts: FakeOpts = {}) {
   const admin = { from, rpc, auth: { admin: { updateUserById, signOut } } };
   return {
     calls,
+    filters,
     from,
     rpc,
     updateUserById,
@@ -154,6 +160,14 @@ describe("ensureBuyerProfile", () => {
     expect(f.updateUserById).not.toHaveBeenCalled();
   });
 
+  it("no email on the Auth user → 403 unconfirmed", async () => {
+    const f = makeFake();
+    const res = await ensureBuyerProfile({ user: { ...USER, email: null }, accessToken: OTP }, f.deps);
+    expect(res).toEqual({ ok: false, status: 403, code: "FORBIDDEN", reason: "unconfirmed" });
+    expect(f.rpc).not.toHaveBeenCalled();
+    expect(f.updateUserById).not.toHaveBeenCalled();
+  });
+
   it("live profile → 200 and nothing else runs (a web session stays signed in)", async () => {
     const row = profile();
     const f = makeFake({ profiles: [ok(row)] });
@@ -185,6 +199,15 @@ describe("ensureBuyerProfile", () => {
     expect(rpcNames(f)).not.toContain("claim_buyer_profile");
     expect(f.rpc).not.toHaveBeenCalled();
     expect(f.updateUserById).not.toHaveBeenCalled();
+  });
+
+  it("session with amr [password, otp], no profile → 403 not_email_code; no rpc", async () => {
+    const f = makeFake();
+    const res = await ensureBuyerProfile({ user: USER, accessToken: PASSWORD_AND_OTP }, f.deps);
+    expect(res).toEqual({ ok: false, status: 403, code: "FORBIDDEN", reason: "not_email_code" });
+    expect(f.rpc).not.toHaveBeenCalled();
+    expect(f.updateUserById).not.toHaveBeenCalled();
+    expect(f.signOut).not.toHaveBeenCalled();
   });
 
   it("claim NULL → 503, nothing else called", async () => {
@@ -237,6 +260,17 @@ describe("ensureBuyerProfile", () => {
     expect(f.updateUserById).not.toHaveBeenCalled();
     expect(f.signOut).not.toHaveBeenCalled();
     expect(rpcNames(f)).not.toContain("create_buyer_profile");
+  });
+
+  it("held RPC returns { error } → 503 and release called", async () => {
+    const f = makeFake({ rpc: { buyer_profile_claim_held: fail() } });
+    const res = await ensureBuyerProfile({ user: USER, accessToken: OTP }, f.deps);
+    expect(res).toEqual({ ok: false, status: 503, code: "SERVER" });
+    expect(f.rpc).toHaveBeenCalledWith("release_buyer_profile_claim", {
+      p_user_id: "u1",
+      p_token: CLAIM,
+    });
+    expect(f.updateUserById).not.toHaveBeenCalled();
   });
 
   it("held RPC throws → 503 and release called", async () => {
@@ -292,6 +326,16 @@ describe("ensureBuyerProfile", () => {
     expect(rpcNames(f)).not.toContain("create_buyer_profile");
   });
 
+  it("create returns an unexpected value → release and 503", async () => {
+    const f = makeFake({ rpc: { create_buyer_profile: ok("surprise") } });
+    const res = await ensureBuyerProfile({ user: USER, accessToken: OTP }, f.deps);
+    expect(res).toEqual({ ok: false, status: 503, code: "SERVER" });
+    expect(f.rpc).toHaveBeenCalledWith("release_buyer_profile_claim", {
+      p_user_id: "u1",
+      p_token: CLAIM,
+    });
+  });
+
   it("create → 'lost' → 503 and release NOT called", async () => {
     const f = makeFake({ rpc: { create_buyer_profile: ok("lost") } });
     const res = await ensureBuyerProfile({ user: USER, accessToken: OTP }, f.deps);
@@ -332,6 +376,16 @@ describe("ensureBuyerProfile", () => {
     expect(uid).toBe("u1");
     expect(typeof attrs.password).toBe("string");
     expect(attrs.password.length).toBeGreaterThanOrEqual(64);
+    // One of each class, so a hosted policy that demands symbols accepts it.
+    expect(attrs.password).toMatch(/[a-z]/);
+    expect(attrs.password).toMatch(/[A-Z]/);
+    expect(attrs.password).toMatch(/[0-9]/);
+    expect(attrs.password).toMatch(/[^A-Za-z0-9]/);
+
+    // Both reads are scoped to this user.
+    expect(f.filters).toContainEqual({ table: "users", column: "id", value: "u1" });
+    expect(f.filters).toContainEqual({ table: "buyer_profiles", column: "id", value: "u1" });
+    expect(f.filters.every((x) => x.column === "id" && x.value === "u1")).toBe(true);
     expect(JSON.stringify(res)).not.toContain(attrs.password);
 
     expect(f.signOut).toHaveBeenCalledWith(OTP, "others");

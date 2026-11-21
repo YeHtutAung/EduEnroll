@@ -1,7 +1,7 @@
 import { randomBytes } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { BuyerProfile, Database } from "@/types/database";
-import { isEmailCodeSession } from "@/lib/authMethod";
+import { isEmailCodeSession, isPasswordSession } from "@/lib/authMethod";
 import { createTimedAdminClient } from "./adminClient";
 
 // ─── ensureBuyerProfile: the ONLY path that creates a buyer profile ─────────
@@ -89,6 +89,15 @@ function answerExisting(row: BuyerProfile): EnsureResult {
   return row.deleted_at ? DELETING : { ok: true, status: 200, profile: row };
 }
 
+/**
+ * 64 random base64url characters plus a fixed suffix with one of each class
+ * (lower, upper, digit, symbol), so a hosted password policy that demands
+ * symbols still accepts it. Nobody ever sees or uses this password.
+ */
+function randomPassword(): string {
+  return randomBytes(48).toString("base64url") + "aA1!";
+}
+
 async function release(admin: Admin, userId: string, token: string): Promise<void> {
   try {
     const { error } = await rpc(admin, "release_buyer_profile_claim", { p_user_id: userId, p_token: token });
@@ -129,7 +138,7 @@ export async function ensureBuyerProfile(
     }
 
     // 7. Replace any password set before the buyer confirmed. Nobody sees this one.
-    const password = randomBytes(48).toString("base64url");
+    const password = randomPassword();
     const updated = await admin.auth.admin.updateUserById(user.id, { password });
     if (updated.error) {
       logFailure("password reset", updated.error);
@@ -197,7 +206,10 @@ async function beforeClaim(
   if (existing.kind === "row") return answerExisting(existing.row);
 
   // 4. Email code only, checked before the claim so a password session never holds one.
-  if (!isEmailCodeSession(accessToken)) return forbidden("not_email_code");
+  // A session whose amr lists a password is refused even if it also lists otp.
+  if (!isEmailCodeSession(accessToken) || isPasswordSession(accessToken)) {
+    return forbidden("not_email_code");
+  }
 
   // 5. Claim.
   const claim = await rpc(admin, "claim_buyer_profile", { p_user_id: user.id });

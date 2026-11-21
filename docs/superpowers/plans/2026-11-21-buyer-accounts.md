@@ -940,7 +940,7 @@ git commit -m "feat(auth): requireBuyer — Auth-checked buyer guard; 401 only f
 
 **Files:**
 - Create: `src/server/buyers/adminClient.ts`, `src/server/buyers/ensureBuyerProfile.ts`
-- Test: `src/__tests__/server/buyers/ensureBuyerProfile.test.ts`
+- Test: `src/__tests__/server/buyers/ensureBuyerProfile.test.ts`, `src/__tests__/server/buyers/adminClient.test.ts`
 
 Mobile spec 4.1, "No password a buyer didn't set", and 4.5. The function takes an Auth user that the caller's `getUser` has **already accepted**, plus that session's access token.
 
@@ -950,37 +950,57 @@ export type EnsureResult =
   | { ok: false; status: 403; code: "FORBIDDEN"; reason: "staff" | "unconfirmed" | "not_email_code" }
   | { ok: false; status: 409; code: "DELETION_IN_PROGRESS" }
   | { ok: false; status: 503; code: "SERVER" };
+
+export interface EnsureInput {
+  user: { id: string; email?: string | null; email_confirmed_at?: string | null };
+  accessToken: string;
+}
+export interface EnsureDeps { admin: SupabaseClient<Database> }
+
+export async function ensureBuyerProfile(
+  input: EnsureInput,
+  deps: EnsureDeps = { admin: createTimedAdminClient() },
+): Promise<EnsureResult>;
 ```
 
 Order. Each step's failure is final unless it says otherwise.
 1. `users` row exists → 403 `staff`. A read error → 503.
-2. `email_confirmed_at` is empty → 403 `unconfirmed`.
+2. `email_confirmed_at` is empty, **or the Auth user has no `email`** → 403 `unconfirmed` (so `create_buyer_profile` never gets an empty email).
 3. Profile exists: live → `200` with it, and **nothing else runs**; `deleted_at` set → 409. A read error → 503.
-4. `isEmailCodeSession(accessToken)` is false → 403 `not_email_code`. This runs before the claim, so a password session never holds one.
+4. `isEmailCodeSession(accessToken)` is false, **or `isPasswordSession(accessToken)` is true** → 403 `not_email_code`. A session whose `amr` lists `password` is refused even if it also lists `otp`. This runs before the claim, so a password session never holds one.
 5. `claim_buyer_profile(userId)`:
    - NULL → 503;
    - `'exists'` → re-read the profile and answer as in step 3;
    - a token → continue.
-6. `buyer_profile_claim_held(userId, token)` is false → 503.
-7. `auth.admin.updateUserById(userId, { password: <48 random bytes, base64url> })` returns `{ error }` or throws → release the claim, 503.
+6. `buyer_profile_claim_held(userId, token)` is false or returns `{ error }` → release the claim, 503.
+7. `auth.admin.updateUserById(userId, { password: <48 random bytes, base64url> + "aA1!"> })` (68 characters; the fixed suffix has one lowercase, uppercase, digit and symbol, so a hosted policy that demands symbols accepts it) returns `{ error }` or throws → release the claim, 503.
 8. `auth.admin.signOut(accessToken, "others")` returns `{ error }` or throws → release the claim, 503.
 9. `create_buyer_profile(userId, token, email)`:
    - `'created'` → 201 with the new row;
-   - `'existing'` → 200 with the re-read row. If the re-read finds no row, answer 503;
+   - `'existing'` → re-read and answer as in step 3 (live → 200, `deleted_at` set → 409). If the re-read finds no row, answer 503;
    - `'lost'` → 503, and don't release (the claim is no longer ours);
-   - an RPC error (including 23505: the email is on another user's profile, which the `auth.users` uniqueness should make impossible) → release, 503.
+   - an RPC error (including 23505: the email is on another user's profile, which the `auth.users` uniqueness should make impossible) → release, 503;
+   - any other value → release, 503.
+
+RPC calls go through one local helper, `rpc(admin, name, args)`, typed from `Database["public"]["Functions"]`: supabase-js can't infer RPC types from the hand-written `Database` type, so the helper casts once (the rest of the repo casts with `as never` at each call). Failures log only the step name and the error's `code`/`status`/`name`, never a message.
 
 **Every exit after step 5 that isn't 9's `'created'`/`'existing'`/`'lost'` releases the claim with `release_buyer_profile_claim(userId, token)`. Wrap steps 6–9 in `try { … } catch { release; return 503 }`.** Never log the password, the token or the email address.
 
-`src/server/buyers/adminClient.ts`: a service-role client whose `global.fetch` adds `AbortSignal.timeout(5000)`, so every Auth and RPC call stops after 5 s, as the mobile spec requires:
+`src/server/buyers/adminClient.ts`: a service-role client whose `global.fetch` adds `AbortSignal.timeout(5000)`, so every Auth and RPC call stops after 5 s, as the mobile spec requires. A caller's own signal is combined with the timeout (`AbortSignal.any`, Node 22), never allowed to replace it:
 ```ts
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 
-const TIMEOUT_MS = 5_000;
+export const TIMEOUT_MS = 5_000;
 
-const timedFetch: typeof fetch = (input, init) =>
-  fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(TIMEOUT_MS) });
+/** Every request stops after 5 s, even when the caller passes its own signal. */
+export const timedFetch: typeof fetch = (input, init) =>
+  fetch(input, {
+    ...init,
+    signal: init?.signal
+      ? AbortSignal.any([init.signal, AbortSignal.timeout(TIMEOUT_MS)])
+      : AbortSignal.timeout(TIMEOUT_MS),
+  });
 
 /** Service role; every request aborts after 5 s (mobile spec 4.1 step 2). */
 export const createTimedAdminClient = () =>
@@ -994,27 +1014,30 @@ export const createTimedAdminClient = () =>
 
   Inject the admin client: `ensureBuyerProfile(input, deps = { admin: createTimedAdminClient() })`. The tests pass a fake with `from()`, `rpc()` and `auth.admin.{updateUserById, signOut}` as `vi.fn()`s, and record calls in order. Cases:
   - staff → 403 `staff`; no `rpc` or `auth.admin` call;
-  - unconfirmed → 403 `unconfirmed`;
+  - unconfirmed → 403 `unconfirmed`; no email on the Auth user → 403 `unconfirmed`;
   - live profile → 200; **no** `rpc`, `updateUserById` or `signOut` (a web session stays signed in);
   - deleted profile → 409;
   - password session (`amr` `password`), no profile → 403 `not_email_code`, and `claim_buyer_profile` never called;
+  - `amr` `[password, otp]`, no profile → 403 `not_email_code`, no `rpc` call;
   - claim NULL → 503, nothing else called;
   - claim `'exists'` → re-reads and returns 200 with no reset;
-  - held false → 503 and `release` called with **that** token;
+  - held false → 503 and `release` called with **that** token; held returns `{ error }` → 503, release called;
   - `updateUserById` returns `{ error }` → 503, release called, `signOut` not called, `create` not called;
   - `updateUserById` throws (simulate abort) → 503, release called;
   - `signOut` returns `{ error }` → 503, release called, `create` not called;
   - `create` → `'lost'` → 503, release **not** called;
-  - happy path → order is exactly: users read, profile read, `claim_buyer_profile`, `buyer_profile_claim_held`, `updateUserById` (with a password of length ≥ 64 that isn't in the result), `signOut(token, "others")`, `create_buyer_profile` → 201;
+  - happy path → order is exactly: users read, profile read, `claim_buyer_profile`, `buyer_profile_claim_held`, `updateUserById` (with a password of length ≥ 64, holding a lowercase, uppercase, digit and symbol, that isn't in the result), `signOut(token, "others")`, `create_buyer_profile`, profile re-read → 201; the fake's `eq()` records its arguments and both reads filter on `("id", userId)`;
   - `create` → `'existing'` → 200; `'existing'` with no row on re-read → 503;
-  - `create` RPC returns `{ error }` (e.g. 23505) → 503, release called;
+  - `create` RPC returns `{ error }` (e.g. 23505) → 503, release called; `create` returns an unexpected value → 503, release called;
   - nothing in the result, and no `console.*` call, contains the email or the password (spy on `console`).
+
+  `adminClient.test.ts` stubs global `fetch` and `AbortSignal.timeout` and checks that the signal `timedFetch` sends aborts when the 5 s timeout fires, with and without a caller signal, and that a caller's abort still aborts it.
 
 - [ ] **Step 2: Run them and confirm they fail**
 
   Run: `npx vitest run src/__tests__/server/buyers/ensureBuyerProfile.test.ts`. Expected: FAIL.
 
-- [ ] **Step 3: Implement** `src/server/buyers/ensureBuyerProfile.ts` exactly in the order above. Use `crypto.randomBytes(48).toString("base64url")` for the password. Type the RPC calls through `src/types/database.ts`.
+- [ ] **Step 3: Implement** `src/server/buyers/ensureBuyerProfile.ts` exactly in the order above. Use `crypto.randomBytes(48).toString("base64url") + "aA1!"` for the password. Type the RPC calls through `src/types/database.ts`.
 
 - [ ] **Step 4: Run the tests and confirm they pass**
 
