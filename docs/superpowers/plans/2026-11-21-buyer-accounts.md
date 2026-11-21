@@ -324,7 +324,7 @@ describe("buyer accounts migration", () => {
     expect(body).toMatch(/ERRCODE = '22023'/i);
     // No per-key cleanup: rows of keys that never come back must expire too.
     expect(body.slice(0, body.indexOf("$$;"))).not.toMatch(/WHERE key = p_key AND window_start </i);
-    expect(body).toMatch(/LIMIT 50/i);
+    expect(body).toMatch(/ORDER BY window_start\s+LIMIT 50\s+FOR UPDATE SKIP LOCKED/i);
     expect(UP).toMatch(/CREATE INDEX mobile_rate_limits_window_start_idx ON public\.mobile_rate_limits \(window_start\)/i);
   });
 
@@ -422,12 +422,16 @@ BEGIN
   RETURNING r.count INTO v_count;
 
   -- Rows expire whether or not their key comes back (a deleted account's keys
-  -- included): each call drops up to 50 windows, of any key, older than two days.
+  -- included): each call drops up to 50 windows, of any key, older than two
+  -- days, oldest first. SKIP LOCKED: two callers sweeping at once take
+  -- different rows instead of waiting on each other.
   DELETE FROM public.mobile_rate_limits
   WHERE ctid = ANY (ARRAY(
     SELECT ctid FROM public.mobile_rate_limits
     WHERE window_start < now() - interval '2 days'
+    ORDER BY window_start
     LIMIT 50
+    FOR UPDATE SKIP LOCKED
   ));
 
   RETURN v_count <= p_limit;
@@ -586,16 +590,20 @@ DROP TABLE IF EXISTS public.buyer_profiles;
 
   `src/__tests__/db/buyer-accounts.db.test.ts`, using the `pg` pool pattern from `staff-password-session.db.test.ts`. Insert `auth.users` rows directly and clean up in `afterAll`. Cases:
   - `claim_buyer_profile` on a fresh user returns a uuid; a second call within 30 s returns NULL.
-  - After `UPDATE buyer_profile_claims SET claimed_at = now() - interval '31 seconds'`, a new claim returns a **different** uuid, and the first token's `create_buyer_profile` returns `'lost'` and inserts nothing.
-  - `create_buyer_profile` with the held token returns `'created'`, stores the email lower-cased and leaves no claim row.
+  - After `UPDATE buyer_profile_claims SET claimed_at = now() - interval '31 seconds'`, a new claim returns a **different** uuid, and the first token's `create_buyer_profile` returns `'lost'`, inserts nothing and leaves the new holder's claim alone.
   - With a profile already present, `claim_buyer_profile` returns `'exists'` and leaves no claim row.
-  - `release_buyer_profile_claim` with the wrong token deletes nothing; with the right one it deletes the row.
-  - `consume_rate_limit('<random uuid>', 3600, 2)` returns true, true, false. Use a fresh key each run, and delete its rows in `afterAll`, so a second run within the hour still passes.
-  - Updating `auth.users.email` to `New@Example.test` sets `buyer_profiles.email` to `new@example.test`. An update that doesn't touch `email` changes nothing.
+  - `create_buyer_profile` with the held token returns `'created'`, stores the email lower-cased and leaves no claim row.
+  - `create_buyer_profile` returns `'existing'` when this user's profile is already there (claim row inserted by hand), and leaves no claim row.
   - `create_buyer_profile` for user B, with an email already on user A's profile, raises `unique_violation` (23505), not `'existing'`. **Claim for B first**, or the function returns `'lost'` before the INSERT. B's claim row survives the raise (the delete rolls back), so clean up through the `auth.users` cascade.
-  - As `authenticated` (`SET LOCAL ROLE authenticated` with a JWT claim for one of the test users, inside a transaction that is rolled back):
-    - `SELECT public.claim_buyer_profile(...)` and `SELECT public.consume_rate_limit(...)` fail with 42501;
-    - `SELECT` on each new table returns **zero rows**, and an `INSERT` is refused (`new row violates row-level security policy`).
+  - `buyer_profile_claim_held` is true only for the held token. `release_buyer_profile_claim` with the wrong token deletes nothing; with the right one it deletes the row.
+  - `consume_rate_limit('<random uuid>', 3600, 2)` returns true, true, false. Use a fresh key each run, and delete its rows in `afterAll`, so a second run within the hour still passes.
+  - `consume_rate_limit` raises 22023 for a window of 0, a window of 604800 s (over a day) and a NULL limit.
+  - The sweep crosses keys: an old (3-day) row for a **different** key is gone after `consume_rate_limit` runs for a fresh key.
+  - Email sync: an update to another `auth.users` column changes nothing (email and `updated_at`); `SET email = email` leaves `updated_at` unchanged; changing it to `New@Example.test` sets `buyer_profiles.email` to `new@example.test`; setting it to NULL succeeds and the profile keeps its email.
+  - Concurrency, with two `pg` clients: client 1 runs `BEGIN` and `create_buyer_profile` with the held token without committing; client 2 calls `claim_buyer_profile` without awaiting (attach a no-op `catch` so a failed assertion isn't hidden by an unhandled rejection); once `pg_stat_activity` shows client 2 waiting on a `Lock`, client 1 commits; client 2 resolves to `'exists'` and no claim row is left.
+  - As `authenticated` (`SET LOCAL ROLE authenticated` with a JWT claim for one of the test users, inside a transaction that is rolled back), with a row seeded in each table first:
+    - all five RPCs (`claim_buyer_profile`, `consume_rate_limit`, `create_buyer_profile`, `buyer_profile_claim_held`, `release_buyer_profile_claim`) fail with 42501;
+    - `SELECT` on each new table returns **zero rows** (while the superuser sees at least one), and an `INSERT` is refused (`new row violates row-level security policy`).
 
     Don't expect 42501 on the tables: `src/__tests__/db/setup.ts` re-grants table DML to `anon` and `authenticated` before every DB run, so locally only RLS stands between them and the rows. **Don't weaken the migration's REVOKE to match local behaviour.** Prove the REVOKE on the dev database in Task 12 instead.
 

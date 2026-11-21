@@ -67,12 +67,16 @@ BEGIN
   RETURNING r.count INTO v_count;
 
   -- Rows expire whether or not their key comes back (a deleted account's keys
-  -- included): each call drops up to 50 windows, of any key, older than two days.
+  -- included): each call drops up to 50 windows, of any key, older than two
+  -- days, oldest first. SKIP LOCKED: two callers sweeping at once take
+  -- different rows instead of waiting on each other.
   DELETE FROM public.mobile_rate_limits
   WHERE ctid = ANY (ARRAY(
     SELECT ctid FROM public.mobile_rate_limits
     WHERE window_start < now() - interval '2 days'
+    ORDER BY window_start
     LIMIT 50
+    FOR UPDATE SKIP LOCKED
   ));
 
   RETURN v_count <= p_limit;

@@ -229,6 +229,9 @@ describe("concurrent claim while a create is in flight", () => {
       const c2Pid = (await c2.query(`SELECT pg_backend_pid() AS pid`)).rows[0].pid;
       // Not awaited: blocks on client 1's lock on the claim row.
       const pending = c2.query(`SELECT public.claim_buyer_profile($1) AS r`, [u]);
+      // If an assertion below fails first, its error stays the one reported,
+      // not an unhandled rejection from this query. The await below still sees it.
+      pending.catch(() => {});
       // Commit only once client 2 is actually waiting on a lock, so the test
       // exercises the race rather than two calls in sequence.
       let waiting = false;

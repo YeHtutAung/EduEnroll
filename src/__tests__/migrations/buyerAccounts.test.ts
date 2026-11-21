@@ -64,7 +64,7 @@ describe("buyer accounts migration", () => {
     expect(body).toMatch(/ERRCODE = '22023'/i);
     // No per-key cleanup: rows of keys that never come back must expire too.
     expect(body.slice(0, body.indexOf("$$;"))).not.toMatch(/WHERE key = p_key AND window_start </i);
-    expect(body).toMatch(/LIMIT 50/i);
+    expect(body).toMatch(/ORDER BY window_start\s+LIMIT 50\s+FOR UPDATE SKIP LOCKED/i);
     expect(UP).toMatch(/CREATE INDEX mobile_rate_limits_window_start_idx ON public\.mobile_rate_limits \(window_start\)/i);
   });
 
