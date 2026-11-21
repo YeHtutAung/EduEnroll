@@ -38,10 +38,12 @@ CREATE TABLE public.mobile_rate_limits (
 ALTER TABLE public.mobile_rate_limits ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.mobile_rate_limits FROM PUBLIC, anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.mobile_rate_limits TO service_role;
+CREATE INDEX mobile_rate_limits_window_start_idx ON public.mobile_rate_limits (window_start);
 
 -- Counts one event for p_key in the current fixed window and says whether it
 -- is still within p_limit. The caller passes an already-hashed key; this never
--- sees an email address.
+-- sees an email address. Windows are 1 s to 1 day: a longer window would be
+-- swept by the two-day cleanup below while still counting, and fail open.
 CREATE FUNCTION public.consume_rate_limit(p_key text, p_window_seconds int, p_limit int)
 RETURNS boolean
 LANGUAGE plpgsql
@@ -49,17 +51,29 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
 DECLARE
-  v_start timestamptz := to_timestamp(floor(extract(epoch FROM now()) / p_window_seconds) * p_window_seconds);
+  v_start timestamptz;
   v_count int;
 BEGIN
+  IF p_window_seconds IS NULL OR p_window_seconds NOT BETWEEN 1 AND 86400 OR p_limit IS NULL OR p_limit < 0 THEN
+    RAISE EXCEPTION 'bad rate limit args' USING ERRCODE = '22023';
+  END IF;
+
+  -- Assigned after the check: in DECLARE it would divide by zero first.
+  v_start := to_timestamp(floor(extract(epoch FROM now()) / p_window_seconds) * p_window_seconds);
+
   INSERT INTO public.mobile_rate_limits AS r (key, window_start, count)
   VALUES (p_key, v_start, 1)
   ON CONFLICT (key, window_start) DO UPDATE SET count = r.count + 1
   RETURNING r.count INTO v_count;
 
-  -- Keys expire on their own: drop this key's windows older than two days.
+  -- Rows expire whether or not their key comes back (a deleted account's keys
+  -- included): each call drops up to 50 windows, of any key, older than two days.
   DELETE FROM public.mobile_rate_limits
-  WHERE key = p_key AND window_start < now() - interval '2 days';
+  WHERE ctid = ANY (ARRAY(
+    SELECT ctid FROM public.mobile_rate_limits
+    WHERE window_start < now() - interval '2 days'
+    LIMIT 50
+  ));
 
   RETURN v_count <= p_limit;
 END;

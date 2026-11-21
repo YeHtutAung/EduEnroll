@@ -58,6 +58,16 @@ describe("buyer accounts migration", () => {
     }
   });
 
+  it("consume_rate_limit refuses bad arguments and sweeps old windows of every key", () => {
+    const body = UP.slice(UP.search(/CREATE FUNCTION public\.consume_rate_limit\(/i));
+    expect(body).toMatch(/p_window_seconds NOT BETWEEN 1 AND 86400/i);
+    expect(body).toMatch(/ERRCODE = '22023'/i);
+    // No per-key cleanup: rows of keys that never come back must expire too.
+    expect(body.slice(0, body.indexOf("$$;"))).not.toMatch(/WHERE key = p_key AND window_start </i);
+    expect(body).toMatch(/LIMIT 50/i);
+    expect(UP).toMatch(/CREATE INDEX mobile_rate_limits_window_start_idx ON public\.mobile_rate_limits \(window_start\)/i);
+  });
+
   it("syncs the profile email only when the auth email changes", () => {
     expect(UP).toMatch(/AFTER UPDATE OF email ON auth\.users/i);
     expect(UP).toMatch(/WHEN \(OLD\.email IS DISTINCT FROM NEW\.email/i);
@@ -65,7 +75,13 @@ describe("buyer accounts migration", () => {
 
   it("rollback drops the trigger before its function, and every object", () => {
     expect(DOWN.search(/DROP TRIGGER/i)).toBeLessThan(DOWN.search(/DROP FUNCTION IF EXISTS public\.sync_buyer_profile_email/i));
-    for (const name of [...FUNCTIONS, "buyer_profiles", "buyer_profile_claims", "mobile_rate_limits"]) {
+    for (const name of [
+      ...FUNCTIONS,
+      "buyer_profiles",
+      "buyer_profile_claims",
+      "mobile_rate_limits",
+      "mobile_rate_limits_window_start_idx",
+    ]) {
       expect(DOWN).toContain(name);
     }
   });

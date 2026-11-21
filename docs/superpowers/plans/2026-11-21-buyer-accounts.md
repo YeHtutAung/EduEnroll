@@ -318,6 +318,16 @@ describe("buyer accounts migration", () => {
     }
   });
 
+  it("consume_rate_limit refuses bad arguments and sweeps old windows of every key", () => {
+    const body = UP.slice(UP.search(/CREATE FUNCTION public\.consume_rate_limit\(/i));
+    expect(body).toMatch(/p_window_seconds NOT BETWEEN 1 AND 86400/i);
+    expect(body).toMatch(/ERRCODE = '22023'/i);
+    // No per-key cleanup: rows of keys that never come back must expire too.
+    expect(body.slice(0, body.indexOf("$$;"))).not.toMatch(/WHERE key = p_key AND window_start </i);
+    expect(body).toMatch(/LIMIT 50/i);
+    expect(UP).toMatch(/CREATE INDEX mobile_rate_limits_window_start_idx ON public\.mobile_rate_limits \(window_start\)/i);
+  });
+
   it("syncs the profile email only when the auth email changes", () => {
     expect(UP).toMatch(/AFTER UPDATE OF email ON auth\.users/i);
     expect(UP).toMatch(/WHEN \(OLD\.email IS DISTINCT FROM NEW\.email/i);
@@ -325,7 +335,13 @@ describe("buyer accounts migration", () => {
 
   it("rollback drops the trigger before its function, and every object", () => {
     expect(DOWN.search(/DROP TRIGGER/i)).toBeLessThan(DOWN.search(/DROP FUNCTION IF EXISTS public\.sync_buyer_profile_email/i));
-    for (const name of [...FUNCTIONS, "buyer_profiles", "buyer_profile_claims", "mobile_rate_limits"]) {
+    for (const name of [
+      ...FUNCTIONS,
+      "buyer_profiles",
+      "buyer_profile_claims",
+      "mobile_rate_limits",
+      "mobile_rate_limits_window_start_idx",
+    ]) {
       expect(DOWN).toContain(name);
     }
   });
@@ -377,10 +393,12 @@ CREATE TABLE public.mobile_rate_limits (
 ALTER TABLE public.mobile_rate_limits ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.mobile_rate_limits FROM PUBLIC, anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.mobile_rate_limits TO service_role;
+CREATE INDEX mobile_rate_limits_window_start_idx ON public.mobile_rate_limits (window_start);
 
 -- Counts one event for p_key in the current fixed window and says whether it
 -- is still within p_limit. The caller passes an already-hashed key; this never
--- sees an email address.
+-- sees an email address. Windows are 1 s to 1 day: a longer window would be
+-- swept by the two-day cleanup below while still counting, and fail open.
 CREATE FUNCTION public.consume_rate_limit(p_key text, p_window_seconds int, p_limit int)
 RETURNS boolean
 LANGUAGE plpgsql
@@ -388,17 +406,29 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
 DECLARE
-  v_start timestamptz := to_timestamp(floor(extract(epoch FROM now()) / p_window_seconds) * p_window_seconds);
+  v_start timestamptz;
   v_count int;
 BEGIN
+  IF p_window_seconds IS NULL OR p_window_seconds NOT BETWEEN 1 AND 86400 OR p_limit IS NULL OR p_limit < 0 THEN
+    RAISE EXCEPTION 'bad rate limit args' USING ERRCODE = '22023';
+  END IF;
+
+  -- Assigned after the check: in DECLARE it would divide by zero first.
+  v_start := to_timestamp(floor(extract(epoch FROM now()) / p_window_seconds) * p_window_seconds);
+
   INSERT INTO public.mobile_rate_limits AS r (key, window_start, count)
   VALUES (p_key, v_start, 1)
   ON CONFLICT (key, window_start) DO UPDATE SET count = r.count + 1
   RETURNING r.count INTO v_count;
 
-  -- Keys expire on their own: drop this key's windows older than two days.
+  -- Rows expire whether or not their key comes back (a deleted account's keys
+  -- included): each call drops up to 50 windows, of any key, older than two days.
   DELETE FROM public.mobile_rate_limits
-  WHERE key = p_key AND window_start < now() - interval '2 days';
+  WHERE ctid = ANY (ARRAY(
+    SELECT ctid FROM public.mobile_rate_limits
+    WHERE window_start < now() - interval '2 days'
+    LIMIT 50
+  ));
 
   RETURN v_count <= p_limit;
 END;
@@ -542,6 +572,7 @@ DROP FUNCTION IF EXISTS public.create_buyer_profile(uuid, uuid, text);
 DROP FUNCTION IF EXISTS public.buyer_profile_claim_held(uuid, uuid);
 DROP FUNCTION IF EXISTS public.claim_buyer_profile(uuid);
 DROP FUNCTION IF EXISTS public.consume_rate_limit(text, int, int);
+DROP INDEX IF EXISTS public.mobile_rate_limits_window_start_idx;
 DROP TABLE IF EXISTS public.mobile_rate_limits;
 DROP TABLE IF EXISTS public.buyer_profile_claims;
 DROP TABLE IF EXISTS public.buyer_profiles;

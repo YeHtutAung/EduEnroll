@@ -7,6 +7,7 @@ DROP FUNCTION IF EXISTS public.create_buyer_profile(uuid, uuid, text);
 DROP FUNCTION IF EXISTS public.buyer_profile_claim_held(uuid, uuid);
 DROP FUNCTION IF EXISTS public.claim_buyer_profile(uuid);
 DROP FUNCTION IF EXISTS public.consume_rate_limit(text, int, int);
+DROP INDEX IF EXISTS public.mobile_rate_limits_window_start_idx;
 DROP TABLE IF EXISTS public.mobile_rate_limits;
 DROP TABLE IF EXISTS public.buyer_profile_claims;
 DROP TABLE IF EXISTS public.buyer_profiles;

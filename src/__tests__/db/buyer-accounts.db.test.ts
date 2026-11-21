@@ -153,6 +153,31 @@ describe("consume_rate_limit", () => {
     expect(await consume()).toBe(true);
     expect(await consume()).toBe(false);
   });
+
+  it.each([
+    ["a window of 0", 0, 2],
+    ["a window longer than a day (604800 s)", 604800, 1],
+    ["a NULL limit", 3600, null],
+  ])("raises 22023 for %s", async (_label, windowSeconds, limit) => {
+    const key = randomUUID();
+    rateKeys.push(key);
+    await expect(
+      sql(`SELECT public.consume_rate_limit($1, $2, $3)`, [key, windowSeconds, limit]),
+    ).rejects.toMatchObject({ code: "22023" });
+  });
+
+  it("sweeps old windows of other keys, not only the caller's", async () => {
+    const oldKey = randomUUID();
+    const freshKey = randomUUID();
+    rateKeys.push(oldKey, freshKey);
+    await sql(
+      `INSERT INTO public.mobile_rate_limits (key, window_start, count) VALUES ($1, now() - interval '3 days', 1)`,
+      [oldKey],
+    );
+    await sql(`SELECT public.consume_rate_limit($1, 3600, 2)`, [freshKey]);
+    const left = await sql(`SELECT 1 FROM public.mobile_rate_limits WHERE key = $1`, [oldKey]);
+    expect(left).toHaveLength(0);
+  });
 });
 
 describe("profile email follows the auth email", () => {
@@ -166,9 +191,65 @@ describe("profile email follows the auth email", () => {
     expect(untouched.email).toBe(before.email);
     expect(untouched.updated_at.getTime()).toBe(before.updated_at.getTime());
 
+    // Touching the email column without changing it doesn't fire the sync.
+    await sql(`UPDATE auth.users SET email = email WHERE id = $1`, [u]);
+    expect((await profile(u)).updated_at.getTime()).toBe(before.updated_at.getTime());
+
     const newEmail = `New-${u}@Example.test`;
     await sql(`UPDATE auth.users SET email = $2 WHERE id = $1`, [u, newEmail]);
-    expect((await profile(u)).email).toBe(newEmail.toLowerCase());
+    const changed = await profile(u);
+    expect(changed.email).toBe(newEmail.toLowerCase());
+
+    // A NULL auth email succeeds and leaves the profile's email in place.
+    await sql(`UPDATE auth.users SET email = NULL WHERE id = $1`, [u]);
+    const afterNull = await profile(u);
+    expect(afterNull.email).toBe(newEmail.toLowerCase());
+    expect(afterNull.updated_at.getTime()).toBe(changed.updated_at.getTime());
+  });
+});
+
+describe("concurrent claim while a create is in flight", () => {
+  it("a claim that waits on an uncommitted create resolves to 'exists'", async () => {
+    const u = await newUser();
+    const token = (await claim(u))!;
+
+    const c1 = new Client({ connectionString: process.env.DATABASE_URL });
+    const c2 = new Client({ connectionString: process.env.DATABASE_URL });
+    await c1.connect();
+    await c2.connect();
+    try {
+      await c1.query("BEGIN");
+      const created = await c1.query(`SELECT public.create_buyer_profile($1, $2, $3) AS r`, [
+        u,
+        token,
+        `buyer-${u}@example.test`,
+      ]);
+      expect(created.rows[0].r).toBe("created");
+
+      const c2Pid = (await c2.query(`SELECT pg_backend_pid() AS pid`)).rows[0].pid;
+      // Not awaited: blocks on client 1's lock on the claim row.
+      const pending = c2.query(`SELECT public.claim_buyer_profile($1) AS r`, [u]);
+      // Commit only once client 2 is actually waiting on a lock, so the test
+      // exercises the race rather than two calls in sequence.
+      let waiting = false;
+      for (let i = 0; i < 100 && !waiting; i++) {
+        const [row] = await sql<{ w: string | null }>(
+          `SELECT wait_event_type AS w FROM pg_stat_activity WHERE pid = $1`,
+          [c2Pid],
+        );
+        waiting = row?.w === "Lock";
+        if (!waiting) await new Promise((r) => setTimeout(r, 20));
+      }
+      expect(waiting).toBe(true);
+      await c1.query("COMMIT");
+
+      expect((await pending).rows[0].r).toBe("exists");
+      expect(await claimRows(u)).toHaveLength(0);
+    } finally {
+      await c1.query("ROLLBACK").catch(() => {});
+      await c1.end();
+      await c2.end();
+    }
   });
 });
 
@@ -206,6 +287,13 @@ describe("authenticated sessions get nothing", () => {
   it.each([
     ["claim_buyer_profile", `SELECT public.claim_buyer_profile($1)`, () => [userId]],
     ["consume_rate_limit", `SELECT public.consume_rate_limit($1, 3600, 2)`, () => [randomUUID()]],
+    [
+      "create_buyer_profile",
+      `SELECT public.create_buyer_profile($1, $2, 'x@example.test')`,
+      () => [userId, randomUUID()],
+    ],
+    ["buyer_profile_claim_held", `SELECT public.buyer_profile_claim_held($1, $2)`, () => [userId, randomUUID()]],
+    ["release_buyer_profile_claim", `SELECT public.release_buyer_profile_claim($1, $2)`, () => [userId, randomUUID()]],
   ])("cannot run %s (42501)", async (_name, text, params) => {
     await expect(runAs(text, params())).rejects.toMatchObject({ code: "42501" });
   });
