@@ -4,6 +4,7 @@ import { extractSubdomainFromHost } from "@/lib/tenant";
 import { gtmAllowedOnHost } from "@/lib/tagManager";
 import TenantTagManager from "@/components/tracking/TenantTagManager";
 import AdClickCapture from "@/components/tracking/AdClickCapture";
+import WalkInNotice from "@/components/tenant/WalkInNotice";
 
 // ─── Server component: resolve tenant name for public pages ─────────────────
 
@@ -60,6 +61,7 @@ export default async function PublicLayout({ children }: { children: React.React
     <div className="flex min-h-screen flex-col bg-white">
       <TenantTagManager containerId={gtmAllowed ? gtmContainerId : null} />
       <AdClickCapture containerId={gtmAllowed ? gtmContainerId : null} />
+      <WalkInNotice tenantSlug={slug || null} />
       {/* ─── Header ──────────────────────────────────────────────── */}
       <header className="border-b border-gray-200 bg-white">
         <div className="mx-auto flex max-w-4xl items-center justify-between px-4 py-4 sm:px-6">
