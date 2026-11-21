@@ -1,0 +1,437 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { createClient } from "@/lib/supabase/client";
+import {
+  accountReducer,
+  initialAccount,
+  type AccountEffect,
+  type AccountEvent,
+  type AccountState,
+  type Notice,
+} from "./accountFlow";
+
+// ─── /account: buyer sign-in with an email code ─────────────────────────────
+//
+// Every decision is in accountFlow.ts. This file only runs its effects
+// (Supabase Auth, fetch) and renders the state through AccountView.
+//
+// The code is read from the form on submit and passed straight into the
+// reducer, which hands it to the single verifyCode effect. It is never kept in
+// React state, put in a URL, or logged; this file logs nothing at all.
+
+// Myanmar text: every `mm` string below is new and needs native review.
+type Bilingual = { en: string; mm: string };
+
+const COPY = {
+  heading: { en: "My account", mm: "ကျွန်ုပ်၏ အကောင့်" },
+  loading: { en: "Loading…", mm: "ခေတ္တစောင့်ပါ…" },
+  emailHeading: { en: "Sign in with your email", mm: "သင့်အီးမေးလ်ဖြင့် ဝင်ရောက်ပါ" },
+  emailHelp: {
+    en: "We'll email you a 6-digit code.",
+    mm: "ဂဏန်း ၆ လုံးပါ ကုဒ်ကို သင့်အီးမေးလ်သို့ ပို့ပေးပါမည်။",
+  },
+  emailLabel: { en: "Email", mm: "အီးမေးလ်" },
+  sendCode: { en: "Send code", mm: "ကုဒ် ပို့ရန်" },
+  codeHeading: { en: "Enter the code", mm: "ကုဒ်ကို ထည့်ပါ" },
+  codeSentTo: { en: "We sent a 6-digit code to", mm: "ဂဏန်း ၆ လုံးပါ ကုဒ်ကို ဤလိပ်စာသို့ ပို့ထားပါသည်" },
+  codeLabel: { en: "6-digit code", mm: "ဂဏန်း ၆ လုံး ကုဒ်" },
+  verify: { en: "Sign in", mm: "ဝင်ရောက်ရန်" },
+  useAnotherEmail: { en: "Use another email", mm: "အခြား အီးမေးလ် သုံးရန်" },
+  resend: { en: "Resend code", mm: "ကုဒ် ပြန်ပို့ရန်" },
+  signedInAs: { en: "Signed in as", mm: "ဝင်ရောက်ထားသော အကောင့်" },
+  signOut: { en: "Sign out", mm: "ထွက်ရန်" },
+  tryAgain: { en: "Try again", mm: "ထပ်မံကြိုးစားရန်" },
+  somethingWrong: {
+    en: "Something went wrong. Please try again.",
+    mm: "တစ်ခုခု မှားယွင်းနေပါသည်။ ထပ်မံကြိုးစားပါ။",
+  },
+} satisfies Record<string, Bilingual>;
+
+const NOTICES: Record<Notice, Bilingual & { tone: "error" | "info" }> = {
+  invalidEmail: {
+    tone: "error",
+    en: "Enter a valid email address.",
+    mm: "မှန်ကန်သော အီးမေးလ်လိပ်စာ ထည့်ပါ။",
+  },
+  tooManyCodes: {
+    tone: "error",
+    en: "Too many codes requested. Please try again later.",
+    mm: "ကုဒ် တောင်းဆိုမှု များလွန်းပါသည်။ ခဏကြာမှ ပြန်ကြိုးစားပါ။",
+  },
+  sendFailed: {
+    tone: "error",
+    en: "We couldn't send the code. Please try again.",
+    mm: "ကုဒ် ပို့၍ မရပါ။ ထပ်မံကြိုးစားပါ။",
+  },
+  codeResent: { tone: "info", en: "We sent a new code.", mm: "ကုဒ်အသစ် ပို့ပြီးပါပြီ။" },
+  invalidCode: {
+    tone: "error",
+    en: "Enter the 6-digit code.",
+    mm: "ဂဏန်း ၆ လုံး ကုဒ်ကို ထည့်ပါ။",
+  },
+  wrongCode: {
+    tone: "error",
+    en: "That code is wrong or has expired.",
+    mm: "ကုဒ် မှားနေပါသည် သို့မဟုတ် သက်တမ်းကုန်သွားပါပြီ။",
+  },
+  tooManyTries: {
+    tone: "error",
+    en: "Too many tries. Please wait and try again.",
+    mm: "ကြိုးစားမှု များလွန်းပါသည်။ ခဏစောင့်ပြီး ပြန်ကြိုးစားပါ။",
+  },
+  staff: {
+    tone: "error",
+    en: "This address belongs to a staff account. Use a different email to buy tickets.",
+    mm: "ဤလိပ်စာသည် ဝန်ထမ်းအကောင့် ဖြစ်ပါသည်။ လက်မှတ်ဝယ်ရန် အခြားအီးမေးလ် သုံးပါ။",
+  },
+  deletion: {
+    tone: "error",
+    en: "This account is being deleted, so it can't be used to sign in.",
+    mm: "ဤအကောင့်ကို ဖျက်နေဆဲ ဖြစ်သောကြောင့် ဝင်ရောက်၍ မရပါ။",
+  },
+  expired: {
+    tone: "error",
+    en: "Your sign-in expired. Please sign in again.",
+    mm: "ဝင်ရောက်မှု သက်တမ်းကုန်သွားပါပြီ။ ပြန်လည်ဝင်ရောက်ပါ။",
+  },
+  generic: {
+    tone: "error",
+    en: "We couldn't sign you in. Please try again.",
+    mm: "ဝင်ရောက်၍ မရပါ။ ထပ်မံကြိုးစားပါ။",
+  },
+};
+
+// ─── Presentational view (static-rendered in tests) ─────────────────────────
+
+export interface AccountViewProps {
+  state: AccountState;
+  onSubmitEmail: (email: string) => void;
+  onSubmitCode: (code: string) => void;
+  onResend: () => void;
+  onUseAnotherEmail: () => void;
+  onSignOut: () => void;
+  onRetryLoad: () => void;
+  onRetryProfile: () => void;
+}
+
+const inputClass =
+  "w-full rounded-lg border border-gray-300 px-4 py-3 text-sm text-gray-900 placeholder-gray-400 focus:border-[#1a6b3c] focus:outline-none focus:ring-1 focus:ring-[#1a6b3c] disabled:bg-gray-100";
+const primaryButton =
+  "w-full rounded-lg bg-[#1a6b3c] px-5 py-3 text-sm font-semibold text-white hover:bg-[#155d33] transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
+const secondaryButton =
+  "rounded-lg px-3 py-2 text-sm font-medium text-[#1a6b3c] underline hover:text-[#155d33] disabled:opacity-50 disabled:cursor-not-allowed";
+
+function Text({ copy, className = "" }: { copy: Bilingual; className?: string }) {
+  return (
+    <>
+      <span className={className}>{copy.en}</span>
+      <span className={`font-myanmar block ${className}`}>{copy.mm}</span>
+    </>
+  );
+}
+
+function NoticeBox({ notice }: { notice: Notice | null }) {
+  if (!notice) return null;
+  const n = NOTICES[notice];
+  const tone =
+    n.tone === "error"
+      ? "border-red-200 bg-red-50 text-red-800"
+      : "border-green-200 bg-green-50 text-green-800";
+  return (
+    <div role={n.tone === "error" ? "alert" : "status"} className={`mb-4 rounded-lg border p-3 text-sm ${tone}`}>
+      <p>{n.en}</p>
+      <p className="font-myanmar mt-0.5">{n.mm}</p>
+    </div>
+  );
+}
+
+function Card({ children }: { children: ReactNode }) {
+  return <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">{children}</div>;
+}
+
+function Body(props: AccountViewProps) {
+  const { state } = props;
+
+  switch (state.step) {
+    case "loading":
+      return (
+        <Card>
+          <p className="text-center text-sm text-gray-500">
+            <Text copy={COPY.loading} />
+          </p>
+        </Card>
+      );
+
+    case "loadFailed":
+      return (
+        <Card>
+          <div role="alert" className="mb-4 text-center text-sm text-gray-700">
+            <Text copy={COPY.somethingWrong} />
+          </div>
+          <button type="button" onClick={props.onRetryLoad} className={primaryButton}>
+            {COPY.tryAgain.en} / <span className="font-myanmar">{COPY.tryAgain.mm}</span>
+          </button>
+        </Card>
+      );
+
+    case "staffSession":
+      return (
+        <Card>
+          <NoticeBox notice="staff" />
+        </Card>
+      );
+
+    case "email": {
+      const onSubmit = (e: FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        props.onSubmitEmail(String(new FormData(e.currentTarget).get("email") ?? ""));
+      };
+      return (
+        <Card>
+          <h2 className="text-lg font-semibold text-gray-900">
+            <Text copy={COPY.emailHeading} />
+          </h2>
+          <p className="mb-4 mt-1 text-sm text-gray-600">
+            <Text copy={COPY.emailHelp} />
+          </p>
+          <NoticeBox notice={state.notice} />
+          <form onSubmit={onSubmit} noValidate>
+            <label htmlFor="account-email" className="mb-2 block text-sm font-medium text-gray-700">
+              {COPY.emailLabel.en} / <span className="font-myanmar">{COPY.emailLabel.mm}</span>
+            </label>
+            <input
+              id="account-email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              inputMode="email"
+              required
+              defaultValue={state.email}
+              disabled={state.busy}
+              className={inputClass}
+            />
+            <button type="submit" disabled={state.busy} className={`mt-4 ${primaryButton}`}>
+              {COPY.sendCode.en} / <span className="font-myanmar">{COPY.sendCode.mm}</span>
+            </button>
+          </form>
+        </Card>
+      );
+    }
+
+    case "code": {
+      const onSubmit = (e: FormEvent<HTMLFormElement>) => {
+        e.preventDefault();
+        props.onSubmitCode(String(new FormData(e.currentTarget).get("code") ?? ""));
+      };
+      return (
+        <Card>
+          <h2 className="text-lg font-semibold text-gray-900">
+            <Text copy={COPY.codeHeading} />
+          </h2>
+          <p className="mb-4 mt-1 text-sm text-gray-600">
+            {COPY.codeSentTo.en} <strong className="break-all">{state.email}</strong>
+            <span className="font-myanmar block">{COPY.codeSentTo.mm}</span>
+          </p>
+          <NoticeBox notice={state.notice} />
+          <form onSubmit={onSubmit} noValidate>
+            <label htmlFor="account-code" className="mb-2 block text-sm font-medium text-gray-700">
+              {COPY.codeLabel.en} / <span className="font-myanmar">{COPY.codeLabel.mm}</span>
+            </label>
+            <input
+              id="account-code"
+              name="code"
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              pattern="[0-9]{6}"
+              maxLength={6}
+              required
+              disabled={state.busy}
+              className={`${inputClass} font-mono tracking-[0.4em]`}
+            />
+            <button type="submit" disabled={state.busy} className={`mt-4 ${primaryButton}`}>
+              {COPY.verify.en} / <span className="font-myanmar">{COPY.verify.mm}</span>
+            </button>
+          </form>
+          <div className="mt-4 flex flex-wrap justify-between gap-2">
+            <button type="button" onClick={props.onUseAnotherEmail} disabled={state.busy} className={secondaryButton}>
+              {COPY.useAnotherEmail.en} / <span className="font-myanmar">{COPY.useAnotherEmail.mm}</span>
+            </button>
+            <button type="button" onClick={props.onResend} disabled={state.busy} className={secondaryButton}>
+              {COPY.resend.en} / <span className="font-myanmar">{COPY.resend.mm}</span>
+            </button>
+          </div>
+        </Card>
+      );
+    }
+
+    case "profileFailed":
+      return (
+        <Card>
+          <div role="alert" className="mb-4 text-center text-sm text-gray-700">
+            <Text copy={COPY.somethingWrong} />
+          </div>
+          <button type="button" onClick={props.onRetryProfile} disabled={state.busy} className={primaryButton}>
+            {COPY.tryAgain.en} / <span className="font-myanmar">{COPY.tryAgain.mm}</span>
+          </button>
+          <div className="mt-4 text-center">
+            <button type="button" onClick={props.onUseAnotherEmail} disabled={state.busy} className={secondaryButton}>
+              {COPY.useAnotherEmail.en} / <span className="font-myanmar">{COPY.useAnotherEmail.mm}</span>
+            </button>
+          </div>
+        </Card>
+      );
+
+    case "signedIn":
+      return (
+        <Card>
+          <p className="text-sm text-gray-600">
+            {COPY.signedInAs.en} / <span className="font-myanmar">{COPY.signedInAs.mm}</span>
+          </p>
+          <p className="mt-1 break-all text-lg font-semibold text-gray-900">{state.email}</p>
+          <button type="button" onClick={props.onSignOut} disabled={state.busy} className={`mt-6 ${primaryButton}`}>
+            {COPY.signOut.en} / <span className="font-myanmar">{COPY.signOut.mm}</span>
+          </button>
+        </Card>
+      );
+  }
+}
+
+export function AccountView(props: AccountViewProps) {
+  return (
+    <div className="mx-auto max-w-md">
+      <div className="mb-8 text-center">
+        <h1 className="text-2xl font-bold text-gray-900">{COPY.heading.en}</h1>
+        <p className="font-myanmar mt-1 text-gray-600">{COPY.heading.mm}</p>
+      </div>
+      {/* Keyed by step so each form mounts fresh: the email field picks up its
+          default again, and a typed code never survives a step change. */}
+      <Body key={props.state.step} {...props} />
+    </div>
+  );
+}
+
+// ─── Effect runner ──────────────────────────────────────────────────────────
+
+const PROFILE_URL = "/api/account/profile";
+
+async function readProfileResponse(res: Response): Promise<{ email?: string; reason?: string }> {
+  try {
+    const body: unknown = await res.json();
+    if (!body || typeof body !== "object") return {};
+    const b = body as { email?: unknown; error?: { reason?: unknown } };
+    return {
+      email: typeof b.email === "string" ? b.email : undefined,
+      reason: typeof b.error?.reason === "string" ? b.error.reason : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+export default function AccountSignIn() {
+  const start = useRef(initialAccount());
+  const stateRef = useRef<AccountState>(start.current.state);
+  const [state, setState] = useState<AccountState>(start.current.state);
+  const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
+  const mounted = useRef(true);
+
+  const supabase = () => (supabaseRef.current ??= createClient());
+
+  // Declared before dispatch and called through a ref so the two can recurse.
+  const runRef = useRef<(effect: AccountEffect) => Promise<void>>(async () => {});
+
+  const dispatch = useCallback((event: AccountEvent) => {
+    if (!mounted.current) return;
+    const { state: next, effects } = accountReducer(stateRef.current, event);
+    stateRef.current = next;
+    setState(next);
+    for (const effect of effects) void runRef.current(effect);
+  }, []);
+
+  runRef.current = async (effect: AccountEffect) => {
+    switch (effect.type) {
+      case "loadProfile": {
+        try {
+          const res = await fetch(PROFILE_URL, { credentials: "same-origin", cache: "no-store" });
+          const { email } = res.ok ? await readProfileResponse(res) : {};
+          dispatch({ type: "profileLoaded", status: res.status, email });
+        } catch {
+          dispatch({ type: "profileLoaded", status: 0 });
+        }
+        return;
+      }
+      case "sendCode": {
+        try {
+          const { error } = await supabase().auth.signInWithOtp({
+            email: effect.email,
+            options: { shouldCreateUser: true },
+          });
+          dispatch(error ? { type: "sendFailed", status: error.status } : { type: "codeSent" });
+        } catch {
+          dispatch({ type: "sendFailed" });
+        }
+        return;
+      }
+      case "verifyCode": {
+        try {
+          const { error } = await supabase().auth.verifyOtp({
+            email: effect.email,
+            token: effect.token,
+            type: "email",
+          });
+          dispatch(error ? { type: "verifyFailed", status: error.status } : { type: "codeVerified" });
+        } catch {
+          dispatch({ type: "verifyFailed" });
+        }
+        return;
+      }
+      case "postProfile": {
+        if (effect.delayMs > 0) await wait(effect.delayMs);
+        try {
+          // No body: the server takes the email from the verified session.
+          const res = await fetch(PROFILE_URL, { method: "POST", credentials: "same-origin", cache: "no-store" });
+          const { email, reason } = await readProfileResponse(res);
+          dispatch({ type: "profilePosted", status: res.status, attempt: effect.attempt, email, reason });
+        } catch {
+          // A network failure is retried like a 503.
+          dispatch({ type: "profilePosted", status: 503, attempt: effect.attempt });
+        }
+        return;
+      }
+      case "signOutLocal": {
+        try {
+          await supabase().auth.signOut({ scope: "local" });
+        } catch {
+          // Local sign-out clears this tab's storage; nothing to recover here.
+        }
+        dispatch({ type: "signedOut" });
+        return;
+      }
+    }
+  };
+
+  useEffect(() => {
+    mounted.current = true;
+    for (const effect of start.current.effects) void runRef.current(effect);
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  return (
+    <AccountView
+      state={state}
+      onSubmitEmail={(email) => dispatch({ type: "submitEmail", email })}
+      onSubmitCode={(code) => dispatch({ type: "submitCode", code })}
+      onResend={() => dispatch({ type: "resend" })}
+      onUseAnotherEmail={() => dispatch({ type: "useAnotherEmail" })}
+      onSignOut={() => dispatch({ type: "signOut" })}
+      onRetryLoad={() => dispatch({ type: "retryLoad" })}
+      onRetryProfile={() => dispatch({ type: "retryProfile" })}
+    />
+  );
+}
