@@ -6,6 +6,7 @@ import { EvTrustedOfficialTemplate } from "@/components/enrollment/templates";
 import type { ClassStatus } from "@/types/database";
 import { applyPriorityUnlock, capturePriorityToken, hideLinkOnlyTiers, isLinkOnlyTier, onlyUnlockedLinkTiers } from "@/lib/interest/priorityUnlock";
 import { pushDataLayer, viewItemPayload } from "@/lib/tagManager";
+import ProtectedNotice from "@/components/enroll/ProtectedNotice";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,6 +29,8 @@ interface IntakeData {
   year: number;
   status: string;
   priority_open_at?: string | null;
+  /** Account-bound tickets (Task 13): shows the "Smartphone required" notice. */
+  ticket_protection?: boolean;
 }
 
 interface PageData {
@@ -167,7 +170,7 @@ export default function TicketsPage() {
     );
   }
 
-  return (
+  const template = (
     <EvTrustedOfficialTemplate
       appearance={data.appearance as never}
       intake={data.intake}
@@ -182,5 +185,17 @@ export default function TicketsPage() {
       organiserTerms={data.organiser_terms ?? null}
       organiserTermsSha256={data.organiser_terms_sha256 ?? null}
     />
+  );
+
+  // Account-bound tickets: "Smartphone required" above the tickets. Any other
+  // event renders exactly as before.
+  if (data.intake.ticket_protection !== true) return template;
+  return (
+    <>
+      <div className="px-5 pt-4" style={{ background: "#f7f5ef" }}>
+        <ProtectedNotice className="mx-auto max-w-md" />
+      </div>
+      {template}
+    </>
   );
 }

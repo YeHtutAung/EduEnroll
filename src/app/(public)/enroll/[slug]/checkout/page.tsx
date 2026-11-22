@@ -9,6 +9,14 @@ import type { SizeNote } from "@/lib/enrollment/sizeChart";
 import { emailBlockedFor, emailBlockedMessage, emailTypoToConfirm } from "@/lib/enrollment/emailAddress";
 import AttendeeSection, { AttendeeTotals, type AttendeeCardSlot } from "@/components/enrollment/AttendeeSection";
 import { attendeeFieldErrors, attendeeSlots, attendeesPayload, slotKey } from "@/lib/enrollment/attendees";
+import ProtectedNotice from "@/components/enroll/ProtectedNotice";
+import ProtectedGate, { AccountEmailField } from "@/components/enroll/ProtectedGate";
+import {
+  currentSignInHref,
+  eventIsProtected,
+  resolveProtectedGate,
+  type GateState,
+} from "@/lib/enrollment/protectedGate";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -45,10 +53,13 @@ function DynamicField({
   field,
   value,
   onChange,
+  lockedEmail = null,
 }: {
   field: FormField;
   value: string;
   onChange: (v: string) => void;
+  /** A protected event's account email: the email field shows it, read-only. */
+  lockedEmail?: string | null;
 }) {
   const isEmail = field.field_key === "email";
   const baseInput = "w-full h-[33px] px-3 rounded-[7px] text-[12px] outline-none";
@@ -75,6 +86,23 @@ function DynamicField({
       {!field.is_required && <span className="font-normal ml-1" style={{ color: "#9a9484" }}>(optional)</span>}
     </label>
   );
+
+  // Protected event: the order email is the account email (the server keeps
+  // it whatever is sent), so the field shows it and can't change.
+  if (lockedEmail !== null && (field.field_key === "email" || field.field_type === "email")) {
+    return (
+      <div>
+        {label}
+        <AccountEmailField
+          email={lockedEmail}
+          className={baseInput}
+          style={{ ...borderStyle(lockedEmail), background: "#f7f5ef" }}
+          noteClassName="text-[9.5px] mt-1"
+          noteStyle={{ color: "#9a9484" }}
+        />
+      </div>
+    );
+  }
 
   if (field.size_chart_url && field.options && field.options.length > 0) {
     return (
@@ -264,6 +292,9 @@ function CheckoutForm() {
   const [runnerValues, setRunnerValues] = useState<Record<string, Record<string, string>>>({});
   const [runnerErrors, setRunnerErrors] = useState<Record<string, Record<string, string>>>({});
   const [openRunner, setOpenRunner] = useState<string | null>(null);
+  // Protected event (account-bound tickets): "open" for every other event.
+  const [gate, setGate] = useState<GateState>("open");
+  const [accountEmail, setAccountEmail] = useState<string | null>(null);
 
   useEffect(() => {
     if (!ref) { setLoadError("Missing order reference."); return; }
@@ -285,23 +316,41 @@ function CheckoutForm() {
       { id: "email",   field_key: "email",   field_label: "Email",     field_type: "email", is_required: true, options: null, sort_order: 2, is_default: true },
     ];
 
-    const applyFields = (f: FormField[]) => {
-      setFields(f);
-      const init: Record<string, string> = {};
-      f.forEach((field) => { init[field.field_key] = ""; });
-      setValues(init);
-    };
+    let cancelled = false;
+    void (async () => {
+      // A protected event asks who is signed in before showing any field; an
+      // unprotected one makes no profile call. The order's email is already
+      // the account's (the server wrote it); this only shows it.
+      const checked = summary.intake_id
+        ? await resolveProtectedGate(await eventIsProtected(params.slug, summary.intake_id))
+        : { state: "open" as const, email: null };
+      if (cancelled) return;
+      setGate(checked.state);
+      setAccountEmail(checked.email);
+      if (checked.state !== "open" && checked.state !== "signedIn") return;
 
-    if (!summary.intake_id) {
-      applyFields(DEFAULT_FIELDS);
-      return;
-    }
+      const applyFields = (f: FormField[]) => {
+        setFields(f);
+        const init: Record<string, string> = {};
+        f.forEach((field) => {
+          const isEmail = field.field_key === "email" || field.field_type === "email";
+          init[field.field_key] = checked.email && isEmail ? checked.email : "";
+        });
+        setValues(init);
+      };
 
-    fetch(`/api/public/form-fields?intake_id=${summary.intake_id}`)
-      .then((r) => r.json())
-      .then((f: FormField[]) => applyFields(f.length > 0 ? f : DEFAULT_FIELDS))
-      .catch(() => applyFields(DEFAULT_FIELDS));
-  }, [summary]);
+      if (!summary.intake_id) {
+        applyFields(DEFAULT_FIELDS);
+        return;
+      }
+
+      await fetch(`/api/public/form-fields?intake_id=${summary.intake_id}`)
+        .then((r) => r.json())
+        .then((f: FormField[]) => { if (!cancelled) applyFields(f.length > 0 ? f : DEFAULT_FIELDS); })
+        .catch(() => { if (!cancelled) applyFields(DEFAULT_FIELDS); });
+    })();
+    return () => { cancelled = true; };
+  }, [summary, params.slug]);
 
   function setValue(key: string, val: string) {
     setValues((prev) => ({ ...prev, [key]: val }));
@@ -378,7 +427,8 @@ function CheckoutForm() {
       return;
     }
 
-    const emailSuggestion = emailTypoToConfirm(email, emailTyposQueried.current);
+    // Not asked of the account email: the buyer can't change it.
+    const emailSuggestion = accountEmail ? null : emailTypoToConfirm(email, emailTyposQueried.current);
     if (emailSuggestion) {
       setFormError(
         `Please check your email, because your e-ticket goes there. Did you mean ${emailSuggestion}? If ${email} is correct, press the button again.`,
@@ -470,6 +520,17 @@ function CheckoutForm() {
     );
   }
 
+  if (gate !== "open" && gate !== "signedIn") {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-5" style={{ background: "#f7f5ef" }}>
+        <ProtectedNotice className="w-full max-w-md" />
+        <div className="w-full">
+          <ProtectedGate state={gate} next={currentSignInHref()} />
+        </div>
+      </div>
+    );
+  }
+
   if (!summary) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: "#f7f5ef" }}>
@@ -491,6 +552,8 @@ function CheckoutForm() {
         <p className="text-[10px] mt-1" style={{ color: "#9a9484" }}>{summary.event_name}</p>
       </div>
 
+      {gate === "signedIn" && <ProtectedNotice className="mb-5" />}
+
       {/* Attendee details form */}
       <p className="text-[11px] font-bold tracking-[1.2px] uppercase pb-1.5 mb-4" style={{ color: "#0f1f42", borderBottom: "1.5px solid #eee9dc" }}>
         Your Details
@@ -505,6 +568,7 @@ function CheckoutForm() {
                 field={field}
                 value={values[field.field_key] ?? ""}
                 onChange={(v) => setValue(field.field_key, v)}
+                lockedEmail={accountEmail}
               />
             ))}
             <AttendeeSection

@@ -19,7 +19,11 @@ export interface CartStash {
 export type CheckoutNewResult =
   | { kind: "redirect-tickets" }
   | { kind: "created"; ref: string }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string }
+  // A protected event (account-bound tickets, Task 12): no buyer session (401)
+  // or a staff session (403). The page shows its sign-in gate instead.
+  | { kind: "sign-in" }
+  | { kind: "staff" };
 
 /** Storage key of the stash. Only digits are accepted, matching the GTM storage allowlist. */
 export function cartStashKey(cartKey: string): string {
@@ -172,6 +176,8 @@ export async function submitTrustedOfficialOrder(attempt: OrderAttempt): Promise
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(attempt.body),
     });
+    if (res.status === 401) return { kind: "sign-in" };
+    if (res.status === 403) return { kind: "staff" };
     const data = await res.json();
     if (!res.ok) throw new Error(data.message ?? "Enrollment failed.");
     if (!data.enrollment_ref) throw new Error("Enrollment failed.");
