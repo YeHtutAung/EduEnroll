@@ -39,6 +39,8 @@ function p256Key(dk: string) {
 }
 
 export function verifyK2(qr: string, nowSeconds: number): VerifiedK2 | null {
+  // A NaN clock would make both window comparisons false and accept any ts.
+  if (!Number.isFinite(nowSeconds)) return null;
   const parts = qr.split(".");
   if (parts.length !== 6 || parts[0] !== "k2") return null;
   const [, h, p, s, ts, devsig] = parts;
@@ -49,6 +51,8 @@ export function verifyK2(qr: string, nowSeconds: number): VerifiedK2 | null {
   } catch {
     return null;
   }
+  // A signed payload of JSON null (or any non-object) must refuse, not throw.
+  if (claims === null || typeof claims !== "object") return null;
   if (claims.typ !== "bound" || typeof claims.dk !== "string" || !DK.test(claims.dk)) return null;
   if (typeof claims.jti !== "string" || typeof claims.eid !== "string") return null;
 

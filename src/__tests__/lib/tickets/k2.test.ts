@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import { generateKeyPairSync } from "crypto";
+import { generateKeyPairSync, createPrivateKey, sign as edSign } from "crypto";
 
 const subtle = globalThis.crypto.subtle;
 const b64u = (b: ArrayBuffer | Uint8Array) => Buffer.from(b as ArrayBuffer).toString("base64url");
@@ -69,6 +69,61 @@ describe("verifyK2", () => {
     const token = signTicketJwt({ jti: "t1", eid: "i1", tier: "VIP", admits: 1, exp: 2_000_000_000 });
     const sig = await subtle.sign({ name: "ECDSA", hash: "SHA-256" }, pair.privateKey, new TextEncoder().encode(`k2|t1|${NOW}`));
     expect(verifyK2(`k2.${token}.${NOW}.${b64u(sig)}`, NOW)).toBeNull();
+  });
+
+  it("rejects a wrong prefix with the right segment count", async () => {
+    const { verifyK2 } = await import("@/lib/tickets/k2");
+    const good = await qr("t1", String(NOW));
+    expect(verifyK2("k3" + good.slice(2), NOW)).toBeNull();
+  });
+
+  // The property that stops a forged QR: an attacker can't put their own dk in a token.
+  async function devsig(jti: string, ts: string) {
+    const sig = await subtle.sign({ name: "ECDSA", hash: "SHA-256" }, pair.privateKey, new TextEncoder().encode(`k2|${jti}|${ts}`));
+    return b64u(sig);
+  }
+  function edToken(payload: unknown, edKey = generateKeyPairSync("ed25519").privateKey) {
+    const header = Buffer.from(JSON.stringify({ alg: "EdDSA", kid: "test-kid" })).toString("base64url");
+    const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+    const s = edSign(null, Buffer.from(`${header}.${body}`), edKey).toString("base64url");
+    return `${header}.${body}.${s}`;
+  }
+  const claims = { jti: "t1", eid: "i1", tier: "VIP", admits: 1, exp: 2_000_000_000, typ: "bound" };
+
+  it("rejects a bound token signed by a key other than the ticket key", async () => {
+    const { verifyK2 } = await import("@/lib/tickets/k2");
+    const token = edToken({ ...claims, dk });
+    expect(verifyK2(`k2.${token}.${NOW}.${await devsig("t1", String(NOW))}`, NOW)).toBeNull();
+  });
+
+  it("rejects a real bound token whose payload was re-encoded with another dk", async () => {
+    const { verifyK2 } = await import("@/lib/tickets/k2");
+    const other = (await subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"])) as CryptoKeyPair;
+    const otherDk = b64u(await subtle.exportKey("raw", other.publicKey));
+    const [h, p, s] = (await qr("t1", String(NOW), pair.privateKey, otherDk)).split(".").slice(1, 4);
+    const swapped = Buffer.from(
+      JSON.stringify({ ...JSON.parse(Buffer.from(p, "base64url").toString()), dk }),
+    ).toString("base64url");
+    expect(verifyK2(`k2.${h}.${swapped}.${s}.${NOW}.${await devsig("t1", String(NOW))}`, NOW)).toBeNull();
+  });
+
+  it("refuses, without throwing, a correctly signed payload that is JSON null", async () => {
+    const { verifyK2 } = await import("@/lib/tickets/k2");
+    const serverKey = createPrivateKey({
+      key: Buffer.from(process.env.TICKET_SIGNING_KEY!, "base64"),
+      format: "der",
+      type: "pkcs8",
+    });
+    const qrNull = `k2.${edToken(null, serverKey)}.${NOW}.${await devsig("t1", String(NOW))}`;
+    expect(() => verifyK2(qrNull, NOW)).not.toThrow();
+    expect(verifyK2(qrNull, NOW)).toBeNull();
+  });
+
+  it("refuses when the clock value is not a finite number", async () => {
+    const { verifyK2 } = await import("@/lib/tickets/k2");
+    const old = await qr("t1", "0");
+    expect(verifyK2(old, NaN)).toBeNull();
+    expect(verifyK2(await qr("t1", String(NOW)), Infinity)).toBeNull();
   });
 
   it("rejects a dk that is not a P-256 point", async () => {
