@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
+import { isAccountEmailKey } from "@/lib/enrollment/accountEmail";
 
 // ─── protectedClassIds ───────────────────────────────────────────────────────
 // The subset of classIds whose class sits on an intake with
@@ -43,8 +44,9 @@ export async function protectedClassIds(
 // ─── withAccountEmail ────────────────────────────────────────────────────────
 // A protected order's email is the account's verified email, whatever the form
 // said (design 5.2). Returns a copy of the form answers with every email field
-// the order and its emails read from (email, email_address, custom_email_*)
-// set to `email`; `email` itself is always set, even if the form had none.
+// the order and its emails read from (isAccountEmailKey: email, email_address,
+// custom_email_*) set to `email`; `email` itself is always set, even if the
+// form had none. The form and checkout pages lock exactly these fields.
 
 export function withAccountEmail(
   fd: Record<string, string>,
@@ -52,7 +54,7 @@ export function withAccountEmail(
 ): Record<string, string> {
   const out: Record<string, string> = { ...fd, email };
   for (const key of Object.keys(out)) {
-    if (key === "email_address" || key.startsWith("custom_email_")) out[key] = email;
+    if (isAccountEmailKey(key)) out[key] = email;
   }
   return out;
 }

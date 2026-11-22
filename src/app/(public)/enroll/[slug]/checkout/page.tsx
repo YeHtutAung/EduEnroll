@@ -7,6 +7,7 @@ import EmailTypoHint from "@/components/enrollment/EmailTypoHint";
 import SizePicker from "@/components/enrollment/SizePicker";
 import type { SizeNote } from "@/lib/enrollment/sizeChart";
 import { emailBlockedFor, emailBlockedMessage, emailTypoToConfirm } from "@/lib/enrollment/emailAddress";
+import { isAccountEmailKey, lockedOrderEmail } from "@/lib/enrollment/accountEmail";
 import AttendeeSection, { AttendeeTotals, type AttendeeCardSlot } from "@/components/enrollment/AttendeeSection";
 import { attendeeFieldErrors, attendeeSlots, attendeesPayload, slotKey } from "@/lib/enrollment/attendees";
 import ProtectedNotice from "@/components/enroll/ProtectedNotice";
@@ -29,6 +30,8 @@ interface EnrollmentSummary {
   intake_id: string | null;
   logo_url: string | null;
   brand_color: string | null;
+  /** The order's stored email ("" when none yet). A protected order keeps it. */
+  email?: string | null;
 }
 
 interface FormField {
@@ -88,8 +91,9 @@ function DynamicField({
   );
 
   // Protected event: the order email is the account email (the server keeps
-  // it whatever is sent), so the field shows it and can't change.
-  if (lockedEmail !== null && (field.field_key === "email" || field.field_type === "email")) {
+  // it whatever is sent), so the field shows it and can't change. Locked are
+  // exactly the fields the server overwrites (isAccountEmailKey).
+  if (lockedEmail !== null && isAccountEmailKey(field.field_key)) {
     return (
       <div>
         {label}
@@ -320,21 +324,22 @@ function CheckoutForm() {
     void (async () => {
       // A protected event asks who is signed in before showing any field; an
       // unprotected one makes no profile call. The order's email is already
-      // the account's (the server wrote it); this only shows it.
+      // the account's (the server wrote it and keeps it); this only shows it,
+      // so it is the order's stored email, not whoever is signed in now.
       const checked = summary.intake_id
         ? await resolveProtectedGate(await eventIsProtected(params.slug, summary.intake_id))
         : { state: "open" as const, email: null };
       if (cancelled) return;
+      const locked = lockedOrderEmail(summary.email, checked.email);
       setGate(checked.state);
-      setAccountEmail(checked.email);
+      setAccountEmail(locked);
       if (checked.state !== "open" && checked.state !== "signedIn") return;
 
       const applyFields = (f: FormField[]) => {
         setFields(f);
         const init: Record<string, string> = {};
         f.forEach((field) => {
-          const isEmail = field.field_key === "email" || field.field_type === "email";
-          init[field.field_key] = checked.email && isEmail ? checked.email : "";
+          init[field.field_key] = locked && isAccountEmailKey(field.field_key) ? locked : "";
         });
         setValues(init);
       };
@@ -401,7 +406,9 @@ function CheckoutForm() {
     const emailField = fields.find((f) => f.field_key === "email" || f.field_type === "email");
 
     const student_name_en = nameField ? (values[nameField.field_key] ?? "").trim() : "";
-    const email = emailField ? (values[emailField.field_key] ?? "").trim() : "";
+    // A protected order's email is the locked one, even if the organiser also
+    // asks an email-type question the server doesn't overwrite.
+    const email = accountEmail ?? (emailField ? (values[emailField.field_key] ?? "").trim() : "");
 
     if (!student_name_en || !email) {
       setFormError("Name and email are required.");
@@ -507,7 +514,8 @@ function CheckoutForm() {
   }
 
   const buyerEmailField = fields.find((f) => f.field_key === "email" || f.field_type === "email");
-  const buyerEmail = buyerEmailField ? (values[buyerEmailField.field_key] ?? "").trim() : "";
+  const buyerEmail =
+    accountEmail ?? (buyerEmailField ? (values[buyerEmailField.field_key] ?? "").trim() : "");
 
   if (loadError) {
     return (

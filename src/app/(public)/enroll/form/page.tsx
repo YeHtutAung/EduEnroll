@@ -14,6 +14,7 @@ import EmailTypoHint from "@/components/enrollment/EmailTypoHint";
 import SizePicker from "@/components/enrollment/SizePicker";
 import type { SizeNote } from "@/lib/enrollment/sizeChart";
 import { emailBlockedFor, emailBlockedMessage, emailTypoToConfirm } from "@/lib/enrollment/emailAddress";
+import { isAccountEmailKey } from "@/lib/enrollment/accountEmail";
 import AttendeeSection, { AttendeeTotals, type AttendeeCardSlot } from "@/components/enrollment/AttendeeSection";
 import ProtectedNotice from "@/components/enroll/ProtectedNotice";
 import ProtectedGate, { AccountEmailField } from "@/components/enroll/ProtectedGate";
@@ -282,8 +283,9 @@ function DynamicField({
   }
 
   // Protected event: the order email is the account email, whatever is typed
-  // (the server overwrites it), so the field shows it and can't change.
-  if (lockedEmail !== null && isEmailField(field)) {
+  // (the server overwrites it), so the field shows it and can't change. Locked
+  // are exactly the fields the server overwrites (isAccountEmailKey).
+  if (lockedEmail !== null && isAccountEmailKey(field.field_key)) {
     return (
       <div className="mb-5">
         <label className="mb-1.5 block text-sm font-medium text-gray-700">{field.field_label}</label>
@@ -633,7 +635,8 @@ function EnrollmentFormPage() {
           // Initialize form data with empty values
           const initial: Record<string, string> = {};
           for (const f of fields) {
-            initial[f.field_key] = gateResult.email && isEmailField(f) ? gateResult.email : "";
+            initial[f.field_key] =
+              gateResult.email && isAccountEmailKey(f.field_key) ? gateResult.email : "";
           }
           setFormData(initial);
         }
@@ -1053,7 +1056,8 @@ function EnrollmentFormPage() {
 
   // ── Step 2: Review & Confirm ─────────────────────────────────
   const reviewEmailField = formFields.find(isEmailField);
-  const reviewEmail = reviewEmailField ? (formData[reviewEmailField.field_key] ?? "").trim() : "";
+  const reviewEmail =
+    accountEmail ?? (reviewEmailField ? (formData[reviewEmailField.field_key] ?? "").trim() : "");
 
   return (
     <PageWrapper schoolName={schoolName} primaryColor={primaryColor} logoUrl={logoUrl}>
