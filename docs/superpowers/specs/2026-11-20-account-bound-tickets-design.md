@@ -305,8 +305,9 @@ email to the old address are the controls (section 13).
   - the ticket page asks iOS buyers to add it to the Home Screen, which keeps its storage out of
     Safari's 7-day deletion (section 6.3);
   - repeat binds are emailed to the holder (below), so an unexpected one is visible.
-- Abuse protection only: at most 30 phone *changes* per buyer per hour; re-opening a ticket on the
-  bound phone is never counted (Plan 3, Task 7).
+- Abuse protection only: at most 30 phone *changes* per buyer per hour. Neither re-opening a ticket
+  on the bound phone nor a ticket's first link is counted, so a leader opening many seats on one
+  phone is never locked out (Plan 3, Task 7).
 - The holder check, revoking the old row and inserting the new one run in **one SQL function**
   (service role only), locking the ticket row, so concurrent binds cannot leave two active rows,
   and a bind racing a claim or give-back (section 6.4) cannot leave the previous holder's phone
@@ -726,3 +727,10 @@ conventions).
 - **Known gap, `intakes_update` RLS:** the policy lets any authenticated member of a tenant update
   any intake column through PostgREST, `ticket_protection` included. The admin route that switches
   protection is owner-only, but closing it in the database is a follow-up, not done in Plan 3.
+- **Known gap, `enrollments_update` RLS:** the same kind of policy on `enrollments` lets any
+  authenticated member of a tenant update any order column through PostgREST with their own
+  session. That includes `email`, `form_data` and `buyer_id`, so it gets round the Edit Email and
+  resend refusals, and setting `buyer_id` moves an order without `move_order_buyer` or its audit row.
+  The admin and public routes are guarded; closing it in the database (a column-level revoke, or a
+  trigger refusing changes to those columns on an account order unless the caller is the service
+  role) is a follow-up, not done in Plan 3, and should land before protection is used in production.

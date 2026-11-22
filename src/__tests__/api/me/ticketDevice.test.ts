@@ -239,18 +239,23 @@ describe("5. the rate limit counts only key changes", () => {
     expect(rateCalls("bind:")[0].slice(1)).toEqual([`bind:${BUYER}`, 3600, 30]);
   });
 
-  it("no active key → counted", async () => {
-    await post();
-    expect(rateCalls("bind:")).toHaveLength(1);
+  it("no active key (a first link) → not counted, so a leader opening many seats is never locked out", async () => {
+    consumeRateLimit.mockResolvedValue("limited"); // even with the counter exhausted
+    rpcResult = { data: "bound_first", error: null };
+    const res = await post();
+    expect(res.status).toBe(200);
+    expect(rateCalls("bind:")).toHaveLength(0);
   });
 
   it("\"limited\" → 429 RATE_LIMITED, no RPC", async () => {
+    activeRead = { data: { public_key: newDeviceKey().dk }, error: null };
     consumeRateLimit.mockResolvedValue("limited");
     await expectError(await post(), 429, "RATE_LIMITED");
     expect(rpc).not.toHaveBeenCalled();
   });
 
   it("\"unavailable\" → 503 SERVER, no RPC", async () => {
+    activeRead = { data: { public_key: newDeviceKey().dk }, error: null };
     consumeRateLimit.mockResolvedValue("unavailable");
     await expectError(await post(), 503, "SERVER");
     expect(rpc).not.toHaveBeenCalled();

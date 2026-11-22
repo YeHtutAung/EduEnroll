@@ -673,8 +673,9 @@ function EnrollmentFormPage() {
         } else if (emailBlockedFor(val)) {
           const blocked = emailBlockedMessage(emailBlockedFor(val)!);
           errors[field.field_key] = `${blocked.en} ${blocked.mm}`;
-        } else if (!accountEmail) {
-          // Not asked of the account email: the buyer can't change it.
+        } else if (!(accountEmail && isAccountEmailKey(field.field_key))) {
+          // Not asked of the account email: the buyer can't change it. Any
+          // other email field (e.g. a guardian's) still gets the prompt.
           const suggestion = emailTypoToConfirm(val, emailTyposQueried.current);
           if (suggestion) {
             errors[field.field_key] =
