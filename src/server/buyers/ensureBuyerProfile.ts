@@ -1,7 +1,7 @@
 import { randomBytes } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { BuyerProfile, Database } from "@/types/database";
-import { isEmailCodeSession, isPasswordSession } from "@/lib/authMethod";
+import { canCreateProfile } from "@/lib/authMethod";
 import { createTimedAdminClient } from "./adminClient";
 
 // ─── ensureBuyerProfile: the ONLY path that creates a buyer profile ─────────
@@ -249,9 +249,10 @@ async function beforeClaim(
   if (existing.kind === "error") return SERVER;
   if (existing.kind === "row") return answerExisting(existing.row);
 
-  // 4. Email code only, checked before the claim so a password session never holds one.
-  // A session whose amr lists a password is refused even if it also lists otp.
-  if (!isEmailCodeSession(accessToken) || isPasswordSession(accessToken)) {
+  // 4. Email code or Google only, checked before the claim so a password session never
+  // holds one. A session whose amr lists a password is refused even if it also lists
+  // otp or oauth. The reason stays "not_email_code" (the app contract).
+  if (!canCreateProfile(accessToken)) {
     return forbidden("not_email_code");
   }
 
