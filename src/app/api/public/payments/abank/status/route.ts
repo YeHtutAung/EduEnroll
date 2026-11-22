@@ -8,7 +8,11 @@ import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
 import { resolveEmailFromFormData } from "@/lib/utils";
 import { issueTicketsForEnrollment } from "@/server/tickets/issueTickets";
-import { buildEticketEmailAttachment } from "@/server/tickets/eticketEmailAttachment";
+import {
+  accountTicketsUrl,
+  buildTicketEmailParts,
+  NO_TICKET_EMAIL_PARTS,
+} from "@/server/tickets/eticketEmailAttachment";
 import { loadEventEmailTerms } from "@/server/notifications/eventEmailTerms";
 import { loadEventEmailImages } from "@/server/notifications/eventEmailImages";
 
@@ -190,6 +194,12 @@ export async function GET(request: NextRequest) {
 
         // Email notification
         if (enrollEmail) {
+          // Asked first: an order with account-bound tickets gets "Open My
+          // Tickets" in the body instead of their QR in the PDF (design 8.1).
+          const parts = await buildTicketEmailParts(payment.enrollment_id).catch((err) => {
+            console.error("[abank-status] e-ticket attachment failed:", err);
+            return NO_TICKET_EMAIL_PARTS;
+          });
           const emailData = enrollmentApprovedEmail({
             studentName: enrollment.student_name_en || "Student",
             enrollmentRef: enrollment.enrollment_ref,
@@ -202,16 +212,14 @@ export async function GET(request: NextRequest) {
             orgType: tenantInfo?.org_type,
             tenantName: tenantInfo?.name,
             logoUrl: tenantInfo?.logo_url ?? undefined,
-          });
-          const attachment = await buildEticketEmailAttachment(payment.enrollment_id).catch((err) => {
-            console.error("[abank-status] e-ticket attachment failed:", err);
-            return null;
+            // statusUrl is already on the tenant's host.
+            ...(parts.accountTickets ? { myTicketsUrl: accountTicketsUrl(statusUrl) } : {}),
           });
           notifyTasks.push(
             sendEmail({
               to: enrollEmail,
               ...emailData,
-              ...(attachment ? { attachments: [attachment] } : {}),
+              ...(parts.attachment ? { attachments: [parts.attachment] } : {}),
             }).catch((err) => {
               console.error("[abank-status] Approval email failed:", err);
             }),

@@ -215,6 +215,9 @@ export async function GET(
 
   // Build signed ticket JWTs for confirmed enrollments only.
   let tickets: { jti: string; tier: string; admits: number; jwt: string; qr: string; holder: string | null }[] = [];
+  // Tickets on an account-bound (protected) event: never signed or returned
+  // here, only counted. They live on /account/tickets (design 8.1).
+  let accountTicketCount = 0;
   if (enrollment.status === "confirmed") {
     const loadTicketRows = async () =>
       ((await supabase
@@ -244,8 +247,8 @@ export async function GET(
     // What each QR encodes is chosen per event. A separate query, not a column
     // on the enrollment select above, so that if this code ever runs ahead of
     // its migration only ticket display fails — not every order lookup.
-    const formats = await loadQrFormats(supabase, validRows);
-    if (!formats) {
+    const events = await loadTicketEvents(supabase, validRows);
+    if (!events) {
       // Unknown is not "the default": a jwt QR on a uuid event is a ticket the
       // gate cannot read. The page treats 503 as an error and blocks download.
       return NextResponse.json(
@@ -254,7 +257,10 @@ export async function GET(
       );
     }
 
-    tickets = validRows.map((t) => {
+    const { formats, protectedIntakes } = events;
+    accountTicketCount = validRows.filter((t) => protectedIntakes.has(t.intake_id)).length;
+
+    tickets = validRows.filter((t) => !protectedIntakes.has(t.intake_id)).map((t) => {
       const jwt = signTicketJwt({
         jti: t.id,
         eid: t.intake_id,
@@ -326,6 +332,8 @@ export async function GET(
     card_brand: verifiedPayment?.card_brand ?? null,
     card_last4: verifiedPayment?.card_last4 ?? null,
     tickets,
+    // Only when there are some, so an unprotected order's response is unchanged.
+    ...(accountTicketCount > 0 ? { account_ticket_count: accountTicketCount } : {}),
     ...(stripeClientSecret ? { stripe_client_secret: stripeClientSecret } : {}),
   });
 }
@@ -473,19 +481,22 @@ export async function PATCH(
  * of them cannot be read with certainty — a failed query, a missing event, or a
  * value this code does not recognise all come back as null, never as a guess.
  */
-async function loadQrFormats(
+async function loadTicketEvents(
   supabase: ReturnType<typeof createAdminClient>,
   rows: TicketRow[],
-): Promise<Map<string, TicketQrFormat> | null> {
+): Promise<{ formats: Map<string, TicketQrFormat>; protectedIntakes: Set<string> } | null> {
   const formats = new Map<string, TicketQrFormat>();
-  if (rows.length === 0) return formats;
+  const protectedIntakes = new Set<string>();
+  if (rows.length === 0) return { formats, protectedIntakes };
 
+  // Protection is read in the same query as the format, so a ticket is shown
+  // only once both are known; any failure is the 503 below (fails closed).
   const intakeIds = [...new Set(rows.map((t) => t.intake_id))];
   const { data, error } = (await supabase
     .from("intakes")
-    .select("id, ticket_qr_format")
+    .select("id, ticket_qr_format, ticket_protection")
     .in("id", intakeIds)) as unknown as {
-    data: { id: string; ticket_qr_format: unknown }[] | null;
+    data: { id: string; ticket_qr_format: unknown; ticket_protection?: unknown }[] | null;
     error: unknown;
   };
 
@@ -497,6 +508,7 @@ async function loadQrFormats(
 
   for (const intake of data) {
     if (isTicketQrFormat(intake.ticket_qr_format)) formats.set(intake.id, intake.ticket_qr_format);
+    if (intake.ticket_protection === true) protectedIntakes.add(intake.id);
   }
 
   const unknown = intakeIds.filter((id) => !formats.has(id));
@@ -504,7 +516,7 @@ async function loadQrFormats(
     console.error(`[enrollment] no readable ticket QR format for ${unknown.length} event(s)`);
     return null;
   }
-  return formats;
+  return { formats, protectedIntakes };
 }
 
 // ─── Internal types ───────────────────────────────────────────────────────────

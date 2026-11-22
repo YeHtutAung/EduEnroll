@@ -126,3 +126,29 @@ describe("qrExportCsv", () => {
     expect(cells.slice(1, 4)).toEqual(["'=HYPERLINK(1)", "'+959123456789", "'@x"]);
   });
 });
+
+// Task 15 (design 8.1): a ticket on an account-bound (protected) event has no
+// QR outside the buyer's phone, so the export carries its id and no qr_text.
+describe("qrExportCsv — account-bound tickets", () => {
+  const QR_COL = QR_EXPORT_HEADER.split(",").indexOf("qr_text");
+  const ID_COL = QR_EXPORT_HEADER.split(",").indexOf("ticket_id");
+  const PROTECTED = "33333333-3333-3333-3333-333333333333";
+
+  it("writes an empty qr_text for tickets on protected intakes, keeping ticket_id", () => {
+    const csv = qrExportCsv(
+      "jwt",
+      [ticket(), ticket({ id: "44444444-4444-4444-4444-444444444444", intake_id: PROTECTED, seat_no: 2 })],
+      new Set([PROTECTED]),
+    );
+    const [, open, bound] = csv.split("\r\n");
+    expect(open.split(",")[QR_COL]).toBe(ticketQrText("jwt", ticket()));
+    expect(bound.split(",")[ID_COL]).toBe("44444444-4444-4444-4444-444444444444");
+    expect(bound.split(",")[QR_COL]).toBe("");
+    expect(bound.split(",")).toHaveLength(QR_EXPORT_HEADER.split(",").length);
+  });
+
+  it("is byte-identical to before when nothing is protected", () => {
+    const rows = [ticket(), ticket({ seat_no: 2 })];
+    expect(qrExportCsv("uuid", rows, new Set())).toBe(qrExportCsv("uuid", rows));
+  });
+});

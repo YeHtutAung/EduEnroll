@@ -8,7 +8,12 @@ import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
 import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils";
 import { sendSms } from "@/lib/sms";
-import { buildEticketEmailAttachment } from "@/server/tickets/eticketEmailAttachment";
+import {
+  accountTicketsUrl,
+  buildTicketEmailParts,
+  NO_TICKET_EMAIL_PARTS,
+} from "@/server/tickets/eticketEmailAttachment";
+import { tenantLinkOrigin } from "@/lib/origin";
 import { loadEventEmailTerms } from "@/server/notifications/eventEmailTerms";
 import { loadEventEmailImages } from "@/server/notifications/eventEmailImages";
 
@@ -158,10 +163,10 @@ export async function POST(request: NextRequest) {
       // Fetch tenant info for email branding
       const { data: tenantInfo } = (await supabase
         .from("tenants")
-        .select("name, org_type, logo_url, currency, sms_on_payment")
+        .select("name, org_type, logo_url, currency, sms_on_payment, subdomain")
         .eq("id", enrollment.tenant_id)
         .single()) as {
-        data: { name: string; org_type: string; logo_url: string | null; currency: string; sms_on_payment: boolean } | null;
+        data: { name: string; org_type: string; logo_url: string | null; currency: string; sms_on_payment: boolean; subdomain?: string | null } | null;
         error: unknown;
       };
       const tenantCurrency = tenantInfo?.currency ?? "MMK";
@@ -192,6 +197,12 @@ export async function POST(request: NextRequest) {
 
       // Email notification
       if (enrollEmail) {
+        // Asked first: an order with account-bound tickets gets "Open My
+        // Tickets" in the body instead of their QR in the PDF (design 8.1).
+        const parts = await buildTicketEmailParts(payment.enrollment_id).catch((err) => {
+          console.error("[mmqr-webhook] e-ticket attachment failed:", err);
+          return NO_TICKET_EMAIL_PARTS;
+        });
         const emailData = enrollmentApprovedEmail({
           studentName: enrollment.student_name_en || "Student",
           enrollmentRef: enrollment.enrollment_ref,
@@ -204,16 +215,17 @@ export async function POST(request: NextRequest) {
           orgType: tenantInfo?.org_type,
           tenantName: tenantInfo?.name,
           logoUrl: tenantInfo?.logo_url ?? undefined,
-        });
-        const attachment = await buildEticketEmailAttachment(payment.enrollment_id).catch((err) => {
-          console.error("[mmqr-webhook] e-ticket attachment failed:", err);
-          return null;
+          // statusUrl above is on the platform root, which has no tenant or
+          // buyer session, so this link is built on the tenant's own host.
+          ...(parts.accountTickets
+            ? { myTicketsUrl: accountTicketsUrl(tenantLinkOrigin(tenantInfo?.subdomain)) }
+            : {}),
         });
         notifyTasks.push(
           sendEmail({
             to: enrollEmail,
             ...emailData,
-            ...(attachment ? { attachments: [attachment] } : {}),
+            ...(parts.attachment ? { attachments: [parts.attachment] } : {}),
           }).catch((err) => {
             console.error("[mmqr-webhook] Approval email failed:", err);
           }),

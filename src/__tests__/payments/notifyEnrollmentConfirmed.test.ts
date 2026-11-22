@@ -9,8 +9,10 @@ vi.mock("@/lib/email", () => ({
   sendEmail: (...args: unknown[]) => mockSendEmail(...args),
   enrollmentApprovedEmail: (...args: unknown[]) => mockEnrollmentApprovedEmail(...args),
 }));
-vi.mock("@/server/tickets/eticketEmailAttachment", () => ({
-  buildEticketEmailAttachment: vi.fn().mockResolvedValue(null),
+// Task 15: the helper is now buildTicketEmailParts.
+vi.mock("@/server/tickets/eticketEmailAttachment", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/tickets/eticketEmailAttachment")>()),
+  buildTicketEmailParts: vi.fn().mockResolvedValue({ attachment: null, accountTickets: false }),
 }));
 vi.mock("@/lib/sms", () => ({ sendSms: vi.fn().mockResolvedValue(true) }));
 vi.mock("@/lib/telegram/notify", () => ({ sendTelegramStatusNotification: vi.fn().mockResolvedValue(true) }));
