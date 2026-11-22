@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
-import { protectedClassIds } from "@/server/enrollment/protection";
+import { protectedClassIds, withAccountEmail } from "@/server/enrollment/protection";
 
 // ─── protectedClassIds: which classes sit on an account-bound intake ────────
 // null means "couldn't tell"; callers answer 503 and never treat it as
@@ -68,5 +68,19 @@ describe("protectedClassIds", () => {
     });
     const client = { from } as unknown as SupabaseClient<Database>;
     expect(await protectedClassIds(client, ["c1"])).toBeNull();
+  });
+});
+
+describe("withAccountEmail", () => {
+  it("sets every email field to the account email and keeps the rest", () => {
+    const fd = { name_en: "A", email: "typed@example.com", email_address: "b@example.com", custom_email_1: "c@example.com" };
+    expect(withAccountEmail(fd, "acct@example.com")).toEqual({
+      name_en: "A", email: "acct@example.com", email_address: "acct@example.com", custom_email_1: "acct@example.com",
+    });
+    expect(fd.email).toBe("typed@example.com"); // a copy, not a mutation
+  });
+
+  it("adds email when the form had none", () => {
+    expect(withAccountEmail({ name_en: "A" }, "acct@example.com")).toEqual({ name_en: "A", email: "acct@example.com" });
   });
 });

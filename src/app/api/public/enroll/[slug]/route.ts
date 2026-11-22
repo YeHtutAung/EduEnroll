@@ -53,7 +53,9 @@ interface TenantLabelsView {
 interface PublicIntakeResponse {
   intake: Pick<
     Intake,
-    "id" | "name" | "year" | "status" | "hero_image_url" | "priority_open_at" | "font_css_url" | "font_family"
+    | "id" | "name" | "year" | "status" | "hero_image_url" | "priority_open_at" | "font_css_url" | "font_family"
+    // Account-bound tickets: checkout needs a signed-in buyer (design 5).
+    | "ticket_protection"
   >;
   classes: PublicClassView[];
   labels: TenantLabelsView;
@@ -129,7 +131,7 @@ export async function GET(
   // ── Find the matching intake by slug column ────────────────────
   const { data: intakes, error: intakeError } = await supabase
     .from("intakes")
-    .select("id, name, year, status, hero_image_url, priority_open_at, organiser_terms, font_css_url, font_family")
+    .select("id, name, year, status, hero_image_url, priority_open_at, organiser_terms, font_css_url, font_family, ticket_protection")
     .eq("tenant_id", tenantId)
     .eq("slug", params.slug.toLowerCase())
     .limit(1);
@@ -146,11 +148,14 @@ export async function GET(
 
   // The organiser's rules travel once, at the top level with their
   // fingerprint, rather than inside `intake`.
-  const { organiser_terms: rawOrganiserTerms, ...intake } = intakes[0] as Pick<
+  const { organiser_terms: rawOrganiserTerms, ...intakeRow } = intakes[0] as Pick<
     Intake,
     | "id" | "name" | "year" | "status" | "hero_image_url" | "priority_open_at" | "organiser_terms"
-    | "font_css_url" | "font_family"
+    | "font_css_url" | "font_family" | "ticket_protection"
   >;
+  // Only a real true protects; anything else reads as an ordinary event here.
+  // The enroll POST checks protection itself and never trusts this flag.
+  const intake = { ...intakeRow, ticket_protection: intakeRow.ticket_protection === true };
   const organiserTerms = normaliseOrganiserTerms(rawOrganiserTerms);
 
   if (intake.status === "closed") {

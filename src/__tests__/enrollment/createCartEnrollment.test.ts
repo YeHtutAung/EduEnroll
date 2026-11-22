@@ -231,4 +231,24 @@ describe("createCartEnrollment", () => {
     await createCartEnrollment({ items: [{ class_id: VALID_UUID, quantity: 1 }], idempotency_key: "" });
     expect(mockRpc.mock.calls[0][1]).not.toHaveProperty("p_idempotency_key");
   });
+
+  // Account-bound tickets (Plan 3, Task 12).
+  it("forwards buyer_id as p_buyer_id, and omits it when absent", async () => {
+    mockRpc.mockResolvedValue({ data: { success: false, error: "CLASS_NOT_FOUND" }, error: null });
+    await createCartEnrollment({ items: [{ class_id: VALID_UUID, quantity: 1 }], buyer_id: "buyer-1" });
+    expect(mockRpc.mock.calls[0][1]).toMatchObject({ p_buyer_id: "buyer-1" });
+
+    mockRpc.mockClear();
+    await createCartEnrollment({ items: [{ class_id: VALID_UUID, quantity: 1 }] });
+    expect(mockRpc.mock.calls[0][1]).not.toHaveProperty("p_buyer_id");
+  });
+
+  it.each([
+    ["BUYER_REQUIRED", 401, "Unauthorized"],
+    ["IDEMPOTENCY_CONFLICT", 409, "Conflict"],
+  ])("maps %s to %i", async (code, status, error) => {
+    mockRpc.mockResolvedValue({ data: { success: false, error: code }, error: null });
+    const result = await createCartEnrollment({ items: [{ class_id: VALID_UUID, quantity: 1 }], buyer_id: "buyer-1" });
+    expect(result).toMatchObject({ ok: false, status, error });
+  });
 });

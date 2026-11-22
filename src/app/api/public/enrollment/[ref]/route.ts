@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { checkAttendees } from "@/server/enrollment/attendeeContext";
+import { withAccountEmail } from "@/server/enrollment/protection";
 import type { Attendee, AttendeeResult } from "@/lib/enrollment/attendees";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
@@ -374,7 +375,7 @@ export async function PATCH(
 
   const { data: enrollment, error: lookupError } = (await supabase
     .from("enrollments")
-    .select("id, status, class_id, quantity, enrollment_items(class_id, quantity)")
+    .select("id, status, class_id, quantity, buyer_id, email, enrollment_items(class_id, quantity)")
     .eq("enrollment_ref", params.ref.trim())
     .eq("tenant_id", tenantId)
     .single()) as {
@@ -383,6 +384,8 @@ export async function PATCH(
       status: string;
       class_id: string | null;
       quantity: number | null;
+      buyer_id?: string | null;
+      email?: string | null;
       enrollment_items: { class_id: string; quantity: number }[] | null;
     } | null;
     error: unknown;
@@ -422,6 +425,16 @@ export async function PATCH(
     runners = check.attendees;
   }
 
+  // An account order (buyer_id set, Plan 3): its email is the buyer's account
+  // email, written by the submit RPC. The body's email is ignored and never
+  // written, and the form's email fields carry the stored one. No session is
+  // read here: the order's buyer was fixed by the POST.
+  const accountOrder = typeof enrollment.buyer_id === "string" && enrollment.buyer_id !== "";
+  const formData =
+    accountOrder && form_data && typeof enrollment.email === "string" && enrollment.email
+      ? withAccountEmail(form_data, enrollment.email)
+      : form_data;
+
   // The pending check above is a read; payment can settle between it and this
   // write (checkout in one tab, payment in another). Ticket issuing copies the
   // runners once and never rewrites a ticket, so the write itself must refuse
@@ -430,8 +443,8 @@ export async function PATCH(
     .from("enrollments")
     .update({
       student_name_en: student_name_en.trim(),
-      email: email.trim(),
-      ...(form_data && Object.keys(form_data).length > 0 ? { form_data } : {}),
+      ...(accountOrder ? {} : { email: email.trim() }),
+      ...(formData && Object.keys(formData).length > 0 ? { form_data: formData } : {}),
       ...(runners.length > 0 ? { attendees: runners } : {}),
     } as never)
     .eq("id", enrollment.id)

@@ -39,3 +39,20 @@ export async function protectedClassIds(
     return null;
   }
 }
+
+// ─── withAccountEmail ────────────────────────────────────────────────────────
+// A protected order's email is the account's verified email, whatever the form
+// said (design 5.2). Returns a copy of the form answers with every email field
+// the order and its emails read from (email, email_address, custom_email_*)
+// set to `email`; `email` itself is always set, even if the form had none.
+
+export function withAccountEmail(
+  fd: Record<string, string>,
+  email: string,
+): Record<string, string> {
+  const out: Record<string, string> = { ...fd, email };
+  for (const key of Object.keys(out)) {
+    if (key === "email_address" || key.startsWith("custom_email_")) out[key] = email;
+  }
+  return out;
+}

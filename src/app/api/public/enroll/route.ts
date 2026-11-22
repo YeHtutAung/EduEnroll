@@ -11,6 +11,8 @@ import { captureAdContext } from "@/server/conversions/captureAdContext";
 import { sendEnrollmentConfirmationEmail } from "@/server/enrollment/enrollmentEmails";
 import { checkTermsAcceptance, type TermsEvidence } from "@/server/legal/organiserRules";
 import { checkAttendees, isUuid } from "@/server/enrollment/attendeeContext";
+import { protectedClassIds, withAccountEmail } from "@/server/enrollment/protection";
+import { requireBuyer } from "@/lib/buyers/requireBuyer";
 import type { Attendee, AttendeeResult } from "@/lib/enrollment/attendees";
 import type { BankAccount } from "@/types/database";
 
@@ -43,7 +45,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ enrollment_ref: "OK-0000-0000" }, { status: 200 });
   }
 
-  const fd = form_data && typeof form_data === "object"
+  let fd = form_data && typeof form_data === "object"
     ? (form_data as Record<string, string>)
     : null;
 
@@ -71,6 +73,32 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = createAdminClient();
+
+  // Account-bound tickets (design 5.2–5.3): a protected class needs a
+  // signed-in buyer. The buyer id comes from the verified session only, never
+  // from the body, and the order email becomes the account email. If
+  // protection can't be read, refuse (503): never treat it as unprotected.
+  // Malformed ids are left to the existing 400 below.
+  const protectedIds = await protectedClassIds(supabase, classIds.filter(isUuid));
+  if (protectedIds === null) return unavailable();
+  let buyerId: string | null = null;
+  if (protectedIds.size > 0) {
+    const ctx = await requireBuyer();
+    if (ctx instanceof NextResponse) {
+      if (ctx.status === 401) return signInRequired();
+      if (ctx.status === 403) {
+        return NextResponse.json(
+          { error: "Forbidden", message: "Staff accounts can't buy account-bound tickets. Use another email." },
+          { status: 403 },
+        );
+      }
+      return unavailable();
+    }
+    buyerId = ctx.buyerId;
+    // Every later step (the order's columns, form_data, the confirmation
+    // email) reads fd. A draft (no form_data) gets its email from the RPC.
+    if (fd) fd = withAccountEmail(fd, ctx.email);
+  }
 
   // Runners: answers the organiser asks once per ticket (e.g. name, jersey
   // size). Checked before the RPC, so a refused order holds no seat.
@@ -118,6 +146,7 @@ export async function POST(request: NextRequest) {
       priority_token_hash: priorityTokenHash,
       idempotency_key: typeof idempotency_key === "string" ? idempotency_key : null,
       attendees: runners,
+      buyer_id: buyerId,
     });
 
     if (!outcome.ok) {
@@ -187,6 +216,7 @@ export async function POST(request: NextRequest) {
     messenger_psid: typeof messenger_psid === "string" ? messenger_psid : null,
     priority_token_hash: priorityTokenHash,
     attendees: runners,
+    buyer_id: buyerId,
   });
 
   if (!outcome.ok) {
@@ -246,6 +276,21 @@ export async function POST(request: NextRequest) {
 }
 
 // ─── Private helpers ──────────────────────────────────────────────────────────
+
+/** The same body the RPC's BUYER_REQUIRED maps to (createEnrollment.ts). */
+function signInRequired() {
+  return NextResponse.json(
+    { error: "Unauthorized", message: "Sign in to buy tickets for this event." },
+    { status: 401 },
+  );
+}
+
+function unavailable() {
+  return NextResponse.json(
+    { error: "Service Unavailable", message: "Please try again in a moment." },
+    { status: 503 },
+  );
+}
 
 /**
  * Stamps the order with what the buyer accepted. The order already exists and
