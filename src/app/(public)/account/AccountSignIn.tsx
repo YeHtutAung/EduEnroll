@@ -1,15 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { isPasswordSession } from "@/lib/authMethod";
 import { isInAppBrowser } from "@/lib/inAppBrowser";
 import {
   accountReducer,
   bootOnce,
+  googleRedirectTo,
   hrefWithoutNotice,
   initialAccount,
+  nextFromSearch,
   noticeFromSearch,
+  type AccountContext,
   type AccountEffect,
   type AccountEvent,
   type AccountState,
@@ -481,6 +485,9 @@ export default function AccountSignIn() {
   const mounted = useRef(true);
   const [inAppBrowser, setInAppBrowser] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  const router = useRouter();
+  /** `?next=` through safeNext(), read once at mount (/account until then). */
+  const ctxRef = useRef<AccountContext>({ next: nextFromSearch("") });
 
   const supabase = () => (supabaseRef.current ??= createClient());
 
@@ -489,7 +496,7 @@ export default function AccountSignIn() {
 
   const dispatch = useCallback((event: AccountEvent) => {
     if (!mounted.current) return;
-    const { state: next, effects } = accountReducer(stateRef.current, event);
+    const { state: next, effects } = accountReducer(stateRef.current, event, ctxRef.current);
     stateRef.current = next;
     setState(next);
     for (const effect of effects) void runRef.current(effect);
@@ -569,13 +576,18 @@ export default function AccountSignIn() {
           const { error } = await supabase().auth.signInWithOAuth({
             provider: "google",
             options: {
-              redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(effect.next)}`,
+              redirectTo: googleRedirectTo(window.location.origin, effect.next),
             },
           });
           if (error) dispatch({ type: "googleFailed" });
         } catch {
           dispatch({ type: "googleFailed" });
         }
+        return;
+      }
+      case "goNext": {
+        // effect.to passed safeNext(): a same-origin path only.
+        router.replace(effect.to);
         return;
       }
       case "signOutLocal": {
@@ -599,6 +611,7 @@ export default function AccountSignIn() {
     // Once per page: a remount must not re-read the (now removed) notice, nor
     // start a second profile POST or sign-out.
     if (!boot.current.started) {
+      ctxRef.current = { next: nextFromSearch(window.location.search) };
       const notice = noticeFromSearch(window.location.search);
       if (notice !== null) {
         window.history.replaceState(window.history.state, "", hrefWithoutNotice(window.location.href));

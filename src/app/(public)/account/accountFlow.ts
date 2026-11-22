@@ -8,6 +8,8 @@
 // The sign-in code is never kept in state. It appears in exactly one place:
 // the `verifyCode` effect that hands it to Supabase.
 
+import { DEFAULT_NEXT, safeNext } from "@/lib/auth/safeNext";
+
 export type Notice =
   | "invalidEmail"
   | "tooManyCodes"
@@ -59,7 +61,9 @@ export type AccountEffect =
   | { type: "postProfile"; attempt: number; delayMs: number }
   | { type: "signOutLocal" }
   /** signInWithOAuth on the browser client; Google returns to /auth/callback?next=. */
-  | { type: "startGoogle"; next: string };
+  | { type: "startGoogle"; next: string }
+  /** Signed in: leave /account for `?next=` (only when it isn't /account). */
+  | { type: "goNext"; to: string };
 
 export type AccountEvent =
   | { type: "profileLoaded"; status: number; email?: string }
@@ -86,6 +90,34 @@ export type AccountEvent =
 export interface Transition {
   state: AccountState;
   effects: AccountEffect[];
+}
+
+/**
+ * Boot parameters the reducer reads but never changes. `next` is where to go
+ * once signed in: already through safeNext(), so /account means "stay".
+ */
+export interface AccountContext {
+  next: string;
+}
+
+const DEFAULT_CONTEXT: AccountContext = { next: DEFAULT_NEXT };
+
+/** `?next=` from a location.search string, through safeNext(); /account if absent or unsafe. */
+export function nextFromSearch(search: string): string {
+  return safeNext(new URLSearchParams(search).get("next"));
+}
+
+/** Google's return address: /auth/callback on this origin, carrying `next`. */
+export function googleRedirectTo(origin: string, next: string): string {
+  return `${origin}/auth/callback?next=${encodeURIComponent(next)}`;
+}
+
+/** The signed-in screen, plus the move to `next` when there is one. */
+function signedIn(email: string, ctx: AccountContext): Transition {
+  return {
+    state: { step: "signedIn", email, busy: false },
+    effects: ctx.next !== DEFAULT_NEXT ? [{ type: "goNext", to: ctx.next }] : [],
+  };
 }
 
 /** Retries after a 503 on POST /api/account/profile. */
@@ -184,14 +216,16 @@ const signOutToEmail = (email: string, notice: Notice | null): Transition => ({
   effects: [{ type: "signOutLocal" }],
 });
 
-export function accountReducer(state: AccountState, event: AccountEvent): Transition {
+export function accountReducer(
+  state: AccountState,
+  event: AccountEvent,
+  ctx: AccountContext = DEFAULT_CONTEXT,
+): Transition {
   switch (event.type) {
     // ── 1. Loading ──────────────────────────────────────────────────────────
     case "profileLoaded": {
       if (state.step !== "loading") return stay(state);
-      if (event.status === 200 && event.email) {
-        return stay({ step: "signedIn", email: event.email, busy: false });
-      }
+      if (event.status === 200 && event.email) return signedIn(event.email, ctx);
       if (event.status === 401) return stay(emailStep("", null));
       // A staff account is already signed in on this host. If that is their
       // password (admin) session, signing it out here would log them out of
@@ -251,7 +285,7 @@ export function accountReducer(state: AccountState, event: AccountEvent): Transi
       if (state.step !== "email" || state.busy) return stay(state);
       return {
         state: { step: "email", email: state.email, busy: true, notice: null, google: true },
-        effects: [{ type: "startGoogle", next: "/account" }],
+        effects: [{ type: "startGoogle", next: ctx.next }],
       };
 
     case "googleFailed":
@@ -320,7 +354,7 @@ export function accountReducer(state: AccountState, event: AccountEvent): Transi
         // password reset ended (Task 11a): clear the dead local session and
         // ask for one more sign-in, the address kept.
         if (event.reason === "sign_in_again") return signOutToEmail(event.email, "accountReady");
-        return stay({ step: "signedIn", email: event.email, busy: false });
+        return signedIn(event.email, ctx);
       }
       if (event.status === 503) {
         if (event.attempt < MAX_PROFILE_RETRIES) {
