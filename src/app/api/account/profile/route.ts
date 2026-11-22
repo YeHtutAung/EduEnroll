@@ -9,7 +9,8 @@ import { settleReissue } from "@/server/buyers/reissueSession";
 
 // ─── /api/account/profile: the website's buyer profile ──────────────────────
 //
-// GET  → requireBuyer(), then { email, name, locale }.
+// GET  → requireBuyer(), then { buyerId, email, name, locale }. buyerId keys
+//        the phone's device key on /account/tickets/[id].
 // POST → the website's "POST /me": cookie session only (Bearer belongs to the
 //        app's own route), Auth accepts that exact token, then
 //        ensureBuyerProfile claims or creates the profile.
@@ -44,7 +45,7 @@ export async function GET(): Promise<NextResponse> {
   // requireBuyer just saw the row; gone now means it was deleted meanwhile.
   if (!data) return unauthenticated();
   const row = data as { name: string | null; locale: "my" | "en" };
-  return NextResponse.json({ email: ctx.email, name: row.name, locale: row.locale });
+  return NextResponse.json({ buyerId: ctx.buyerId, email: ctx.email, name: row.name, locale: row.locale });
 }
 
 const MAX_BODY_BYTES = 4096;
