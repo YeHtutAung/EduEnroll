@@ -472,6 +472,33 @@ export interface MarketingPageVersion {
   published_at: string | null;
 }
 
+// ─── Buyer accounts (service-role only) ───────────────────────────────────────
+
+export interface BuyerProfile {
+  id: string;
+  email: string;
+  // Unverified contact number; never used to sign in or find orders.
+  phone_e164: string | null;
+  name: string | null;
+  locale: "my" | "en";
+  is_reviewer: boolean;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface BuyerProfileClaim {
+  user_id: string;
+  token: string;
+  claimed_at: string;
+}
+
+export interface MobileRateLimit {
+  key: string;
+  window_start: string;
+  count: number;
+}
+
 // ─── Supabase Database shape ──────────────────────────────────────────────────
 
 export interface Database {
@@ -525,6 +552,22 @@ export interface Database {
         Insert: Partial<MarketingPageVersion> & { status: MarketingPageVersion["status"]; content: unknown };
         Update: Partial<MarketingPageVersion>;
       };
+      buyer_profiles: {
+        Row: BuyerProfile;
+        Insert: Pick<BuyerProfile, "id" | "email"> &
+          Partial<Omit<BuyerProfile, "id" | "email">>;
+        Update: Partial<Omit<BuyerProfile, "id" | "created_at">>;
+      };
+      buyer_profile_claims: {
+        Row: BuyerProfileClaim;
+        Insert: BuyerProfileClaim;
+        Update: Partial<BuyerProfileClaim>;
+      };
+      mobile_rate_limits: {
+        Row: MobileRateLimit;
+        Insert: Omit<MobileRateLimit, "count"> & { count?: number };
+        Update: Partial<MobileRateLimit>;
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -555,6 +598,28 @@ export interface Database {
           p_quantity?: number;
         };
         Returns: SubmitEnrollmentResult;
+      };
+      // Buyer accounts: service_role only.
+      claim_buyer_profile: {
+        Args: { p_user_id: string };
+        // A claim token (uuid), 'exists', or null while another caller holds a fresh claim.
+        Returns: string | null;
+      };
+      buyer_profile_claim_held: {
+        Args: { p_user_id: string; p_token: string };
+        Returns: boolean;
+      };
+      create_buyer_profile: {
+        Args: { p_user_id: string; p_token: string; p_email: string };
+        Returns: "created" | "existing" | "lost";
+      };
+      release_buyer_profile_claim: {
+        Args: { p_user_id: string; p_token: string };
+        Returns: void;
+      };
+      consume_rate_limit: {
+        Args: { p_key: string; p_window_seconds: number; p_limit: number };
+        Returns: boolean;
       };
     };
     Enums: {

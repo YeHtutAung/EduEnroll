@@ -6,3 +6,6 @@
 .env.keys
 .env.local
 .env.*.local
+
+# Send Email Hook secret for local testing (see config.toml)
+.env

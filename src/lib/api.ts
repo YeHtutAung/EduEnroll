@@ -295,3 +295,6 @@ export function notFound(resource = "Resource") {
     { status: 404 },
   );
 }
+
+// Buyer guard (mobile spec 4.3 names this file). Implemented in its own module.
+export { requireBuyer, type BuyerContext } from "@/lib/buyers/requireBuyer";

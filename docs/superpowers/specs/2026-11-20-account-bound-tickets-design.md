@@ -7,7 +7,9 @@ decided by the owner 2026-11-20: **email for both web and app** (section 4.1 (a)
 must be updated to match before either side builds buyer sign-in (section 4.1, "What this changes").
 Revised 2026-11-22 to balance organisers and customers (owner decisions, section 2): group seats
 can be shared by link (section 6.4), phone moves are unlimited, and the bind limit, admin "Reset
-phone" and help-desk path are removed.
+phone" and help-desk path are removed. Revised again 2026-11-22 (owner): no backup phone; Google
+sign-in on the website first; a lost account is recovered by the organiser moving the order to the
+buyer's new account (section 4.7).
 
 ## 1. Goal
 
@@ -45,7 +47,8 @@ not require it.
 |---|---|
 | Where the buyer opens the ticket | Web profile now; the KuuNyi mobile app adopts the same scheme later |
 | Sign-in identity | The verified email is the identity, shared by web and app — owner decision 2026-11-20, option (a) in section 4.1 |
-| Ways to sign in | Email code, or "Continue with Google" (same account when the Google email matches). A verified backup phone can sign in by SMS code when the email is lost. Owner decision 2026-11-22, section 4.1 |
+| Ways to sign in | Email code, or "Continue with Google" on the website (same account when the Google email matches). The app keeps email codes; Google comes to the app later together with Sign in with Apple. No phone sign-in or backup phone. Owner decision 2026-11-22, section 4.1 |
+| Lost account | The tenant owner moves the order to the buyer's new account after checking it (section 4.7), logged and emailed to both addresses. Owner decision 2026-11-22; the one exception to "no admin holder changes" |
 | When the buyer signs in | Before checkout, on protected events |
 | Live QR method | Phone-bound key: non-extractable WebCrypto key, QR re-signed every 15 s |
 | Transfers | Inside the order only: the leader shares a seat by link with one account (one hop); the holder can give it back. Owner decision 2026-11-22 |
@@ -86,22 +89,22 @@ email OTP) on the web and in the app. One person, one account, one ticket list.
   per hour). Dev first.
 - The verified email on the auth user is the identity. `buyer_profiles.email` copies it; the order
   email for a protected event is this email (section 5).
-- **Email change is not supported** in this version, mirroring the mobile spec's rule for phone:
-  `auth.updateUser({ email })` is blocked for buyers, and `requireBuyer` rejects a token whose auth
-  email differs from `buyer_profiles.email`.
+- **Email change is not offered**, but Supabase can't switch off `auth.updateUser({ email })`.
+  "Secure email change" stays on, so both addresses must confirm, and an `AFTER UPDATE OF email`
+  trigger on `auth.users` keeps `buyer_profiles.email` equal to the auth email in the same transaction
+  (mobile spec 4.2). `requireBuyer` still fails closed (401) if they ever differ.
 - Phone becomes an optional, unverified contact field (`buyer_profiles.phone_e164`), used to pre-fill
-  forms. It is no longer unique or required. The **backup phone** below is a different, verified
-  field on the auth user.
-- No SMS cost per sign-in, and buyers without a Myanmar number can sign in. SMS is sent only to add
-  or change a backup phone and to recover an account.
+  forms. It is no longer unique or required. It is never verified and never signs anyone in; the
+  organiser may use it to check a recovery request (section 4.7).
+- No SMS is sent for buyer sign-in, and buyers without a Myanmar number can sign in.
 
 **Ways in (owner decision 2026-11-22).** Email is not used daily by many buyers in Myanmar, and some
-forget the address or its password. The identity stays the verified email; there are three ways to
-prove it or recover it:
+forget which address they used. The identity stays the verified email; there are two ways to prove
+it, and one way back for a buyer who can do neither:
 
 1. **Email code**, as above. Always offered.
-2. **"Continue with Google"** (Supabase Google provider, PKCE redirect through a new
-   `/auth/callback` route on the tenant host). Most Android phones already have a Google account
+2. **"Continue with Google"**, on the website (Supabase Google provider, PKCE redirect through a
+   new `/auth/callback` route on the tenant host). Most Android phones already have a Google account
    signed in, so there is nothing to remember or type. Google returns a verified email, and Supabase
    links it to the existing auth user with the same address, so an email-code account and a Google
    sign-in for the same email are **one account**, never two. The plan must prove that linking, and
@@ -110,44 +113,21 @@ prove it or recover it:
    - Google refuses sign-in inside embedded browsers (Facebook, Messenger, Instagram, Viber and
      similar in-app browsers), and that is how many links are opened in Myanmar. The sign-in page
      detects them, hides the Google button there, and shows "Open in Chrome / Safari" with a
-     copy-link button. The email code works everywhere.
+     copy-link button. The email code works everywhere, so it can never be removed.
    - Each tenant host (subdomains and custom domains such as `skyfestivalmm.com`) must be on the
      Supabase Redirect URLs allowlist, or Google sign-in returns to the wrong site. The plan lists
      it as an owner step per domain.
-3. **Backup phone, SMS code, for recovery.** Optional. A signed-in buyer adds a Myanmar mobile number
-   (`+959…` only) on `/account`; Supabase sends a code to it (`updateUser({ phone })`, verified with
-   type `phone_change`) and stores it as the auth user's verified `phone`. Later, "Can't get your
-   email code?" signs in with `signInWithOtp({ phone, options: { shouldCreateUser: false } })` and
-   the SMS code. The session is the same account: same email identity, same tickets.
-   - SMS goes out only through our **Send SMS Hook** (Standard Webhooks, like the Send Email Hook),
-     which sends through the existing SmsPoh client (`src/lib/sms.ts`) and refuses, without sending:
-     a number outside `+959`; an auth user with no live `buyer_profiles` row; a staff user (a `users`
-     row); a phone add on a profile younger than 24 hours; and anything over its caps (per number,
-     per user, and separate daily project budgets for adding a phone and for recovery, in the
-     durable rate-limit table), so SMS cost and SMS-pumping fraud are bounded. It never logs the
-     number or the code.
-   - **No phone-only accounts.** `shouldCreateUser` is a client flag and cannot be trusted. A Before
-     User Created hook rejects any new auth user created with a phone, so a phone can be attached
-     only to an existing email account. (Task 1 of Plan 2 found this hook cannot tell a password
-     sign-up from an email-code one, but it does see whether the new user has a phone.)
-   - Adding or changing the backup phone emails the account ("A backup phone was added"), so a
-     takeover is visible. The number is shown masked on `/account`. Email change is still not
-     offered, so a recovered buyer keeps their email identity and can keep using the phone or
-     Google.
-   - A phone that later belongs to someone else (Myanmar SIMs are recycled) is the same takeover risk
-     as a forwarded email code; accepted (section 13). The buyer can change the backup phone at any
-     time while signed in.
+   - **Not in the app yet.** An app that offers Google sign-in must also offer Sign in with Apple
+     on iOS (App Store guideline 4.8). The app keeps email codes until both are built together, as
+     its own story. Because the account is shared, a buyer who joined with Google on the website
+     signs in to the app with an email code to the same Gmail address.
+3. **Recovery through the organiser** (section 4.7), for a buyer who has lost the mailbox and the
+   Google account. There is no self-service recovery.
 
-All three sessions are buyer sessions. None is a `password` session, so every staff gate (section
-4.4) refuses them; staff keep signing in with a password. The plan must record the `amr` each one
-produces (email code `otp`; Google and SMS to be confirmed) and `ensureBuyerProfile` must accept
-the email-code and Google ones for creating a profile, never an SMS one (a backup phone exists only
-on an account that already has a profile). An SMS session probably also has `amr` `otp`, so as
-defence in depth `ensureBuyerProfile` refuses to create a profile for a user with a confirmed phone.
-
-The recovery page shows the same text whether or not a number is registered, but that hides it from
-the page only: Supabase's own answers, rate-limit responses and the duplicate-phone error on
-`updateUser` still let a direct API caller tell registered numbers apart (section 13).
+Both sign-in sessions are buyer sessions. Neither is a `password` session, so every staff gate
+(section 4.4) refuses them; staff keep signing in with a password. The plan must record the `amr`
+each produces (email code `otp`; Google to be confirmed), and `ensureBuyerProfile` must accept both
+for creating a profile.
 
 **What this changes in the mobile spec** (must be updated before either side builds buyer sign-in;
 that is the app team's document, not edited by this work):
@@ -163,12 +143,17 @@ that is the app team's document, not edited by this work):
   fields.
 - 11.2: web deletion is by email code (`signInWithOtp({ email, options: { shouldCreateUser: false } })`),
   with the same "if an account exists, it has been deleted" answer.
-- 4.1 (revision 2026-11-22): the app also offers native Google sign-in (`signInWithIdToken`) and
-  backup-phone recovery by SMS, on the same accounts, with the same rules as above.
+- 4.1 (revision 2026-11-22): nothing for now. ADR-81 stands (no phone codes). Google sign-in in the
+  app is a later story, shipped together with Sign in with Apple, on the same accounts. An order the
+  organiser moves (section 4.7) shows up in the new account's `/me/orders` through `buyer_id`.
 
 **Options not chosen**, kept for the record: (b) phone stays the identity and protected events add a
 verified email on the same account (SMS cost per web sign-in, `+959` numbers only); (c) separate web
-and app accounts (two unconnected accounts per person).
+and app accounts (two unconnected accounts per person); (d) a verified backup phone that signs in by
+SMS code to recover the account (designed 2026-11-22, dropped the same day by the owner): it brings
+back SMS cost and the SmsPoh dependency that ADR-81 removed, recycled Myanmar SIMs would become a
+way to take over accounts holding non-transferable tickets, and without passwords few buyers lose
+access at all.
 
 ### 4.2 Tables
 
@@ -233,6 +218,42 @@ have email addresses. Staff access is defined as requiring a password sign-in, s
 
 The private security advisories that #451 says must be closed before buyer sign-up is enabled.
 
+### 4.7 Recovering a lost account (organiser moves the order)
+
+For a buyer who can no longer sign in to the account that bought the order: the mailbox is gone and
+there is no Google account for it. Rare without passwords; handled by people, not by a
+self-service flow.
+
+1. The buyer signs in on the tenant's site with a new email or Google, which creates a new buyer
+   account, and contacts the organiser.
+2. The organiser checks the request outside the system: the order reference, the payment proof or
+   payer details, and the contact phone on the order. The page lists these as the checks to make.
+3. The tenant **owner** (`requireOwner`, password session) opens the order and uses "Move order to
+   another account": the new account's email and a required reason.
+4. One SQL function, `move_order_buyer(enrollment, tenant, staff_user, to_buyer, reason)` (service
+   role only), locks the enrollment and its tickets `FOR UPDATE` and refuses, with one generic
+   error:
+   - an order from another tenant, or one that is not confirmed;
+   - an order whose `buyer_id` is NULL (the old account was deleted; section 9 promises those
+     tickets cannot be recovered);
+   - a target that has no live `buyer_profiles` row, is staff (a `users` row) or is the current
+     buyer;
+   - an event whose last day has ended.
+5. It sets `enrollments.buyer_id` to the new account, revokes the active `ticket_devices` row of
+   every seat still with the leader (`revoked_by = 'order_moved'`), cancels the open share links the
+   old leader made (Plan 4), and logs `order_moved` in `ticket_holder_events` for each of those
+   seats with the staff user as actor. Seats already claimed by friends stay with them. The move is
+   also written to `order_moves` (`id`, `enrollment_id`, `tenant_id`, `from_buyer_id`,
+   `to_buyer_id`, `moved_by` (FK `users`), `reason`, `created_at`; RLS with no policies; never
+   updated or deleted).
+6. Both addresses are emailed, in Myanmar and English: the old one "Order <ref> was moved to another
+   account by <organiser>", so a real owner notices a wrong move; the new one "Order <ref> was added
+   to your account".
+
+The new account binds its phone as usual (section 6.1). The admin order view shows every move. A
+dishonest staff member could move an order to someone else; the owner-only rule, the log and the
+email to the old address are the controls (section 13).
+
 ## 5. Checkout on a protected event
 
 1. The enrollment form first asks for the buyer's email and sends a code; the buyer enters it and is
@@ -274,7 +295,7 @@ The private security advisories that #451 says must be closed before buyer sign-
   that is NULL), and the ticket must be valid and on a protected intake. Anyone else gets 404.
 - New table `ticket_devices`: `id`, `ticket_id`, `buyer_id` (FK `auth.users(id)` **ON DELETE SET
   NULL**, so rows outlive a deleted account), `public_key`, `created_at`, `revoked_at`, `revoked_by`
-  (`rebind` | `holder_changed` | `account_deleted`). Partial unique index: one row with
+  (`rebind` | `holder_changed` | `account_deleted` | `order_moved`). Partial unique index: one row with
   `revoked_at is null` per ticket. Rows are never deleted; they are the audit trail.
 - Binding the key that is already active for the ticket is a no-op (returns the current token).
 - **No bind limit** (owner decision 2026-11-22). A holder can move to a new phone any number of
@@ -349,7 +370,7 @@ For a group that does not arrive together. Only the leader shares, and only seat
   one open link (not claimed, not cancelled) per ticket. **Only the hash is stored**; the raw token
   exists only in the link the leader sends.
 - `ticket_holder_events`: `id`, `ticket_id`, `event` (`link_created` | `link_cancelled` | `claimed`
-  | `given_back` | `holder_deleted` | `voided`), `actor_buyer_id`, `from_buyer_id`, `to_buyer_id` (all FK ON
+  | `given_back` | `holder_deleted` | `voided` | `order_moved`), `actor_buyer_id`, `from_buyer_id`, `to_buyer_id` (all FK ON
   DELETE SET NULL), `created_at`. Never updated or deleted; the organiser's record of every move.
 - All three, and `ticket_devices` (section 10): RLS enabled with **no policies**, so only the
   service role reads or writes them. Writes go only through the functions below; buyers and admins
@@ -524,7 +545,8 @@ and these rules are relaxed in that story, not before.
   explanation.
 - Order or ticket view, read-only: each seat's current holder (masked email), link status, phone
   status (bound / not bound, last bound time) and the `ticket_holder_events` history.
-- No "Reset phone" and no admin holder changes (owner decision 2026-11-22).
+- No "Reset phone" and no admin holder changes (owner decision 2026-11-22), with one exception: the
+  owner-only "Move order to another account" for a lost account (section 4.7).
 
 **Account deletion is never blocked.** These are also the app's accounts, and Apple guideline
 5.1.1(v) and Google Play both require that users can delete their account in the app. Mobile spec
@@ -558,10 +580,12 @@ code that reads it:
   (service role only);
 - Plan 3: `intakes.ticket_protection` plus check constraint plus lock trigger; `ticket_devices` plus
   partial unique index plus RLS with no policies (service role only, section 6.4); the bind
-  function; submit RPC changes to accept and require `buyer_id` for protected intakes;
+  function; submit RPC changes to accept and require `buyer_id` for protected intakes; `order_moves`
+  and `move_order_buyer` (section 4.7);
 - Plan 4: `tickets.holder_buyer_id`, `ticket_share_links`, `ticket_holder_events` with RLS, the four
-  sharing functions and the void function (section 6.4), and the bind function updated to check
-  the current holder and tenant.
+  sharing functions and the void function (section 6.4), the bind function updated to check
+  the current holder and tenant, and `move_order_buyer` updated to cancel share links and log
+  `order_moved`.
 
 Hash guards on function bodies must strip `chr(13)` (see the CRLF note in the repo's migration
 conventions).
@@ -596,11 +620,13 @@ conventions).
   admin and superadmin APIs and is sent away from `/admin`; the same account signed in with its
   password is unaffected.
 - **Ways in (section 4.1):** a Google sign-in for an existing email-code account lands on the same
-  auth user and profile; a Google sign-in creates a profile on first use; an SMS session never
-  creates one; the Send SMS Hook refuses a non-`+959` number, a user with no live profile, a staff
-  user and anything over each cap, sending nothing; creating an auth user with a phone is refused;
-  Google and SMS sessions get 403 on every staff gate; the Google button is hidden in in-app
-  browsers.
+  auth user and profile; a Google sign-in creates a profile on first use; a Google session gets 403
+  on every staff gate; the Google button is hidden in in-app browsers.
+- **Order move (section 4.7):** only a tenant owner with a password session can move; each refusal
+  in 4.7 step 4 gives the same error; a move revokes the leader-held seats' devices, leaves friends'
+  seats alone, cancels the old leader's open links, writes one `order_moves` row and one
+  `order_moved` event per affected seat, and emails both addresses; the old account no longer sees
+  the order and the new one does, on the web and in `/me/orders`.
 - **`requireBuyer` (section 4.3):** auth email different from `buyer_profiles.email` → 401;
   Auth rejection → 401; Auth unreachable, timeout, 5xx and 429 →
   503 `SERVER`, never 401; staff account → 403; deleted profile → 401; token without `session_id`
@@ -627,14 +653,14 @@ conventions).
 3. Resend SMTP set for Supabase Auth on dev, then staging. Staff gates require a `password` sign-in
    (section 4.4) **before** email OTP is turned on in any project.
 4. **Plan 1** (#471): staff gates require a password session. Done on dev and staging.
-5. **Plan 2:** buyer accounts (section 4): email code first, then Google sign-in and the backup
-   phone. It also creates the durable `consume_rate_limit` RPC that Plans 3 and 4 use. Owner
-   prerequisites: a Google OAuth client for the Supabase Google provider, every tenant host on the
-   Redirect URLs allowlist, and SmsPoh credit and keys for the Send SMS Hook.
+5. **Plan 2:** buyer accounts (section 4): email code first, then Google sign-in on the website. It
+   also creates the durable `consume_rate_limit` RPC that Plans 3 and 4 use. Owner prerequisites: a
+   Google OAuth client for the Supabase Google provider, and every tenant host on the Redirect URLs
+   allowlist.
 6. kuunyi-scanner: send `token`, accept `k2.`. Needed before any gate test of Plan 3.
 7. **Plan 3:** the leader's phone (mode A): scope switch, checkout, binding with no limit, the `k2`
    QR, the scan path, closing the other QR surfaces, `/account/tickets`, the admin read-only view,
-   and the deletion step. Mode A works end to end.
+   the order move (section 4.7) and the deletion step. Mode A works end to end.
 8. **Plan 4:** seat sharing (mode B, section 6.4): the tables and functions, the share, claim and
    give-back routes, `/t/claim`, the emails and the holder history in admin. Built on Plan 3, since a
    claim revokes a bound phone.
@@ -661,22 +687,19 @@ conventions).
 - **A friend misses the cutoff:** a seat not claimed 24 hours before the event stays with the
   leader, and the friend can enter only on the leader's phone. The share page and the leader's
   reminder say when sharing closes.
-- **Organiser support load:** with no admin holder changes or reset, every seat problem is solved
-  by the buyers themselves (share, give-back, re-bind). Organisers need the read-only history
-  (section 9) to answer questions.
+- **Organiser support load:** with no reset and only one admin change (the order move for a lost
+  account, section 4.7), seat problems are solved by the buyers themselves (share, give-back,
+  re-bind). Organisers need the read-only history (section 9) to answer questions, and must check
+  each move request by hand.
+- **A wrong or dishonest order move:** a staff member could move an order to someone who isn't its
+  buyer, which is a resale path. Only the tenant owner can move, every move is logged with a reason,
+  and the old address is emailed. Accepted.
 - **Email deliverability:** email-code sign-in depends on Resend reaching the buyer. Code emails
-  must be monitored on launch day. Google sign-in and the backup phone keep existing buyers able to
-  sign in during a Resend outage; a new buyer without Google cannot.
+  must be monitored on launch day. Google sign-in keeps buyers who use it able to sign in during a
+  Resend outage; everyone else, and everyone in the app, waits for email.
 - **Google in in-app browsers:** Google blocks sign-in in Facebook, Messenger and similar embedded
   browsers. The page hides the button there and says to open the page in Chrome or Safari; buyers
   who don't will use the email code.
-- **SMS cost and fraud:** every SMS costs money. The Send SMS Hook's caps and the `+959`-only rule
-  bound it. Adding a phone and recovery have separate daily budgets, so mass phone-adding from cheap
-  accounts cannot starve recovery, but a flood can still use up the recovery budget on a bad day.
-- **Backup-phone enumeration:** a direct API caller can learn whether a number is someone's backup
-  phone (section 4.1). It reveals no email or ticket; accepted.
-- **Recycled or handed-over SIMs:** whoever holds the backup phone can sign in to the account. Same
-  class as account handover (section 1); adding or changing the phone is emailed.
 - **Staff accounts and email codes:** email OTP is project-wide, so staff gates must refuse
   non-password sessions (section 4.4) before it is turned on.
 - **App and web drift:** until the app supports bound tickets, protected events are invisible in

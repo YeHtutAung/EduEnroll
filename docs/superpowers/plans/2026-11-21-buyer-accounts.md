@@ -2,12 +2,14 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A buyer can sign in on a tenant's website with a 6-digit email code and gets one `buyer_profiles` row, created by the single shared server function that the KuuNyi app's `POST /api/mobile/v1/me` will also use. Every Auth email goes through our own Send Email Hook, which enforces per-email limits.
+**Goal:** A buyer can sign in on a tenant's website with a 6-digit email code and gets one `buyer_profiles` row, created by the single shared server function that the KuuNyi app's `POST /api/mobile/v1/me` will also use. Every Auth email goes through our own Send Email Hook, which enforces per-email limits. **Part B (Tasks 13–15 and 19, owner decision 2026-11-22):** on the website, the same account can also be reached with "Continue with Google" (design section 4.1, "Ways in"). The backup phone (Tasks 16–18) was dropped by the owner the same day; a lost account is recovered by the organiser moving the order (design section 4.7, Plan 3).
+
+**Two PRs.** Part A is Tasks 1–12 (email code), opened and reviewed on its own. Part B is Tasks 13–15 and 19, on a new branch off `dev` after Part A merges, so Part A is not held up by the Google setup.
 
 **Architecture:** Email-code sign-in is Supabase Auth email OTP. Supabase calls our Send Email Hook (`POST /api/internal/auth/send-email`) for every Auth email. The hook checks the Standard Webhooks signature, counts against per-email caps in `mobile_rate_limits`, and sends through Resend. A profile is created only by `ensureBuyerProfile()`, which:
 1. accepts only an email-code (`amr` `otp`) session;
 2. takes a database claim;
-3. resets the account's password to a random value and ends every other session;
+3. resets the account's password to a random value, which ends every session, and has the route re-issue the caller's session (Task 11a);
 4. inserts the profile.
 
 `requireBuyer()` is the guard for every buyer route. It asks the Auth server (never a local JWT check), separates a real rejection (401) from an Auth outage (503), and refuses staff (403). The `/account` page is the web sign-in.
@@ -27,9 +29,9 @@
 | # | Plan | Depends on | Status |
 |---|---|---|---|
 | 1 | Staff password sessions (`2026-11-20-staff-password-sessions.md`) | nothing | **done**: #471 on dev, staging via #488; migration on the dev DB |
-| 2 | **Buyer accounts** (this file) | Plan 1; mobile spec at #311 | ready |
-| 3 | Ticket protection core: `intakes.ticket_protection`, `ticket_devices` + bind, `k2` QR, `/api/scans` protected path | Plan 2; kuunyi-scanner sends `token` | after Plan 2 |
-| 4 | Protected checkout, closing QR surfaces (web + mobile API), `/account/tickets`, admin controls, deletion | Plan 3 | after Plan 3 |
+| 2 | **Buyer accounts** (this file): Part A email code, Part B Google on the website | Plan 1; mobile spec at #311 | in progress |
+| 3 | The leader's phone (mode A): scope switch, protected checkout, binding with no limit, `k2` QR, `/api/scans` protected path, closing QR surfaces, `/account/tickets`, admin read-only view, order move for a lost account (design 4.7), deletion step (design section 12, revised 2026-11-22) | Plan 2; kuunyi-scanner sends `token` | after Plan 2 |
+| 4 | Seat sharing (mode B, design section 6.4) | Plan 3 | after Plan 3 |
 
 **In this plan:**
 - Tables: `buyer_profiles`, `buyer_profile_claims` and `mobile_rate_limits`.
@@ -40,8 +42,14 @@
 - The Auth-error classifier, `requireBuyer` and `ensureBuyerProfile`.
 - The web profile route and the `/account` sign-in page.
 - Example env hygiene: every value in `.env.local.example` is an obvious placeholder.
+- Part B: Google sign-in on the website (`/auth/callback`, in-app browser detection) and
+  `ensureBuyerProfile` accepting Google sessions.
 
 **Not in this plan:**
+- A backup phone or any SMS sign-in: dropped by the owner 2026-11-22 (design 4.1, option (d)).
+- Google sign-in in the app: a later app story, shipped together with Sign in with Apple (App Store
+  guideline 4.8). The app keeps email codes (ADR-81).
+- Recovering a lost account: the organiser's order move, Plan 3 (design 4.7).
 - Mobile `/api/mobile/v1/*` routes: #451, which reuses `requireBuyer` and `ensureBuyerProfile` from here.
 - The App Review reviewer (`REVIEWER_EMAIL`, `is_reviewer` repair, demo tenant): waits on Q11 / KN-164.
 - `requireBuyerForDeletion` and account deletion: Plan 4.
@@ -99,6 +107,12 @@
 | `src/types/database.ts` (modify) | Types for the new tables and RPCs |
 | `supabase/config.toml` (modify) | Local: confirmations on, 10-minute codes, hook settings |
 | `.env.local.example` (modify) | Placeholders only; new secret names as placeholders |
+| **Part B** | |
+| `src/lib/authMethod.ts` (modify) | `canCreateProfile(token)`: email code or Google, never password |
+| `src/app/auth/callback/route.ts` | Google PKCE return: exchange the code, ensure the profile, redirect |
+| `src/lib/auth/safeNext.ts` | Same-origin relative `next` paths only |
+| `src/lib/inAppBrowser.ts` | `isInAppBrowser(userAgent)` |
+| `src/app/(public)/account/*` (modify) | Google button, in-app browser fallback |
 
 ---
 
@@ -318,6 +332,16 @@ describe("buyer accounts migration", () => {
     }
   });
 
+  it("consume_rate_limit refuses bad arguments and sweeps old windows of every key", () => {
+    const body = UP.slice(UP.search(/CREATE FUNCTION public\.consume_rate_limit\(/i));
+    expect(body).toMatch(/p_window_seconds NOT BETWEEN 1 AND 86400/i);
+    expect(body).toMatch(/ERRCODE = '22023'/i);
+    // No per-key cleanup: rows of keys that never come back must expire too.
+    expect(body.slice(0, body.indexOf("$$;"))).not.toMatch(/WHERE key = p_key AND window_start </i);
+    expect(body).toMatch(/ORDER BY window_start\s+LIMIT 50\s+FOR UPDATE SKIP LOCKED/i);
+    expect(UP).toMatch(/CREATE INDEX mobile_rate_limits_window_start_idx ON public\.mobile_rate_limits \(window_start\)/i);
+  });
+
   it("syncs the profile email only when the auth email changes", () => {
     expect(UP).toMatch(/AFTER UPDATE OF email ON auth\.users/i);
     expect(UP).toMatch(/WHEN \(OLD\.email IS DISTINCT FROM NEW\.email/i);
@@ -325,7 +349,13 @@ describe("buyer accounts migration", () => {
 
   it("rollback drops the trigger before its function, and every object", () => {
     expect(DOWN.search(/DROP TRIGGER/i)).toBeLessThan(DOWN.search(/DROP FUNCTION IF EXISTS public\.sync_buyer_profile_email/i));
-    for (const name of [...FUNCTIONS, "buyer_profiles", "buyer_profile_claims", "mobile_rate_limits"]) {
+    for (const name of [
+      ...FUNCTIONS,
+      "buyer_profiles",
+      "buyer_profile_claims",
+      "mobile_rate_limits",
+      "mobile_rate_limits_window_start_idx",
+    ]) {
       expect(DOWN).toContain(name);
     }
   });
@@ -377,10 +407,12 @@ CREATE TABLE public.mobile_rate_limits (
 ALTER TABLE public.mobile_rate_limits ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.mobile_rate_limits FROM PUBLIC, anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.mobile_rate_limits TO service_role;
+CREATE INDEX mobile_rate_limits_window_start_idx ON public.mobile_rate_limits (window_start);
 
 -- Counts one event for p_key in the current fixed window and says whether it
 -- is still within p_limit. The caller passes an already-hashed key; this never
--- sees an email address.
+-- sees an email address. Windows are 1 s to 1 day: a longer window would be
+-- swept by the two-day cleanup below while still counting, and fail open.
 CREATE FUNCTION public.consume_rate_limit(p_key text, p_window_seconds int, p_limit int)
 RETURNS boolean
 LANGUAGE plpgsql
@@ -388,17 +420,33 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
 DECLARE
-  v_start timestamptz := to_timestamp(floor(extract(epoch FROM now()) / p_window_seconds) * p_window_seconds);
+  v_start timestamptz;
   v_count int;
 BEGIN
+  IF p_window_seconds IS NULL OR p_window_seconds NOT BETWEEN 1 AND 86400 OR p_limit IS NULL OR p_limit < 0 THEN
+    RAISE EXCEPTION 'bad rate limit args' USING ERRCODE = '22023';
+  END IF;
+
+  -- Assigned after the check: in DECLARE it would divide by zero first.
+  v_start := to_timestamp(floor(extract(epoch FROM now()) / p_window_seconds) * p_window_seconds);
+
   INSERT INTO public.mobile_rate_limits AS r (key, window_start, count)
   VALUES (p_key, v_start, 1)
   ON CONFLICT (key, window_start) DO UPDATE SET count = r.count + 1
   RETURNING r.count INTO v_count;
 
-  -- Keys expire on their own: drop this key's windows older than two days.
+  -- Rows expire whether or not their key comes back (a deleted account's keys
+  -- included): each call drops up to 50 windows, of any key, older than two
+  -- days, oldest first. SKIP LOCKED: two callers sweeping at once take
+  -- different rows instead of waiting on each other.
   DELETE FROM public.mobile_rate_limits
-  WHERE key = p_key AND window_start < now() - interval '2 days';
+  WHERE ctid = ANY (ARRAY(
+    SELECT ctid FROM public.mobile_rate_limits
+    WHERE window_start < now() - interval '2 days'
+    ORDER BY window_start
+    LIMIT 50
+    FOR UPDATE SKIP LOCKED
+  ));
 
   RETURN v_count <= p_limit;
 END;
@@ -542,6 +590,7 @@ DROP FUNCTION IF EXISTS public.create_buyer_profile(uuid, uuid, text);
 DROP FUNCTION IF EXISTS public.buyer_profile_claim_held(uuid, uuid);
 DROP FUNCTION IF EXISTS public.claim_buyer_profile(uuid);
 DROP FUNCTION IF EXISTS public.consume_rate_limit(text, int, int);
+DROP INDEX IF EXISTS public.mobile_rate_limits_window_start_idx;
 DROP TABLE IF EXISTS public.mobile_rate_limits;
 DROP TABLE IF EXISTS public.buyer_profile_claims;
 DROP TABLE IF EXISTS public.buyer_profiles;
@@ -555,16 +604,20 @@ DROP TABLE IF EXISTS public.buyer_profiles;
 
   `src/__tests__/db/buyer-accounts.db.test.ts`, using the `pg` pool pattern from `staff-password-session.db.test.ts`. Insert `auth.users` rows directly and clean up in `afterAll`. Cases:
   - `claim_buyer_profile` on a fresh user returns a uuid; a second call within 30 s returns NULL.
-  - After `UPDATE buyer_profile_claims SET claimed_at = now() - interval '31 seconds'`, a new claim returns a **different** uuid, and the first token's `create_buyer_profile` returns `'lost'` and inserts nothing.
-  - `create_buyer_profile` with the held token returns `'created'`, stores the email lower-cased and leaves no claim row.
+  - After `UPDATE buyer_profile_claims SET claimed_at = now() - interval '31 seconds'`, a new claim returns a **different** uuid, and the first token's `create_buyer_profile` returns `'lost'`, inserts nothing and leaves the new holder's claim alone.
   - With a profile already present, `claim_buyer_profile` returns `'exists'` and leaves no claim row.
-  - `release_buyer_profile_claim` with the wrong token deletes nothing; with the right one it deletes the row.
-  - `consume_rate_limit('<random uuid>', 3600, 2)` returns true, true, false. Use a fresh key each run, and delete its rows in `afterAll`, so a second run within the hour still passes.
-  - Updating `auth.users.email` to `New@Example.test` sets `buyer_profiles.email` to `new@example.test`. An update that doesn't touch `email` changes nothing.
+  - `create_buyer_profile` with the held token returns `'created'`, stores the email lower-cased and leaves no claim row.
+  - `create_buyer_profile` returns `'existing'` when this user's profile is already there (claim row inserted by hand), and leaves no claim row.
   - `create_buyer_profile` for user B, with an email already on user A's profile, raises `unique_violation` (23505), not `'existing'`. **Claim for B first**, or the function returns `'lost'` before the INSERT. B's claim row survives the raise (the delete rolls back), so clean up through the `auth.users` cascade.
-  - As `authenticated` (`SET LOCAL ROLE authenticated` with a JWT claim for one of the test users, inside a transaction that is rolled back):
-    - `SELECT public.claim_buyer_profile(...)` and `SELECT public.consume_rate_limit(...)` fail with 42501;
-    - `SELECT` on each new table returns **zero rows**, and an `INSERT` is refused (`new row violates row-level security policy`).
+  - `buyer_profile_claim_held` is true only for the held token. `release_buyer_profile_claim` with the wrong token deletes nothing; with the right one it deletes the row.
+  - `consume_rate_limit('<random uuid>', 3600, 2)` returns true, true, false. Use a fresh key each run, and delete its rows in `afterAll`, so a second run within the hour still passes.
+  - `consume_rate_limit` raises 22023 for a window of 0, a window of 604800 s (over a day) and a NULL limit.
+  - The sweep crosses keys: an old (3-day) row for a **different** key is gone after `consume_rate_limit` runs for a fresh key.
+  - Email sync: an update to another `auth.users` column changes nothing (email and `updated_at`); `SET email = email` leaves `updated_at` unchanged; changing it to `New@Example.test` sets `buyer_profiles.email` to `new@example.test`; setting it to NULL succeeds and the profile keeps its email.
+  - Concurrency, with two `pg` clients: client 1 runs `BEGIN` and `create_buyer_profile` with the held token without committing; client 2 calls `claim_buyer_profile` without awaiting (attach a no-op `catch` so a failed assertion isn't hidden by an unhandled rejection); once `pg_stat_activity` shows client 2 waiting on a `Lock`, client 1 commits; client 2 resolves to `'exists'` and no claim row is left.
+  - As `authenticated` (`SET LOCAL ROLE authenticated` with a JWT claim for one of the test users, inside a transaction that is rolled back), with a row seeded in each table first:
+    - all five RPCs (`claim_buyer_profile`, `consume_rate_limit`, `create_buyer_profile`, `buyer_profile_claim_held`, `release_buyer_profile_claim`) fail with 42501;
+    - `SELECT` on each new table returns **zero rows** (while the superuser sees at least one), and an `INSERT` is refused (`new row violates row-level security policy`).
 
     Don't expect 42501 on the tables: `src/__tests__/db/setup.ts` re-grants table DML to `anon` and `authenticated` before every DB run, so locally only RLS stands between them and the rows. **Don't weaken the migration's REVOKE to match local behaviour.** Prove the REVOKE on the dev database in Task 12 instead.
 
@@ -726,13 +779,16 @@ git commit -m "feat(auth): token claim helpers and an Auth error classifier for 
 ### Task 5: `requireBuyer`
 
 **Files:**
+- Create: `src/lib/buyers/sessionUser.ts` (shared with Task 7: cookie read and Auth acceptance)
 - Create: `src/lib/buyers/requireBuyer.ts`
 - Modify: `src/lib/api.ts` (one re-export line)
+- Test: `src/__tests__/lib/buyers/sessionUser.test.ts`
+- Test: `src/__tests__/lib/buyers/sessionUser.authjs.test.ts` (real auth-js client, stubbed `fetch`)
 - Test: `src/__tests__/lib/buyers/requireBuyer.test.ts`
 
 Behaviour (mobile spec 4.3, design 4.3):
-1. The token comes from `x-supabase-auth` or `Authorization: Bearer …` (the app), or else the cookie session (the website). No token → 401 `UNAUTHENTICATED`.
-2. `getUser(token)` asks Auth. If it fails, `classifyAuthError` decides: `rejected` → 401 `UNAUTHENTICATED`; `unavailable` → 503 `SERVER`.
+1. The token comes from `x-supabase-auth` or `Authorization: Bearer …` (the app), or else the cookie session (the website), via `readCookieToken()` in `sessionUser.ts`. No token → 401 `UNAUTHENTICATED`. `getSession()` may refresh a near-expiry session. A session that comes back is used, even with an error beside it. With no session, only these count as **none** → 401: no error, `AuthSessionMissingError`, `AuthInvalidTokenResponseError` (matched by `name`), or a 4xx `AuthApiError` other than 429. Anything else is **unavailable** → 503 `SERVER` (never 401): a retryable fetch error, `AuthUnknownError`, an `AuthApiError` ≥ 500 or 429, any error that isn't an `AuthError`, or a throw.
+2. `acceptToken(token)` in `sessionUser.ts` asks Auth with `getUser(token)` on a bare, non-persisting client. An `AuthSessionMissingError`, returned or thrown, is **rejected** → 401: that is how auth-js reports getUser's 403 `session_not_found` (an ended session, e.g. one `ensureBuyerProfile` signed out; spec 4.3), not as an `AuthApiError`. Otherwise `classifyAuthError` decides: `rejected` → 401 `UNAUTHENTICATED`; `unavailable` → 503 `SERVER`. `classifyAuthError` itself is unchanged.
 3. Only after that, read `session_id` from the same token. Missing → 401.
 4. A `users` row exists (staff) → 403 `FORBIDDEN`.
 5. No `buyer_profiles` row, or `deleted_at` is set → 401 `UNAUTHENTICATED`.
@@ -744,34 +800,143 @@ The profile and staff reads use the service-role client: the tables have no poli
 
 - [ ] **Step 1: Write the failing tests**
 
-  Mock `next/headers` (as `require-auth-password.test.ts` does), `@/lib/supabase/server` (cookie client with `auth.getSession`), and `@/lib/supabase/admin` (`from("users")`, `from("buyer_profiles")` with `.select().eq().maybeSingle()`). Mock `@supabase/supabase-js` **with `importOriginal`**, replacing only `createClient` (the client that calls `getUser`), so `isAuthApiError` and the error classes stay real. Build tokens with a local `token(payload)` helper like the one in `authMethod.test.ts`. Cases, each asserting status, `error.code`, and that later reads did **not** happen when an earlier step failed:
+  Mock `next/headers` (as `require-auth-password.test.ts` does), `@/lib/supabase/server` (cookie client with `auth.getSession`), and `@/lib/supabase/admin` (`from("users")`, `from("buyer_profiles")` with `.select().eq().maybeSingle()`). Mock `@supabase/supabase-js` **with `importOriginal`**, replacing only `createClient` (the client that calls `getUser`), so `isAuthApiError` and the error classes stay real. Build tokens with a local `token(payload)` helper like the one in `authMethod.test.ts`.
+
+  `sessionUser.test.ts` (same mocks, minus `next/headers` and the admin client): `readCookieToken` returns the token, including when an error comes with a session; no session and no error → none; `AuthSessionMissingError`, `AuthInvalidTokenResponseError`, `AuthApiError` 400 / 403 (`user_not_found`) with no session → none; a retryable fetch error, `AuthApiError` 500 / 503 / 429, `AuthUnknownError`, a plain `Error` and a non-error value → unavailable; a throw → unavailable. `acceptToken` returns `{ kind: "ok", user, token }` with the same token, builds its client with `{ persistSession: false, autoRefreshToken: false }`, maps a 4xx `AuthApiError` (`user_not_found`) and an `AuthSessionMissingError` (returned or thrown) to rejected, a 5xx, 429, `AuthUnknownError`, retryable fetch error, missing user or thrown network error to unavailable, and a thrown 4xx to rejected.
+
+  `sessionUser.authjs.test.ts` does not mock `@supabase/supabase-js`; it stubs global `fetch` and sets the two `NEXT_PUBLIC_SUPABASE_*` env values, so the error class comes from the installed auth-js: 403 `session_not_found` (2024 API header, and legacy `error_code`) → rejected; 403 `user_not_found` → rejected; 500 with an HTML body → unavailable; a network failure → unavailable; 200 with a user → ok with the same token.
+
+  `requireBuyer.test.ts` cases, each asserting status, `error.code`, and that later reads did **not** happen when an earlier step failed:
   - no header and no cookie session → 401; `getUser` not called;
-  - Bearer, `getUser` → `AuthApiError(403, "session_not_found")` → 401;
+  - `x-supabase-auth: Bearer GOOD` and `authorization: Bearer OTHER` both set → `getUser` gets `GOOD`;
+  - `authorization: Basic xyz` and no cookie session → 401; `getUser` not called;
+  - `getSession` resolves `{ session: null, error: AuthRetryableFetchError }` (a refresh that couldn't reach Auth) → 503 `SERVER`; `getUser` not called;
+  - `getSession` rejects → 503 `SERVER`; `getUser` not called;
+  - `getSession` returns `AuthApiError(400, "refresh_token_not_found")` with no session → 401; `getUser` not called;
+  - `getSession` returns `AuthSessionMissingError` with no session → 401; `getUser` not called;
+  - Bearer, `getUser` → `AuthSessionMissingError` (auth-js's form of a 403 `session_not_found`) → 401;
+  - Bearer, `getUser` → `AuthApiError(403, "user_not_found")` → 401;
   - Bearer, `getUser` → `AuthApiError(500)` → 503 `SERVER`;
   - Bearer, `getUser` throws `AuthRetryableFetchError` → 503;
   - Bearer, `getUser` → 429 → 503;
   - accepted token with no `session_id` → 401, and `from()` never called;
-  - staff (`users` row found) → 403;
-  - no profile → 401; `deleted_at` set → 401; email mismatch → 401;
+  - staff (`users` row found) → 403, `buyer_profiles` not read; `users` read returns `{ error }` → 503, `buyer_profiles` not read;
+  - no profile → 401; `deleted_at` set → 401; email mismatch → 401 (each reads exactly `users`, `buyer_profiles`);
   - `buyer_profiles` read returns `{ error }` → 503;
+  - every 503 path logs a fixed string, and no `console` call contains the token, the email or the user id;
   - happy path, Bearer: returns `{ buyerId: "u1", email: "b@example.test", isReviewer: false, sessionId: "s1" }`;
-  - happy path, cookie: same result, and the token passed to `tokenClaim` is the cookie session's `access_token`.
+  - happy path, cookie: same result, and the token passed to `tokenClaim` is the cookie session's `access_token`;
+  - `getSession` returns an error **and** a session → that token goes to `getUser` and the buyer context comes back.
 
 - [ ] **Step 2: Run them and confirm they fail**
 
-  Run: `npx vitest run src/__tests__/lib/buyers/requireBuyer.test.ts`. Expected: FAIL (module not found).
+  Run: `npx vitest run src/__tests__/lib/buyers/sessionUser.test.ts src/__tests__/lib/buyers/sessionUser.authjs.test.ts src/__tests__/lib/buyers/requireBuyer.test.ts`. Expected: FAIL (module not found).
 
-- [ ] **Step 3: Implement `src/lib/buyers/requireBuyer.ts`**
+- [ ] **Step 3: Implement `src/lib/buyers/sessionUser.ts` and `src/lib/buyers/requireBuyer.ts`**
 
 ```ts
+// src/lib/buyers/sessionUser.ts
+import {
+  createClient as createBareClient,
+  isAuthApiError,
+  isAuthError,
+  isAuthSessionMissingError,
+} from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/server";
+import { classifyAuthError } from "./authErrors";
+
+// ─── Shared token reading for buyer routes ──────────────────────────────────
+//
+// requireBuyer and /api/account/profile both read the cookie session and both
+// have Auth accept a token. One copy here so the 401/503 rules can't drift.
+// Nothing here logs: callers log fixed strings. Never log a token or email.
+
+export type CookieTokenRead =
+  | { kind: "token"; token: string }
+  | { kind: "none" }
+  | { kind: "unavailable" };
+
+export type AuthUser = { id: string; email?: string | null; email_confirmed_at?: string | null };
+
+export type TokenAcceptance =
+  | { kind: "ok"; user: AuthUser; token: string }
+  | { kind: "rejected" }
+  | { kind: "unavailable" };
+
+/**
+ * With no session, a getSession() error is "none" (401) only when Auth itself
+ * said the session isn't there: AuthSessionMissingError,
+ * AuthInvalidTokenResponseError, or a 4xx AuthApiError other than 429.
+ * Everything else (a retryable fetch error, AuthUnknownError, an Auth 5xx or
+ * 429, or anything that isn't an AuthError) is an outage: 503, never 401.
+ */
+function sessionErrorIsOutage(error: unknown): boolean {
+  if (!isAuthError(error)) return true;
+  if (isAuthSessionMissingError(error)) return false;
+  if (error.name === "AuthInvalidTokenResponseError") return false;
+  if (isAuthApiError(error)) return error.status >= 500 || error.status === 429;
+  return true;
+}
+
+/**
+ * The website's cookie session token. getSession() may refresh a near-expiry
+ * session; if that refresh can't reach Auth, or getSession throws, the answer
+ * is "unavailable" (503), never "none" (401). A session that comes back is
+ * used even when an error comes with it.
+ */
+export async function readCookieToken(): Promise<CookieTokenRead> {
+  try {
+    const { data, error } = await createClient().auth.getSession();
+    const token = data?.session?.access_token;
+    if (token) return { kind: "token", token };
+    if (error != null && sessionErrorIsOutage(error)) return { kind: "unavailable" };
+    return { kind: "none" };
+  } catch {
+    return { kind: "unavailable" };
+  }
+}
+
+/**
+ * getUser's answer. auth-js turns a 403 session_not_found (an ended session,
+ * e.g. one ensureBuyerProfile signed out) into AuthSessionMissingError, not an
+ * AuthApiError, so that is a rejection here. Otherwise classifyAuthError
+ * decides: a 4xx other than 429 is rejected, anything else unavailable.
+ */
+function getUserFailure(error: unknown): TokenAcceptance {
+  if (isAuthSessionMissingError(error)) return { kind: "rejected" };
+  return classifyAuthError(error) === "rejected" ? { kind: "rejected" } : { kind: "unavailable" };
+}
+
+/**
+ * Ask the Auth server whether it accepts this exact token. Never a local-only
+ * JWT check. Uses a bare client that neither stores nor refreshes a session.
+ * A 4xx (except 429) or an ended session is "rejected"; anything else that
+ * fails is "unavailable".
+ */
+export async function acceptToken(token: string): Promise<TokenAcceptance> {
+  try {
+    const client = createBareClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      { auth: { persistSession: false, autoRefreshToken: false } },
+    );
+    const { data, error } = await client.auth.getUser(token);
+    if (error || !data.user) return getUserFailure(error);
+    return { kind: "ok", user: data.user, token };
+  } catch (err) {
+    return getUserFailure(err);
+  }
+}
+```
+
+```ts
+// src/lib/buyers/requireBuyer.ts
 import { headers } from "next/headers";
 import { NextResponse } from "next/server";
-import { createClient as createBareClient } from "@supabase/supabase-js";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { tokenClaim } from "@/lib/authMethod";
-import { classifyAuthError } from "./authErrors";
 import { buyerError } from "./errors";
+import { acceptToken, readCookieToken, type AuthUser, type CookieTokenRead } from "./sessionUser";
 
 export interface BuyerContext {
   buyerId: string;
@@ -780,53 +945,53 @@ export interface BuyerContext {
   sessionId: string;
 }
 
-type AuthUser = { id: string; email?: string | null };
+const unauthenticated = () => buyerError(401, "UNAUTHENTICATED", "Sign in required.");
+const authUnavailable = () => buyerError(503, "SERVER", "Sign-in service unavailable. Try again.");
 
-/** The bearer token, else the cookie session's token (website). */
-async function readToken(): Promise<string | null> {
+/**
+ * The bearer token, else the cookie session's token (website). The cookie
+ * read's 401/503 rule lives in readCookieToken (sessionUser.ts).
+ */
+async function readToken(): Promise<CookieTokenRead> {
   const h = headers();
   const header = h.get("x-supabase-auth") ?? h.get("authorization");
-  if (header?.startsWith("Bearer ")) return header.substring(7);
-  const { data } = await createClient().auth.getSession();
-  return data.session?.access_token ?? null;
+  if (header?.startsWith("Bearer ")) return { kind: "token", token: header.substring(7) };
+  return readCookieToken();
 }
 
 /**
  * Guard for every buyer route (web and mobile). Asks the Auth server; never a
  * local-only JWT check, so a deleted user or ended session fails at once.
+ * Logs fixed strings only: never a token, email or id.
  */
 export async function requireBuyer(): Promise<BuyerContext | NextResponse> {
-  const token = await readToken();
-  if (!token) return buyerError(401, "UNAUTHENTICATED", "Sign in required.");
-
-  let user: AuthUser;
-  try {
-    const client = createBareClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-      { auth: { persistSession: false, autoRefreshToken: false } },
-    );
-    const { data, error } = await client.auth.getUser(token);
-    if (error || !data.user) {
-      return classifyAuthError(error) === "rejected"
-        ? buyerError(401, "UNAUTHENTICATED", "Sign in required.")
-        : buyerError(503, "SERVER", "Sign-in service unavailable. Try again.");
-    }
-    user = data.user;
-  } catch (err) {
-    return classifyAuthError(err) === "rejected"
-      ? buyerError(401, "UNAUTHENTICATED", "Sign in required.")
-      : buyerError(503, "SERVER", "Sign-in service unavailable. Try again.");
+  const read = await readToken();
+  if (read.kind === "unavailable") {
+    console.error("[requireBuyer] cookie session read failed");
+    return authUnavailable();
   }
+  if (read.kind === "none") return unauthenticated();
+  const token = read.token;
+
+  const accepted = await acceptToken(token);
+  if (accepted.kind === "rejected") return unauthenticated();
+  if (accepted.kind === "unavailable") {
+    console.error("[requireBuyer] Auth getUser unavailable");
+    return authUnavailable();
+  }
+  const user: AuthUser = accepted.user;
 
   // Read only after getUser has accepted this exact token.
   const sessionId = tokenClaim(token, "session_id");
-  if (!sessionId) return buyerError(401, "UNAUTHENTICATED", "Sign in required.");
+  if (!sessionId) return unauthenticated();
 
   const admin = createAdminClient();
 
   const staff = await admin.from("users").select("id").eq("id", user.id).maybeSingle();
-  if (staff.error) return buyerError(503, "SERVER", "Try again.");
+  if (staff.error) {
+    console.error("[requireBuyer] users lookup failed");
+    return buyerError(503, "SERVER", "Try again.");
+  }
   if (staff.data) return buyerError(403, "FORBIDDEN", "Staff accounts can't use buyer pages.");
 
   const profile = await admin
@@ -834,12 +999,13 @@ export async function requireBuyer(): Promise<BuyerContext | NextResponse> {
     .select("id, email, is_reviewer, deleted_at")
     .eq("id", user.id)
     .maybeSingle();
-  if (profile.error) return buyerError(503, "SERVER", "Try again.");
-  const p = profile.data as { id: string; email: string; is_reviewer: boolean; deleted_at: string | null } | null;
-  if (!p || p.deleted_at) return buyerError(401, "UNAUTHENTICATED", "Sign in required.");
-  if (p.email !== (user.email ?? "").toLowerCase()) {
-    return buyerError(401, "UNAUTHENTICATED", "Sign in required.");
+  if (profile.error) {
+    console.error("[requireBuyer] buyer_profiles lookup failed");
+    return buyerError(503, "SERVER", "Try again.");
   }
+  const p = profile.data as { id: string; email: string; is_reviewer: boolean; deleted_at: string | null } | null;
+  if (!p || p.deleted_at) return unauthenticated();
+  if (p.email !== (user.email ?? "").toLowerCase()) return unauthenticated();
 
   return { buyerId: p.id, email: p.email, isReviewer: p.is_reviewer, sessionId };
 }
@@ -853,11 +1019,11 @@ export { requireBuyer, type BuyerContext } from "@/lib/buyers/requireBuyer";
 
 - [ ] **Step 4: Run the tests and confirm they pass**
 
-  Run: `npx vitest run src/__tests__/lib/buyers/requireBuyer.test.ts`. Expected: PASS.
+  Run: `npx vitest run src/__tests__/lib/buyers/sessionUser.test.ts src/__tests__/lib/buyers/sessionUser.authjs.test.ts src/__tests__/lib/buyers/requireBuyer.test.ts`. Expected: PASS.
 
 - [ ] **Step 5: Commit**
 ```bash
-git add src/lib/buyers/requireBuyer.ts src/lib/api.ts src/__tests__/lib/buyers/requireBuyer.test.ts
+git add src/lib/buyers/sessionUser.ts src/lib/buyers/requireBuyer.ts src/lib/api.ts src/__tests__/lib/buyers/sessionUser.test.ts src/__tests__/lib/buyers/sessionUser.authjs.test.ts src/__tests__/lib/buyers/requireBuyer.test.ts
 git commit -m "feat(auth): requireBuyer — Auth-checked buyer guard; 401 only for real rejections"
 ```
 
@@ -867,7 +1033,7 @@ git commit -m "feat(auth): requireBuyer — Auth-checked buyer guard; 401 only f
 
 **Files:**
 - Create: `src/server/buyers/adminClient.ts`, `src/server/buyers/ensureBuyerProfile.ts`
-- Test: `src/__tests__/server/buyers/ensureBuyerProfile.test.ts`
+- Test: `src/__tests__/server/buyers/ensureBuyerProfile.test.ts`, `src/__tests__/server/buyers/adminClient.test.ts`
 
 Mobile spec 4.1, "No password a buyer didn't set", and 4.5. The function takes an Auth user that the caller's `getUser` has **already accepted**, plus that session's access token.
 
@@ -877,37 +1043,57 @@ export type EnsureResult =
   | { ok: false; status: 403; code: "FORBIDDEN"; reason: "staff" | "unconfirmed" | "not_email_code" }
   | { ok: false; status: 409; code: "DELETION_IN_PROGRESS" }
   | { ok: false; status: 503; code: "SERVER" };
+
+export interface EnsureInput {
+  user: { id: string; email?: string | null; email_confirmed_at?: string | null };
+  accessToken: string;
+}
+export interface EnsureDeps { admin: SupabaseClient<Database> }
+
+export async function ensureBuyerProfile(
+  input: EnsureInput,
+  deps: EnsureDeps = { admin: createTimedAdminClient() },
+): Promise<EnsureResult>;
 ```
 
 Order. Each step's failure is final unless it says otherwise.
 1. `users` row exists → 403 `staff`. A read error → 503.
-2. `email_confirmed_at` is empty → 403 `unconfirmed`.
+2. `email_confirmed_at` is empty, **or the Auth user has no `email`** → 403 `unconfirmed` (so `create_buyer_profile` never gets an empty email).
 3. Profile exists: live → `200` with it, and **nothing else runs**; `deleted_at` set → 409. A read error → 503.
-4. `isEmailCodeSession(accessToken)` is false → 403 `not_email_code`. This runs before the claim, so a password session never holds one.
+4. `isEmailCodeSession(accessToken)` is false, **or `isPasswordSession(accessToken)` is true** → 403 `not_email_code`. A session whose `amr` lists `password` is refused even if it also lists `otp`. This runs before the claim, so a password session never holds one.
 5. `claim_buyer_profile(userId)`:
    - NULL → 503;
    - `'exists'` → re-read the profile and answer as in step 3;
    - a token → continue.
-6. `buyer_profile_claim_held(userId, token)` is false → 503.
-7. `auth.admin.updateUserById(userId, { password: <48 random bytes, base64url> })` returns `{ error }` or throws → release the claim, 503.
-8. `auth.admin.signOut(accessToken, "others")` returns `{ error }` or throws → release the claim, 503.
+6. `buyer_profile_claim_held(userId, token)` is false or returns `{ error }` → release the claim, 503.
+7. `auth.admin.updateUserById(userId, { password: <48 random bytes, base64url> + "aA1!"> })` (68 characters; the fixed suffix has one lowercase, uppercase, digit and symbol, so a hosted policy that demands symbols accepts it) returns `{ error }` or throws → release the claim, 503.
+8. ~~`auth.admin.signOut(accessToken, "others")`~~ **Removed by Task 11a**: the reset in step 7 already ends every session, and the route re-issues the caller's session instead.
 9. `create_buyer_profile(userId, token, email)`:
    - `'created'` → 201 with the new row;
-   - `'existing'` → 200 with the re-read row. If the re-read finds no row, answer 503;
+   - `'existing'` → re-read and answer as in step 3 (live → 200, `deleted_at` set → 409). If the re-read finds no row, answer 503;
    - `'lost'` → 503, and don't release (the claim is no longer ours);
-   - an RPC error (including 23505: the email is on another user's profile, which the `auth.users` uniqueness should make impossible) → release, 503.
+   - an RPC error (including 23505: the email is on another user's profile, which the `auth.users` uniqueness should make impossible) → release, 503;
+   - any other value → release, 503.
+
+RPC calls go through one local helper, `rpc(admin, name, args)`, typed from `Database["public"]["Functions"]`: supabase-js can't infer RPC types from the hand-written `Database` type, so the helper casts once (the rest of the repo casts with `as never` at each call). Failures log only the step name and the error's `code`/`status`/`name`, never a message.
 
 **Every exit after step 5 that isn't 9's `'created'`/`'existing'`/`'lost'` releases the claim with `release_buyer_profile_claim(userId, token)`. Wrap steps 6–9 in `try { … } catch { release; return 503 }`.** Never log the password, the token or the email address.
 
-`src/server/buyers/adminClient.ts`: a service-role client whose `global.fetch` adds `AbortSignal.timeout(5000)`, so every Auth and RPC call stops after 5 s, as the mobile spec requires:
+`src/server/buyers/adminClient.ts`: a service-role client whose `global.fetch` adds `AbortSignal.timeout(5000)`, so every Auth and RPC call stops after 5 s, as the mobile spec requires. A caller's own signal is combined with the timeout (`AbortSignal.any`, Node 22), never allowed to replace it:
 ```ts
 import { createClient } from "@supabase/supabase-js";
 import type { Database } from "@/types/database";
 
-const TIMEOUT_MS = 5_000;
+export const TIMEOUT_MS = 5_000;
 
-const timedFetch: typeof fetch = (input, init) =>
-  fetch(input, { ...init, signal: init?.signal ?? AbortSignal.timeout(TIMEOUT_MS) });
+/** Every request stops after 5 s, even when the caller passes its own signal. */
+export const timedFetch: typeof fetch = (input, init) =>
+  fetch(input, {
+    ...init,
+    signal: init?.signal
+      ? AbortSignal.any([init.signal, AbortSignal.timeout(TIMEOUT_MS)])
+      : AbortSignal.timeout(TIMEOUT_MS),
+  });
 
 /** Service role; every request aborts after 5 s (mobile spec 4.1 step 2). */
 export const createTimedAdminClient = () =>
@@ -921,27 +1107,30 @@ export const createTimedAdminClient = () =>
 
   Inject the admin client: `ensureBuyerProfile(input, deps = { admin: createTimedAdminClient() })`. The tests pass a fake with `from()`, `rpc()` and `auth.admin.{updateUserById, signOut}` as `vi.fn()`s, and record calls in order. Cases:
   - staff → 403 `staff`; no `rpc` or `auth.admin` call;
-  - unconfirmed → 403 `unconfirmed`;
+  - unconfirmed → 403 `unconfirmed`; no email on the Auth user → 403 `unconfirmed`;
   - live profile → 200; **no** `rpc`, `updateUserById` or `signOut` (a web session stays signed in);
   - deleted profile → 409;
   - password session (`amr` `password`), no profile → 403 `not_email_code`, and `claim_buyer_profile` never called;
+  - `amr` `[password, otp]`, no profile → 403 `not_email_code`, no `rpc` call;
   - claim NULL → 503, nothing else called;
   - claim `'exists'` → re-reads and returns 200 with no reset;
-  - held false → 503 and `release` called with **that** token;
+  - held false → 503 and `release` called with **that** token; held returns `{ error }` → 503, release called;
   - `updateUserById` returns `{ error }` → 503, release called, `signOut` not called, `create` not called;
   - `updateUserById` throws (simulate abort) → 503, release called;
   - `signOut` returns `{ error }` → 503, release called, `create` not called;
   - `create` → `'lost'` → 503, release **not** called;
-  - happy path → order is exactly: users read, profile read, `claim_buyer_profile`, `buyer_profile_claim_held`, `updateUserById` (with a password of length ≥ 64 that isn't in the result), `signOut(token, "others")`, `create_buyer_profile` → 201;
+  - happy path → order is exactly: users read, profile read, `claim_buyer_profile`, `buyer_profile_claim_held`, `updateUserById` (with a password of length ≥ 64, holding a lowercase, uppercase, digit and symbol, that isn't in the result), `signOut(token, "others")`, `create_buyer_profile`, profile re-read → 201; the fake's `eq()` records its arguments and both reads filter on `("id", userId)`;
   - `create` → `'existing'` → 200; `'existing'` with no row on re-read → 503;
-  - `create` RPC returns `{ error }` (e.g. 23505) → 503, release called;
+  - `create` RPC returns `{ error }` (e.g. 23505) → 503, release called; `create` returns an unexpected value → 503, release called;
   - nothing in the result, and no `console.*` call, contains the email or the password (spy on `console`).
+
+  `adminClient.test.ts` stubs global `fetch` and `AbortSignal.timeout` and checks that the signal `timedFetch` sends aborts when the 5 s timeout fires, with and without a caller signal, and that a caller's abort still aborts it.
 
 - [ ] **Step 2: Run them and confirm they fail**
 
   Run: `npx vitest run src/__tests__/server/buyers/ensureBuyerProfile.test.ts`. Expected: FAIL.
 
-- [ ] **Step 3: Implement** `src/server/buyers/ensureBuyerProfile.ts` exactly in the order above. Use `crypto.randomBytes(48).toString("base64url")` for the password. Type the RPC calls through `src/types/database.ts`.
+- [ ] **Step 3: Implement** `src/server/buyers/ensureBuyerProfile.ts` exactly in the order above. Use `crypto.randomBytes(48).toString("base64url") + "aA1!"` for the password. Type the RPC calls through `src/types/database.ts`.
 
 - [ ] **Step 4: Run the tests and confirm they pass**
 
@@ -961,22 +1150,27 @@ git commit -m "feat(buyers): ensureBuyerProfile — claim, reset password, end o
 - Create: `src/app/api/account/profile/route.ts`
 - Test: `src/__tests__/api/account/profile.test.ts`
 
-- `GET` → `requireBuyer()` → `200 { email, name, locale }`. Errors pass through unchanged.
+- `GET` → `requireBuyer()`. Its error response passes through unchanged. On success, read `name, locale` from `buyer_profiles` (service-role admin client, `id = buyerId`) and answer `200 { email, name, locale }` (`email` from `requireBuyer`). A read error → 503 `SERVER`; no row (deleted meanwhile) → 401 `UNAUTHENTICATED`.
 - `POST` → the website's `POST /me`:
-  1. Cookie session only. Bearer is for the app's own route in #451.
-  2. `createClient().auth.getSession()`. No session → **401** `UNAUTHENTICATED`. Check this first: with no session, `getUser()` returns `AuthSessionMissingError`, which isn't an `AuthApiError` and would classify as "unavailable" (503).
-  3. `getUser(access_token)` with that exact token. On failure, `classifyAuthError` → 401 or 503. This way the token handed on is the one Auth accepted.
-  4. Call `ensureBuyerProfile({ userId, email: user.email, emailConfirmedAt: user.email_confirmed_at, accessToken })`.
-  5. Map the result: `ok` → its status with `{ email, name, locale }`. `FORBIDDEN` → 403 `FORBIDDEN`, with `reason` as an extra field so the page can show the staff message. 409 → `DELETION_IN_PROGRESS`. 503 → `SERVER`.
-  6. A request body with an `email` key → 422 `VALIDATION` (the mobile spec rule; the website sends no body).
+  1. Cookie session only. Bearer is for the app's own route in #451; a Bearer header is ignored.
+  2. Cross-site refusal (CSRF hardening), before any Auth call: `sec-fetch-site` is `cross-site` or `same-site` → 403 `FORBIDDEN`; an `Origin` header that is present but unparseable (e.g. `null`) or whose host isn't the request's `Host` header → 403 `FORBIDDEN`. No `Origin` and no `sec-fetch-site` (not a browser) → allowed, since the cookie is still required.
+  3. Body checks, before any Auth call: over 4 KB (4096 bytes, by `content-length` when present and by the text's byte length) → 413 `VALIDATION`; a JSON body with an `email` key (any value) → 422 `VALIDATION`; malformed JSON → 422. An empty or absent body is fine.
+  4. `readCookieToken()` from `@/lib/buyers/sessionUser` (Task 5), the same rule as `requireBuyer`: a session that comes back is used; with no session, no error, `AuthSessionMissingError`, `AuthInvalidTokenResponseError` or a 4xx `AuthApiError` other than 429 → **401** `UNAUTHENTICATED`; anything else (a retryable fetch error, `AuthUnknownError`, an `AuthApiError` ≥ 500 or 429, a non-`AuthError`, or a throw) → **503** `SERVER`. This is decided before any `getUser` call.
+  5. `acceptToken(token)` from the same module: `getUser` with that exact token on a bare non-persisting client. `rejected` → 401 (including `AuthSessionMissingError`, auth-js's form of an ended session's 403 `session_not_found`), `unavailable` → 503. This way the token handed on is the one Auth accepted.
+  6. Only then call `ensureBuyerProfile({ user: accepted.user, accessToken: accepted.token })` with the Auth user `getUser` returned (`{ id, email, email_confirmed_at }`) and that token.
+  7. Map the `EnsureResult`: `ok` → its status (200 or 201) with `{ email, name, locale }` from the profile. `FORBIDDEN` → 403 `{ error: { code: "FORBIDDEN", message, reason } }`, `reason` being `staff`, `unconfirmed` or `not_email_code`, so the page can show the staff message. Each reason has its own message: `staff` → "Staff accounts can't use buyer pages."; `unconfirmed` → "Confirm your email with the code we sent, then try again."; `not_email_code` → "Sign in with the code sent to your email." 409 → `DELETION_IN_PROGRESS`. 503 → `SERVER`.
+  8. Logs fixed strings only: never a token or an email.
 
 - [ ] **Step 1: Write the failing tests**
 
-  Mock `@/lib/supabase/server`, `@/lib/buyers/requireBuyer` and `@/server/buyers/ensureBuyerProfile`. Cover each branch above, plus:
-  - no session → 401, and neither `getUser` nor `ensureBuyerProfile` is called;
-  - `ensureBuyerProfile` receives the session's own token and the user's `email_confirmed_at`;
-  - a `getUser` 5xx → 503, and `ensureBuyerProfile` isn't called;
-  - a body `{ "email": "x@y.z" }` → 422, and `ensureBuyerProfile` isn't called.
+  Mock `@/lib/supabase/server`, `@supabase/supabase-js` (`importOriginal`, for the real error classes and a mocked `createClient`), `@/lib/buyers/requireBuyer`, `@/server/buyers/ensureBuyerProfile` and `@/lib/supabase/admin`. Cover each branch above, plus:
+  - each `getSession` outcome (unavailable error → 503, 429 → 503, throw → 503, real rejection → 401, `AuthSessionMissingError` → 401, no session → 401), and in each neither `getUser` nor `ensureBuyerProfile` is called;
+  - cross-site: `sec-fetch-site` `cross-site` and `same-site` → 403, an `Origin` host ≠ `Host` → 403, `Origin: null` → 403, each without calling `getSession`; a same-origin browser request and a request with neither header are allowed;
+  - a body over 4 KB → 413, and a `content-length` over 4 KB → 413, without calling `getSession`; exactly 4 KB is fine;
+  - `ensureBuyerProfile` receives `getUser`'s user and the session's own token;
+  - a `getUser` `AuthSessionMissingError` → 401, a 4xx `AuthApiError` (`user_not_found`) → 401, a 5xx or throw → 503, and `ensureBuyerProfile` isn't called;
+  - a body `{ "email": "x@y.z" }`, `{ "email": null }` or malformed JSON → 422, and neither `getSession` nor `ensureBuyerProfile` is called;
+  - every `EnsureResult` mapping, and a different message for each 403 reason; `GET`'s pass-through, 200 and 503.
 
 - [ ] **Step 2: Run them and confirm they fail**
 
@@ -1004,33 +1198,40 @@ git commit -m "feat(account): web profile route — GET via requireBuyer, POST v
 
 No new dependency. Verify with Node `crypto`, per the Standard Webhooks scheme Supabase uses:
 - headers `webhook-id`, `webhook-timestamp` (Unix seconds) and `webhook-signature` (space-separated `v1,<base64>` entries);
-- signed content is `${id}.${timestamp}.${rawBody}`, HMAC-SHA256, keyed with the base64-decoded secret after stripping a leading `v1,whsec_` or `whsec_`.
+- signed content is `${id}.${timestamp}.${rawBody}`, HMAC-SHA256, keyed with the base64-decoded secret after stripping a leading `v1,` and then `whsec_` (so `v1,whsec_…`, `whsec_…` and bare base64 all work). An empty key is refused: anyone could sign with it.
 
 - [ ] **Step 1: Write the failing tests**
 
   `standardWebhook.test.ts`: sign a body in the test with a known throwaway secret. Cases:
-  - accepts a valid signature;
-  - accepts the secret with and without the `v1,whsec_` prefix;
+  - accepts a valid signature, and a timestamp exactly 300 s away either side;
+  - accepts the secret with `v1,whsec_`, with `whsec_` only, and bare;
   - accepts when one of several entries matches;
-  - rejects a changed body, a wrong secret, a missing header, an entry without `v1,`, a timestamp more than 300 s old or more than 300 s in the future, and a non-numeric timestamp.
+  - rejects a changed body, a wrong secret, an empty secret (even against a signature made with an empty key), a missing header, an entry without `v1,` (or `v2,`, or `v1,` with nothing after), a timestamp more than 300 s old or more than 300 s in the future, and a non-numeric timestamp.
 
   The comparison must use `timingSafeEqual` on equal-length buffers; a length mismatch is false, not an exception.
 
-  `authEmailCopy.test.ts`:
-  - `signup` and `magiclink` produce a subject and HTML containing the 6-digit code, with Myanmar and English text in one email, and **no sign-in link**: no `/auth/v1/verify`, no `token_hash` value, no `redirect_to`. The plain footer link to `EMAIL_FOOTER_URL` is allowed;
-  - `recovery`, `invite` and `reauthentication` produce the staff copy;
-  - `email_change` produces two messages, each with its own code.
+  `authEmailCopy.test.ts`, against `authEmailMessages(payload, supabaseUrl) → Array<{ to, subject, html }> | null`:
+  - `signup` and `magiclink` produce one message to `user.email`, with the 6-digit code in the subject and HTML, Myanmar and English text in one email, and **no sign-in link**: no `/auth/v1/verify`, no `token_hash` value, no `redirect_to`, no `site_url`. The only `href` is the footer link to `EMAIL_FOOTER_URL`;
+  - a code that isn't 6–10 digits, or no `user.email`, → `null`;
+  - `recovery` and `invite` link to `${supabaseUrl}/auth/v1/verify?token=<token_hash>&type=<type>&redirect_to=<encoded>` (HTML-escaped in the `href`), never `site_url`, with different subjects; no `token_hash` or no Supabase URL → `null`;
+  - `reauthentication` shows the code and no link;
+  - `email_change` produces two messages, `token` to `user.email` and `token_new` to `user.new_email`, each with only its own code; a missing code or `new_email` → `null`;
+  - an unlisted type → `null`.
 
-  `send-email.test.ts`: mock `@/lib/email` `sendEmail` and the timed admin client's `rpc("consume_rate_limit")`. Cases:
-  - bad signature → 401 `{ error: { http_code: 401, … } }`, nothing sent, no rate-limit call;
-  - unlisted type (e.g. `password_changed_notification`) → 400, nothing sent;
-  - `signup` within limits → 200 `{}`, one email to `user.email` containing `email_data.token`;
+  `send-email.test.ts`: mock `@/lib/email` `sendEmail` (`importOriginal`, keeping `EMAIL_FOOTER_URL`) and `@/server/buyers/adminClient` so `createTimedAdminClient()` returns `{ rpc }`. Set the env with `vi.stubEnv`. Cases:
+  - `dynamic` is `"force-dynamic"`;
+  - bad signature or stale timestamp → 401 `{ error: { http_code: 401, … } }`, nothing sent, no rate-limit call;
+  - `SUPABASE_SEND_EMAIL_HOOK_SECRET` unset → 503, nothing sent, no rate-limit call;
+  - `RATE_LIMIT_HMAC_SECRET` unset → 503, nothing sent, no rate-limit call;
+  - unlisted type (e.g. `password_changed_notification`) → 400, nothing sent; a body that isn't JSON → 400;
+  - `signup` within limits → 200 `{}`, one email to `user.email` containing `email_data.token`, no verify link;
+  - the rate-limit keys are `authmail:signin:h:<hex>` (3600 s, 5) and `authmail:signin:d:<hex>` (86400 s, 20), and `<hex>` is the HMAC of the trimmed, lowercased address with `RATE_LIMIT_HMAC_SECRET`, **not** the address or its plain SHA-256;
   - hour cap reached (`consume_rate_limit` → false) → 429 `{ error: { http_code: 429 } }`, nothing sent;
-  - the rate-limit key is `authmail:signin:h:<hex>`, and `<hex>` is **not** the email or its plain SHA-256 (it's the HMAC with `RATE_LIMIT_HMAC_SECRET`);
-  - `recovery` counts under `staff`, not `signin`;
-  - `email_change` sends two emails, the current-address code (per the Task 1 finding) to `user.email` and the new-address code to `user.new_email`, with each address counted under its own `email_change` key (3 per day);
+  - RPC error (e.g. 22023), RPC throw (timeout), or `data` that isn't a boolean → 503, nothing sent;
+  - `recovery` counts under `staff`, not `signin`, and its link uses `NEXT_PUBLIC_SUPABASE_URL`;
+  - `email_change` sends two emails, `token` to `user.email` and `token_new` to `user.new_email` (Task 1 finding), with each address counted under its own `authmail:email_change:d:<hex>` key (86400 s, 3); without `token_new` → 400, nothing sent, no rate-limit call;
   - `sendEmail` returns false → 500 `{ error: { http_code: 500 } }`. This never answers success without sending;
-  - no `console.*` call contains the code or the address.
+  - no `console.*` call, on any path, contains a code, a `token_hash` or an address.
 
 - [ ] **Step 2: Run them and confirm they fail**
 
@@ -1054,6 +1255,8 @@ export function verifyStandardWebhook(opts: {
   if (Math.abs(now - Number(timestamp)) > TOLERANCE_S) return false;
 
   const key = Buffer.from(opts.secret.replace(/^v1,/, "").replace(/^whsec_/, ""), "base64");
+  // An empty key is a key anyone can sign with.
+  if (key.length === 0) return false;
   const expected = createHmac("sha256", key).update(`${id}.${timestamp}.${body}`).digest();
 
   return signature.split(" ").some((entry) => {
@@ -1078,6 +1281,10 @@ export const GROUP: Record<AuthEmailType, LimitGroup> = {
   email_change: "email_change",
 };
 
+export function isAuthEmailType(t: unknown): t is AuthEmailType {
+  return typeof t === "string" && Object.prototype.hasOwnProperty.call(GROUP, t);
+}
+
 /** [windowSeconds, limit, label]: mobile spec 4.1. */
 export const CAPS: Record<LimitGroup, Array<[number, number, string]>> = {
   signin: [[3600, 5, "h"], [86400, 20, "d"]],
@@ -1085,28 +1292,33 @@ export const CAPS: Record<LimitGroup, Array<[number, number, string]>> = {
   email_change: [[86400, 3, "d"]],
 };
 
-/** An HMAC, not a plain hash: a hash of an email address can be reversed. */
-export function emailKey(email: string): string {
-  return createHmac("sha256", process.env.RATE_LIMIT_HMAC_SECRET!).update(email.trim().toLowerCase()).digest("hex");
+/** An HMAC, not a plain hash: a hash of an email address can be reversed.
+ *  The caller passes the secret and refuses to run without one. */
+export function emailKey(email: string, secret: string): string {
+  return createHmac("sha256", secret).update(email.trim().toLowerCase()).digest("hex");
 }
 ```
 
-  `src/lib/auth/authEmailCopy.ts`: plain bilingual HTML using `FROM_EMAIL` and `EMAIL_FOOTER_URL` from `src/lib/email.ts`.
-  - Buyer code: subject `KuuNyi sign-in code / KuuNyi ဝင်ရောက်ရန်ကုဒ်: {code}`, a large code, "expires in 10 minutes", and "if you didn't ask for this, ignore this email". **No link.**
-  - Staff types: short copy. Recovery and invite include the verify link `${NEXT_PUBLIC_SUPABASE_URL}/auth/v1/verify?token=${token_hash}&type=${type}&redirect_to=${encodeURIComponent(redirect_to)}`. Use the Supabase URL, **not** `email_data.site_url`, which is the app's site URL. Reauthentication shows the code.
+  `src/lib/auth/authEmailCopy.ts`: `authEmailMessages(payload, supabaseUrl)` returns the messages to send, or `null` when the type isn't listed or the payload lacks what that type needs. Plain bilingual HTML with its own small layout (the one in `src/lib/email.ts` isn't exported) and the footer link to `EMAIL_FOOTER_URL`; the code and the link are HTML-escaped. Codes must match `^\d{6,10}$` (Supabase sends 6).
+  - Buyer code (`signup`, `magiclink`): subject `KuuNyi sign-in code / KuuNyi ဝင်ရောက်ရန်ကုဒ်: {code}`, a large code, "expires in 10 minutes", and "if you didn't ask for this, ignore this email; don't share this code". **No link.**
+  - Staff types: short copy. Recovery and invite include the verify link `${NEXT_PUBLIC_SUPABASE_URL}/auth/v1/verify?token=${token_hash}&type=${type}&redirect_to=${encodeURIComponent(redirect_to)}` (`redirect_to` left off when empty). Use the Supabase URL, **not** `email_data.site_url`, which is the app's site URL. Reauthentication shows the code.
+  - `email_change`: `email_data.token` → `user.email` (current), `email_data.token_new` → `user.new_email` (new), per the Task 1 finding. Both codes and both addresses are required, or `null`.
 
-  Use the same Myanmar wording style as the existing confirmation emails. Mark the new Myanmar strings for native review in the PR.
+  Myanmar wording follows the existing confirmation emails. Mark the new Myanmar strings for native review in the PR.
 
   `src/app/api/internal/auth/send-email/route.ts`:
   1. `export const dynamic = "force-dynamic"`.
   2. Read the body with `await request.text()`.
-  3. Verify the signature with `SUPABASE_SEND_EMAIL_HOOK_SECRET`. On failure → 401.
-  4. Parse the JSON. A type that isn't in `GROUP` → 400; log the type only.
-  5. For each recipient address, run every cap for its group via `rpc("consume_rate_limit", { p_key: \`authmail:${group}:${label}:${emailKey(addr)}\`, p_window_seconds, p_limit })`. Any false → 429. An RPC error → 503.
-  6. Send each message with `sendEmail`. Any false → 500.
-  7. Return `NextResponse.json({})`.
+  3. `SUPABASE_SEND_EMAIL_HOOK_SECRET` unset → 503. Verify the signature with it. On failure → 401.
+  4. `RATE_LIMIT_HMAC_SECRET` unset → 503 (`createHmac` with an undefined key would throw).
+  5. Parse the JSON (not JSON → 400). A type that isn't in `GROUP` → 400; log the type only, cut to `[a-z_]`, 40 chars. `authEmailMessages` → `null` → 400.
+  6. For each message's `to`, run every cap for its group via a typed `consumeRateLimit` wrapper around `admin.rpc("consume_rate_limit", { p_key: \`authmail:${group}:${label}:${emailKey(to, secret)}\`, p_window_seconds, p_limit })` on `createTimedAdminClient()` (supabase-js can't infer RPC types from the hand-written `Database`). Any false → 429. An RPC error, a throw, or `data` that isn't a boolean → 503, never "allowed". All caps are checked before anything is sent.
+  7. Send each message with `sendEmail`. Any false → 500.
+  8. Return `NextResponse.json({})`.
 
-  Errors are `NextResponse.json({ error: { http_code, message } }, { status: http_code })`.
+  Errors are `NextResponse.json({ error: { http_code, message } }, { status: http_code })` with fixed messages. Logs carry the type and fixed strings only.
+
+  `src/middleware.ts` runs on `/api/internal/*` (matcher `/api/:path*`) and needs no change: the path isn't tenant-skipped, but no redirect or 404 applies to it; it doesn't read the body; and with no cookies, `getUser()` returns without a network call. The hook URL must use `www` (the apex 307s, which Auth won't follow).
 
 - [ ] **Step 4: Run the tests and confirm they pass**
 
@@ -1127,23 +1339,25 @@ git commit -m "feat(auth): Send Email Hook — signed, per-email capped, bilingu
 - Modify: `src/middleware.ts` (matcher only)
 - Test: `src/__tests__/account/accountFlow.test.ts`, `src/__tests__/account/AccountSignIn.test.tsx` (static render), `src/__tests__/middleware.test.ts` (extend)
 
-**No new dependency.** The repo has no Testing Library or DOM environment (`vitest.config.ts` runs `node`). Put every decision in a pure reducer, `accountFlow.ts`: `(state, event) => { state, effects }`, where effects are plain descriptions like `{ type: "signOutLocal" }` or `{ type: "postProfile", attempt: 2 }`. Unit-test the reducer. `AccountSignIn.tsx` only runs the effects (Supabase calls, `fetch`) and renders the state. Test it with `react-dom/server` static rendering, as the existing `.test.tsx` files do: each state renders its fields and bilingual text.
+**No new dependency.** The repo has no Testing Library or DOM environment (`vitest.config.ts` runs `node`). Every decision is in a pure reducer, `accountFlow.ts`: `accountReducer(state, event) => { state, effects }`, with `initialAccount()` returning `{ state: { step: "loading" }, effects: [{ type: "loadProfile" }] }`. Effects are plain descriptions: `loadProfile`, `checkSession`, `sendCode { email }`, `verifyCode { email, token }`, `postProfile { attempt, delayMs }` and `signOutLocal`. Events from a step they don't belong to (or while `busy`) are ignored, so a late response can't move the page. Every local sign-out goes through one path: the email step with `busy: true, signingOut: true` until `signedOut` arrives, so a new sign-in can't start and then be cleared by the late sign-out. `AccountSignIn.tsx` (client) only runs the effects (Supabase calls, `fetch`) and feeds the outcome back as events (`profileLoaded`, `sessionChecked`, `codeSent`/`sendFailed`, `codeVerified`/`verifyFailed`, `profilePosted`, `signedOut`); it returns early if the page unmounted during a retry's back-off, before the `fetch`. `readProfileResponse(res)` (exported, never throws) pulls `email` and `error.reason` from a response. It renders the presentational `AccountView({ state, onSubmitEmail, onSubmitCode, onResend, onUseAnotherEmail, onSignOut, onRetryLoad, onRetryProfile })`, exported from the same file. `page.tsx` is a thin server wrapper inside the `(public)` layout, which supplies tenant branding.
 
-States:
-1. **Loading.** On mount, `GET /api/account/profile`:
-   - 200 → state 4;
+States (`step` values in brackets):
+1. **Loading** [`loading`]. On mount, `GET /api/account/profile`:
+   - 200 with an email → state 4;
    - 401 → state 2;
-   - 403 `FORBIDDEN` → the staff message from state 3 (a staff member already signed in on this host), **without** signing out. That session is their admin session; signing it out would log them out of `/admin`;
-   - 503 → "try again".
-2. **Email.** A field (trimmed and lower-cased before sending) and "Send code". The button calls `createClient().auth.signInWithOtp({ email, options: { shouldCreateUser: true } })`. An error whose status is 429 shows "too many codes, try later". On success go to state 3.
-3. **Code.** A 6-digit field, plus "Use another email" and "Resend". Submitting calls `verifyOtp({ email, token, type: "email" })`, then `POST /api/account/profile`:
+   - 403 `FORBIDDEN` → [`staffSession`] (a staff account already signed in on this host), with no form and its own text: "You're signed in as staff on this site. Sign out of the admin, or use another browser, to buy tickets." It then runs `checkSession`: `getSession()`'s access token through `isPasswordSession` (`@/lib/authMethod`), reported as `sessionChecked { kind: "password" | "other" | "none" }`. A password session (their admin session; signing it out would log them out of `/admin`), no session, or a failed read gets **no** button. Only `"other"` (a left-over code session) gets a local "Sign out", which returns to state 2;
+   - 503, a network failure, or anything else → [`loadFailed`] "try again", which reloads.
+2. **Email** [`email`]. A field and "Send code" ("Sending…" while busy). The field is focused when returning here (a pre-filled address or a notice), not on first arrival. The email is trimmed and lower-cased; an obviously malformed one shows a notice without sending. The button calls `createClient().auth.signInWithOtp({ email, options: { shouldCreateUser: true } })`. An error whose status is 429 shows "too many codes, try later"; any other error a generic send failure. On success go to state 3.
+3. **Code** [`code`]. A code field (`inputMode="numeric"`, `autoComplete="one-time-code"`, `autoFocus`, `maxLength={12}` so a pasted "482 913" fits), plus "Use another email" (back to state 2, the address pre-filled, no sign-out: no session exists yet) and "Resend" (`sendCode` to the same email, `resending: true` while busy; 429 → "too many codes"). Before the check, `normalizeCode` maps Myanmar digits U+1040–U+1049 to 0–9 and removes spaces and dashes; anything but 6 digits then shows a notice without a call. The submit button reads "Checking…" while verifying. Submitting calls `verifyOtp({ email, token, type: "email" })`; an error stays in the code step ("wrong or expired", or "too many tries" on 429). On success, `POST /api/account/profile` (no body):
    - 200 or 201 → state 4;
-   - 403 with `reason: "staff"` → sign out locally and show: "This address belongs to a staff account. Use a different email to buy tickets." (design 4.4);
+   - 403 with `reason: "staff"` → sign out locally (`signOut({ scope: "local" })`: the code session this page just made) and show, on the email step: "This address belongs to a staff account. Use a different email to buy tickets." (design 4.4);
    - 403 for another reason → sign out locally, generic error;
-   - 503 → retry the `POST` up to twice with back-off, then "try again".
-4. **Signed in.** Shows the account email and a "Sign out" button, which calls `signOut({ scope: "local" })`.
+   - 409 `DELETION_IN_PROGRESS` → sign out locally, "this account is being deleted";
+   - 401 → sign out locally, "your sign-in expired", the email kept; any other status (413, 422, 500, or a 200/201 without an email) → sign out locally, generic error;
+   - 503 (or a network failure) → retry the `POST` twice, after 1 s and 2 s (`attempt` 1 and 2), then [`profileFailed`]: "Try again" re-posts the profile, "Use another email" signs the code session out locally.
+4. **Signed in** [`signedIn`]. Shows the account email and a "Sign out" button, which calls `signOut({ scope: "local" })` and then returns to state 2.
 
-All text is Myanmar and English, like `/status`. Never put the code in the URL or in logs.
+All text is Myanmar and English, like `/status`; the new Myanmar strings carry a "needs native review" comment. Both forms have `method="post"` (a safeguard against a native GET submit putting input in the URL) and `aria-busy`. The code is read from the form on submit and passed straight to the reducer: it is never in reducer or React state, a URL, a log, or any effect but `verifyCode`. `AccountSignIn.tsx` logs nothing.
 
 - [ ] **Step 1: Write the failing tests**
   - `accountFlow.test.ts`: every transition above, through the reducer. Cover:
@@ -1152,16 +1366,19 @@ All text is Myanmar and English, like `/status`. Never put the code in the URL o
     - the email is trimmed and lower-cased in the `sendCode` effect;
     - a 429 from `sendCode` shows the "too many codes" state;
     - no state or effect ever carries the code except the single `verifyCode` effect.
-  - `AccountSignIn.test.tsx`: split the view into a presentational `AccountView({ state, on… })` that takes the state as a prop; effects don't run under `react-dom/server`. Static-render `AccountView` for each state (email, code, signed in, staff message) and check the expected fields and Myanmar + English text.
+    - also: the 409, 401 (email kept, `expired`) and other-403 paths, `it.each([413, 422, 500])` → generic, a 200 without an email → generic, the 503 retry that succeeds, `retryProfile`, "Use another email" (from the code step: no effect; from `profileFailed`: `signOutLocal`), resend, the wrong-code and 6-digit checks, Myanmar digits and spaces/dashes in the code, `busy` until `signedOut` (no new email meanwhile), and that a late `signedOut` doesn't wipe the staff notice;
+    - the staff screen on load: `checkSession`, then no sign-out for `password` or `none`, a local sign-out for `other`;
+    - one `it.each` table of stale events (a late `profileLoaded`, `codeSent`/`sendFailed` when not busy or while signing out, `profilePosted` when not posting, `useAnotherEmail` while busy, …) → the same state object and no effects.
+  - `AccountSignIn.test.tsx`: the presentational `AccountView({ state, on… })` takes the state as a prop; effects don't run under `react-dom/server`. Static-render `AccountView` for each state (loading, email, code, signed in, staff message after a code, staff session on load, load failed, profile failed, deletion notice) and check the expected fields and Myanmar + English text. Also: the staff-on-load screen's own text, with a Sign out button only when `canSignOut`; the code field is never pre-filled and has `maxlength="12"`; buttons are disabled while busy; `method="post"` and `aria-busy` on both forms; "Sending…"/"Checking…" labels; `autoFocus` on the code field and on the email field only when returning; the source has the native-review comment and no `console.` or code-in-URL. `readProfileResponse` is tested with fake `Response`s (profile, `error.reason`, missing or non-string email, non-JSON and empty bodies).
   - In the reducer test, also check that the state-1 403 produces **no** `signOutLocal` effect, while the state-3 staff 403 does.
   - The page is also listed in the `/account` row of Task 12's staging test, which is the real end-to-end check.
 
   **Note:** `(public)/layout.tsx` also renders `WalkInNotice` (the Sky Festival pop-up), so it appears on `/account` too. Leave it.
-  - `middleware.test.ts`: `config.matcher` includes `/account` and `/account/:path*`. A `GET /account` on a tenant host runs through the session refresh without a redirect: it's not a staff page, so #471's password rule doesn't apply.
+  - `middleware.test.ts`: `config.matcher` includes `/account` and `/account/:path*`. A `GET /account` on a tenant host runs through the session refresh (the Supabase mock counts `getUser()` calls) without a redirect, for a signed-out visitor, an email-code session and a password session alike: it's not a staff page, so #471's password rule doesn't apply. It's also served on a tenant's custom domain. Only the matcher test fails before Step 3: the tests call `middleware()` directly, so the others are guards.
 
 - [ ] **Step 2: Run them and confirm they fail**
 
-  Run: `npx vitest run src/__tests__/account src/__tests__/middleware.test.ts`. Expected: FAIL.
+  Run: `npx vitest run src/__tests__/account src/__tests__/middleware.test.ts`. Expected: FAIL (`AccountSignIn` missing; the matcher test).
 
 - [ ] **Step 3: Implement** the page and add `"/account", "/account/:path*"` to `config.matcher` in `src/middleware.ts`. Change nothing else in middleware.
 
@@ -1180,29 +1397,31 @@ git commit -m "feat(account): email-code sign-in page for buyers"
 ### Task 10: Local Supabase config
 
 **Files:**
-- Modify: `supabase/config.toml`
+- Modify: `supabase/config.toml`, `supabase/.gitignore` (adds `.env`: it was **not** ignored before)
+- Create: `supabase/templates/email-code.html`
 
-- [ ] **Step 1: Set**
+- [x] **Step 1: Set**
   - `[auth.email] enable_confirmations = true`, `otp_length = 6`, `otp_expiry = 600`, `double_confirm_changes = true` (Secure email change).
-  - `[auth.rate_limit] email_sent = 30`, so local testing isn't stopped at 2 per hour.
-  - `[auth.hook.send_email] enabled = false` **committed**, with `uri = "http://host.docker.internal:3005/api/internal/auth/send-email"` and `secrets = "env(SUPABASE_SEND_EMAIL_HOOK_SECRET)"` filled in. A developer turns it on locally when testing the hook. The secret goes in a gitignored `supabase/.env` in `v1,whsec_<base64>` form, and the same value goes in `.env.local`. Never commit it or print it.
-  - Local templates `[auth.email.template.magic_link]` and `[auth.email.template.confirmation]` point to a committed `supabase/templates/email-code.html` that shows `{{ .Token }}`, so the hook-off path also sends a code and not a link.
-  - If Task 3 Step 7 ran: `[auth.hook.before_user_created] enabled = true`, `uri = "pg-functions://postgres/public/hook_before_user_created"`.
+  - `[auth.rate_limit] email_sent = 30`, so local testing isn't stopped at 2 per hour. Locally this has no effect: without real SMTP the CLI sets `GOTRUE_RATE_LIMIT_EMAIL_SENT=360000` whatever it says (noted in a config comment).
+  - `[auth.hook.send_email]` with `uri = "http://host.docker.internal:3005/api/internal/auth/send-email"` and `secrets = "env(SUPABASE_SEND_EMAIL_HOOK_SECRET)"`, committed **commented out** with a note on how to turn it on. Task 1 found that while the block is present, `supabase stop`, `start` and `status` all fail if the variable is unset, even with `enabled = false`. A developer uncomments it locally to test the hook. The secret goes in a gitignored `supabase/.env` in `v1,whsec_<base64>` form, and the same value goes in `.env.local`; `RATE_LIMIT_HMAC_SECRET` goes in `.env.local` too. Never commit it or print it.
+  - No Before User Created hook line (finding B).
+  - Local templates `[auth.email.template.magic_link]` and `[auth.email.template.confirmation]` (subject `KuuNyi sign-in code / KuuNyi ဝင်ရောက်ရန်ကုဒ်`) point to a committed `supabase/templates/email-code.html`: a bilingual page with the `buyerCodeEmail` copy from `authEmailCopy.ts` that shows `{{ .Token }}` and no link, so the hook-off path also sends a code. The CLI serves them through Kong (`GOTRUE_MAILER_TEMPLATES_*=http://supabase_kong_EduEnroll:8088/email/...`).
 
-- [ ] **Step 2: Restart the local stack and sign in end to end**
+- [x] **Step 2: Restart the local stack and sign in end to end** (done 2026-11-21, local stack only, GoTrue v2.192.0, CLI 2.109.1)
 
-  `npx supabase stop && npx supabase start`, then `npm run dev`.
-  1. **Hook off** (the committed config): open `http://localhost:3005/account?tenant=brave` and sign in with a new `@example.test` address, reading the code in the local mail catcher. Confirm a `buyer_profiles` row exists.
-  Before Step 1, confirm `supabase start` accepts `secrets = "env(SUPABASE_SEND_EMAIL_HOOK_SECRET)"` while the hook is disabled and the variable is unset. If it doesn't, comment the line out in the committed config.
+  `npx supabase stop && npx supabase start` both exit 0 with the committed config and no hook secret set. The auth container shows `GOTRUE_MAILER_AUTOCONFIRM=false`, `GOTRUE_MAILER_OTP_LENGTH=6`, `GOTRUE_MAILER_OTP_EXP=600`, `GOTRUE_MAILER_SECURE_EMAIL_CHANGE_ENABLED=true`, and no `GOTRUE_HOOK_SEND_EMAIL_*`. The worktree's gitignored `.env.local` was written from `supabase status -o json` (local URL, anon and service-role keys, `NEXT_PUBLIC_DEV_TENANT=brave`); then `npx next dev -p 3005`.
+  1. **Hook off**, by script, not a browser: `@supabase/ssr` `createServerClient` with an in-memory cookie jar ran `signInWithOtp` for a new `@example.test` address. Mailpit got one email, subject as above, exactly one 6-digit code, no `href`, Myanmar text present. `verifyOtp(type: "email")` gave a session with `amr` `["otp"]` and set the real `sb-*-auth-token` cookie, which was sent to `POST http://localhost:3005/api/account/profile` (the route itself, no Origin header). A second `signInWithOtp` for the same, now-existing address (the `magic_link` template) also mailed one code and no link.
+     **Result: the route answered 503 `SERVER` and no `buyer_profiles` row was made.** The server logged `[ensureBuyerProfile] sign out others failed 400`. Cause, reproduced on its own: step 7's `admin.updateUserById(id, { password })` **deletes every `auth.sessions` row for the user** on this GoTrue, so step 8's `admin.signOut(accessToken, "others")` finds no session (`AuthSessionMissingError`, GoTrue logs "session id … doesn't exist", 403 `session_not_found`) and the buyer's own session is gone too (a following `GET /api/account/profile` was 401). `signOut(jwt, "others")` without the password update works, which is all Task 1 tested. **Every first buyer sign-in fails this way until `ensureBuyerProfile` is fixed** (for example, skip step 7 when the user has no password, or reorder so the caller's session survives); that is outside this task.
+  2. **Hook on**: not run in this task.
+  3. Staff password sign-in: the owner made by step 4 signed in with `signInWithPassword` (`amr` `["password"]`, email confirmed). The `/login` page to `/admin/dashboard` was not driven in a browser.
+  4. `POST /api/saas/register` answered 201 with confirmations on, making the tenant, an `owner` `users` row and a confirmed auth user.
 
-  2. **Hook on** (local only; put `RATE_LIMIT_HMAC_SECRET` in `.env.local` too, or `createHmac` throws first and you test the wrong failure): confirm the hook route receives the request and verifies its signature. With `RESEND_API_KEY` unset locally, `sendEmail` returns false and the hook answers 500. Sign-in then fails with an error, which is the correct "never answer success without sending" behaviour. Record what you saw. Real delivery is tested on staging (Task 12).
-  3. Confirm a staff password sign-in at `/login?tenant=brave` still reaches `/admin/dashboard`.
-  4. Confirm `/register` still creates a tenant. It creates its owner with the service role, so confirmations being on must not block it; if it does, stop and report.
+  Throwaway users and the tenant were deleted afterwards; the dev server was stopped.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit** (`833d688`)
 ```bash
-git add supabase/config.toml supabase/templates/email-code.html
-git status --short supabase/   # supabase/.env must NOT appear; add it to .gitignore if it does
+git add supabase/config.toml supabase/templates/email-code.html supabase/.gitignore
+git status --short supabase/   # supabase/.env must NOT appear
 git commit -m "chore(supabase): local email confirmations, 10-minute codes, Send Email Hook settings"
 ```
 
@@ -1220,6 +1439,67 @@ git commit -m "chore(supabase): local email confirmations, 10-minute codes, Send
 git add docs/superpowers/specs/2026-11-20-account-bound-tickets-design.md
 git commit -m "docs(spec): email change follows the mobile spec (secure change + sync trigger)"
 ```
+
+---
+
+### Task 11a: First sign-in keeps a working session (blocks Task 12 and Part B)
+
+Task 10 Step 2 found that step 7 of `ensureBuyerProfile` (`updateUserById({ password })`) deletes
+**every** session of the user on this GoTrue, so the caller's own session dies and every first
+sign-in answers 503. The reset can't be dropped: it is what removes a pre-registered password
+(and, in Part B, a password a Google sign-in may link to).
+
+**Files:** modify `src/server/buyers/ensureBuyerProfile.ts` (step 8 removed; `EnsureResult`'s 201
+case gains `reissue: { hashedToken }`), `src/app/api/account/profile/route.ts`,
+`src/app/(public)/account/accountFlow.ts` and `AccountSignIn.tsx` (a 201 with
+`reason: "sign_in_again"`, and later Task 15's `notice=sign_in_again`, go to the email step with
+"Your account is ready — sign in once more", the email pre-filled); tests beside each.
+
+- [x] **Step 1: Spike (local stack, shape-only output).** After `updateUserById({ password })`,
+  re-issue a session for the same user **without sending any email**: `admin.generateLink({ type:
+  "magiclink", email })` → `properties.hashed_token` → `verifyOtp({ token_hash, type: "magiclink" })`
+  on the route's cookie client. Record: does `generateLink` call the Send Email Hook or send mail
+  (it must not); the new session's `amr`; that the old session is gone and the new one passes
+  `requireBuyer`. If `generateLink` sends anything, stop and report. **If the re-issued `amr` is
+  not `otp`** (for example `magiclink`), record it in the findings as a value every later buyer
+  check must accept as an ordinary buyer session (Plans 3–4, #451), and add it to design
+  section 4.1's `amr` sentence.
+
+  **Done 2026-11-22** (local stack, GoTrue as in Task 10), hook off and again with the Send Email
+  Hook on (a shape-only capture server): after the reset the user had 0 sessions and the old token
+  got `AuthSessionMissingError`; `generateLink({ type: "magiclink" })` returned a `hashed_token`
+  (`verification_type` `magiclink`), sent **no** email and made **no** hook call; `verifyOtp({
+  token_hash, type })` with `magiclink` and with `email` both gave a session for the same user,
+  `amr` **`["otp"]`**, with a `session_id`, accepted by `getUser`, refreshable. So the re-issued
+  session is an ordinary email-code session; nothing later needs a new `amr` value.
+- [x] **Step 2: Change the order:** step 8 (`signOut(accessToken, "others")`) is removed (the reset
+  already ended every session); after step 7, `ensureBuyerProfile` returns a `reissue` handle
+  (`{ hashedToken }`, never logged) with the 201, and the **route** completes the `verifyOtp` on its
+  cookie client, so the browser gets the new session cookie in the same response. A failed re-issue
+  answers 201 with `reason: "sign_in_again"`, and the page goes to the email step with "Your account
+  is ready — sign in once more".
+- [x] **Step 3: Tests:** the order with the re-issue; `hashedToken` absent from logs and the JSON
+  body; the route sets the cookie; the `sign_in_again` path; the existing step-8 tests rewritten.
+- [x] **Step 4:** `npx vitest run src/__tests__/server/buyers src/__tests__/api/account` → PASS, then
+  repeat Task 10 Step 2's end-to-end run: a new buyer's first `POST /api/account/profile` gives 201
+  and a following `GET` gives 200.
+
+  **Done 2026-11-22.** Built as: `ensureBuyerProfile` returns `reissue: { hashedToken } | null` on
+  any success after its reset (201 `created`, and 200 `existing` too, since the reset ended that
+  caller's session as well); the route verifies it with `verifyOtp({ token_hash, type: "email" })`
+  on the cookie client and never puts it in the body or a log; a null handle or a failed verify
+  answers the same status with `reason: "sign_in_again"`, which the page turns into a local
+  sign-out and the new `accountReady` notice on the email step. Unit runs: 187 passed in those
+  folders; full `npm test` 3611 passed, `tsc` 0, lint 0. End to end on the local stack and a local
+  dev server: `GET` before the profile 401; first `POST` **201** with a new session cookie and body
+  keys `email, locale, name` only; `GET` after **200**; the old access token rejected; 1 session
+  and 1 profile row for the user; 1 email to the buyer (the sign-in code); a second `POST` 200 with
+  no cookie change. No server errors logged. `npm run test:db` and `npm run build` not run here;
+  Task 12 runs them.
+- [x] **Step 5: Commit** `fix(buyers): first sign-in re-issues the session the password reset ends`.
+
+The mobile app's `POST /me` (#451) needs the same re-issue, returned as tokens instead of a cookie;
+note it on kuunyi-app #311.
 
 ---
 
@@ -1278,15 +1558,161 @@ npm run build; echo BUILD=$?    # no dev server running from this folder
 
 ---
 
+# Part B — Google sign-in on the website (owner decision 2026-11-22)
+
+Design section 4.1, "Ways in". Start only after Part A's PR has merged into `dev`, in a fresh
+worktree off `origin/dev` on branch `feat/buyer-google`. **Task 11a must be merged first:**
+Google sign-ins go through `ensureBuyerProfile`, whose password reset ends every session; the
+callback relies on 11a's re-issue.
+
+### Task 13: Spike 2 — Google behaviour
+
+**Files:** none committed; findings go in the "Findings (Part B)" table at the end of this file.
+
+- [ ] **Step 1:** *(removed 2026-11-22 with the backup phone: no phone spike.)*
+- [ ] **Step 2 (dev project, owner-assisted): Google.** Needs owner steps G1–G3 of Task 19 on the
+  **dev** project only, with `http://localhost:3005/auth/callback` also on its Redirect URLs for the
+  spike (removed afterwards). PKCE is finished by a throwaway page in the scratchpad (a local
+  Next.js route or a tiny server on port 3005 calling `exchangeCodeForSession`), not committed; or
+  build Task 15 first and use its callback. The owner signs in with a test Google account in the browser (never enter a
+  Google password yourself). Record for each case the auth user id equality, `identities[].provider`,
+  `amr`, `email_confirmed_at`, and whether `encrypted_password` is set (as a boolean, via SQL shown to
+  the owner first):
+  1. a new address;
+  2. an address that already has an email-code buyer (same user id expected);
+  3. an address with only an unconfirmed `signUp({ email, password })` (does the password survive
+     the link?);
+  4. a staff address (Google session must still get 403 on `/admin` APIs).
+  Delete the test users afterwards (SQL shown to the owner first).
+- [ ] **Step 3:** fill in the Part B findings table. If case 2 or case 3 does not end on one linked
+  user (a second user, or a refusal), stop and revisit the design: it assumes automatic linking.
+
+---
+
+### Task 14: `ensureBuyerProfile` accepts Google sessions
+
+**Files:**
+- Modify: `src/lib/authMethod.ts`, `src/server/buyers/ensureBuyerProfile.ts`
+- Test: `src/__tests__/lib/authMethod.test.ts`, `src/__tests__/server/buyers/ensureBuyerProfile.test.ts`
+
+Step 4 of `ensureBuyerProfile` becomes `canCreateProfile(accessToken)`: `amr` lists `otp` (email
+code) or the Google method found in Task 13 (`oauth` expected), and never `password`. The reason code
+stays `not_email_code` (the app contract). There is no SMS sign-in, so `otp` always means an email
+code. Everything after step 4 (claim, password reset, the
+Task 11a re-issue, create) is unchanged, so a Google sign-in on an address with a pre-registered
+password still loses that password, and the callback (Task 15) gets the re-issued session.
+
+- [ ] **Step 1: Write the failing tests:** `canCreateProfile` for `["otp"]`, `["oauth"]` (or the
+  Task 13 value) → true; `["password"]`, `["password","oauth"]`, `[]`, a malformed token → false.
+  `ensureBuyerProfile`: a Google session with no profile goes through the full happy-path order and
+  returns 201 with the re-issue handle; `["password","oauth"]` → 403 `not_email_code` with no RPC
+  call. **Staff gates:** `isPasswordSession` and the existing `requireAuth` / `requireOwner` /
+  `requireSuperadmin` / middleware tests refuse `["oauth"]` and `["otp"]`.
+- [ ] **Step 2:** `npx vitest run src/__tests__/lib/authMethod.test.ts src/__tests__/server/buyers` → FAIL.
+- [ ] **Step 3: Implement.** Keep `isEmailCodeSession` for its other callers.
+- [ ] **Step 4:** same command → PASS.
+- [ ] **Step 5: Commit** `feat(buyers): Google sessions can create a buyer profile`.
+
+---
+
+### Task 15: "Continue with Google" on `/account`
+
+**Files:**
+- Create: `src/app/auth/callback/route.ts`, `src/lib/auth/safeNext.ts`, `src/lib/inAppBrowser.ts`
+- Modify: `src/app/(public)/account/accountFlow.ts`, `AccountSignIn.tsx`, `src/middleware.ts` (matcher: `/auth/callback`), `supabase/config.toml` (`[auth.external.google]` block committed **commented out**, like the hook block, because an unset `env()` breaks `supabase start`)
+- Test: `src/__tests__/auth/callback.test.ts`, `src/__tests__/lib/safeNext.test.ts`, `src/__tests__/lib/inAppBrowser.test.ts`, the account tests
+
+Flow:
+1. The email step shows "Continue with Google" above the email field, unless `isInAppBrowser`.
+   Click → effect `startGoogle { next: "/account" }` → the client runs
+   `signInWithOAuth({ provider: "google", options: { redirectTo: `${location.origin}/auth/callback?next=/account` } })`
+   (PKCE; `@supabase/ssr` keeps the verifier in a cookie on this host).
+2. `GET /auth/callback?code=…&next=…`:
+   - `next` passes `safeNext()`: a relative path starting with a single `/`, no `//`, no `\`, no
+     scheme, no control characters; anything else becomes `/account` (no open redirect);
+   - `exchangeCodeForSession(code)` with the server client; an error or no `code` → redirect
+     `/account?notice=google_failed`;
+   - `getUser()`, then `ensureBuyerProfile({ user, accessToken })`:
+     - 200 → redirect `next`;
+     - 201 → complete the Task 11a re-issue on this response's cookies, redirect `next`; a failed
+       re-issue → `/account?notice=sign_in_again`;
+     - 403 `staff` → `signOut({ scope: "local" })`, redirect `/account?notice=staff`;
+     - 403 other → sign out locally, `/account?notice=google_failed`;
+     - 409 → sign out locally, `/account?notice=deleting`;
+     - 503 → keep the session, redirect `/account?notice=retry_profile`.
+   - Never log the code, tokens or the email. Responses are `303` with `Cache-Control: no-store`.
+3. `/account` maps `notice` on load: `staff`, `deleting`, `google_failed` show the existing
+   messages on the email step; `retry_profile` goes to the profile-posting state (the existing
+   503 retry path). The page then removes `notice` from the URL with `history.replaceState`.
+4. In an in-app browser the email step shows, instead of the Google button: "Google sign-in doesn't
+   work inside this app. Open this page in Chrome or Safari, or use an email code." and a
+   "Copy link" button. `isInAppBrowser(ua)` matches `FBAN`, `FBAV`, `FB_IAB`, `Instagram`,
+   `Messenger`, `Line/`, `Viber`, `MicroMessenger` and Android WebView (`; wv)`); a table test
+   covers each plus Chrome, Safari, Samsung Internet and Firefox as false.
+
+- [ ] **Step 1: Write the failing tests:** `safeNext` table (`/account` ok; `//evil.example`,
+  `/\evil`, `https://evil.example`, `javascript:…`, `%2F%2Fevil`, empty → `/account`); the callback
+  route with the Supabase client and `ensureBuyerProfile` mocked: every branch above, the redirect
+  target, `no-store`, no `console.*` containing the code; reducer: `googleClicked` → `startGoogle`,
+  ignored while busy; each `notice` value; view: the button present on a normal UA and absent with the
+  in-app text on a Messenger UA; middleware matcher includes `/auth/callback`.
+- [ ] **Step 2:** `npx vitest run src/__tests__/auth src/__tests__/lib src/__tests__/account src/__tests__/middleware.test.ts` → FAIL.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4:** same command → PASS.
+- [ ] **Step 5: Commit** `feat(account): Continue with Google, in-app browser fallback`.
+
+---
+
+### Tasks 16–18: removed (owner decision 2026-11-22)
+
+The phone sign-up refusal, the Send SMS Hook and the backup phone on `/account` were dropped with the
+backup phone (design section 4.1, option (d)). The numbers are kept so references stay stable.
+
+---
+
+### Task 19: Part B verification, PR and owner steps
+
+- [ ] **Step 1:** the five commands of Task 12 Step 1, every exit code 0.
+- [ ] **Step 2:** Codex review as in Task 12 Step 2.
+- [ ] **Step 3:** PR into `dev`: `feat: buyer accounts part B — Google sign-in on the website`,
+  with the Part B findings and the owner steps below, each **Required**. Never merge it yourself.
+- [ ] **Step 4: Owner steps, in order** (dev project first; staging reads it):
+  - G1. Google Cloud: an OAuth client (Web), consent screen in production status, authorised
+    redirect URI `https://fnfvwzwrdsnmwxunciti.supabase.co/auth/v1/callback`.
+  - G2. Dev Supabase → Auth → Providers → Google: client id and secret (set in the dashboard, never
+    pasted into chat or a commit).
+  - G3. Dev Supabase → Auth → URL configuration → Redirect URLs: the staging hosts' `/auth/callback`
+    (each tenant subdomain pattern and each custom domain used on staging).
+  - G4. Merge to `dev`, promote to `staging`.
+  - T1. Staging test: Google sign-in on a normal browser lands on the same account as the email
+    code; the Google button is hidden in Messenger's browser; a staff email signed in with Google
+    gets 403 on `/admin`.
+  - Production: nothing while the release freeze holds. Later: G1–G3 against the production
+    project, with each custom domain on its Redirect URLs.
+
+---
+
+## Findings (Part B, filled in by Task 13)
+
+| Question | Result | Consequence |
+|---|---|---|
+| Google, new address: `amr`, confirmed? | | Task 14 |
+| Google on an existing email-code buyer: same user id? | | **stop if not** |
+| Google on an unconfirmed password sign-up: one linked user? password kept? | | **stop if not linked**; reset covers a kept password |
+| Google on a staff address: admin refused? | | design 4.4 |
+
+---
+
 ## Findings (filled in by Task 1)
 
 | Question | Result | Consequence |
 |---|---|---|
-| `amr` of a first-ever email-code session | | must be `otp` |
-| Is there any separate "email codes" switch, or does the Email provider alone allow `signInWithOtp`? | | gate wording |
-| Does the project-wide `email_sent` limit still apply with the Send Email Hook on? | | if yes, owner raises it (Task 12 step 7.5) |
-| Action type for a new email / an existing email | | `signup` / `magiclink` expected |
-| Types for reset, invite, email change | | |
-| Which `email_change` code goes to which address | | Task 8 routing |
-| Before User Created: can a public password sign-up be told apart? | | (A) build the hook / (B) skip |
-| `auth.admin.signOut(jwt, "others")` ends the other session and keeps this one | | must be yes |
+| `amr` of a first-ever email-code session | `["otp"]`, for a new and an existing email; the token has a `session_id` claim; the user is email-confirmed after `verifyOtp` | `isEmailCodeSession` rule holds |
+| Is there any separate "email codes" switch, or does the Email provider alone allow `signInWithOtp`? | No switch: `signInWithOtp` + `verifyOtp` worked with only the Email provider on | gate wording stands: the Send Email Hook is the switch |
+| Does the project-wide `email_sent` limit still apply with the Send Email Hook on? | **Can't be tested locally**: the CLI sets `GOTRUE_RATE_LIMIT_EMAIL_SENT=360000` whatever `email_sent` says (the setting needs real SMTP) | owner checks the dev project's limit (Task 12 step 7.5) |
+| Action type for a new email / an existing email | `signup` / `magiclink`, each with a 6-digit `email_data.token` | Task 8 groups as planned |
+| Types for reset, invite, email change | `recovery`, `invite`, `email_change` (6-digit codes); every request carries `webhook-signature` | as planned |
+| Which `email_change` code goes to which address | `email_data.token` → the **current** address (`user.email`); `email_data.token_new` → the **new** address (`user.new_email`). Verified: both `verifyOtp(type: "email_change")` calls succeed only with that pairing, and the email changes | Task 8 routing |
+| Before User Created: can a public password sign-up be told apart? | **No (B).** Its event has the same keys and values as an email-code sign-up; no password field is sent. `admin.createUser` doesn't fire the hook at all; `inviteUserByEmail` does | **skip Task 3 Step 7 and the hook line in Task 10**; `ensureBuyerProfile`'s reset covers it (mobile spec 4.1 allows this) |
+| `auth.admin.signOut(jwt, "others")` ends the other session and keeps this one | Yes: the other session's refresh fails, the caller's still works | step 8 of `ensureBuyerProfile` as planned |
+| Local config gotcha | With `[auth.hook.send_email]` present, `supabase stop`/`start`/`status` all **fail** if its `env()` secret is unset, even when the hook is disabled | Task 10: keep the whole `[auth.hook.send_email]` block **commented out** in the committed config, with instructions to uncomment |
