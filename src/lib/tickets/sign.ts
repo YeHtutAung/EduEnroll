@@ -11,13 +11,29 @@ export interface TicketClaims {
   exp: number;
 }
 
-export function signTicketJwt(claims: TicketClaims): string {
+function signPayload(payload: object): string {
   const { privateKey, kid } = loadSigningKey();
   const header = b64u(Buffer.from(JSON.stringify({ alg: "EdDSA", kid })));
-  const payload = b64u(Buffer.from(JSON.stringify(claims)));
-  const data = Buffer.from(`${header}.${payload}`);
+  const body = b64u(Buffer.from(JSON.stringify(payload)));
+  const data = Buffer.from(`${header}.${body}`);
   const sig = edSign(null, data, privateKey); // Ed25519: algorithm arg is null
-  return `${header}.${payload}.${b64u(sig)}`;
+  return `${header}.${body}.${b64u(sig)}`;
+}
+
+export function signTicketJwt(claims: TicketClaims): string {
+  return signPayload(claims);
+}
+
+export interface BoundTicketClaims extends TicketClaims {
+  typ: "bound";
+  /** The device's raw P-256 public key, base64url (87 chars). */
+  dk: string;
+}
+
+/** Design 6.1: the token a bound phone keeps. Same key and format as a plain ticket token. */
+export function signBoundTicket(claims: TicketClaims, dk: string): string {
+  const payload: BoundTicketClaims = { ...claims, typ: "bound", dk };
+  return signPayload(payload);
 }
 
 // Verifies signature only — does NOT check exp/kid. Callers (scan endpoint) enforce exp/tenant via the DB.
