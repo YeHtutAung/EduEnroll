@@ -1,10 +1,14 @@
 import { describe, it, expect } from "vitest";
 import {
   accountReducer,
+  bootOnce,
+  hrefWithoutNotice,
   initialAccount,
   MAX_PROFILE_RETRIES,
   normalizeCode,
+  noticeFromSearch,
   type AccountEvent,
+  type Notice,
   type AccountState,
   type Transition,
 } from "@/app/(public)/account/accountFlow";
@@ -434,5 +438,139 @@ describe("accountFlow — stale events change nothing", () => {
     const t = accountReducer(state, event);
     expect(t.state).toBe(state);
     expect(t.effects).toEqual([]);
+  });
+});
+
+// ─── Continue with Google (buyer accounts plan, Task 15) ────────────────────
+describe("accountFlow — Continue with Google", () => {
+  it("googleClicked on the email step → busy, startGoogle back to /account", () => {
+    const t = accountReducer(emailState, { type: "googleClicked" });
+    expect(t.state).toEqual({ step: "email", email: "", busy: true, notice: null, google: true });
+    expect(t.effects).toEqual([{ type: "startGoogle", next: "/account" }]);
+  });
+
+  it("googleClicked clears an old notice and keeps a typed address", () => {
+    const t = accountReducer({ step: "email", email: "a@b.co", busy: false, notice: "staff" }, { type: "googleClicked" });
+    expect(t.state).toMatchObject({ email: "a@b.co", notice: null, busy: true });
+  });
+
+  it.each<[string, AccountState]>([
+    ["while sending a code", { step: "email", email: "a@b.co", busy: true, notice: null }],
+    ["while signing out", { step: "email", email: "", busy: true, notice: null, signingOut: true }],
+    ["while already opening Google", { step: "email", email: "", busy: true, notice: null, google: true }],
+    ["on the code step", codeState],
+    ["when signed in", { step: "signedIn", email: "a@b.co", busy: false }],
+    ["while loading", { step: "loading" }],
+  ])("googleClicked is ignored %s", (_n, state) => {
+    const t = accountReducer(state, { type: "googleClicked" });
+    expect(t.state).toBe(state);
+    expect(t.effects).toEqual([]);
+  });
+
+  it("a failed start → back to idle with the google_failed notice", () => {
+    const [, t] = run(emailState, { type: "googleClicked" }, { type: "googleFailed" });
+    expect(t.state).toEqual({ step: "email", email: "", busy: false, notice: "googleFailed" });
+    expect(t.effects).toEqual([]);
+  });
+
+  it("coming back from Google (back button) → idle again, no notice", () => {
+    const [, t] = run(emailState, { type: "googleClicked" }, { type: "googleReturned" });
+    expect(t.state).toEqual({ step: "email", email: "", busy: false, notice: null });
+  });
+
+  it("a code result can't land while Google is opening", () => {
+    const opening: AccountState = { step: "email", email: "a@b.co", busy: true, notice: null, google: true };
+    for (const e of [{ type: "codeSent" }, { type: "sendFailed", status: 429 }] as AccountEvent[]) {
+      expect(accountReducer(opening, e).state).toBe(opening);
+    }
+  });
+
+  it.each<[string, AccountState]>([
+    ["idle email step", emailState],
+    ["sending a code", { step: "email", email: "a@b.co", busy: true, notice: null }],
+    ["code step", codeState],
+  ])("googleFailed / googleReturned are ignored on the %s", (_n, state) => {
+    expect(accountReducer(state, { type: "googleFailed" }).state).toBe(state);
+    expect(accountReducer(state, { type: "googleReturned" }).state).toBe(state);
+  });
+});
+
+describe("accountFlow — ?notice= from /auth/callback", () => {
+  it.each<[string, Notice]>([
+    ["staff", "staff"],
+    ["deleting", "deletion"],
+    ["google_failed", "googleFailed"],
+  ])("%s → the email step with its notice, no profile load", (raw, notice) => {
+    expect(initialAccount(raw)).toEqual({
+      state: { step: "email", email: "", busy: false, notice },
+      effects: [],
+    });
+  });
+
+  it("sign_in_again → clears the dead local session, then 'account ready'", () => {
+    const t = initialAccount("sign_in_again");
+    expect(t).toEqual({
+      state: { step: "email", email: "", busy: true, notice: "accountReady", signingOut: true },
+      effects: [{ type: "signOutLocal" }],
+    });
+    expect(accountReducer(t.state, { type: "signedOut" }).state).toEqual({
+      step: "email",
+      email: "",
+      busy: false,
+      notice: "accountReady",
+    });
+  });
+
+  it("retry_profile → the profile POST, on the existing 503 retry path", () => {
+    const t = initialAccount("retry_profile");
+    expect(t.state).toEqual({ step: "profileFailed", email: "", busy: true });
+    expect(t.effects).toEqual([{ type: "postProfile", attempt: 0, delayMs: 0 }]);
+    // Success signs in with the server's email.
+    const ok = accountReducer(t.state, { type: "profilePosted", status: 201, attempt: 0, email: "g@b.co" });
+    expect(ok.state).toEqual({ step: "signedIn", email: "g@b.co", busy: false });
+    // A 503 backs off and retries like a code sign-in.
+    const again = accountReducer(t.state, { type: "profilePosted", status: 503, attempt: 0 });
+    expect(again.effects).toEqual([{ type: "postProfile", attempt: 1, delayMs: 1000 }]);
+    const gaveUp = accountReducer(t.state, { type: "profilePosted", status: 503, attempt: MAX_PROFILE_RETRIES });
+    expect(gaveUp.state).toEqual({ step: "profileFailed", email: "", busy: false });
+  });
+
+  it.each([[null], [undefined], [""], ["bogus"], ["STAFF"], ["accountReady"], ["__proto__"]])(
+    "%s is ignored: the normal profile load",
+    (raw) => {
+      expect(initialAccount(raw)).toEqual(initialAccount());
+    },
+  );
+
+  it("noticeFromSearch reads only the notice parameter", () => {
+    expect(noticeFromSearch("?notice=staff")).toBe("staff");
+    expect(noticeFromSearch("?x=1&notice=google_failed")).toBe("google_failed");
+    expect(noticeFromSearch("")).toBeNull();
+    expect(noticeFromSearch("?x=1")).toBeNull();
+  });
+
+  it("hrefWithoutNotice drops notice and keeps everything else", () => {
+    expect(hrefWithoutNotice("https://t.kuunyi.com/account?notice=staff")).toBe("https://t.kuunyi.com/account");
+    expect(hrefWithoutNotice("https://t.kuunyi.com/account?a=1&notice=staff#h")).toBe(
+      "https://t.kuunyi.com/account?a=1#h",
+    );
+    expect(hrefWithoutNotice("https://t.kuunyi.com/account?a=1")).toBe("https://t.kuunyi.com/account?a=1");
+  });
+});
+
+// A dev StrictMode remount runs the mount effect twice; the first transition's
+// effects (a profile POST, a sign-out) must still run only once per page.
+describe("accountFlow — bootOnce", () => {
+  it("hands out the first transition once, then nothing", () => {
+    const boot = { started: false };
+    const first = initialAccount("retry_profile");
+    expect(bootOnce(boot, first)).toBe(first);
+    expect(bootOnce(boot, initialAccount("retry_profile"))).toBeNull();
+    expect(bootOnce(boot, initialAccount())).toBeNull();
+  });
+
+  it("each page gets its own boot", () => {
+    expect(bootOnce({ started: false }, initialAccount("sign_in_again"))?.effects).toEqual([{ type: "signOutLocal" }]);
+    expect(bootOnce({ started: false }, initialAccount("sign_in_again"))?.effects).toEqual([{ type: "signOutLocal" }]);
   });
 });

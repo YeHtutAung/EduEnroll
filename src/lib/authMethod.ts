@@ -47,3 +47,18 @@ export function tokenClaim(accessToken: string | null | undefined, name: string)
 export function isEmailCodeSession(accessToken: string | null | undefined): boolean {
   return sessionAuthMethods(accessToken).includes("otp");
 }
+
+/**
+ * Sign-in methods that may create a buyer profile: an email code (`otp`) or
+ * Google (`oauth`, to be confirmed on the dev project by plan Task 13). An
+ * allow list, so any other or new method fails closed, and a session that also
+ * lists a password is always refused. There is no SMS sign-in, so `otp` always
+ * means an email code.
+ */
+const PROFILE_CREATING_METHODS = new Set(["otp", "oauth"]);
+
+export function canCreateProfile(accessToken: string | null | undefined): boolean {
+  const methods = sessionAuthMethods(accessToken);
+  if (methods.includes("password")) return false;
+  return methods.some((m) => PROFILE_CREATING_METHODS.has(m));
+}

@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
 import { requireBuyer } from "@/lib/buyers/requireBuyer";
 import { acceptToken, readCookieToken } from "@/lib/buyers/sessionUser";
 import { buyerError } from "@/lib/buyers/errors";
 import { ensureBuyerProfile, type EnsureResult } from "@/server/buyers/ensureBuyerProfile";
+import { settleReissue } from "@/server/buyers/reissueSession";
 
 // ─── /api/account/profile: the website's buyer profile ──────────────────────
 //
@@ -94,21 +94,6 @@ function isCrossSite(request: Request): boolean {
   return !host || originHost.toLowerCase() !== host.toLowerCase();
 }
 
-/** Turn the re-issue hash into this browser's new session. Never throws. */
-async function reissueSession(hashedToken: string): Promise<boolean> {
-  try {
-    const { data, error } = await createClient().auth.verifyOtp({ token_hash: hashedToken, type: "email" });
-    if (error || !data?.session) {
-      console.error("[account/profile] session re-issue failed");
-      return false;
-    }
-    return true;
-  } catch {
-    console.error("[account/profile] session re-issue failed");
-    return false;
-  }
-}
-
 async function mapResult(result: EnsureResult): Promise<NextResponse> {
   if (result.ok) {
     const { email, name, locale } = result.profile;
@@ -117,10 +102,7 @@ async function mapResult(result: EnsureResult): Promise<NextResponse> {
       name,
       locale,
     };
-    if (result.reissue !== undefined) {
-      const reissued = result.reissue !== null && (await reissueSession(result.reissue.hashedToken));
-      if (!reissued) body.reason = "sign_in_again";
-    }
+    if (!(await settleReissue(result.reissue, "account/profile"))) body.reason = "sign_in_again";
     return NextResponse.json(body, { status: result.status });
   }
   switch (result.code) {
