@@ -273,5 +273,7 @@ export const config = {
     "/api/:path*",
     "/enroll/:path*",
     "/status",
+    "/account",
+    "/account/:path*",
   ],
 };

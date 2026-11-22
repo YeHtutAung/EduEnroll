@@ -9,12 +9,16 @@ import { middleware } from "@/middleware";
 const authState = vi.hoisted(() => ({
   user: null as null | { id: string },
   accessToken: null as string | null,
+  getUserCalls: 0,
 }));
 
 vi.mock("@supabase/ssr", () => ({
   createServerClient: () => ({
     auth: {
-      getUser: async () => ({ data: { user: authState.user } }),
+      getUser: async () => {
+        authState.getUserCalls += 1;
+        return { data: { user: authState.user } };
+      },
       getSession: async () => ({
         data: { session: authState.accessToken ? { access_token: authState.accessToken } : null },
       }),
@@ -46,6 +50,7 @@ afterEach(() => {
   for (const k of ENV_KEYS) restoreEnv(k);
   authState.user = null;
   authState.accessToken = null;
+  authState.getUserCalls = 0;
 });
 
 // ─── Host-aware request factory — REQUIRED, do not inline NextRequest ────────
@@ -516,5 +521,51 @@ describe("middleware — staff pages need a password session", () => {
     signIn("otp");
     const res = await devGet("/onboarding");
     expect(location(res)).toContain("/login");
+  });
+});
+
+// ─── /account: buyer sign-in page (buyer accounts plan, Task 9) ─────────────
+// In the matcher so the Supabase session cookie is refreshed there. It is not a
+// staff page, so the password rule above must not redirect anyone from it.
+describe("middleware — /account", () => {
+  function sessionToken(method: string): string {
+    const enc = (v: unknown) => Buffer.from(JSON.stringify(v)).toString("base64url");
+    return `${enc({ alg: "HS256" })}.${enc({ sub: "u1", amr: [{ method, timestamp: 1 }] })}.sig`;
+  }
+
+  it("is in config.matcher, with its subpaths", async () => {
+    const { config } = await import("@/middleware");
+    expect(config.matcher).toContain("/account");
+    expect(config.matcher).toContain("/account/:path*");
+  });
+
+  it("refreshes the session for a signed-out visitor on a tenant host, without a redirect", async () => {
+    const res = await get("https://nihon-moment.kuunyi.com/account");
+    expect(authState.getUserCalls).toBe(1);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+    expect(slug(res)).toBe("nihon-moment");
+  });
+
+  it("does not redirect a buyer signed in with an email code", async () => {
+    authState.user = { id: "u1" };
+    authState.accessToken = sessionToken("otp");
+    const res = await get("https://nihon-moment.kuunyi.com/account");
+    expect(authState.getUserCalls).toBe(1);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("does not redirect a staff password session either", async () => {
+    authState.user = { id: "u1" };
+    authState.accessToken = sessionToken("password");
+    const res = await get("https://nihon-moment.kuunyi.com/account");
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("serves /account on a tenant's custom domain", async () => {
+    const res = await get("https://flashtic.com/account");
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.status).not.toBe(404);
+    expect(slug(res)).toBe("flashtic");
   });
 });

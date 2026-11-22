@@ -22,30 +22,41 @@ interface SendEmailParams {
   subject: string;
   html: string;
   attachments?: EmailAttachment[];
+  /** Aborts the Resend request (the SDK spreads its options into fetch). */
+  signal?: AbortSignal;
 }
 
-export async function sendEmail({ to, subject, html, attachments }: SendEmailParams): Promise<boolean> {
+/**
+ * Logs fixed fields only. Resend writes the error message itself and it may
+ * repeat the recipient address, so never log the message or the object.
+ */
+export async function sendEmail({ to, subject, html, attachments, signal }: SendEmailParams): Promise<boolean> {
   if (!process.env.RESEND_API_KEY) {
     console.warn("[email] RESEND_API_KEY not set — skipping email send.");
     return false;
   }
 
   try {
-    const { error } = await getResend().emails.send({
-      from: FROM_EMAIL,
-      to,
-      subject,
-      html,
-      attachments,
-    });
+    const { error } = await getResend().emails.send(
+      {
+        from: FROM_EMAIL,
+        to,
+        subject,
+        html,
+        attachments,
+      },
+      // PostOptions doesn't declare signal, but Resend spreads the options
+      // into its fetch() init, so it reaches fetch.
+      (signal ? { signal } : {}) as Parameters<ReturnType<typeof getResend>["emails"]["send"]>[1],
+    );
 
     if (error) {
-      console.error("[email] Resend error:", error);
+      console.error("[email] Resend error:", String(error.name), Number(error.statusCode) || null);
       return false;
     }
     return true;
   } catch (err) {
-    console.error("[email] Send failed:", err);
+    console.error("[email] Send failed:", err instanceof Error ? err.name : "unknown");
     return false;
   }
 }

@@ -179,7 +179,10 @@ password_requirements = ""
 
 [auth.rate_limit]
 # Number of emails that can be sent per hour. Requires auth.email.smtp to be enabled.
-email_sent = 2
+# Raised from 2 so buyer sign-in can be tested repeatedly. Note: without real
+# SMTP the CLI forces GOTRUE_RATE_LIMIT_EMAIL_SENT=360000 whatever this says,
+# so locally it has no effect; it documents the intended value.
+email_sent = 30
 # Number of SMS messages that can be sent per hour. Requires auth.sms to be enabled.
 sms_sent = 30
 # Number of anonymous sign-ins that can be made per hour per IP address. Requires enable_anonymous_sign_ins = true.
@@ -206,7 +209,7 @@ enable_signup = true
 # addresses. If disabled, only the new email is required to confirm.
 double_confirm_changes = true
 # If enabled, users need to confirm their email address before signing in.
-enable_confirmations = false
+enable_confirmations = true
 # If enabled, users will need to reauthenticate or have logged in recently to change their password.
 secure_password_change = false
 # Controls the minimum amount of time that must pass before sending another signup confirmation or password reset email.
@@ -214,7 +217,8 @@ max_frequency = "1s"
 # Number of characters used in the email OTP.
 otp_length = 6
 # Number of seconds before the email OTP expires (defaults to 1 hour).
-otp_expiry = 3600
+# Buyer sign-in codes last 10 minutes.
+otp_expiry = 600
 
 # Use a production-ready SMTP server
 # [auth.email.smtp]
@@ -230,6 +234,17 @@ otp_expiry = 3600
 # [auth.email.template.invite]
 # subject = "You have been invited"
 # content_path = "./supabase/templates/invite.html"
+
+# Buyer sign-in sends a 6-digit code, never a link. With the Send Email Hook
+# off (the committed default), GoTrue renders these templates itself, so a
+# new email (confirmation) and an existing email (magic_link) both get a code.
+[auth.email.template.magic_link]
+subject = "KuuNyi sign-in code / KuuNyi ဝင်ရောက်ရန်ကုဒ်"
+content_path = "./supabase/templates/email-code.html"
+
+[auth.email.template.confirmation]
+subject = "KuuNyi sign-in code / KuuNyi ဝင်ရောက်ရန်ကုဒ်"
+content_path = "./supabase/templates/email-code.html"
 
 # Uncomment to customize notification email template
 # [auth.email.notification.password_changed]
@@ -262,6 +277,22 @@ max_frequency = "5s"
 # [auth.hook.before_user_created]
 # enabled = true
 # uri = "pg-functions://postgres/auth/before-user-created-hook"
+
+# Send Email Hook: GoTrue posts each auth email to the app, which sends it via
+# Resend (src/app/api/internal/auth/send-email). Kept commented out because
+# while this block is present, `supabase stop`, `start` and `status` all fail
+# if the env() secret below is unset, even with enabled = false.
+# To test the hook locally:
+#   1. Uncomment the block (don't commit that change).
+#   2. Put SUPABASE_SEND_EMAIL_HOOK_SECRET="v1,whsec_<base64>" in a gitignored
+#      supabase/.env, and the same value in .env.local.
+#   3. Put RATE_LIMIT_HMAC_SECRET in .env.local too, or the route throws first.
+#   4. `npx supabase stop && npx supabase start`, then run the app on port 3005.
+# Never commit or print the secret.
+# [auth.hook.send_email]
+# enabled = true
+# uri = "http://host.docker.internal:3005/api/internal/auth/send-email"
+# secrets = "env(SUPABASE_SEND_EMAIL_HOOK_SECRET)"
 
 # This hook runs before a token is issued and allows you to add additional claims based on the authentication method used.
 # [auth.hook.custom_access_token]
