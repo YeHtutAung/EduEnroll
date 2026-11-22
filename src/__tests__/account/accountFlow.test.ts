@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   accountReducer,
+  bootOnce,
   hrefWithoutNotice,
   initialAccount,
   MAX_PROFILE_RETRIES,
@@ -554,5 +555,22 @@ describe("accountFlow — ?notice= from /auth/callback", () => {
       "https://t.kuunyi.com/account?a=1#h",
     );
     expect(hrefWithoutNotice("https://t.kuunyi.com/account?a=1")).toBe("https://t.kuunyi.com/account?a=1");
+  });
+});
+
+// A dev StrictMode remount runs the mount effect twice; the first transition's
+// effects (a profile POST, a sign-out) must still run only once per page.
+describe("accountFlow — bootOnce", () => {
+  it("hands out the first transition once, then nothing", () => {
+    const boot = { started: false };
+    const first = initialAccount("retry_profile");
+    expect(bootOnce(boot, first)).toBe(first);
+    expect(bootOnce(boot, initialAccount("retry_profile"))).toBeNull();
+    expect(bootOnce(boot, initialAccount())).toBeNull();
+  });
+
+  it("each page gets its own boot", () => {
+    expect(bootOnce({ started: false }, initialAccount("sign_in_again"))?.effects).toEqual([{ type: "signOutLocal" }]);
+    expect(bootOnce({ started: false }, initialAccount("sign_in_again"))?.effects).toEqual([{ type: "signOutLocal" }]);
   });
 });

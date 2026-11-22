@@ -122,6 +122,17 @@ export function initialAccount(urlNotice?: string | null): Transition {
   }
 }
 
+/**
+ * The page's first transition, handed out once per page (`boot` is the
+ * component's ref). A dev StrictMode remount runs the mount effect again and
+ * gets null, so a profile POST or a sign-out never starts twice.
+ */
+export function bootOnce(boot: { started: boolean }, first: Transition): Transition | null {
+  if (boot.started) return null;
+  boot.started = true;
+  return first;
+}
+
 /** `?notice=` from a location.search string, or null. */
 export function noticeFromSearch(search: string): string | null {
   return new URLSearchParams(search).get("notice");

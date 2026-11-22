@@ -3,7 +3,13 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AccountView, readProfileResponse } from "@/app/(public)/account/AccountSignIn";
-import type { AccountState } from "@/app/(public)/account/accountFlow";
+import {
+  accountReducer,
+  initialAccount,
+  MAX_PROFILE_RETRIES,
+  type AccountEvent,
+  type AccountState,
+} from "@/app/(public)/account/accountFlow";
 import { isInAppBrowser } from "@/lib/inAppBrowser";
 
 // Effects don't run under react-dom/server, so the presentational view is
@@ -299,5 +305,52 @@ describe("AccountView — Continue with Google", () => {
     ] as AccountState[]) {
       expect(render(state)).not.toContain("Continue with Google");
     }
+  });
+});
+
+// A Google buyer on ?notice=retry_profile starts with no address (email "").
+// No screen reachable from there may show a blank address.
+describe("AccountView — retry_profile never shows a blank address", () => {
+  const start = initialAccount("retry_profile").state;
+  const posted = (status: number, attempt = 0, extra: Partial<AccountEvent> = {}) =>
+    ({ type: "profilePosted", status, attempt, ...extra }) as AccountEvent;
+  const after = (...events: AccountEvent[]) => {
+    let state = start;
+    for (const e of events) state = accountReducer(state, e).state;
+    return state;
+  };
+  const exhausted = after(posted(503, MAX_PROFILE_RETRIES));
+
+  const reachable: [string, AccountState][] = [
+    ["posting", start],
+    ["a retry in flight", after(posted(503, 0))],
+    ["retries ran out", exhausted],
+    ["Try again after running out", accountReducer(exhausted, { type: "retryProfile" }).state],
+    ["Use another email after running out", accountReducer(exhausted, { type: "useAnotherEmail" }).state],
+    ["signed out after Use another email", after(posted(503, MAX_PROFILE_RETRIES), { type: "useAnotherEmail" }, { type: "signedOut" })],
+    ["a 401", after(posted(401))],
+    ["a 403", after(posted(403, 0, { reason: "staff" }))],
+    ["a 409", after(posted(409))],
+    ["a 200 without an email", after(posted(200))],
+    ["sign_in_again", after(posted(201, 0, { email: "g@b.co", reason: "sign_in_again" }))],
+  ];
+
+  it.each(reachable)("%s", (_name, state) => {
+    if (state.step === "signedIn" || state.step === "code") expect(state.email).not.toBe("");
+    const html = render(state);
+    // An address is only ever shown in <strong> (code step) or the signed-in
+    // line; neither may be empty, and no "sent to" / "signed in as" line may
+    // stand without one.
+    expect(html).not.toMatch(/<strong[^>]*><\/strong>/);
+    expect(html).not.toMatch(/<p[^>]*break-all[^>]*><\/p>/);
+    // An email step with an empty field is the ordinary first-arrival screen,
+    // not a blank address: it shows no "sent to" text.
+    if (state.step === "email") expect(html).not.toContain("We sent a 6-digit code to");
+  });
+
+  it("success signs in with the server's address", () => {
+    const state = after(posted(201, 0, { email: "g@b.co" }));
+    expect(state).toEqual({ step: "signedIn", email: "g@b.co", busy: false });
+    expect(render(state)).toContain("g@b.co");
   });
 });

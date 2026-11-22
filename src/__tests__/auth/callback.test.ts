@@ -11,6 +11,16 @@ const cookieClient = {
 };
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => cookieClient }));
 
+// The route's own fallback cookie clearing goes through next/headers cookies().
+// getAll() here is what the route-handler cookie store holds: the request's
+// cookies plus those the exchange just set.
+const cookieJar = {
+  names: [] as string[],
+  getAll: vi.fn(() => cookieJar.names.map((name) => ({ name, value: "v" }))),
+  set: vi.fn(),
+};
+vi.mock("next/headers", () => ({ cookies: () => cookieJar }));
+
 const acceptToken = vi.fn();
 vi.mock("@/lib/buyers/sessionUser", () => ({ acceptToken: (...a: unknown[]) => acceptToken(...a) }));
 
@@ -65,6 +75,14 @@ beforeEach(() => {
   cookieClient.auth.verifyOtp.mockResolvedValue({ data: { session: { access_token: "new" } }, error: null });
   acceptToken.mockResolvedValue({ kind: "ok", user: USER, token: ACCESS });
   ensureBuyerProfile.mockResolvedValue({ ok: true, status: 200, profile: PROFILE });
+  cookieJar.names = [
+    "sb-abcref-auth-token",
+    "sb-abcref-auth-token.0",
+    "sb-abcref-auth-token.1",
+    "sb-abcref-auth-token-code-verifier",
+    "x-tenant-slug",
+    "sb-abcref-auth-tokenish",
+  ];
 });
 
 afterEach(() => {
@@ -228,5 +246,92 @@ describe("no open redirect", () => {
   it("error redirects also stay on the request's origin", async () => {
     const res = await GET(req("", { "x-forwarded-host": "evil.example" }));
     expectRedirect(res, "/account?notice=google_failed");
+  });
+});
+
+// ─── A sign-out that fails must still clear the session cookies ─────────────
+// signOut({ scope: "local" }) calls /logout first; on a network error or a 5xx
+// it RETURNS { error } without removing the session, so the 303 would carry
+// the fresh Google session. The route then deletes the auth cookies itself.
+describe("sign-out fallback", () => {
+  const AUTH_COOKIES = ["sb-abcref-auth-token", "sb-abcref-auth-token.0", "sb-abcref-auth-token.1"];
+
+  const branches: [string, () => void, string][] = [
+    ["rejected token", () => acceptToken.mockResolvedValue({ kind: "rejected" }), "/account?notice=google_failed"],
+    [
+      "403 staff",
+      () => ensureBuyerProfile.mockResolvedValue({ ok: false, status: 403, code: "FORBIDDEN", reason: "staff" }),
+      "/account?notice=staff",
+    ],
+    [
+      "403 unconfirmed",
+      () => ensureBuyerProfile.mockResolvedValue({ ok: false, status: 403, code: "FORBIDDEN", reason: "unconfirmed" }),
+      "/account?notice=google_failed",
+    ],
+    [
+      "409",
+      () => ensureBuyerProfile.mockResolvedValue({ ok: false, status: 409, code: "DELETION_IN_PROGRESS" }),
+      "/account?notice=deleting",
+    ],
+    [
+      "failed re-issue",
+      () => ensureBuyerProfile.mockResolvedValue({ ok: true, status: 201, profile: PROFILE, reissue: null }),
+      "/account?notice=sign_in_again",
+    ],
+  ];
+
+  function deleted(): string[] {
+    return cookieJar.set.mock.calls
+      .filter(([, value, options]) => value === "" && (options as { maxAge?: number })?.maxAge === 0)
+      .map(([name]) => name as string);
+  }
+
+  function expectAuthCookiesDeleted() {
+    expect(deleted().sort()).toEqual([...AUTH_COOKIES].sort());
+    for (const call of cookieJar.set.mock.calls) {
+      expect(call[2]).toMatchObject({ path: "/", maxAge: 0 });
+    }
+  }
+
+  describe.each(branches)("%s", (_name, arrange, target) => {
+    it("signOut resolving { error } → the auth cookies are deleted on the response", async () => {
+      arrange();
+      cookieClient.auth.signOut.mockResolvedValue({ error: { status: 503, name: "AuthRetryableFetchError" } });
+      expectRedirect(await GET(req(withCode())), target);
+      expect(cookieClient.auth.signOut).toHaveBeenCalledWith({ scope: "local" });
+      expectAuthCookiesDeleted();
+    });
+
+    it("signOut throwing → the auth cookies are deleted on the response", async () => {
+      arrange();
+      cookieClient.auth.signOut.mockRejectedValue(new Error("network"));
+      expectRedirect(await GET(req(withCode())), target);
+      expectAuthCookiesDeleted();
+    });
+
+    it("a clean signOut leaves the cookies to supabase-js", async () => {
+      arrange();
+      expectRedirect(await GET(req(withCode())), target);
+      expect(cookieJar.set).not.toHaveBeenCalled();
+    });
+  });
+
+  it("never touches the code verifier or unrelated cookies", async () => {
+    acceptToken.mockResolvedValue({ kind: "rejected" });
+    cookieClient.auth.signOut.mockResolvedValue({ error: { status: 500 } });
+    await GET(req(withCode()));
+    const names = cookieJar.set.mock.calls.map(([n]) => n);
+    expect(names).not.toContain("sb-abcref-auth-token-code-verifier");
+    expect(names).not.toContain("x-tenant-slug");
+    expect(names).not.toContain("sb-abcref-auth-tokenish");
+  });
+
+  it("a cookie store that throws still redirects", async () => {
+    acceptToken.mockResolvedValue({ kind: "rejected" });
+    cookieClient.auth.signOut.mockResolvedValue({ error: { status: 500 } });
+    cookieJar.getAll.mockImplementationOnce(() => {
+      throw new Error("store");
+    });
+    expectRedirect(await GET(req(withCode())), "/account?notice=google_failed");
   });
 });

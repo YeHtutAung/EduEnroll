@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { acceptToken } from "@/lib/buyers/sessionUser";
 import { safeNext, DEFAULT_NEXT } from "@/lib/auth/safeNext";
@@ -44,12 +45,47 @@ const withNotice = (request: Request, notice: Notice) => redirect(request, `${DE
 
 type Client = ReturnType<typeof createClient>;
 
-/** Drop this browser's session cookies. Never throws. */
-async function signOutLocal(supabase: Client): Promise<void> {
+/**
+ * @supabase/ssr's session cookie, `sb-<project ref>-auth-token`, and its
+ * chunks `.0`, `.1`, … Not the `-code-verifier` cookie.
+ */
+const AUTH_COOKIE = /^sb-[^.]+-auth-token(\.\d+)?$/;
+
+/**
+ * Delete the session cookies directly. cookies() in a route handler holds the
+ * request's cookies plus those set during this request (the exchange's new
+ * session), and Next copies these deletions onto the redirect. Never throws.
+ */
+function clearAuthCookies(): void {
   try {
-    await supabase.auth.signOut({ scope: "local" });
+    const store = cookies();
+    for (const { name } of store.getAll()) {
+      if (AUTH_COOKIE.test(name)) store.set(name, "", { path: "/", maxAge: 0 });
+    }
   } catch {
-    console.error(`[${LOG}] local sign-out failed`);
+    console.error(`[${LOG}] auth cookie clearing failed`);
+  }
+}
+
+/**
+ * Drop this browser's session cookies. Never throws.
+ *
+ * signOut({ scope: "local" }) calls /logout first, and on a network error or
+ * a 5xx it RETURNS { error } without removing the local session, which would
+ * leave the fresh Google session on the redirect. So on an error, returned or
+ * thrown, the cookies are deleted here.
+ */
+async function signOutLocal(supabase: Client): Promise<void> {
+  let failed: boolean;
+  try {
+    const { error } = await supabase.auth.signOut({ scope: "local" });
+    failed = error != null;
+  } catch {
+    failed = true;
+  }
+  if (failed) {
+    console.error(`[${LOG}] local sign-out failed; clearing auth cookies`);
+    clearAuthCookies();
   }
 }
 

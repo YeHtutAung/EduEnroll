@@ -6,6 +6,7 @@ import { isPasswordSession } from "@/lib/authMethod";
 import { isInAppBrowser } from "@/lib/inAppBrowser";
 import {
   accountReducer,
+  bootOnce,
   hrefWithoutNotice,
   initialAccount,
   noticeFromSearch,
@@ -466,8 +467,8 @@ export default function AccountSignIn() {
   // the real first transition, since it needs location's ?notice=.
   const stateRef = useRef<AccountState>(initialAccount().state);
   const [state, setState] = useState<AccountState>(stateRef.current);
-  /** ?notice= as first read (undefined: not read yet), kept across a dev double mount. */
-  const urlNotice = useRef<string | null | undefined>(undefined);
+  /** The first transition has run (kept across a dev StrictMode remount). */
+  const boot = useRef({ started: false });
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
   const mounted = useRef(true);
   const [inAppBrowser, setInAppBrowser] = useState(false);
@@ -587,16 +588,20 @@ export default function AccountSignIn() {
 
     // /auth/callback's ?notice= picks the first screen, then leaves the URL so
     // a reload or a shared link doesn't show it again.
-    if (urlNotice.current === undefined) {
-      urlNotice.current = noticeFromSearch(window.location.search);
-      if (urlNotice.current !== null) {
+    // Once per page: a remount must not re-read the (now removed) notice, nor
+    // start a second profile POST or sign-out.
+    if (!boot.current.started) {
+      const notice = noticeFromSearch(window.location.search);
+      if (notice !== null) {
         window.history.replaceState(window.history.state, "", hrefWithoutNotice(window.location.href));
       }
+      const first = bootOnce(boot.current, initialAccount(notice));
+      if (first) {
+        stateRef.current = first.state;
+        setState(first.state);
+        for (const effect of first.effects) void runRef.current(effect);
+      }
     }
-    const first = initialAccount(urlNotice.current);
-    stateRef.current = first.state;
-    setState(first.state);
-    for (const effect of first.effects) void runRef.current(effect);
 
     // Back from Google's page via the back/forward cache: the page is restored
     // still waiting on the redirect, so unlock it.
