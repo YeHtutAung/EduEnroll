@@ -120,6 +120,15 @@ describe("GET", () => {
     profileRead = { data: null, error: null };
     await expectError(await GET(), 401, "UNAUTHENTICATED");
   });
+
+  // Per-buyer (it carries buyerId): never cached, on success or error.
+  it("sets Cache-Control: no-store on 200, on its own errors and on requireBuyer's", async () => {
+    expect((await GET()).headers.get("cache-control")).toBe("no-store");
+    profileRead = { data: null, error: { code: "57014" } };
+    expect((await GET()).headers.get("cache-control")).toBe("no-store");
+    requireBuyer.mockResolvedValue(NextResponse.json({ error: { code: "UNAUTHENTICATED" } }, { status: 401 }));
+    expect((await GET()).headers.get("cache-control")).toBe("no-store");
+  });
 });
 
 describe("POST — cookie session", () => {

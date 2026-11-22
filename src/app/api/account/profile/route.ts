@@ -29,7 +29,14 @@ export const dynamic = "force-dynamic";
 const unauthenticated = () => buyerError(401, "UNAUTHENTICATED", "Sign in required.");
 const authUnavailable = () => buyerError(503, "SERVER", "Sign-in service unavailable. Try again.");
 
+// The answer is per buyer (it carries buyerId): never cached, errors included.
 export async function GET(): Promise<NextResponse> {
+  const res = await readProfile();
+  res.headers.set("Cache-Control", "no-store");
+  return res;
+}
+
+async function readProfile(): Promise<NextResponse> {
   const ctx = await requireBuyer();
   if (ctx instanceof NextResponse) return ctx;
 

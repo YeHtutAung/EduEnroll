@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import type { AccountTicket } from "@/app/api/me/tickets/route";
-import { clearToken, deviceKey, k2Text, loadToken, saveToken, type StoredToken } from "@/lib/tickets/deviceKey";
+import { clearToken, deviceKey, k2TextAt, loadToken, saveToken } from "@/lib/tickets/deviceKey";
+import { K2_PERIOD_SECONDS, qrSlot, qrTs, secondsLeftAt } from "@/lib/tickets/liveClock";
+import { canFallBack, decide, profileStep, type BindOutcome } from "./liveTicketFlow";
 import {
   Card,
   Inline,
@@ -63,15 +65,14 @@ const COPY = {
     mm: "QR ကုဒ်သည် ၁၅ စက္ကန့်တိုင်း ပြောင်းသောကြောင့် screenshot ဖြင့် ဝင်၍ မရပါ။",
   },
   homeScreen: {
-    en: "Add to Home Screen so this ticket stays on your phone.",
-    mm: "ဤလက်မှတ် သင့်ဖုန်းတွင် ဆက်ရှိနေစေရန် Home Screen သို့ ထည့်ပါ။",
+    en: "Add to Home Screen so this ticket stays on your phone. If you opened this link in Facebook or Messenger, open this page in Safari first.",
+    // needs native review
+    mm: "ဤလက်မှတ် သင့်ဖုန်းတွင် ဆက်ရှိနေစေရန် Home Screen သို့ ထည့်ပါ။ Facebook သို့မဟုတ် Messenger ထဲတွင် ဖွင့်ထားပါက ဤစာမျက်နှာကို Safari တွင် ဦးစွာ ဖွင့်ပါ။",
   },
   ticket: { en: "Ticket", mm: "လက်မှတ်" },
   signedInAs: { en: "Signed in as", mm: "ဝင်ရောက်ထားသော အကောင့်" },
   allTickets: { en: "All my tickets", mm: "လက်မှတ်များ အားလုံး" },
 } satisfies Record<string, Bilingual>;
-
-const PERIOD_SECONDS = 15;
 
 export type LiveTicketState =
   | { kind: "loading" }
@@ -107,10 +108,8 @@ export function shouldShowHomeScreenHint(nav: {
   return ios && nav.standalone !== true;
 }
 
-/** Seconds until the next 15-s boundary of server time, 1..15. */
-export function secondsLeftAt(serverNowSeconds: number): number {
-  return PERIOD_SECONDS - (Math.floor(serverNowSeconds) % PERIOD_SECONDS);
-}
+/** Re-exported for the view tests; defined in liveClock.ts. */
+export { secondsLeftAt };
 
 function Message({ copy, tone = "gray" }: { copy: Bilingual; tone?: "gray" | "red" }) {
   const cls = tone === "red" ? "text-red-800" : "text-gray-700";
@@ -241,10 +240,14 @@ export function LiveTicketView(props: LiveTicketViewProps) {
 }
 
 // ─── Effect runner ──────────────────────────────────────────────────────────
+// Thin: every decision is in liveTicketFlow.ts, the time maths in liveClock.ts.
 
 interface Session {
   pair: CryptoKeyPair;
-  stored: StoredToken;
+  token: string;
+  jti: string;
+  /** Server time = performance.now()/1000 + perfOffset: monotonic for the page's life. */
+  perfOffset: number;
 }
 
 type Loaded =
@@ -253,6 +256,8 @@ type Loaded =
 
 const fetchJson = (url: string, init?: RequestInit) =>
   fetch(url, { cache: "no-store", credentials: "same-origin", ...init });
+
+const perfSeconds = () => performance.now() / 1000;
 
 async function loadDetails(ticketId: string): Promise<AccountTicket | null> {
   try {
@@ -264,28 +269,35 @@ async function loadDetails(ticketId: string): Promise<AccountTicket | null> {
   }
 }
 
-type BindResult =
-  | { kind: "ok"; token: string; jti: string; serverTime: number }
-  | { kind: "signedOut" | "notFound" | "failed" };
-
-async function bind(ticketId: string, publicKey: string): Promise<BindResult> {
+/** POST the key; t0/t1 bracket this request alone, so a slow list call can't skew the offset. */
+async function bind(ticketId: string, publicKey: string): Promise<BindOutcome> {
+  const t0 = perfSeconds();
+  let res: Response;
   try {
-    const res = await fetchJson(`/api/me/tickets/${encodeURIComponent(ticketId)}/device`, {
+    res = await fetchJson(`/api/me/tickets/${encodeURIComponent(ticketId)}/device`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ publicKey }),
     });
-    if (res.status === 401) return { kind: "signedOut" };
-    if (res.status === 404) return { kind: "notFound" };
-    if (!res.ok) return { kind: "failed" };
-    const b = (await res.json()) as { token?: unknown; jti?: unknown; serverTime?: unknown };
-    if (typeof b.token !== "string" || typeof b.jti !== "string" || typeof b.serverTime !== "number") {
-      return { kind: "failed" };
-    }
-    if (!Number.isFinite(b.serverTime)) return { kind: "failed" };
-    return { kind: "ok", token: b.token, jti: b.jti, serverTime: b.serverTime };
   } catch {
-    return { kind: "failed" };
+    return { kind: "network" };
+  }
+  const t1 = perfSeconds();
+  const wallAtT1 = Date.now() / 1000;
+  if (!res.ok) return { kind: "status", status: res.status };
+  try {
+    const b = (await res.json()) as { token?: unknown; jti?: unknown; serverTime?: unknown };
+    if (
+      typeof b.token !== "string" ||
+      typeof b.jti !== "string" ||
+      typeof b.serverTime !== "number" ||
+      !Number.isFinite(b.serverTime)
+    ) {
+      return { kind: "malformed" };
+    }
+    return { kind: "ok", token: b.token, jti: b.jti, serverTime: b.serverTime, t0, t1, wallAtT1 };
+  } catch {
+    return { kind: "malformed" };
   }
 }
 
@@ -295,8 +307,8 @@ async function load(ticketId: string): Promise<Loaded> {
   let email: string;
   try {
     const res = await fetchJson("/api/account/profile");
-    if (res.status === 401) return { kind: "signedOut" };
-    if (!res.ok) return { kind: "error" };
+    const step = profileStep(res.status);
+    if (step !== "ok") return { kind: step };
     const b = (await res.json()) as { buyerId?: unknown; email?: unknown };
     if (typeof b.buyerId !== "string" || typeof b.email !== "string") return { kind: "error" };
     buyerId = b.buyerId;
@@ -316,36 +328,34 @@ async function load(ticketId: string): Promise<Loaded> {
   // 3. Bind (every load) and the ticket's details, side by side.
   const [ticket, bound] = await Promise.all([loadDetails(ticketId), bind(ticketId, key.publicKey)]);
 
-  if (bound.kind === "signedOut") return { kind: "signedOut" };
-  if (bound.kind === "notFound") {
-    await clearToken(buyerId, ticketId).catch(() => undefined);
-    return { kind: "notAvailable" };
-  }
-  if (bound.kind === "ok") {
-    const stored: StoredToken = {
-      token: bound.token,
-      jti: bound.jti,
-      offset: bound.serverTime - Date.now() / 1000,
-      publicKey: key.publicKey,
-    };
-    // A failed save only costs the offline fallback; the QR still works now.
-    await saveToken(buyerId, ticketId, stored).catch(() => undefined);
-    return { kind: "ready", email, ticket, session: { pair: key.pair, stored }, notice: null };
-  }
+  const saved = canFallBack(bound) ? await loadToken(buyerId, ticketId).catch(() => undefined) : undefined;
+  const d = decide(bound, saved, key.publicKey, { perf: perfSeconds(), wall: Date.now() / 1000 });
 
-  // 429, 503, network: the saved token, only if it was bound to this same key.
-  const saved = await loadToken(buyerId, ticketId).catch(() => undefined);
-  if (saved && saved.publicKey === key.publicKey) {
-    return { kind: "ready", email, ticket, session: { pair: key.pair, stored: saved }, notice: "stale" };
+  switch (d.kind) {
+    case "signedOut":
+    case "error":
+      return { kind: d.kind };
+    case "notAvailable":
+      await clearToken(buyerId, ticketId).catch(() => undefined);
+      return { kind: "notAvailable" };
+    case "ready":
+      // A failed save only costs the offline fallback; the QR still works now.
+      if (d.save) await saveToken(buyerId, ticketId, d.save).catch(() => undefined);
+      return {
+        kind: "ready",
+        email,
+        ticket,
+        session: { pair: key.pair, token: d.token, jti: d.jti, perfOffset: d.perfOffset },
+        notice: d.notice,
+      };
   }
-  return { kind: "error" };
 }
 
 export default function LiveTicket({ ticketId }: { ticketId: string }) {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
-  const [secondsLeft, setSecondsLeft] = useState(PERIOD_SECONDS);
+  const [secondsLeft, setSecondsLeft] = useState(K2_PERIOD_SECONDS);
   const [qrFailed, setQrFailed] = useState(false);
   const [homeHint, setHomeHint] = useState(false);
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
@@ -384,13 +394,13 @@ export default function LiveTicket({ ticketId }: { ticketId: string }) {
     slotRef.current = -1;
 
     const tick = () => {
-      const phoneNow = Date.now() / 1000;
-      const serverNow = phoneNow + session.stored.offset;
+      // Monotonic: a phone clock correction while the page is open doesn't move the QR.
+      const serverNow = perfSeconds() + session.perfOffset;
       setSecondsLeft(secondsLeftAt(serverNow));
-      const slot = Math.floor(Math.floor(serverNow) / PERIOD_SECONDS);
+      const slot = qrSlot(serverNow);
       if (slot === slotRef.current) return;
       slotRef.current = slot;
-      k2Text(session.pair, session.stored, phoneNow)
+      k2TextAt(session.pair, session, qrTs(slot))
         .then((text) => QRCode.toDataURL(text, { width: 300, margin: 1, errorCorrectionLevel: "L" }))
         .then((url) => {
           if (!stopped && slotRef.current === slot) setQrDataUrl(url);

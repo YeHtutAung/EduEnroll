@@ -11,7 +11,11 @@ const DB = "kuunyi-tickets";
 const STORE = "keys";
 const TOKENS = "tokens";
 
-/** offset = serverTime - phone time, seconds; publicKey = the key this token was bound to. */
+/**
+ * offset = server time minus Date.now()/1000 when saved (wall clock: it must
+ * survive a reload, which a performance.now() anchor doesn't); publicKey = the
+ * key this token was bound to.
+ */
 export interface StoredToken {
   token: string;
   jti: string;
@@ -71,17 +75,64 @@ export async function exportPublicKey(pair: CryptoKeyPair): Promise<string> {
   return b64u(await crypto.subtle.exportKey("raw", pair.publicKey));
 }
 
+/** Where the keys live; an interface so the create-once logic is testable without IndexedDB. */
+export interface KeyStore {
+  get(buyerId: string): Promise<CryptoKeyPair | undefined>;
+  /** Writes only if no key is stored yet: "exists" when another tab got there first. */
+  add(buyerId: string, pair: CryptoKeyPair): Promise<"added" | "exists">;
+}
+
+/**
+ * The stored key, or a new one. Two tabs opening their first ticket at once
+ * both generate a key, but `add` lets only one write; the other re-reads and
+ * uses the winner's, so both bind the same key and neither revokes the other.
+ */
+export async function getOrCreateKey(
+  buyerId: string,
+  store: KeyStore,
+  generate: () => Promise<CryptoKeyPair>,
+): Promise<CryptoKeyPair> {
+  const existing = await store.get(buyerId);
+  if (existing) return existing;
+  const pair = await generate();
+  if ((await store.add(buyerId, pair)) === "added") return pair;
+  const winner = await store.get(buyerId);
+  if (!winner) throw new Error("device key missing after a conflicting add");
+  return winner;
+}
+
+async function addKey(buyerId: string, pair: CryptoKeyPair): Promise<"added" | "exists"> {
+  const db = await open();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, "readwrite");
+    let exists = false;
+    const r = tx.objectStore(STORE).add(pair, buyerId);
+    r.onerror = (e) => {
+      if (r.error?.name === "ConstraintError") {
+        exists = true;
+        e.preventDefault(); // keep the transaction from aborting
+        e.stopPropagation();
+      }
+    };
+    tx.oncomplete = () => resolve(exists ? "exists" : "added");
+    tx.onerror = () => {
+      if (!exists) reject(tx.error);
+    };
+    tx.onabort = () => reject(tx.error ?? new Error("indexeddb transaction aborted"));
+  });
+}
+
+const idbKeyStore: KeyStore = { get: (id) => get<CryptoKeyPair>(STORE, id), add: addKey };
+
+const generateDeviceKey = async () =>
+  (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, [
+    "sign",
+    "verify",
+  ])) as CryptoKeyPair;
+
 /** The buyer's key on this browser, created on first use. Returns the public key, base64url. */
 export async function deviceKey(buyerId: string): Promise<{ pair: CryptoKeyPair; publicKey: string }> {
-  let pair = await get<CryptoKeyPair>(STORE, buyerId);
-  if (!pair) {
-    pair = (await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, [
-      "sign",
-      "verify",
-    ])) as CryptoKeyPair;
-    const created = pair;
-    await write(STORE, (s) => s.put(created, buyerId));
-  }
+  const pair = await getOrCreateKey(buyerId, idbKeyStore, generateDeviceKey);
   return { pair, publicKey: await exportPublicKey(pair) };
 }
 
@@ -97,13 +148,22 @@ export const saveToken = (buyerId: string, ticketId: string, t: StoredToken) =>
 export const clearToken = (buyerId: string, ticketId: string) =>
   write(TOKENS, (s) => s.delete(tokenKey(buyerId, ticketId)));
 
-/** The QR text for "now": k2.<token>.<ts>.<devsig> (design 6.2). Pure apart from WebCrypto. */
-export async function k2Text(pair: CryptoKeyPair, t: StoredToken, phoneNowSeconds: number): Promise<string> {
-  const ts = String(Math.floor(phoneNowSeconds + t.offset));
+/** The QR text for a given ts: k2.<token>.<ts>.<devsig> (design 6.2). Pure apart from WebCrypto. */
+export async function k2TextAt(
+  pair: CryptoKeyPair,
+  t: Pick<StoredToken, "token" | "jti">,
+  tsSeconds: number,
+): Promise<string> {
+  const ts = String(Math.floor(tsSeconds));
   const sig = await crypto.subtle.sign(
     { name: "ECDSA", hash: "SHA-256" },
     pair.privateKey,
     new TextEncoder().encode(k2SignedText(t.jti, ts)),
   );
   return `k2.${t.token}.${ts}.${b64u(sig)}`;
+}
+
+/** The QR text for "now" by the phone clock plus the stored offset. */
+export async function k2Text(pair: CryptoKeyPair, t: StoredToken, phoneNowSeconds: number): Promise<string> {
+  return k2TextAt(pair, t, phoneNowSeconds + t.offset);
 }

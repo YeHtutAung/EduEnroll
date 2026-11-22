@@ -184,6 +184,12 @@ describe("LiveTicketView", () => {
     expect(renderLive(ready())).not.toContain("Add to Home Screen");
   });
 
+  it("the Home Screen hint says to open the page in Safari first (in-app webviews can't add it), in both languages", () => {
+    const html = renderLive(ready({ showHomeScreenHint: true }));
+    expect(html).toContain("open this page in Safari first");
+    expect(html).toContain("Safari တွင် ဦးစွာ ဖွင့်ပါ");
+  });
+
   it("signed out: Sign in, with next set to this ticket", () => {
     const html = renderLive({ kind: "signedOut" });
     expect(html).toContain(`href="/account?next=%2Faccount%2Ftickets%2F${ID}"`);
@@ -238,6 +244,8 @@ describe("secrets stay out of logs and the page", () => {
   const read = (p: string) => readFileSync(path.resolve(process.cwd(), p), "utf8");
   const files = [
     "src/lib/tickets/deviceKey.ts",
+    "src/lib/tickets/liveClock.ts",
+    "src/app/(public)/account/tickets/[id]/liveTicketFlow.ts",
     "src/app/(public)/account/tickets/TicketList.tsx",
     "src/app/(public)/account/tickets/[id]/LiveTicket.tsx",
     "src/app/api/me/tickets/route.ts",
@@ -250,7 +258,7 @@ describe("secrets stay out of logs and the page", () => {
   it("the ticket page renders the QR text only as an image", () => {
     const src = read("src/app/(public)/account/tickets/[id]/LiveTicket.tsx");
     // The k2 text goes straight from k2Text into QRCode.toDataURL; no state holds it.
-    expect(src).toMatch(/k2Text\([^)]*\)\s*\.then\(\(text\) => QRCode\.toDataURL\(text,/);
+    expect(src).toMatch(/k2TextAt\(session\.pair, session, qrTs\(slot\)\)\s*\.then\(\(text\) => QRCode\.toDataURL\(text,/);
     expect(src).not.toMatch(/set\w*\(text\)/);
     expect(src).toContain('errorCorrectionLevel: "L"');
   });

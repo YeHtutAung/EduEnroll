@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { generateKeyPairSync } from "crypto";
-import { exportPublicKey, k2Text, type StoredToken } from "@/lib/tickets/deviceKey";
+import { exportPublicKey, getOrCreateKey, k2Text, type KeyStore, type StoredToken } from "@/lib/tickets/deviceKey";
 import { verifyK2, K2_PAST_SECONDS, K2_FUTURE_SECONDS } from "@/lib/tickets/k2";
 import { signBoundTicket } from "@/lib/tickets/sign";
 
@@ -92,5 +92,83 @@ describe("k2Text → verifyK2 round trip", () => {
       "verify",
     ])) as CryptoKeyPair;
     expect(verifyK2(await k2Text(other, stored(0), SERVER_NOW), SERVER_NOW)).toBeNull();
+  });
+});
+
+// ─── getOrCreateKey: two tabs never end up with two keys (review M1) ────────
+// The IndexedDB store's `add` refuses an existing key (ConstraintError →
+// "exists"); this fake does the same, so the create-once logic runs here.
+
+function fakeStore(initial?: CryptoKeyPair) {
+  const map = new Map<string, CryptoKeyPair>();
+  if (initial) map.set("b1", initial);
+  const store: KeyStore & { adds: number } = {
+    adds: 0,
+    get: async (id) => map.get(id),
+    add: async (id, p) => {
+      store.adds++;
+      if (map.has(id)) return "exists";
+      map.set(id, p);
+      return "added";
+    },
+  };
+  return { store, map };
+}
+
+const newPair = async () =>
+  (await globalThis.crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, [
+    "sign",
+    "verify",
+  ])) as CryptoKeyPair;
+
+describe("getOrCreateKey", () => {
+  it("returns the stored key without generating", async () => {
+    const { store } = fakeStore(pair);
+    let generated = 0;
+    const got = await getOrCreateKey("b1", store, async () => {
+      generated++;
+      return newPair();
+    });
+    expect(got).toBe(pair);
+    expect(generated).toBe(0);
+    expect(store.adds).toBe(0);
+  });
+
+  it("creates and adds a key on first use", async () => {
+    const { store, map } = fakeStore();
+    const fresh = await newPair();
+    expect(await getOrCreateKey("b1", store, async () => fresh)).toBe(fresh);
+    expect(map.get("b1")).toBe(fresh);
+  });
+
+  it("two tabs racing: both read nothing, both generate, both end up with the first tab's key", async () => {
+    const { store, map } = fakeStore();
+    const a = await newPair();
+    const b = await newPair();
+    // Both reads happen before either add.
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const racing: KeyStore = {
+      get: async (id) => {
+        const v = map.get(id);
+        await gate;
+        return v;
+      },
+      add: store.add,
+    };
+    const [gotA, gotB] = await Promise.all([
+      getOrCreateKey("b1", racing, async () => a),
+      getOrCreateKey("b1", racing, async () => b),
+      Promise.resolve().then(release),
+    ]);
+    expect(map.get("b1")).toBeDefined();
+    expect(gotA).toBe(map.get("b1"));
+    expect(gotB).toBe(map.get("b1"));
+    expect(gotA).toBe(gotB);
+  });
+
+  it("add says exists but the re-read finds nothing → throws (the page shows its storage error)", async () => {
+    const store: KeyStore = { get: async () => undefined, add: async () => "exists" };
+    await expect(getOrCreateKey("b1", store, newPair)).rejects.toThrow();
   });
 });
