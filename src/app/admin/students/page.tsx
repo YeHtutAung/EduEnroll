@@ -54,6 +54,8 @@ interface StudentDetail {
   nrc_number: string | null;
   phone: string;
   email: string | null;
+  /** Set on an account order: its email is the account's and can't be edited here. */
+  buyer_id?: string | null;
   form_data: Record<string, string>;
   form_fields: FormFieldDef[];
   status: EnrollmentStatus;
@@ -385,16 +387,18 @@ function StudentDetailModal({
                       }
                     />
                   )}
-                  <EditOrderEmail
-                    enrollmentId={row.enrollment_id}
-                    currentEmail={
-                      detail.email || resolveEmailFromFormData(detail.form_data) || ""
-                    }
-                    canResend={detail.payment != null}
-                    onSaved={(email, formData) =>
-                      setDetail((prev) => (prev ? { ...prev, email, form_data: formData } : prev))
-                    }
-                  />
+                  {!detail.buyer_id && (
+                    <EditOrderEmail
+                      enrollmentId={row.enrollment_id}
+                      currentEmail={
+                        detail.email || resolveEmailFromFormData(detail.form_data) || ""
+                      }
+                      canResend={detail.payment != null}
+                      onSaved={(email, formData) =>
+                        setDetail((prev) => (prev ? { ...prev, email, form_data: formData } : prev))
+                      }
+                    />
+                  )}
                   <DetailRow
                     label="Ref"
                     value={

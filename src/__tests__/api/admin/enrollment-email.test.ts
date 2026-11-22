@@ -147,6 +147,21 @@ describe("PATCH /api/admin/enrollments/[id]/email", () => {
     expect(res.status).toBe(500);
   });
 
+  it("refuses an order that belongs to a buyer account, and never changes it", async () => {
+    lookup = {
+      data: { id: "order-1", email: "a@gmail.con", form_data: { email: "a@gmail.con" }, buyer_id: "buyer-1" },
+      error: null,
+    };
+    const res = await send({ email: "a@gmail.com" });
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({
+      error: "Conflict",
+      message: "This order belongs to a buyer account; its email is the account's email.",
+    });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it("reports a failed lookup as a failure, not as a missing order", async () => {
     lookup = { data: null, error: { code: "57014" } };
     const res = await send({ email: "a@gmail.com" });

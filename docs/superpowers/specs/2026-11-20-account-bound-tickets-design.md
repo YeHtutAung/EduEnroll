@@ -305,6 +305,8 @@ email to the old address are the controls (section 13).
   - the ticket page asks iOS buyers to add it to the Home Screen, which keeps its storage out of
     Safari's 7-day deletion (section 6.3);
   - repeat binds are emailed to the holder (below), so an unexpected one is visible.
+- Abuse protection only: at most 30 phone *changes* per buyer per hour; re-opening a ticket on the
+  bound phone is never counted (Plan 3, Task 7).
 - The holder check, revoking the old row and inserting the new one run in **one SQL function**
   (service role only), locking the ticket row, so concurrent binds cannot leave two active rows,
   and a bind racing a claim or give-back (section 6.4) cannot leave the previous holder's phone
@@ -332,6 +334,10 @@ Anything else is not a `k2` token.
 - `ts`: Unix seconds as a canonical decimal string (no sign, no leading zeros), refreshed every
   15 seconds. The page reads server time once on load (from the bind response) and adds that offset
   to the phone clock, so a wrong phone clock does not matter while the page stays open.
+- **As built (Plan 3, Task 8):** each QR is signed 5 s ahead of its slot start, and the clock
+  offset is anchored to the moment the bind response arrived. A QR on screen therefore carries a
+  `ts` from about 11 s behind to 5 s ahead of server time, which leaves about 9 s for the
+  scanner's upload inside the scan window.
 - `devsig`: ECDSA P-256 with SHA-256 over the UTF-8 bytes of `k2|<jti>|<ts>`, using the `ts` segment
   exactly as it appears in the QR. WebCrypto produces raw r||s (64 bytes), sent base64url. The
   server verifies with `crypto.verify("sha256", data, { key, dsaEncoding: "ieee-p1363" }, sig)`.
@@ -704,3 +710,19 @@ conventions).
   non-password sessions (section 4.4) before it is turned on.
 - **App and web drift:** until the app supports bound tickets, protected events are invisible in
   the app (section 8.2). A buyer may see an event on the web that the app doesn't list.
+- **A rebind racing an admission:** the scan checks the active phone, then admits; a rebind landing
+  between the two lets the old phone in once (Plan 3, decision 6). Accepted.
+- **Tag scripts on the same site:** a script on the tenant's host runs as the signed-in buyer and
+  could bind its own phone. Tenant tag scripts are off on the whole host while the tenant has a live
+  protected event (owner decision 2026-11-23, Plan 3 decision 8).
+- **A page opened before protection keeps its tags:** a tag script that loaded before the event was
+  protected stays on an already-open page until a full reload. Accepted.
+- **Edits wait behind checkouts:** during an on-sale every checkout holds a share lock on its
+  intake row, so an organiser's edit of that event can wait behind checkouts (Plan 3, Task 1).
+- **The bind limit is approximate:** it counts key changes after a non-atomic pre-read, so
+  concurrent requests from the buyer's own session can pass it by about 2×. The new-phone email's
+  10-minute slot is used up even when the send fails, so a failed send is not retried in that
+  window. Accepted: the limit is abuse protection only (section 6.1).
+- **Known gap, `intakes_update` RLS:** the policy lets any authenticated member of a tenant update
+  any intake column through PostgREST, `ticket_protection` included. The admin route that switches
+  protection is owner-only, but closing it in the database is a follow-up, not done in Plan 3.
