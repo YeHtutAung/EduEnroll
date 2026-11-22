@@ -117,6 +117,12 @@ describe("AccountView", () => {
     expect(html).toContain("Use another email");
   });
 
+  it("the account-ready notice asks to sign in once more, in both languages", () => {
+    const html = render({ step: "email", email: "a@b.co", busy: false, notice: "accountReady" });
+    expect(html).toContain("Your account is ready. Sign in once more to continue.");
+    expect(html).toMatch(/[က-႟]/);
+  });
+
   it("the deletion-in-progress notice", () => {
     const html = render({ step: "email", email: "", busy: false, notice: "deletion" });
     expect(html).toContain("being deleted");
@@ -197,6 +203,14 @@ describe("readProfileResponse", () => {
   it("reads the email from a profile", async () => {
     const res = new Response(JSON.stringify({ email: "a@b.co", name: null, locale: "my" }), { status: 200 });
     expect(await readProfileResponse(res)).toEqual({ email: "a@b.co", reason: undefined });
+  });
+
+  it("reads a top-level reason (sign_in_again) beside the email", async () => {
+    const res = new Response(
+      JSON.stringify({ email: "a@b.co", name: null, locale: "my", reason: "sign_in_again" }),
+      { status: 201 },
+    );
+    expect(await readProfileResponse(res)).toEqual({ email: "a@b.co", reason: "sign_in_again" });
   });
 
   it("reads error.reason from a 403", async () => {

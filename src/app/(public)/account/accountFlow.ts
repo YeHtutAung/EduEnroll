@@ -19,6 +19,7 @@ export type Notice =
   | "staff"
   | "deletion"
   | "expired"
+  | "accountReady"
   | "generic";
 
 /** What `getSession()` holds on this host, for the staff screen on load. */
@@ -243,6 +244,10 @@ export function accountReducer(state: AccountState, event: AccountEvent): Transi
       const { email } = state;
 
       if ((event.status === 200 || event.status === 201) && event.email) {
+        // The profile exists, but the server couldn't re-issue the session its
+        // password reset ended (Task 11a): clear the dead local session and
+        // ask for one more sign-in, the address kept.
+        if (event.reason === "sign_in_again") return signOutToEmail(event.email, "accountReady");
         return stay({ step: "signedIn", email: event.email, busy: false });
       }
       if (event.status === 503) {

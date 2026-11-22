@@ -192,6 +192,30 @@ describe("accountFlow — 3. code", () => {
     expect(t.effects).toEqual([]);
   });
 
+  it.each([200, 201])("POST %i with reason sign_in_again → email kept, 'accountReady', signOutLocal", (status) => {
+    const t = accountReducer(posting(), {
+      type: "profilePosted",
+      status,
+      attempt: 0,
+      email: "buyer@example.com",
+      reason: "sign_in_again",
+    });
+    expect(t.effects).toEqual([{ type: "signOutLocal" }]);
+    expect(t.state).toEqual({
+      step: "email",
+      email: "buyer@example.com",
+      busy: true,
+      notice: "accountReady",
+      signingOut: true,
+    });
+    expect(accountReducer(t.state, { type: "signedOut" }).state).toEqual({
+      step: "email",
+      email: "buyer@example.com",
+      busy: false,
+      notice: "accountReady",
+    });
+  });
+
   it("POST 403 staff → signOutLocal and the staff message, busy until signed out", () => {
     const t = accountReducer(posting(), { type: "profilePosted", status: 403, attempt: 0, reason: "staff" });
     expect(t.effects).toEqual([{ type: "signOutLocal" }]);

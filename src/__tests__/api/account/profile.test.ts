@@ -7,7 +7,7 @@ import { AuthApiError, AuthRetryableFetchError, AuthSessionMissingError } from "
 // accept that exact token, then hands the user and token to ensureBuyerProfile.
 // An Auth outage is 503 SERVER, never 401.
 
-const cookieClient = { auth: { getSession: vi.fn() } };
+const cookieClient = { auth: { getSession: vi.fn(), verifyOtp: vi.fn() } };
 vi.mock("@/lib/supabase/server", () => ({ createClient: () => cookieClient }));
 
 const bareClient = { auth: { getUser: vi.fn() } };
@@ -41,6 +41,7 @@ vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: () => ({ from: admin
 import { GET, POST, dynamic } from "@/app/api/account/profile/route";
 
 const USER = { id: "u1", email: "b@example.test", email_confirmed_at: "2026-11-01T00:00:00Z" };
+const HASH = "reissue-hash-secret-abcdef0123456789";
 const PROFILE = {
   id: "u1",
   email: "b@example.test",
@@ -81,6 +82,7 @@ beforeEach(() => {
   });
   bareClient.auth.getUser.mockResolvedValue({ data: { user: USER }, error: null });
   ensureBuyerProfile.mockResolvedValue({ ok: true, status: 200, profile: PROFILE });
+  cookieClient.auth.verifyOtp.mockResolvedValue({ data: { session: { access_token: "new" } }, error: null });
   requireBuyer.mockResolvedValue({ buyerId: "u1", email: "b@example.test", isReviewer: false, sessionId: "s1" });
   profileRead = { data: { name: "Aung", locale: "my" }, error: null };
 });
@@ -240,6 +242,50 @@ describe("POST — ensureBuyerProfile", () => {
     const res = await POST(post());
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ email: "b@example.test", name: null, locale: "en" });
+  });
+
+  it("with a re-issue handle → verifies it on the cookie client and answers without the handle", async () => {
+    ensureBuyerProfile.mockResolvedValue({ ok: true, status: 201, profile: PROFILE, reissue: { hashedToken: HASH } });
+    const res = await POST(post());
+    expect(res.status).toBe(201);
+    expect(cookieClient.auth.verifyOtp).toHaveBeenCalledWith({ token_hash: HASH, type: "email" });
+    const text = await res.text();
+    expect(JSON.parse(text)).toEqual({ email: "b@example.test", name: "Aung", locale: "my" });
+    expect(text).not.toContain(HASH);
+  });
+
+  it("a 200 'existing' with a re-issue handle is also re-issued", async () => {
+    ensureBuyerProfile.mockResolvedValue({ ok: true, status: 200, profile: PROFILE, reissue: { hashedToken: HASH } });
+    const res = await POST(post());
+    expect(res.status).toBe(200);
+    expect(cookieClient.auth.verifyOtp).toHaveBeenCalledTimes(1);
+  });
+
+  it("no re-issue needed (existing profile) → verifyOtp not called", async () => {
+    await POST(post());
+    expect(cookieClient.auth.verifyOtp).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["reissue null", null, undefined],
+    ["verifyOtp error", { hashedToken: "h" }, { data: { session: null }, error: { status: 403, code: "otp_expired" } }],
+    ["verifyOtp with no session", { hashedToken: "h" }, { data: { session: null }, error: null }],
+    ["verifyOtp throws", { hashedToken: "h" }, "throw"],
+  ])("%s → same status with reason sign_in_again", async (_n, reissue, verify) => {
+    ensureBuyerProfile.mockResolvedValue({ ok: true, status: 201, profile: PROFILE, reissue });
+    if (verify === "throw") cookieClient.auth.verifyOtp.mockRejectedValue(new Error("network"));
+    else if (verify) cookieClient.auth.verifyOtp.mockResolvedValue(verify);
+    const res = await POST(post());
+    expect(res.status).toBe(201);
+    expect(await res.json()).toEqual({ email: "b@example.test", name: "Aung", locale: "my", reason: "sign_in_again" });
+  });
+
+  it("never logs the re-issue handle", async () => {
+    ensureBuyerProfile.mockResolvedValue({ ok: true, status: 201, profile: PROFILE, reissue: { hashedToken: HASH } });
+    cookieClient.auth.verifyOtp.mockResolvedValue({ data: { session: null }, error: { status: 403, message: HASH } });
+    await POST(post());
+    const logged = JSON.stringify((console.error as unknown as { mock: { calls: unknown[] } }).mock.calls);
+    expect(logged).not.toContain(HASH);
   });
 
   it.each(["staff", "unconfirmed", "not_email_code"] as const)("403 %s → FORBIDDEN with reason", async (reason) => {

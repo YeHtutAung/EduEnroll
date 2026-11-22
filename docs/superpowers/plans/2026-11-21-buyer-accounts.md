@@ -1459,7 +1459,7 @@ case gains `reissue: { hashedToken }`), `src/app/api/account/profile/route.ts`,
 `reason: "sign_in_again"`, and later Task 15's `notice=sign_in_again`, go to the email step with
 "Your account is ready — sign in once more", the email pre-filled); tests beside each.
 
-- [ ] **Step 1: Spike (local stack, shape-only output).** After `updateUserById({ password })`,
+- [x] **Step 1: Spike (local stack, shape-only output).** After `updateUserById({ password })`,
   re-issue a session for the same user **without sending any email**: `admin.generateLink({ type:
   "magiclink", email })` → `properties.hashed_token` → `verifyOtp({ token_hash, type: "magiclink" })`
   on the route's cookie client. Record: does `generateLink` call the Send Email Hook or send mail
@@ -1468,18 +1468,39 @@ case gains `reissue: { hashedToken }`), `src/app/api/account/profile/route.ts`,
   not `otp`** (for example `magiclink`), record it in the findings as a value every later buyer
   check must accept as an ordinary buyer session (Plans 3–4, #451), and add it to design
   section 4.1's `amr` sentence.
-- [ ] **Step 2: Change the order:** step 8 (`signOut(accessToken, "others")`) is removed (the reset
+
+  **Done 2026-11-22** (local stack, GoTrue as in Task 10), hook off and again with the Send Email
+  Hook on (a shape-only capture server): after the reset the user had 0 sessions and the old token
+  got `AuthSessionMissingError`; `generateLink({ type: "magiclink" })` returned a `hashed_token`
+  (`verification_type` `magiclink`), sent **no** email and made **no** hook call; `verifyOtp({
+  token_hash, type })` with `magiclink` and with `email` both gave a session for the same user,
+  `amr` **`["otp"]`**, with a `session_id`, accepted by `getUser`, refreshable. So the re-issued
+  session is an ordinary email-code session; nothing later needs a new `amr` value.
+- [x] **Step 2: Change the order:** step 8 (`signOut(accessToken, "others")`) is removed (the reset
   already ended every session); after step 7, `ensureBuyerProfile` returns a `reissue` handle
   (`{ hashedToken }`, never logged) with the 201, and the **route** completes the `verifyOtp` on its
   cookie client, so the browser gets the new session cookie in the same response. A failed re-issue
   answers 201 with `reason: "sign_in_again"`, and the page goes to the email step with "Your account
   is ready — sign in once more".
-- [ ] **Step 3: Tests:** the order with the re-issue; `hashedToken` absent from logs and the JSON
+- [x] **Step 3: Tests:** the order with the re-issue; `hashedToken` absent from logs and the JSON
   body; the route sets the cookie; the `sign_in_again` path; the existing step-8 tests rewritten.
-- [ ] **Step 4:** `npx vitest run src/__tests__/server/buyers src/__tests__/api/account` → PASS, then
+- [x] **Step 4:** `npx vitest run src/__tests__/server/buyers src/__tests__/api/account` → PASS, then
   repeat Task 10 Step 2's end-to-end run: a new buyer's first `POST /api/account/profile` gives 201
   and a following `GET` gives 200.
-- [ ] **Step 5: Commit** `fix(buyers): first sign-in re-issues the session the password reset ends`.
+
+  **Done 2026-11-22.** Built as: `ensureBuyerProfile` returns `reissue: { hashedToken } | null` on
+  any success after its reset (201 `created`, and 200 `existing` too, since the reset ended that
+  caller's session as well); the route verifies it with `verifyOtp({ token_hash, type: "email" })`
+  on the cookie client and never puts it in the body or a log; a null handle or a failed verify
+  answers the same status with `reason: "sign_in_again"`, which the page turns into a local
+  sign-out and the new `accountReady` notice on the email step. Unit runs: 187 passed in those
+  folders; full `npm test` 3611 passed, `tsc` 0, lint 0. End to end on the local stack and a local
+  dev server: `GET` before the profile 401; first `POST` **201** with a new session cookie and body
+  keys `email, locale, name` only; `GET` after **200**; the old access token rejected; 1 session
+  and 1 profile row for the user; 1 email to the buyer (the sign-in code); a second `POST` 200 with
+  no cookie change. No server errors logged. `npm run test:db` and `npm run build` not run here;
+  Task 12 runs them.
+- [x] **Step 5: Commit** `fix(buyers): first sign-in re-issues the session the password reset ends`.
 
 The mobile app's `POST /me` (#451) needs the same re-issue, returned as tokens instead of a cookie;
 note it on kuunyi-app #311.

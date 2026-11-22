@@ -5,7 +5,9 @@ import type { Database, BuyerProfile } from "@/types/database";
 // ─── ensureBuyerProfile: the only path that creates a buyer profile ─────────
 // Mobile spec 4.1 "No password a buyer didn't set". A password set before the
 // buyer confirmed their email must never work: claim, reset the password to a
-// random one nobody sees, end every other session, then create the profile.
+// random one nobody sees (which ends every session, the caller's too), create
+// the profile, then hand back a one-time handle the route uses to re-issue the
+// caller's session without sending an email (Task 11a).
 
 vi.mock("@/server/buyers/adminClient", () => ({
   createTimedAdminClient: () => {
@@ -28,6 +30,7 @@ const PASSWORD_AND_OTP = token(["password", "otp"]);
 
 const EMAIL = "buyer.secret@example.test";
 const CLAIM = "11111111-2222-4333-8444-555555555555";
+const HASHED = "hashed-token-secret-0123456789abcdef";
 
 const USER = { id: "u1", email: EMAIL, email_confirmed_at: "2026-11-21T00:00:00Z" };
 
@@ -59,7 +62,7 @@ interface FakeOpts {
   profiles?: Outcome[]; // one per read, in order; the last repeats
   rpc?: Partial<Record<string, Outcome>>;
   update?: Outcome;
-  signOut?: Outcome;
+  link?: Outcome;
 }
 
 function makeFake(opts: FakeOpts = {}) {
@@ -103,12 +106,17 @@ function makeFake(opts: FakeOpts = {}) {
     calls.push("auth:updateUserById");
     return run(opts.update, { data: { user: { id: "u1" } }, error: null });
   });
+  // Never used any more: the password reset already ends every session.
   const signOut = vi.fn(async () => {
     calls.push("auth:signOut");
-    return run(opts.signOut, { data: null, error: null });
+    return { data: null, error: null };
+  });
+  const generateLink = vi.fn(async () => {
+    calls.push("auth:generateLink");
+    return run(opts.link, { data: { properties: { hashed_token: HASHED } }, error: null });
   });
 
-  const admin = { from, rpc, auth: { admin: { updateUserById, signOut } } };
+  const admin = { from, rpc, auth: { admin: { updateUserById, signOut, generateLink } } };
   return {
     calls,
     filters,
@@ -116,6 +124,7 @@ function makeFake(opts: FakeOpts = {}) {
     rpc,
     updateUserById,
     signOut,
+    generateLink,
     deps: { admin: admin as unknown as SupabaseClient<Database> },
   };
 }
@@ -307,23 +316,33 @@ describe("ensureBuyerProfile", () => {
     expect(rpcNames(f)).not.toContain("create_buyer_profile");
   });
 
-  it("signOut returns { error } → 503, release called, no create", async () => {
-    const f = makeFake({ signOut: { data: null, error: { status: 500, message: "x" } } });
+  it("generateLink returns { error } → 201 with reissue null (the route says sign in again)", async () => {
+    const row = profile();
+    const f = makeFake({ profiles: [ok(null), ok(row)], link: { data: null, error: { status: 500, message: "x" } } });
     const res = await ensureBuyerProfile({ user: USER, accessToken: OTP }, f.deps);
-    expect(res).toEqual({ ok: false, status: 503, code: "SERVER" });
-    expect(f.rpc).toHaveBeenCalledWith("release_buyer_profile_claim", {
-      p_user_id: "u1",
-      p_token: CLAIM,
-    });
-    expect(rpcNames(f)).not.toContain("create_buyer_profile");
+    expect(res).toEqual({ ok: true, status: 201, profile: row, reissue: null });
+    expect(rpcNames(f)).not.toContain("release_buyer_profile_claim");
   });
 
-  it("signOut throws → 503, release called, no create", async () => {
-    const f = makeFake({ signOut: abort });
+  it("generateLink throws → 201 with reissue null; the claim is not released", async () => {
+    const row = profile();
+    const f = makeFake({ profiles: [ok(null), ok(row)], link: abort });
     const res = await ensureBuyerProfile({ user: USER, accessToken: OTP }, f.deps);
-    expect(res).toEqual({ ok: false, status: 503, code: "SERVER" });
-    expect(rpcNames(f)).toContain("release_buyer_profile_claim");
-    expect(rpcNames(f)).not.toContain("create_buyer_profile");
+    expect(res).toEqual({ ok: true, status: 201, profile: row, reissue: null });
+    expect(rpcNames(f)).not.toContain("release_buyer_profile_claim");
+  });
+
+  it("generateLink without a hashed token → reissue null", async () => {
+    const row = profile();
+    const f = makeFake({ profiles: [ok(null), ok(row)], link: ok({ properties: {} }) });
+    const res = await ensureBuyerProfile({ user: USER, accessToken: OTP }, f.deps);
+    expect(res).toEqual({ ok: true, status: 201, profile: row, reissue: null });
+  });
+
+  it("never signs out other sessions (the reset already ended them all)", async () => {
+    const f = makeFake({ profiles: [ok(null), ok(profile())] });
+    await ensureBuyerProfile({ user: USER, accessToken: OTP }, f.deps);
+    expect(f.signOut).not.toHaveBeenCalled();
   });
 
   it("create returns an unexpected value → release and 503", async () => {
@@ -343,11 +362,11 @@ describe("ensureBuyerProfile", () => {
     expect(rpcNames(f)).not.toContain("release_buyer_profile_claim");
   });
 
-  it("happy path → exact order and 201 with the new row", async () => {
+  it("happy path → exact order and 201 with the new row and a re-issue handle", async () => {
     const row = profile();
     const f = makeFake({ profiles: [ok(null), ok(row)] });
     const res = await ensureBuyerProfile({ user: USER, accessToken: OTP }, f.deps);
-    expect(res).toEqual({ ok: true, status: 201, profile: row });
+    expect(res).toEqual({ ok: true, status: 201, profile: row, reissue: { hashedToken: HASHED } });
 
     expect(f.calls).toEqual([
       "read:users",
@@ -355,10 +374,12 @@ describe("ensureBuyerProfile", () => {
       "rpc:claim_buyer_profile",
       "rpc:buyer_profile_claim_held",
       "auth:updateUserById",
-      "auth:signOut",
       "rpc:create_buyer_profile",
       "read:buyer_profiles",
+      "auth:generateLink",
     ]);
+    // Magic-link type for this exact address; generateLink sends no email (Task 11a spike).
+    expect(f.generateLink).toHaveBeenCalledWith({ type: "magiclink", email: EMAIL });
 
     expect(f.rpc).toHaveBeenCalledWith("claim_buyer_profile", { p_user_id: "u1" });
     expect(f.rpc).toHaveBeenCalledWith("buyer_profile_claim_held", {
@@ -388,7 +409,7 @@ describe("ensureBuyerProfile", () => {
     expect(f.filters.every((x) => x.column === "id" && x.value === "u1")).toBe(true);
     expect(JSON.stringify(res)).not.toContain(attrs.password);
 
-    expect(f.signOut).toHaveBeenCalledWith(OTP, "others");
+    expect(f.signOut).not.toHaveBeenCalled();
   });
 
   it("each run uses a fresh random password", async () => {
@@ -407,14 +428,14 @@ describe("ensureBuyerProfile", () => {
     expect(res).toEqual({ ok: false, status: 503, code: "SERVER" });
   });
 
-  it("create → 'existing' → 200 with the re-read row", async () => {
+  it("create → 'existing' → 200 with the re-read row, and a re-issue (our reset ended the session)", async () => {
     const row = profile();
     const f = makeFake({
       profiles: [ok(null), ok(row)],
       rpc: { create_buyer_profile: ok("existing") },
     });
     const res = await ensureBuyerProfile({ user: USER, accessToken: OTP }, f.deps);
-    expect(res).toEqual({ ok: true, status: 200, profile: row });
+    expect(res).toEqual({ ok: true, status: 200, profile: row, reissue: { hashedToken: HASHED } });
     expect(rpcNames(f)).not.toContain("release_buyer_profile_claim");
   });
 
@@ -457,7 +478,8 @@ describe("ensureBuyerProfile", () => {
       { profiles: [ok(null), ok(profile())] },
       { update: { data: { user: null }, error: { status: 500, message: "x" } } },
       { update: abort },
-      { signOut: { data: null, error: { status: 500, message: "x" } } },
+      { profiles: [ok(null), ok(profile())], link: { data: null, error: { status: 500, message: "x" } } },
+      { profiles: [ok(null), ok(profile())], link: abort },
       { rpc: { create_buyer_profile: fail("23505") } },
       { rpc: { create_buyer_profile: ok("lost") } },
       { rpc: { buyer_profile_claim_held: ok(false) } },
@@ -478,6 +500,7 @@ describe("ensureBuyerProfile", () => {
       expect(logged).not.toContain(EMAIL);
       expect(logged).not.toContain(OTP);
       expect(logged).not.toContain(CLAIM);
+      expect(logged).not.toContain(HASHED);
       if (pw) expect(logged).not.toContain(pw);
     }
   });

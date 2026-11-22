@@ -103,6 +103,12 @@ const NOTICES: Record<Notice, Bilingual & { tone: "error" | "info" }> = {
     en: "Your sign-in expired. Please sign in again.",
     mm: "ဝင်ရောက်မှု သက်တမ်းကုန်သွားပါပြီ။ ပြန်လည်ဝင်ရောက်ပါ။",
   },
+  accountReady: {
+    tone: "info",
+    en: "Your account is ready. Sign in once more to continue.",
+    // needs native review
+    mm: "သင့်အကောင့် အဆင်သင့်ဖြစ်ပါပြီ။ ဆက်လက်ရန် နောက်တစ်ကြိမ် ဝင်ရောက်ပါ။",
+  },
   generic: {
     tone: "error",
     en: "We couldn't sign you in. Please try again.",
@@ -370,10 +376,12 @@ export async function readProfileResponse(res: Response): Promise<{ email?: stri
   try {
     const body: unknown = await res.json();
     if (!body || typeof body !== "object") return {};
-    const b = body as { email?: unknown; error?: { reason?: unknown } };
+    const b = body as { email?: unknown; reason?: unknown; error?: { reason?: unknown } };
+    // A success body may carry a top-level reason (sign_in_again); an error body carries error.reason.
+    const reason = typeof b.error?.reason === "string" ? b.error.reason : typeof b.reason === "string" ? b.reason : undefined;
     return {
       email: typeof b.email === "string" ? b.email : undefined,
-      reason: typeof b.error?.reason === "string" ? b.error.reason : undefined,
+      reason,
     };
   } catch {
     return {};

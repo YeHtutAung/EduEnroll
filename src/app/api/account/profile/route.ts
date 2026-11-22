@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createClient } from "@/lib/supabase/server";
 import { requireBuyer } from "@/lib/buyers/requireBuyer";
 import { acceptToken, readCookieToken } from "@/lib/buyers/sessionUser";
 import { buyerError } from "@/lib/buyers/errors";
@@ -13,7 +14,13 @@ import { ensureBuyerProfile, type EnsureResult } from "@/server/buyers/ensureBuy
 //        ensureBuyerProfile claims or creates the profile.
 //
 // An Auth outage is 503 SERVER, never 401: a 401 signs the buyer out.
-// Logs fixed strings only: never a token or an email.
+// Logs fixed strings only: never a token, a re-issue hash or an email.
+//
+// First sign-in (Task 11a): ensureBuyerProfile's password reset ends the
+// buyer's own session, so it hands back a one-time hash. This route verifies
+// it on the cookie client, which writes the new session cookies onto this same
+// response. If that fails the profile still exists and the body says
+// `reason: "sign_in_again"`; the page asks the buyer to sign in once more.
 
 export const dynamic = "force-dynamic";
 
@@ -87,10 +94,34 @@ function isCrossSite(request: Request): boolean {
   return !host || originHost.toLowerCase() !== host.toLowerCase();
 }
 
-function mapResult(result: EnsureResult): NextResponse {
+/** Turn the re-issue hash into this browser's new session. Never throws. */
+async function reissueSession(hashedToken: string): Promise<boolean> {
+  try {
+    const { data, error } = await createClient().auth.verifyOtp({ token_hash: hashedToken, type: "email" });
+    if (error || !data?.session) {
+      console.error("[account/profile] session re-issue failed");
+      return false;
+    }
+    return true;
+  } catch {
+    console.error("[account/profile] session re-issue failed");
+    return false;
+  }
+}
+
+async function mapResult(result: EnsureResult): Promise<NextResponse> {
   if (result.ok) {
     const { email, name, locale } = result.profile;
-    return NextResponse.json({ email, name, locale }, { status: result.status });
+    const body: { email: string; name: string | null; locale: string; reason?: "sign_in_again" } = {
+      email,
+      name,
+      locale,
+    };
+    if (result.reissue !== undefined) {
+      const reissued = result.reissue !== null && (await reissueSession(result.reissue.hashedToken));
+      if (!reissued) body.reason = "sign_in_again";
+    }
+    return NextResponse.json(body, { status: result.status });
   }
   switch (result.code) {
     case "FORBIDDEN":
@@ -139,5 +170,5 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   // Only now: getUser has accepted this exact token for this user.
-  return mapResult(await ensureBuyerProfile({ user: accepted.user, accessToken: accepted.token }));
+  return await mapResult(await ensureBuyerProfile({ user: accepted.user, accessToken: accepted.token }));
 }
