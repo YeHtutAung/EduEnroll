@@ -257,6 +257,8 @@ export interface Intake {
   email_terms: string | null; // organiser's terms printed in the confirmation email; not shown at checkout; null = none
   font_css_url: string | null; // Adobe Fonts stylesheet for the landing page; see src/lib/eventFont.ts
   font_family: string | null; // CSS font-family from that stylesheet; set with font_css_url
+  /** Account-bound tickets: bought signed in, shown only on the buyer's phone (20261122130000). */
+  ticket_protection: boolean;
   created_at: string;
 }
 
@@ -318,6 +320,8 @@ export interface Enrollment {
   telegram_phone: string | null;
   telegram_link_token: string | null;
   telegram_link_token_expires_at: string | null;
+  /** The signed-in buyer (auth.users.id) who placed the order; null for guest orders. */
+  buyer_id: string | null;
 }
 
 export interface Payment {
@@ -501,6 +505,32 @@ export interface MobileRateLimit {
   count: number;
 }
 
+// ─── Account-bound tickets (service-role only, 20261122130000) ────────────────
+
+export type TicketDeviceRevokedBy = "rebind" | "holder_changed" | "account_deleted" | "order_moved";
+
+export interface TicketDevice {
+  id: string;
+  ticket_id: string;
+  buyer_id: string | null;
+  /** Raw uncompressed P-256 point, base64url without padding (87 chars). */
+  public_key: string;
+  created_at: string;
+  revoked_at: string | null;
+  revoked_by: TicketDeviceRevokedBy | null;
+}
+
+export interface OrderMove {
+  id: string;
+  enrollment_id: string;
+  tenant_id: string;
+  from_buyer_id: string | null;
+  to_buyer_id: string | null;
+  moved_by: string | null;
+  reason: string;
+  created_at: string;
+}
+
 // ─── Supabase Database shape ──────────────────────────────────────────────────
 
 export interface Database {
@@ -570,6 +600,20 @@ export interface Database {
         Insert: Omit<MobileRateLimit, "count"> & { count?: number };
         Update: Partial<MobileRateLimit>;
       };
+      // Audit trail: service_role may SELECT, INSERT, UPDATE; never DELETE.
+      ticket_devices: {
+        Row: TicketDevice;
+        Insert: Pick<TicketDevice, "ticket_id" | "public_key"> &
+          Partial<Omit<TicketDevice, "ticket_id" | "public_key">>;
+        Update: Partial<Omit<TicketDevice, "id" | "created_at">>;
+      };
+      // Append-only: service_role may SELECT, INSERT.
+      order_moves: {
+        Row: OrderMove;
+        Insert: Pick<OrderMove, "enrollment_id" | "tenant_id" | "reason"> &
+          Partial<Omit<OrderMove, "enrollment_id" | "tenant_id" | "reason">>;
+        Update: Record<string, never>;
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -590,7 +634,13 @@ export interface Database {
         Returns: void;
       };
       submit_cart_enrollment: {
-        Args: { p_items: string; p_tenant_id?: string | null };
+        Args: {
+          p_items: string;
+          p_tenant_id?: string | null;
+          p_priority_token_hash?: string | null;
+          p_idempotency_key?: string | null;
+          p_buyer_id?: string | null;
+        };
         Returns: SubmitCartEnrollmentResult;
       };
       submit_enrollment: {
@@ -598,6 +648,8 @@ export interface Database {
           p_class_id: string;
           p_idempotency_key?: string | null;
           p_quantity?: number;
+          p_priority_token_hash?: string | null;
+          p_buyer_id?: string | null;
         };
         Returns: SubmitEnrollmentResult;
       };
@@ -622,6 +674,25 @@ export interface Database {
       consume_rate_limit: {
         Args: { p_key: string; p_window_seconds: number; p_limit: number };
         Returns: boolean;
+      };
+      // Account-bound tickets: service_role only. One generic refusal each.
+      bind_ticket_device: {
+        Args: { p_ticket_id: string; p_tenant_id: string; p_buyer_id: string; p_public_key: string };
+        Returns: "bound_first" | "bound_again" | "unchanged" | "refused";
+      };
+      move_order_buyer: {
+        Args: {
+          p_enrollment_id: string;
+          p_tenant_id: string;
+          p_staff_user_id: string;
+          p_to_buyer_id: string;
+          p_reason: string;
+        };
+        Returns: { result: "moved" | "refused"; from_buyer_id: string | null }[];
+      };
+      revoke_buyer_ticket_devices: {
+        Args: { p_buyer_id: string };
+        Returns: number;
       };
     };
     Enums: {
