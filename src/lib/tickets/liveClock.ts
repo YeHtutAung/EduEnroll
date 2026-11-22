@@ -19,11 +19,18 @@ export const K2_SIGN_AHEAD_SECONDS = 5;
 /**
  * Server time minus the local clock, from one bind round trip.
  * t0 = local clock just before the request, t1 = when the response arrived
- * (seconds, any one clock). The server stamped `serverTime` (floored seconds)
- * somewhere in between: assume the midpoint, and add 0.5 to undo the floor.
+ * (seconds, any one clock). The bind route stamps `serverTime` (floored
+ * seconds) as its LAST step, after its database calls and, on a phone change,
+ * the new-phone email. So the stamp sits near t1, not at the midpoint: a slow
+ * server would otherwise push the estimate ahead by half its processing time
+ * (and past the +10 s limit). Anchor to t1 and add 0.5 to undo the floor. The
+ * only error left is the response's network time, which makes the QR slightly
+ * older, and the −20 s side has the room for it. t0 is kept for callers and
+ * as a sanity bound.
  */
 export function bindOffset(t0: number, t1: number, serverTime: number): number {
-  return serverTime + 0.5 - (t0 + t1) / 2;
+  void t0;
+  return serverTime + 0.5 - t1;
 }
 
 /** Moves an offset from one local clock to another, read at the same instant. */

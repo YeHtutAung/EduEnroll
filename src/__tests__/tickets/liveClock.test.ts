@@ -37,9 +37,9 @@ beforeAll(async () => {
 });
 
 describe("pure helpers", () => {
-  it("bindOffset: the midpoint of the round trip, +0.5 for the server's floor", () => {
+  it("bindOffset: anchored to the response's arrival (the route stamps last), +0.5 for the server's floor", () => {
     // Sent at 100, answered at 100.4, server said 1000 (really 1000.0..1000.99).
-    expect(bindOffset(100, 100.4, 1000)).toBeCloseTo(1000.5 - 100.2, 9);
+    expect(bindOffset(100, 100.4, 1000)).toBeCloseTo(1000.5 - 100.4, 9);
   });
 
   it("rebaseOffset moves an offset between clocks read at the same instant", () => {
@@ -97,6 +97,7 @@ async function sweep(opts: { trueOffset: number; t0: number; t1: number; stampAt
 
 describe("every QR verifies for its whole time on screen plus an 8 s upload", () => {
   for (const frac of [0.01, 0.5, 0.99]) {
+    // The route stamps last, so "t0" is the worst case (a 0.4 s return trip), not a real one.
     for (const where of ["t0", "mid", "t1"] as const) {
       it(`server clock fraction ${frac}, stamped at ${where} of a 0.4 s round trip`, async () => {
         const t0 = 100;
@@ -107,6 +108,22 @@ describe("every QR verifies for its whole time on screen plus an 8 s upload", ()
       });
     }
   }
+
+  it("a slow server (24 s, e.g. an email send) doesn't push the clock ahead: the stamp is taken last", async () => {
+    // Codex P2 on #495: the midpoint assumption put the phone ~12 s ahead here,
+    // past the +10 s limit for part of every slot.
+    const t0 = 100;
+    const t1 = 124.4; // 24 s of server work, then 0.4 s back over the network
+    const stampAt = 124.0;
+    const { failures, err } = await sweep({ trueOffset: BASE - 100 + 0.5, t0, t1, stampAt });
+    expect(failures).toEqual([]);
+    expect(err).toBeGreaterThanOrEqual(0); // the estimate is behind (older QR), never ahead
+    expect(err).toBeLessThanOrEqual(1.5);
+    // The old midpoint estimate: ~12 s ahead.
+    const serverTime = Math.floor(stampAt + BASE - 100 + 0.5);
+    const midpoint = serverTime + 0.5 - (t0 + t1) / 2;
+    expect(BASE - 100 + 0.5 - midpoint).toBeLessThan(-10);
+  });
 
   it("a list call 2.5 s slower than the bind doesn't move the offset (t0/t1 bracket the bind alone)", async () => {
     // Bind 100 → 100.4; the list (in parallel) lands at 102.9. Only the bind's
