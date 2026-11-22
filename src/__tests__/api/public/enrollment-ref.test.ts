@@ -705,4 +705,14 @@ describe("PATCH /api/public/enrollment/[ref] — account orders", () => {
     expect(updates[0].email).toBe("someone-else@example.com");
     expect(updates[0].form_data).toEqual(body.form_data);
   });
+
+  it("an account order with no stored email refuses the write (fails closed, never passes the body's email through)", async () => {
+    for (const email of [null, ""]) {
+      const { client, updates } = orderMock({ ...ORDER, buyer_id: "buyer-1", email });
+      vi.mocked(createAdminClient).mockReturnValue(client as never);
+      const res = await PATCH(makeRequest("PATCH", body) as never, routeParams);
+      expect(res.status).toBe(500);
+      expect(updates).toHaveLength(0);
+    }
+  });
 });

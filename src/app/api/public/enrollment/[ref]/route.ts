@@ -430,6 +430,13 @@ export async function PATCH(
   // written, and the form's email fields carry the stored one. No session is
   // read here: the order's buyer was fixed by the POST.
   const accountOrder = typeof enrollment.buyer_id === "string" && enrollment.buyer_id !== "";
+  // Fail closed: an account order always has its email (the RPC refuses one
+  // without). If it somehow doesn't, never pass the body's raw form_data
+  // through, or its email fields would become where the tickets go.
+  if (accountOrder && !(typeof enrollment.email === "string" && enrollment.email)) {
+    console.error("[enrollment] account order without a stored email");
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+  }
   const formData =
     accountOrder && form_data && typeof enrollment.email === "string" && enrollment.email
       ? withAccountEmail(form_data, enrollment.email)
