@@ -700,6 +700,19 @@ BEGIN
      FOR SHARE OF e;   -- waits behind a move's FOR UPDATE; doesn't block inserts referencing the order
   PERFORM 1 FROM public.tickets WHERE id = p_ticket_id FOR UPDATE;   -- serialises two binds
 
+  -- Account deletion sets buyer_profiles.deleted_at, then revokes the buyer's
+  -- phones (revoke_buyer_ticket_devices). The share lock makes a bind and a
+  -- deletion take turns: a bind waiting behind the deletion's UPDATE wakes
+  -- up to a deleted profile and is refused; a deletion waiting behind a bind
+  -- revokes the row the bind just wrote. Without it a bind could commit after
+  -- the revoke, and deleteUser would leave an active row nobody can find.
+  PERFORM 1 FROM public.buyer_profiles
+   WHERE id = p_buyer_id AND deleted_at IS NULL
+     FOR SHARE;
+  IF NOT FOUND THEN
+    RETURN 'refused';
+  END IF;
+
   -- A separate statement after the locks: a fresh READ COMMITTED snapshot.
   SELECT t.tenant_id, t.status, e.buyer_id, e.status::text AS order_status, i.ticket_protection
     INTO v_t
@@ -790,6 +803,19 @@ BEGIN
      OR NOT EXISTS (SELECT 1 FROM public.buyer_profiles bp WHERE bp.id = p_to_buyer_id AND bp.deleted_at IS NULL)
      OR EXISTS (SELECT 1 FROM public.users u WHERE u.id = p_to_buyer_id)
   THEN
+    RETURN QUERY SELECT 'refused'::text, NULL::uuid; RETURN;
+  END IF;
+
+  -- Hold the target's profile live until this move commits, so a deletion
+  -- of the target can't slip in between the check above and the commit: a
+  -- deletion waiting behind the move then sees the moved order, and a move
+  -- waiting behind a deletion wakes up to a deleted profile and is refused.
+  -- Placed after the refusal check so the FOUND that check reads is still
+  -- the enrollment read's, not this statement's.
+  PERFORM 1 FROM public.buyer_profiles
+   WHERE id = p_to_buyer_id AND deleted_at IS NULL
+     FOR SHARE;
+  IF NOT FOUND THEN
     RETURN QUERY SELECT 'refused'::text, NULL::uuid; RETURN;
   END IF;
 

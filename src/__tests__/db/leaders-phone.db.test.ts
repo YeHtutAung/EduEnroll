@@ -253,6 +253,47 @@ describe("intakes.ticket_protection", () => {
   });
 });
 
+describe("the submit RPCs' share lock on the intake", () => {
+  it("1b. switching protection on waits for an in-flight guest order, then is refused", async () => {
+    // Exercises the RPC's own lock: client A runs a real guest
+    // submit_enrollment and holds its transaction open. Nothing else in that
+    // call locks the intake row, so B can only be waiting on its FOR SHARE.
+    const intake = await createIntake(T1);
+    const cls = await createClass(T1, intake);
+    const key = `lp-${randomUUID()}`;
+
+    const a = new Client({ connectionString: process.env.DATABASE_URL });
+    const b = new Client({ connectionString: process.env.DATABASE_URL });
+    await a.connect();
+    await b.connect();
+    try {
+      await a.query("BEGIN");
+      const r = await a.query(`SELECT public.submit_enrollment($1::uuid, $2::text, 1, NULL::text, NULL::uuid) AS r`, [
+        cls,
+        key,
+      ]);
+      expect(r.rows[0].r).toMatchObject({ success: true });
+
+      const pid = (await b.query(`SELECT pg_backend_pid() AS pid`)).rows[0].pid;
+      // Not awaited: blocks on A's FOR SHARE of the intake row.
+      const pending = b.query(`UPDATE intakes SET ticket_protection = true WHERE id = $1`, [intake]);
+      pending.catch(() => {});
+      expect(await waitForLock(pid)).toBe(true);
+      await a.query("COMMIT");
+
+      // The order now exists, so the lock trigger refuses the switch.
+      await expect(pending).rejects.toThrow(/ticket_protection_locked/);
+      const [row] = await sql<{ p: boolean }>(`SELECT ticket_protection AS p FROM intakes WHERE id = $1`, [intake]);
+      expect(row.p).toBe(false);
+      expect(await sql(`SELECT 1 FROM enrollments WHERE idempotency_key = $1`, [key])).toHaveLength(1);
+    } finally {
+      await a.query("ROLLBACK").catch(() => {});
+      await a.end();
+      await b.end();
+    }
+  });
+});
+
 // ── 3–5. The submit RPCs ────────────────────────────────────────────────────
 
 describe("submit RPCs and p_buyer_id", () => {
@@ -361,6 +402,14 @@ describe("bind_ticket_device", () => {
     expect(await devices(ticket)).toHaveLength(22);
   });
 
+  it("6b. refuses a buyer whose profile is deleted, even on their own order", async () => {
+    const buyer = await newBuyer();
+    const o = await createOrder({ tenantId: T1, intakeId: protIntake, classId: protClass, buyerId: buyer, tickets: 1 });
+    await sql(`UPDATE buyer_profiles SET deleted_at = now() WHERE id = $1`, [buyer]);
+    expect(await bind(o.ticketIds[0], T1, buyer, newKey())).toBe("refused");
+    expect(await devices(o.ticketIds[0])).toHaveLength(0);
+  });
+
   it("7. refuses another buyer, another tenant, a void ticket, an unprotected ticket, an unconfirmed order, a malformed key", async () => {
     const [, ticket] = order.ticketIds;
     expect(await bind(ticket, T1, B2, newKey())).toBe("refused");
@@ -454,6 +503,37 @@ describe("bind_ticket_device", () => {
       await c1.query("ROLLBACK").catch(() => {});
       await c1.end();
       await c2.end();
+    }
+  });
+});
+
+describe("bind_ticket_device racing account deletion", () => {
+  it("8c. a bind queued behind the deletion's deleted_at UPDATE is refused and leaves no active row", async () => {
+    const buyer = await newBuyer();
+    const o = await createOrder({ tenantId: T1, intakeId: protIntake, classId: protClass, buyerId: buyer, tickets: 1 });
+    const ticket = o.ticketIds[0];
+
+    const a = new Client({ connectionString: process.env.DATABASE_URL });
+    const b = new Client({ connectionString: process.env.DATABASE_URL });
+    await a.connect();
+    await b.connect();
+    try {
+      await a.query("BEGIN");
+      await a.query(`UPDATE buyer_profiles SET deleted_at = now() WHERE id = $1`, [buyer]);
+
+      const pid = (await b.query(`SELECT pg_backend_pid() AS pid`)).rows[0].pid;
+      // Not awaited: blocks on the profile row A is updating.
+      const pending = b.query(`SELECT public.bind_ticket_device($1, $2, $3, $4) AS r`, [ticket, T1, buyer, newKey()]);
+      pending.catch(() => {});
+      expect(await waitForLock(pid)).toBe(true);
+      await a.query("COMMIT");
+
+      expect((await pending).rows[0].r).toBe("refused");
+      expect(await activeDevices(ticket)).toHaveLength(0);
+    } finally {
+      await a.query("ROLLBACK").catch(() => {});
+      await a.end();
+      await b.end();
     }
   });
 });
