@@ -468,3 +468,26 @@ describe("ticketNewPhoneEmail", () => {
     expect(m.html).toContain("&lt;script&gt;");
   });
 });
+
+describe("11. review follow-ups", () => {
+  it("refuses before binding when the ticket signing key is unusable, so the old phone isn't revoked", async () => {
+    const saved = process.env.TICKET_SIGNING_KEY;
+    process.env.TICKET_SIGNING_KEY = "not-a-key";
+    try {
+      await expectError(await post(), 503, "SERVER");
+      expect(rpc).not.toHaveBeenCalled();
+    } finally {
+      process.env.TICKET_SIGNING_KEY = saved;
+    }
+  });
+
+  it("caps the request body at 2 KB, before any bind", async () => {
+    await expectError(await post({ rawBody: JSON.stringify({ publicKey: DK, pad: "x".repeat(3000) }) }), 413, "VALIDATION");
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("trusts a declared content-length over the cap too", async () => {
+    await expectError(await post({ headers: { "content-length": "999999" } }), 413, "VALIDATION");
+    expect(rpc).not.toHaveBeenCalled();
+  });
+});
