@@ -24,7 +24,10 @@
 -- DROPPED and recreated; a fresh CREATE takes the default ACL (EXECUTE to
 -- PUBLIC), so the REVOKE/GRANT pairs below are load-bearing, and asserted.
 --
--- DEPLOY ORDER: apply this BEFORE the code that passes p_buyer_id.
+-- DEPLOY ORDER: apply this BEFORE any of the Part A code reaches a database,
+-- including the scan route: /api/scans selects intakes(ticket_protection) and
+-- enrollments(buyer_id), so without this migration EVERY scan (unprotected
+-- tickets too) is a 500. Then the code that passes p_buyer_id.
 -- Rollback: supabase/rollbacks/20261122130000_leaders_phone.down.sql
 -- ============================================================================
 

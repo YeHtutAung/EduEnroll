@@ -105,6 +105,10 @@ function setupTicketMock(opts: {
   const updateEqSpy = vi.fn();
   const updateIsSpy = vi.fn();
   const updateOrSpy = vi.fn();
+  const ticketSelectSpy = vi.fn();
+  const deviceSelectSpy = vi.fn();
+  const deviceEqSpy = vi.fn();
+  const deviceIsSpy = vi.fn();
 
   mockAdminFrom.mockImplementation((table: string) => {
     if (table === "ticket_devices") {
@@ -114,9 +118,18 @@ function setupTicketMock(opts: {
         is: ReturnType<typeof vi.fn>;
         maybeSingle: ReturnType<typeof vi.fn>;
       } = { select: vi.fn(), eq: vi.fn(), is: vi.fn(), maybeSingle: vi.fn() };
-      chain.select.mockReturnValue(chain);
-      chain.eq.mockReturnValue(chain);
-      chain.is.mockReturnValue(chain);
+      chain.select.mockImplementation((...args: unknown[]) => {
+        deviceSelectSpy(...args);
+        return chain;
+      });
+      chain.eq.mockImplementation((...args: unknown[]) => {
+        deviceEqSpy(...args);
+        return chain;
+      });
+      chain.is.mockImplementation((...args: unknown[]) => {
+        deviceIsSpy(...args);
+        return chain;
+      });
       chain.maybeSingle.mockResolvedValue({
         data: opts.deviceError ? null : (opts.device ?? null),
         error: opts.deviceError ?? null,
@@ -125,7 +138,8 @@ function setupTicketMock(opts: {
     }
     if (table !== "tickets") throw new Error(`Unexpected table: ${table}`);
     return {
-      select: vi.fn().mockImplementation(() => {
+      select: vi.fn().mockImplementation((...args: unknown[]) => {
+        ticketSelectSpy(...args);
         selectCalls += 1;
         const isFirstCall = selectCalls === 1;
         const chain: { eq: ReturnType<typeof vi.fn>; single: ReturnType<typeof vi.fn> } = {
@@ -173,7 +187,16 @@ function setupTicketMock(opts: {
     };
   });
 
-  return { updateSpy, updateEqSpy, updateIsSpy, updateOrSpy };
+  return {
+    updateSpy,
+    updateEqSpy,
+    updateIsSpy,
+    updateOrSpy,
+    ticketSelectSpy,
+    deviceSelectSpy,
+    deviceEqSpy,
+    deviceIsSpy,
+  };
 }
 
 const FUTURE_EXP = "2099-01-01T00:00:00.000Z";
@@ -622,6 +645,24 @@ describe("POST /api/scans — protected tickets", () => {
       firstScanTime: "2026-11-22T05:30:00.000Z",
       firstScanGate: "Gate-A",
     });
+  });
+
+  it("loads the protection embeds and reads only the ticket's active, unrevoked phone", async () => {
+    const { ticketSelectSpy, deviceSelectSpy, deviceEqSpy, deviceIsSpy } = setupTicketMock({
+      load: load(),
+      device: { public_key: bound.dk, buyer_id: BUYER },
+      claimed: CLAIMED,
+    });
+    const res = await scan(k2For(bound));
+    expect(res.status).toBe(200);
+    // Without these embeds every real scan would be a 500 (the mock fills them in).
+    const sel = String(ticketSelectSpy.mock.calls[0]?.[0] ?? "");
+    expect(sel).toContain("intakes(ticket_protection)");
+    expect(sel).toContain("enrollments(buyer_id)");
+    // A revoked phone (deletion, rebind) must never be the row compared.
+    expect(deviceSelectSpy).toHaveBeenCalledWith("public_key, buyer_id");
+    expect(deviceEqSpy).toHaveBeenCalledWith("ticket_id", "t1");
+    expect(deviceIsSpy).toHaveBeenCalledWith("revoked_at", null);
   });
 
   it("refuses a plain token for a protected ticket", async () => {
