@@ -2,12 +2,14 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A buyer can sign in on a tenant's website with a 6-digit email code and gets one `buyer_profiles` row, created by the single shared server function that the KuuNyi app's `POST /api/mobile/v1/me` will also use. Every Auth email goes through our own Send Email Hook, which enforces per-email limits.
+**Goal:** A buyer can sign in on a tenant's website with a 6-digit email code and gets one `buyer_profiles` row, created by the single shared server function that the KuuNyi app's `POST /api/mobile/v1/me` will also use. Every Auth email goes through our own Send Email Hook, which enforces per-email limits. **Part B (Tasks 13–19, owner decision 2026-11-22):** the same account can also be reached with "Continue with Google", and a verified backup phone recovers it by SMS code when the email is lost (design section 4.1, "Ways in").
+
+**Two PRs.** Part A is Tasks 1–12 (email code), opened and reviewed on its own. Part B is Tasks 13–19, on a new branch off `dev` after Part A merges, so Part A is not held up by the Google and SmsPoh setup.
 
 **Architecture:** Email-code sign-in is Supabase Auth email OTP. Supabase calls our Send Email Hook (`POST /api/internal/auth/send-email`) for every Auth email. The hook checks the Standard Webhooks signature, counts against per-email caps in `mobile_rate_limits`, and sends through Resend. A profile is created only by `ensureBuyerProfile()`, which:
 1. accepts only an email-code (`amr` `otp`) session;
 2. takes a database claim;
-3. resets the account's password to a random value and ends every other session;
+3. resets the account's password to a random value, which ends every session, and has the route re-issue the caller's session (Task 11a);
 4. inserts the profile.
 
 `requireBuyer()` is the guard for every buyer route. It asks the Auth server (never a local JWT check), separates a real rejection (401) from an Auth outage (503), and refuses staff (403). The `/account` page is the web sign-in.
@@ -27,9 +29,9 @@
 | # | Plan | Depends on | Status |
 |---|---|---|---|
 | 1 | Staff password sessions (`2026-11-20-staff-password-sessions.md`) | nothing | **done**: #471 on dev, staging via #488; migration on the dev DB |
-| 2 | **Buyer accounts** (this file) | Plan 1; mobile spec at #311 | ready |
-| 3 | Ticket protection core: `intakes.ticket_protection`, `ticket_devices` + bind, `k2` QR, `/api/scans` protected path | Plan 2; kuunyi-scanner sends `token` | after Plan 2 |
-| 4 | Protected checkout, closing QR surfaces (web + mobile API), `/account/tickets`, admin controls, deletion | Plan 3 | after Plan 3 |
+| 2 | **Buyer accounts** (this file): Part A email code, Part B Google + backup phone | Plan 1; mobile spec at #311 | in progress |
+| 3 | The leader's phone (mode A): scope switch, protected checkout, binding with no limit, `k2` QR, `/api/scans` protected path, closing QR surfaces, `/account/tickets`, admin read-only view, deletion step (design section 12, revised 2026-11-22) | Plan 2; kuunyi-scanner sends `token` | after Plan 2 |
+| 4 | Seat sharing (mode B, design section 6.4) | Plan 3 | after Plan 3 |
 
 **In this plan:**
 - Tables: `buyer_profiles`, `buyer_profile_claims` and `mobile_rate_limits`.
@@ -40,8 +42,13 @@
 - The Auth-error classifier, `requireBuyer` and `ensureBuyerProfile`.
 - The web profile route and the `/account` sign-in page.
 - Example env hygiene: every value in `.env.local.example` is an obvious placeholder.
+- Part B: Google sign-in (`/auth/callback`, in-app browser detection), `ensureBuyerProfile`
+  accepting Google sessions, the Before User Created hook refusing phone sign-ups, the Send SMS
+  Hook (SmsPoh), and the backup phone add and recovery flows on `/account`.
 
 **Not in this plan:**
+- Removing a backup phone (change is supported; removal later).
+- Native Google sign-in and phone recovery in the app: #451 / the mobile spec.
 - Mobile `/api/mobile/v1/*` routes: #451, which reuses `requireBuyer` and `ensureBuyerProfile` from here.
 - The App Review reviewer (`REVIEWER_EMAIL`, `is_reviewer` repair, demo tenant): waits on Q11 / KN-164.
 - `requireBuyerForDeletion` and account deletion: Plan 4.
@@ -99,6 +106,17 @@
 | `src/types/database.ts` (modify) | Types for the new tables and RPCs |
 | `supabase/config.toml` (modify) | Local: confirmations on, 10-minute codes, hook settings |
 | `.env.local.example` (modify) | Placeholders only; new secret names as placeholders |
+| **Part B** | |
+| `src/lib/authMethod.ts` (modify) | `canCreateProfile(token)`: email code or Google, never password |
+| `src/app/auth/callback/route.ts` | Google PKCE return: exchange the code, ensure the profile, redirect |
+| `src/lib/auth/safeNext.ts` | Same-origin relative `next` paths only |
+| `src/lib/inAppBrowser.ts` | `isInAppBrowser(userAgent)` |
+| `supabase/migrations/<next>_buyer_phone_hooks.sql` (+ rollback) | `hook_before_user_created` refusing phone sign-ups |
+| `src/lib/auth/authSmsCopy.ts` | Bilingual SMS text |
+| `src/lib/auth/authSmsLimits.ts` | `+959` check, caps, HMAC keys |
+| `src/app/api/internal/auth/send-sms/route.ts` | The Send SMS Hook |
+| `src/lib/phone.ts` | `toMyanmarE164()`, `maskPhone()` |
+| `src/app/(public)/account/*` (modify) | Google button, backup phone, recovery steps |
 
 ---
 
@@ -1053,7 +1071,7 @@ Order. Each step's failure is final unless it says otherwise.
    - a token → continue.
 6. `buyer_profile_claim_held(userId, token)` is false or returns `{ error }` → release the claim, 503.
 7. `auth.admin.updateUserById(userId, { password: <48 random bytes, base64url> + "aA1!"> })` (68 characters; the fixed suffix has one lowercase, uppercase, digit and symbol, so a hosted policy that demands symbols accepts it) returns `{ error }` or throws → release the claim, 503.
-8. `auth.admin.signOut(accessToken, "others")` returns `{ error }` or throws → release the claim, 503.
+8. ~~`auth.admin.signOut(accessToken, "others")`~~ **Removed by Task 11a**: the reset in step 7 already ends every session, and the route re-issues the caller's session instead.
 9. `create_buyer_profile(userId, token, email)`:
    - `'created'` → 201 with the new row;
    - `'existing'` → re-read and answer as in step 3 (live → 200, `deleted_at` set → 409). If the re-read finds no row, answer 503;
@@ -1428,6 +1446,46 @@ git commit -m "docs(spec): email change follows the mobile spec (secure change +
 
 ---
 
+### Task 11a: First sign-in keeps a working session (blocks Task 12 and Part B)
+
+Task 10 Step 2 found that step 7 of `ensureBuyerProfile` (`updateUserById({ password })`) deletes
+**every** session of the user on this GoTrue, so the caller's own session dies and every first
+sign-in answers 503. The reset can't be dropped: it is what removes a pre-registered password
+(and, in Part B, a password a Google sign-in may link to).
+
+**Files:** modify `src/server/buyers/ensureBuyerProfile.ts` (step 8 removed; `EnsureResult`'s 201
+case gains `reissue: { hashedToken }`), `src/app/api/account/profile/route.ts`,
+`src/app/(public)/account/accountFlow.ts` and `AccountSignIn.tsx` (a 201 with
+`reason: "sign_in_again"`, and later Task 15's `notice=sign_in_again`, go to the email step with
+"Your account is ready — sign in once more", the email pre-filled); tests beside each.
+
+- [ ] **Step 1: Spike (local stack, shape-only output).** After `updateUserById({ password })`,
+  re-issue a session for the same user **without sending any email**: `admin.generateLink({ type:
+  "magiclink", email })` → `properties.hashed_token` → `verifyOtp({ token_hash, type: "magiclink" })`
+  on the route's cookie client. Record: does `generateLink` call the Send Email Hook or send mail
+  (it must not); the new session's `amr`; that the old session is gone and the new one passes
+  `requireBuyer`. If `generateLink` sends anything, stop and report. **If the re-issued `amr` is
+  not `otp`** (for example `magiclink`), record it in the findings as a value every later buyer
+  check must accept as an ordinary buyer session (Plans 3–4, #451), and add it to design
+  section 4.1's `amr` sentence.
+- [ ] **Step 2: Change the order:** step 8 (`signOut(accessToken, "others")`) is removed (the reset
+  already ended every session); after step 7, `ensureBuyerProfile` returns a `reissue` handle
+  (`{ hashedToken }`, never logged) with the 201, and the **route** completes the `verifyOtp` on its
+  cookie client, so the browser gets the new session cookie in the same response. A failed re-issue
+  answers 201 with `reason: "sign_in_again"`, and the page goes to the email step with "Your account
+  is ready — sign in once more".
+- [ ] **Step 3: Tests:** the order with the re-issue; `hashedToken` absent from logs and the JSON
+  body; the route sets the cookie; the `sign_in_again` path; the existing step-8 tests rewritten.
+- [ ] **Step 4:** `npx vitest run src/__tests__/server/buyers src/__tests__/api/account` → PASS, then
+  repeat Task 10 Step 2's end-to-end run: a new buyer's first `POST /api/account/profile` gives 201
+  and a following `GET` gives 200.
+- [ ] **Step 5: Commit** `fix(buyers): first sign-in re-issues the session the password reset ends`.
+
+The mobile app's `POST /me` (#451) needs the same re-issue, returned as tokens instead of a cookie;
+note it on kuunyi-app #311.
+
+---
+
 ### Task 12: Full verification, PR, and owner steps
 
 - [ ] **Step 1: Run everything, judged by exit code**
@@ -1480,6 +1538,277 @@ npm run build; echo BUILD=$?    # no dev server running from this folder
      - `email_change` codes reach the right addresses.
      - If the Before User Created hook was built: a public `signUp({ email, password })` is refused, and staff creation through the service role still works. The mobile spec requires this proof on staging.
   10. **Production: nothing.** Releases to `main` are frozen. When they resume, production needs this migration, the secrets and the hook before the code, and email codes switched on last.
+
+---
+
+# Part B — Google sign-in and backup phone (owner decision 2026-11-22)
+
+Design section 4.1, "Ways in". Start only after Part A's PR has merged into `dev`, in a fresh
+worktree off `origin/dev` on branch `feat/buyer-google-phone`. **Task 11a must be merged first:**
+Google sign-ins go through `ensureBuyerProfile`, whose password reset ends every session; the
+callback relies on 11a's re-issue.
+
+### Task 13: Spike 2 — Google and phone behaviour
+
+**Files:** none committed; findings go in the "Findings (Part B)" table at the end of this file.
+
+- [ ] **Step 1 (local stack): phone.** Turn on `[auth.sms]` locally with `enable_signup = true` and a
+  throwaway Send SMS Hook capture server (shape-only logging, like Task 1's), never a real SmsPoh
+  key. Record, printing only types, booleans and error codes:
+  1. the Send SMS Hook payload keys for (a) `updateUser({ phone })` on a signed-in email user and
+     (b) `signInWithOtp({ phone, options: { shouldCreateUser: false } })` for that user after
+     verifying: does the payload say which case it is (an action type, `new_phone`, or only
+     `user.phone`)?
+  2. `amr` of a session from `verifyOtp({ phone, token, type: "sms" })`; the verify `type` for the
+     add step (`phone_change` expected);
+  3. `signInWithOtp({ phone })` with `shouldCreateUser: true` for an unknown number: is a user
+     created, and does the Before User Created event carry `user.phone`?
+  4. after the phone is verified, does an email-code sign-in still reach the same user and keep
+     `user.phone`?
+  5. `updateUser({ phone })` with a number already on another user: the error code (an enumeration
+     signal, design section 13);
+  6. `signInWithOtp({ phone, shouldCreateUser: false })` for an unregistered number: the error code,
+     and whether the Send SMS Hook is called at all.
+- [ ] **Step 2 (dev project, owner-assisted): Google.** Needs owner steps G1–G3 of Task 19 on the
+  **dev** project only, with `http://localhost:3005/auth/callback` also on its Redirect URLs for the
+  spike (removed afterwards). PKCE is finished by a throwaway page in the scratchpad (a local
+  Next.js route or a tiny server on port 3005 calling `exchangeCodeForSession`), not committed; or
+  build Task 15 first and use its callback. The owner signs in with a test Google account in the browser (never enter a
+  Google password yourself). Record for each case the auth user id equality, `identities[].provider`,
+  `amr`, `email_confirmed_at`, and whether `encrypted_password` is set (as a boolean, via SQL shown to
+  the owner first):
+  1. a new address;
+  2. an address that already has an email-code buyer (same user id expected);
+  3. an address with only an unconfirmed `signUp({ email, password })` (does the password survive
+     the link?);
+  4. a staff address (Google session must still get 403 on `/admin` APIs).
+  Delete the test users afterwards (SQL shown to the owner first).
+- [ ] **Step 3:** fill in the Part B findings table. If case 2 or case 3 does not end on one linked
+  user (a second user, or a refusal), stop and revisit the design: it assumes automatic linking.
+
+---
+
+### Task 14: `ensureBuyerProfile` accepts Google sessions
+
+**Files:**
+- Modify: `src/lib/authMethod.ts`, `src/server/buyers/ensureBuyerProfile.ts`
+- Test: `src/__tests__/lib/authMethod.test.ts`, `src/__tests__/server/buyers/ensureBuyerProfile.test.ts`
+
+Step 4 of `ensureBuyerProfile` becomes `canCreateProfile(accessToken)`: `amr` lists `otp` (email
+code) or the Google method found in Task 13 (`oauth` expected), and never `password`. The reason code
+stays `not_email_code` (the app contract). An SMS session never reaches step 4: a backup phone can be
+added only to a user with a profile (Task 18), the Send SMS Hook refuses users without one (Task 17),
+and phone sign-ups are refused (Task 16), so step 3 answers first. An SMS session most likely has
+`amr` `otp` too, the same as an email code, so `canCreateProfile` cannot tell them apart; as defence
+in depth, `EnsureInput.user` gains `phone_confirmed_at`, and **no profile plus a confirmed phone →
+403 `not_email_code`** (before the claim). Everything after step 4 (claim, password reset, the
+Task 11a re-issue, create) is unchanged, so a Google sign-in on an address with a pre-registered
+password still loses that password, and the callback (Task 15) gets the re-issued session.
+
+- [ ] **Step 1: Write the failing tests:** `canCreateProfile` for `["otp"]`, `["oauth"]` (or the
+  Task 13 value) → true; `["password"]`, `["password","oauth"]`, `[]`, a malformed token → false.
+  `ensureBuyerProfile`: a Google session with no profile goes through the full happy-path order and
+  returns 201 with the re-issue handle; `["password","oauth"]` → 403 `not_email_code` with no RPC
+  call; no profile and `phone_confirmed_at` set → 403, no RPC call. **Staff gates:** `isPasswordSession`
+  and the existing `requireAuth` / `requireOwner` / `requireSuperadmin` / middleware tests refuse
+  `["oauth"]`, `["otp"]` and the Task 13 SMS value.
+- [ ] **Step 2:** `npx vitest run src/__tests__/lib/authMethod.test.ts src/__tests__/server/buyers` → FAIL.
+- [ ] **Step 3: Implement.** Keep `isEmailCodeSession` for its other callers.
+- [ ] **Step 4:** same command → PASS.
+- [ ] **Step 5: Commit** `feat(buyers): Google sessions can create a buyer profile`.
+
+---
+
+### Task 15: "Continue with Google" on `/account`
+
+**Files:**
+- Create: `src/app/auth/callback/route.ts`, `src/lib/auth/safeNext.ts`, `src/lib/inAppBrowser.ts`
+- Modify: `src/app/(public)/account/accountFlow.ts`, `AccountSignIn.tsx`, `src/middleware.ts` (matcher: `/auth/callback`), `supabase/config.toml` (`[auth.external.google]` block committed **commented out**, like the hook block, because an unset `env()` breaks `supabase start`)
+- Test: `src/__tests__/auth/callback.test.ts`, `src/__tests__/lib/safeNext.test.ts`, `src/__tests__/lib/inAppBrowser.test.ts`, the account tests
+
+Flow:
+1. The email step shows "Continue with Google" above the email field, unless `isInAppBrowser`.
+   Click → effect `startGoogle { next: "/account" }` → the client runs
+   `signInWithOAuth({ provider: "google", options: { redirectTo: `${location.origin}/auth/callback?next=/account` } })`
+   (PKCE; `@supabase/ssr` keeps the verifier in a cookie on this host).
+2. `GET /auth/callback?code=…&next=…`:
+   - `next` passes `safeNext()`: a relative path starting with a single `/`, no `//`, no `\`, no
+     scheme, no control characters; anything else becomes `/account` (no open redirect);
+   - `exchangeCodeForSession(code)` with the server client; an error or no `code` → redirect
+     `/account?notice=google_failed`;
+   - `getUser()`, then `ensureBuyerProfile({ user, accessToken })`:
+     - 200 → redirect `next`;
+     - 201 → complete the Task 11a re-issue on this response's cookies, redirect `next`; a failed
+       re-issue → `/account?notice=sign_in_again`;
+     - 403 `staff` → `signOut({ scope: "local" })`, redirect `/account?notice=staff`;
+     - 403 other → sign out locally, `/account?notice=google_failed`;
+     - 409 → sign out locally, `/account?notice=deleting`;
+     - 503 → keep the session, redirect `/account?notice=retry_profile`.
+   - Never log the code, tokens or the email. Responses are `303` with `Cache-Control: no-store`.
+3. `/account` maps `notice` on load: `staff`, `deleting`, `google_failed` show the existing
+   messages on the email step; `retry_profile` goes to the profile-posting state (the existing
+   503 retry path). The page then removes `notice` from the URL with `history.replaceState`.
+4. In an in-app browser the email step shows, instead of the Google button: "Google sign-in doesn't
+   work inside this app. Open this page in Chrome or Safari, or use an email code." and a
+   "Copy link" button. `isInAppBrowser(ua)` matches `FBAN`, `FBAV`, `FB_IAB`, `Instagram`,
+   `Messenger`, `Line/`, `Viber`, `MicroMessenger` and Android WebView (`; wv)`); a table test
+   covers each plus Chrome, Safari, Samsung Internet and Firefox as false.
+
+- [ ] **Step 1: Write the failing tests:** `safeNext` table (`/account` ok; `//evil.example`,
+  `/\evil`, `https://evil.example`, `javascript:…`, `%2F%2Fevil`, empty → `/account`); the callback
+  route with the Supabase client and `ensureBuyerProfile` mocked: every branch above, the redirect
+  target, `no-store`, no `console.*` containing the code; reducer: `googleClicked` → `startGoogle`,
+  ignored while busy; each `notice` value; view: the button present on a normal UA and absent with the
+  in-app text on a Messenger UA; middleware matcher includes `/auth/callback`.
+- [ ] **Step 2:** `npx vitest run src/__tests__/auth src/__tests__/lib src/__tests__/account src/__tests__/middleware.test.ts` → FAIL.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4:** same command → PASS.
+- [ ] **Step 5: Commit** `feat(account): Continue with Google, in-app browser fallback`.
+
+---
+
+### Task 16: Migration — refuse phone sign-ups
+
+**Files:**
+- Create: `supabase/migrations/<next free timestamp>_buyer_phone_hooks.sql`, `supabase/rollbacks/<same>.down.sql`
+- Test: `src/__tests__/db/beforeUserCreatedHook.test.ts`
+
+`public.hook_before_user_created(event jsonb) returns jsonb`, `SECURITY DEFINER`, `search_path = ''`:
+if `nullif(event->'user'->>'phone', '')` is not null (or wherever Task 13 found the phone), return
+`{"error":{"http_code":403,"message":"Sign up with an email address."}}`; otherwise `'{}'::jsonb`.
+`GRANT EXECUTE … TO supabase_auth_admin`; `REVOKE … FROM PUBLIC, anon, authenticated`. It never
+refuses a user without a phone, so staff creation and email sign-ups are untouched.
+
+- [ ] **Step 1:** DB test (via `pg`, as the other `src/__tests__/db` tests): phone present → the
+  error object; email only → `{}`; empty phone → `{}`; `anon`/`authenticated` cannot execute it.
+- [ ] **Step 2:** `npm run test:db` → FAIL.
+- [ ] **Step 3:** write the migration and rollback; `npx supabase migration up` locally.
+- [ ] **Step 4:** `npm run test:db` → PASS. Then, locally with `[auth.hook.before_user_created]`
+  pointed at it (commented out in the committed config, like the other hooks): `signInWithOtp({ phone })`
+  for a new number creates no user; `signInWithOtp({ email })` still does.
+- [ ] **Step 5: Commit** `feat(db): refuse phone sign-ups (backup phones attach to email accounts only)`.
+
+---
+
+### Task 17: Send SMS Hook
+
+**Files:**
+- Create: `src/app/api/internal/auth/send-sms/route.ts`, `src/lib/auth/authSmsCopy.ts`, `src/lib/auth/authSmsLimits.ts`, `src/lib/phone.ts`
+- Modify: `src/lib/utils.ts` (export `MM_PHONE_RE`), `src/lib/sms.ts` (a `quiet` option: today `sendSms` logs `Sent to <number>` and, on failure, SmsPoh's raw response body, which can echo the code; with `quiet: true` it logs only the HTTP status and message id), `src/middleware.ts` only if the email hook needed a bypass there (mirror it), `.env.local.example` (`SUPABASE_SEND_SMS_HOOK_SECRET` placeholder)
+- Test: `src/__tests__/api/internal/sendSms.test.ts`, `src/__tests__/lib/phone.test.ts`
+
+Same structure as Task 8's Send Email Hook (`standardWebhook.ts`, a 4 s deadline, `consume_rate_limit`
+with HMAC keys from `RATE_LIMIT_HMAC_SECRET`, never logging the number or code). Order:
+1. Verify the signature with `SUPABASE_SEND_SMS_HOOK_SECRET`; unset secret → 503; bad signature → 401.
+2. The number (`user.phone`, or the new-phone field Task 13 found for a phone change) must match
+   `^\+959\d{7,9}$` (`toMyanmarE164` from `MM_PHONE_RE`) → else 400 with the hook error shape
+   `{ "error": { "http_code": 400, "message": "…" } }`.
+3. Service-role reads: a `users` row → 403; no `buyer_profiles` row with `deleted_at IS NULL` → 403.
+   A read error → 503.
+4. Caps, all must pass: per number 3/hour and 6/day; per user 6/day; and two **separate** project
+   budgets, adding/changing a phone 150/day and recovery sign-in 150/day, so mass phone-adding from
+   cheap accounts can never starve recovery. Adding a phone also requires the profile to be at
+   least 24 hours old (`buyer_profiles.created_at`). Over → 429. RPC failure → 503 (fail closed).
+5. For a phone **change or add** (as Task 13 tells it apart): send the account email "A backup phone
+   (+959•••••12) was requested for your KuuNyi account. If this wasn't you, sign in and change it."
+   through Resend, before the SMS. A failed email → 503, no SMS.
+6. `sendSms({ to, message, quiet: true })` with `authSmsCopy` ("KuuNyi code: 123456. Don't share it." in Myanmar
+   and English, under 160 characters). `false` → 503. Success → 200 `{}`.
+
+`maskPhone("+959791234567")` → `+959•••••567`.
+
+- [ ] **Step 1: Write the failing tests** for every numbered branch, the cap keys (HMAC, no raw
+  number), the two budgets kept apart, the 24-hour profile age, a `console` spy through the **real**
+  `sendSms` with `quiet: true` (fetch stubbed, success and failure bodies) showing no number or code, the order (email before SMS on a change; no SMS after a failed email), no `console.*`
+  with the number or code, and `toMyanmarE164` (`09791234567`, `+959791234567`, `959791234567`,
+  `09-791-234-567` → `+959791234567`; landlines, `+66…`, short numbers → null).
+- [ ] **Step 2:** `npx vitest run src/__tests__/api/internal/sendSms.test.ts src/__tests__/lib/phone.test.ts` → FAIL.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4:** same command → PASS.
+- [ ] **Step 5: Commit** `feat(auth): Send SMS Hook — Myanmar numbers, profile-only, capped, via SmsPoh`.
+
+---
+
+### Task 18: Backup phone and recovery on `/account`
+
+**Files:**
+- Modify: `src/app/(public)/account/accountFlow.ts`, `AccountSignIn.tsx`, `src/lib/buyers/requireBuyer.ts` (its result gains `backupPhoneMasked: maskPhone(user.phone)` or null, from the `getUser` it already makes; never the full number), `src/app/api/account/profile/route.ts` (GET returns it as `backupPhone`)
+- Test: the account tests, `src/__tests__/api/account/profile.test.ts`
+
+Signed-in view gains "Backup phone" with the masked number or "Not set", and "Add" / "Change":
+1. [`phoneEntry`] a `tel` field; `toMyanmarE164` null → notice, no call. `updateUser({ phone })`;
+   429 → "too many codes"; other error → generic.
+2. [`phoneCode`] `verifyOtp({ phone, token, type: "phone_change" })` (or the Task 13 type) with the
+   same `normalizeCode`; success → reload the profile → signed in, showing the new masked number.
+
+Email step gains "Can't get your email code? Use your backup phone":
+3. [`recoveryPhone`] phone field → `signInWithOtp({ phone, options: { shouldCreateUser: false } })`.
+   Every outcome, **429 included**, shows the same "If this number is a backup phone, a code is on
+   its way" text; then always go to the code step. This hides registration from the page only: a
+   direct API caller can still tell registered numbers apart (design section 13).
+4. [`recoveryCode`] `verifyOtp({ phone, token, type: "sms" })` → `GET /api/account/profile` → 200 →
+   signed in; 401 → "no account with this backup phone" is **not** shown; use the generic
+   "wrong or expired code".
+
+The code rules from Task 9 apply (never in state, URL, logs; `one-time-code`; Myanmar digits).
+
+- [ ] **Step 1: Write the failing tests:** reducer transitions for all four steps, the uniform
+  recovery message, stale events ignored, the code only in `verifyCode`-style effects; view renders;
+  profile GET returns the masked number and never the full one.
+- [ ] **Step 2:** `npx vitest run src/__tests__/account src/__tests__/api/account` → FAIL.
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4:** same command → PASS.
+- [ ] **Step 5: Commit** `feat(account): backup phone and SMS recovery`.
+
+---
+
+### Task 19: Part B verification, PR and owner steps
+
+- [ ] **Step 1:** the five commands of Task 12 Step 1, every exit code 0.
+- [ ] **Step 2:** Codex review as in Task 12 Step 2.
+- [ ] **Step 3:** PR into `dev`: `feat: buyer accounts part B — Google sign-in and backup phone`,
+  with the Part B findings and the owner steps below, each **Required**. Never merge it yourself.
+- [ ] **Step 4: Owner steps, in order** (dev project first; staging reads it):
+  - G1. Google Cloud: an OAuth client (Web), consent screen in production status, authorised
+    redirect URI `https://fnfvwzwrdsnmwxunciti.supabase.co/auth/v1/callback`.
+  - G2. Dev Supabase → Auth → Providers → Google: client id and secret (set in the dashboard, never
+    pasted into chat or a commit).
+  - G3. Dev Supabase → Auth → URL configuration → Redirect URLs: the staging hosts' `/auth/callback`
+    (each tenant subdomain pattern and each custom domain used on staging).
+  - S1. SmsPoh: credit for recovery SMS; `SMSPOH_API_KEY` / `SMSPOH_API_SECRET` / `SMSPOH_SENDER_ID`
+    present in Vercel **Preview** (check, don't print).
+  - S2. Vercel Preview: `SUPABASE_SEND_SMS_HOOK_SECRET` with `printf`. Not Production.
+  - S3. Merge to `dev`, promote to `staging`, so the hook route is live first.
+  - S3b. Dev DB: review Task 16's migration diff, then apply it (`supabase db push` after a dry run).
+    No CI applies migrations; S4 fails without it.
+  - S4. Dev Supabase → Hooks: Before User Created → `public.hook_before_user_created` **before**
+    turning on the Phone provider.
+  - S5. Dev Supabase → Auth → Providers → Phone on, "Allow new users to sign up" left as needed for
+    email (the hook refuses phone sign-ups), Send SMS Hook →
+    `https://staging.kuunyi.com/api/internal/auth/send-sms` with the S2 secret. To undo: Phone off.
+  - T1. Staging test with real phones: Google sign-in on a normal browser lands on the same account
+    as the email code; the Google button is hidden in Messenger's browser; add a backup phone (the
+    account gets the warning email, the phone gets the code); sign out, recover by SMS; a number
+    that isn't a backup phone shows the same text and sends no SMS; a new number can't create an
+    account; a staff email signed in with Google gets 403 on `/admin`.
+  - Production: nothing while the release freeze holds. Later: G1–G3 and S1–S5 against the
+    production project, each custom domain on its Redirect URLs, migration before code.
+
+---
+
+## Findings (Part B, filled in by Task 13)
+
+| Question | Result | Consequence |
+|---|---|---|
+| Send SMS Hook payload: tells add/change from sign-in? | | Task 17 step 5 |
+| `amr` of an SMS session; verify type for adding a phone | | Tasks 14, 18 |
+| Phone sign-up: user created? `user.phone` in Before User Created event? | | Task 16 |
+| Email-code sign-in after adding a phone: same user, phone kept? | | Task 18 |
+| Google, new address: `amr`, confirmed? | | Task 14 |
+| Google on an existing email-code buyer: same user id? | | **stop if not** |
+| Google on an unconfirmed password sign-up: one linked user? password kept? | | **stop if not linked**; reset covers a kept password |
+| `updateUser({ phone })` duplicate error; unregistered `signInWithOtp({ phone })` error, hook called? | | design 13 (enumeration) |
+| Google on a staff address: admin refused? | | design 4.4 |
 
 ---
 
