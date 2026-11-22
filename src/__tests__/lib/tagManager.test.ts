@@ -72,6 +72,10 @@ describe("isTrackedPath", () => {
     "/enroll/x/tickets/extra",
     "/enroll/%66orm",
     "/enroll/x/%74ickets",
+    // Account ticket pages show a live QR: no tag script may run there (plan Task 8).
+    "/account",
+    "/account/tickets",
+    "/account/tickets/x",
   ])("does not track %s", (p) => expect(isTrackedPath(p)).toBe(false));
 });
 

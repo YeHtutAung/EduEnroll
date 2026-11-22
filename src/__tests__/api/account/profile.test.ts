@@ -102,10 +102,11 @@ describe("GET", () => {
     expect(adminFrom).not.toHaveBeenCalled();
   });
 
-  it("answers 200 { email, name, locale }, reading the buyer's own row", async () => {
+  it("answers 200 { buyerId, email, name, locale }, reading the buyer's own row", async () => {
     const res = await GET();
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ email: "b@example.test", name: "Aung", locale: "my" });
+    // buyerId keys the phone's device key on /account/tickets/[id] (plan Task 8).
+    expect(await res.json()).toEqual({ buyerId: "u1", email: "b@example.test", name: "Aung", locale: "my" });
     expect(adminFrom).toHaveBeenCalledWith("buyer_profiles");
     expect(eqSpy).toHaveBeenCalledWith("id", "u1");
   });
@@ -118,6 +119,15 @@ describe("GET", () => {
   it("answers 401 when the row vanished after requireBuyer", async () => {
     profileRead = { data: null, error: null };
     await expectError(await GET(), 401, "UNAUTHENTICATED");
+  });
+
+  // Per-buyer (it carries buyerId): never cached, on success or error.
+  it("sets Cache-Control: no-store on 200, on its own errors and on requireBuyer's", async () => {
+    expect((await GET()).headers.get("cache-control")).toBe("no-store");
+    profileRead = { data: null, error: { code: "57014" } };
+    expect((await GET()).headers.get("cache-control")).toBe("no-store");
+    requireBuyer.mockResolvedValue(NextResponse.json({ error: { code: "UNAUTHENTICATED" } }, { status: 401 }));
+    expect((await GET()).headers.get("cache-control")).toBe("no-store");
   });
 });
 

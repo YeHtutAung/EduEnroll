@@ -739,6 +739,42 @@ export function interestConfirmationEmail(params: {
   };
 }
 
+// ── New-phone notice (an account-bound ticket was bound to another phone) ───
+//
+// The only anti-takeover signal for an account-bound ticket: sent when a
+// ticket moves from one phone to another (bind_ticket_device → bound_again).
+// It carries no link, token or key. The Myanmar line needs native review.
+
+export function ticketNewPhoneEmail(params: {
+  tier: string;
+  tenantName?: string;
+  logoUrl?: string;
+}): { subject: string; html: string } {
+  const { tier, tenantName, logoUrl } = params;
+  return {
+    subject: "Your ticket was opened on a new phone",
+    html: baseLayout(`
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="margin: 0; font-size: 22px; color: #1a1a1a;">Your ticket is on a new phone</h1>
+        <p style="margin: 4px 0 0; color: #6b7280; font-family: 'Noto Sans Myanmar', sans-serif;">သင့်လက်မှတ်ကို ဖုန်းအသစ်တွင် ဖွင့်ထားပါသည်</p>
+      </div>
+
+      <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 16px; margin: 20px 0;">
+        <p style="margin: 0; font-size: 14px; color: #92400e;">
+          Your ticket was opened on a new phone. If this wasn't you, sign in and open your ticket again to move it back.
+        </p>
+        <p style="margin: 6px 0 0; font-size: 13px; color: #a16207; font-family: 'Noto Sans Myanmar', sans-serif;">
+          သင့်လက်မှတ်ကို ဖုန်းအသစ်တစ်လုံးတွင် ဖွင့်ထားပါသည်။ သင်မဟုတ်ပါက အကောင့်သို့ ဝင်ပြီး လက်မှတ်ကို ပြန်ဖွင့်၍ သင့်ဖုန်းသို့ ပြန်ရွှေ့ပါ။
+        </p>
+      </div>
+
+      <p style="font-size: 13px; color: #374151; text-align: center;">
+        Ticket: <strong>${escapeEmailText(tier)}</strong>
+      </p>
+    `, tenantName ? escapeEmailText(tenantName) : undefined, logoUrl),
+  };
+}
+
 // ── Priority window reminder email (sent by an admin) ────────────────────────
 //
 // An invitation is explicitly permitted BEFORE the window opens and AFTER it
