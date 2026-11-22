@@ -115,6 +115,17 @@ describe("AccountView", () => {
     expect(html).not.toContain("<input");
   });
 
+  it("signed in: a My tickets link to /account/tickets, in both languages", () => {
+    const html = render({ step: "signedIn", email: "buyer@example.com", busy: false });
+    expect(html).toMatch(/<a[^>]+href="\/account\/tickets"[^>]*>/);
+    expect(html).toContain("My tickets");
+    expect(html).toContain("ကျွန်ုပ်၏ လက်မှတ်များ");
+  });
+
+  it("signed out: no My tickets link", () => {
+    expect(render({ step: "email", email: "", busy: false, notice: null })).not.toContain("/account/tickets");
+  });
+
   it("load failure offers Try again", () => {
     const html = render({ step: "loadFailed" });
     expect(html).toContain("Try again");

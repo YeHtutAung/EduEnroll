@@ -68,6 +68,7 @@ const COPY = {
   },
   copyLink: { en: "Copy link", mm: "လင့်ခ် ကူးယူရန်" },
   linkCopied: { en: "Link copied", mm: "လင့်ခ် ကူးယူပြီးပါပြီ" },
+  myTickets: { en: "My tickets", mm: "ကျွန်ုပ်၏ လက်မှတ်များ" },
 } satisfies Record<string, Bilingual>;
 
 const NOTICES: Record<Notice, Bilingual & { tone: "error" | "info" }> = {
@@ -417,7 +418,14 @@ function Body(props: AccountViewProps) {
             {COPY.signedInAs.en} / <span className="font-myanmar">{COPY.signedInAs.mm}</span>
           </p>
           <p className="mt-1 break-all text-lg font-semibold text-gray-900">{state.email}</p>
-          <button type="button" onClick={props.onSignOut} disabled={state.busy} className={`mt-6 ${primaryButton}`}>
+          {/* A plain link: a full page load, like every other exit here. */}
+          <a
+            href="/account/tickets"
+            className="mt-6 block w-full rounded-lg border border-[#1a6b3c] px-5 py-3 text-center text-sm font-semibold text-[#1a6b3c] hover:bg-green-50 transition-colors"
+          >
+            {COPY.myTickets.en} / <span className="font-myanmar">{COPY.myTickets.mm}</span>
+          </a>
+          <button type="button" onClick={props.onSignOut} disabled={state.busy} className={`mt-3 ${primaryButton}`}>
             {COPY.signOut.en} / <span className="font-myanmar">{COPY.signOut.mm}</span>
           </button>
         </Card>
