@@ -47,17 +47,23 @@ Each part branches from `dev` after the previous one merges.
 5. **The email rule lives in one helper whose return type changes.** `buildEticketEmailAttachment()` is replaced by `buildTicketEmailParts()`, which returns `{ attachment, accountTickets }` and leaves protected tickets out of the PDF. Every caller must handle the new shape, so the compiler finds a caller that forgot. This is the "one shared helper" of design 8.1.
 6. **A revoked phone racing an admission.** The scan checks the active device key, then admits with the existing conditional `UPDATE`. A rebind that lands in the milliseconds between the two lets the old phone in once. This is accepted and recorded in design section 13 (Task 16 adds it). Closing it would mean moving admission into SQL, which is out of scope.
 7. **Moving an order whose event has no date** is allowed: there is no known end, so nothing to refuse on. Every other refusal in design 4.7 step 4 is implemented.
-8. **Scripts on the same site can bind a phone (owner decision needed before Part B merges).**
+8. **Scripts on the same site can bind a phone. Decided 2026-11-23: (a), tags off on the whole host.**
    - The bind route answers a signed-in buyer's own browser. The session cookie covers the whole host.
    - So a tenant's tag script on **any** tracked page of that host could call `/api/me/tickets` and the bind route with a key of its own, as could any script injected into that origin. GTM runs on `/enroll`, `/enroll/<slug>` and `/enroll/<slug>/tickets`, for every event (`src/lib/tagManager.ts:30`).
    - Such a call gets a working QR and revokes the buyer's phone. The only signal is the "new phone" email, and a second move within the same 10-minute email window sends no new email (Task 7).
    - The plan always adds a same-origin check (Task 7). That stops sibling tenant subdomains; it can't stop a script on the same origin.
 
-   The owner chooses:
-   - **(a)** switch tenant tag scripts off on the **whole host** while that tenant has any protected event. Switching them off only on the protected event's pages leaves the hole open, because every other tracked page is the same origin. This costs that tenant its ad tracking.
-   - **(b)** accept the risk and record it in design section 13. The organiser controls their own GTM container, so the exposure comes from what they load in it.
+   The options were:
+   - **(a)** switch tenant tag scripts off on the **whole host** while that tenant has a protected event. Switching them off only on the protected event's pages leaves the hole open, because every other tracked page is the same origin. This costs that tenant its ad tracking.
+   - **(b)** accept the risk and record it in design section 13.
 
-   Task 16 records the answer. If (a), Task 13 also makes the tag loader skip the host whenever the tenant has a protected intake (one flag on the tenant's public config, read where `TenantTagManager` is mounted), with a unit test.
+   **The owner chose (a) on 2026-11-23.** What it means:
+   - Task 13 step 4 turns off `TenantTagManager` and `AdClickCapture` on the tenant's host while the tenant has a **live** protected event: an intake with `ticket_protection` that has an event not yet ended, by the same end rule `move_order_buyer` uses (Task 1), or no date at all.
+   - Once every protected event has ended, the tags come back. Protection can't be switched off on an event with orders, so without the end rule the tags would stay off for good.
+   - If the check can't be read, the tags stay off (fail closed).
+   - This covers scripts in the browser only. Server-side conversion sends run no code on the host and are not changed by this decision.
+   - The organiser should hear before they protect an event that their ad tracking stops on the whole site until it ends. Task 14's helper text says so.
+   - Task 16 records the decision in design section 13.
 
 ## Not in this plan
 
@@ -1365,7 +1371,7 @@ Branch `feat/leaders-phone-b` from `origin/dev` after Part A merges.
 
 ### Task 13: Protected checkout in the browser (design 5.1–5.2, 5.6)
 
-**Files:** Modify `src/app/(public)/enroll/form/page.tsx`, `src/app/(public)/enroll/[slug]/page.tsx`, `src/app/(public)/enroll/[slug]/tickets/page.tsx`, `src/app/(public)/enroll/[slug]/checkout/new/page.tsx`, `src/app/(public)/enroll/[slug]/checkout/page.tsx`. Create `src/components/enroll/ProtectedNotice.tsx`.
+**Files:** Modify `src/app/(public)/enroll/form/page.tsx`, `src/app/(public)/enroll/[slug]/page.tsx`, `src/app/(public)/enroll/[slug]/tickets/page.tsx`, `src/app/(public)/enroll/[slug]/checkout/new/page.tsx`, `src/app/(public)/enroll/[slug]/checkout/page.tsx`, `src/app/(public)/layout.tsx`. Create `src/components/enroll/ProtectedNotice.tsx`, `src/server/tickets/liveProtectedEvent.ts`, `src/__tests__/tracking/liveProtectedEvent.test.ts`.
 
 The server (Task 12) is the control; this task is the experience.
 
@@ -1383,7 +1389,18 @@ The server (Task 12) is the control; this task is the experience.
   - a protected intake without a session shows the sign-in button with the right `next`;
   - with a session, the email input is read-only and holds the profile email;
   - an unprotected intake renders as before.
-- [ ] **Step 4:** Tests pass, and `npx tsc --noEmit` passes. Commit: `feat(enroll): sign-in gate and smartphone notice on protected events`.
+- [ ] **Step 4: Tags off on the host (decision 8).**
+  1. Create `src/server/tickets/liveProtectedEvent.ts` with `tenantHasLiveProtectedEvent(admin, tenantSlug, now)`. It reads the tenant's intakes with `ticket_protection = true` and their classes' dates, and returns `true` when any of them has an event that hasn't ended by the end rule in `move_order_buyer` (Task 1), or has no date. A read error returns `true`.
+  2. Keep the date decision in a pure function, `isLiveProtected(rows, now)`, so it can be tested without a database.
+  3. In `src/app/(public)/layout.tsx`, compute `gtmAllowed` as today **and** `!(await tenantHasLiveProtectedEvent(...))`. Both `TenantTagManager` and `AdClickCapture` already take `gtmAllowed`, so neither component changes.
+  4. Tests in `src/__tests__/tracking/liveProtectedEvent.test.ts`:
+     - no protected intake → `false`;
+     - a protected intake whose event ends tomorrow → `true`;
+     - a protected intake whose events have all ended → `false`;
+     - a protected intake with no date → `true`;
+     - an unprotected intake with a future event → `false`;
+     - a read error → `true`.
+- [ ] **Step 5:** Tests pass, and `npx tsc --noEmit` passes. Commit: `feat(enroll): sign-in gate, smartphone notice and tags off on protected events`.
 
 ---
 
@@ -1403,6 +1420,7 @@ The server (Task 12) is the control; this task is the experience.
   `GET /api/intakes/[id]` returns `has_orders: boolean`, computed from one `enrollments` count and one `enrollment_items` count on the intake's classes.
 - [ ] **Step 2: Implement** with the route's existing per-field pattern (`"ticket_protection" in body`, `typeof === "boolean"`). In the edit modal, add a checkbox "Account-bound tickets (stop resale)". It is disabled when `has_orders`, with the helper text:
   - "Buyers sign in to buy, and tickets work only on the buyer's phone as a live QR. Can't be changed once the event has orders."
+  - "While this event is on sale or upcoming, ad tracking (Google Tag Manager) is off on your whole site." (decision 8)
 - [ ] **Step 3:** Tests pass. Commit: `feat(admin): account-bound tickets switch on an event`.
 
 ---
@@ -1459,7 +1477,7 @@ The server (Task 12) is the control; this task is the experience.
 - [ ] **Step 2: Design notes.** Add to the design:
   - section 13: "**A rebind racing an admission:** the scan checks the active phone, then admits; a rebind landing between the two lets the old phone in once (Plan 3, decision 6). Accepted.";
   - section 6.1, after "No bind limit": "Abuse protection only: at most 30 phone *changes* per buyer per hour; re-opening a ticket on the bound phone is never counted (Plan 3, Task 7).";
-  - section 13, the owner's answer to Plan 3 decision 8 (tag scripts on the same site), whichever it is.
+  - section 13: "**Tag scripts on the same site:** a script on the tenant's host runs as the signed-in buyer and could bind its own phone. Tenant tag scripts are off on the whole host while the tenant has a live protected event (owner decision 2026-11-23, Plan 3 decision 8)."
 
   Commit: `feat(admin): no Edit Email on account orders; design notes from Plan 3`.
 - [ ] **Step 3 (owner-assisted, before this PR merges): QR size spike (design 6.2).**
