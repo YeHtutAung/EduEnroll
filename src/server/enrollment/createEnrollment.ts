@@ -166,6 +166,13 @@ function mapEnrollmentError(payload: Extract<SubmitEnrollmentResult, { success: 
         message: "This pre-registration link has already been used to buy a ticket. Each link can be used for one purchase.",
         message_mm: "ဤကြိုတင်စာရင်းသွင်းလင့်ခ်ဖြင့် လက်မှတ်ဝယ်ယူပြီးဖြစ်သည်။ လင့်ခ်တစ်ခုလျှင် တစ်ကြိမ်သာ ဝယ်ယူနိုင်ပါသည်။",
       };
+    // Account-bound tickets (20261122130000_leaders_phone.sql): a protected
+    // event needs a signed-in buyer with a live profile, and an idempotency
+    // key belongs to the buyer (or guest) that first used it.
+    case "BUYER_REQUIRED":
+      return { ok: false, status: 401, error: "Unauthorized", message: "Sign in to buy tickets for this event." };
+    case "IDEMPOTENCY_CONFLICT":
+      return { ok: false, status: 409, error: "Conflict", message: "This checkout was started by another account. Please start again." };
     default:
       console.error("[createEnrollment] DB error:", payload.detail);
       return { ok: false, status: 500, error: "Internal Server Error", message: "Enrollment failed. Please try again." };

@@ -1,3 +1,8 @@
+// The default event time zone when TICKET_TZ is unset. move_order_buyer
+// (20261122130000_leaders_phone.sql) hard-codes the same zone; a database
+// test keeps the two equal.
+export const DEFAULT_TICKET_TZ = "Asia/Yangon";
+
 // Returns the tz's UTC offset (in ms) at the instant `date`, computed via
 // Intl.DateTimeFormat so it does not depend on the host system's own timezone.
 function getOffsetMs(date: Date, tz: string): number {

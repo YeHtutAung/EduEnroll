@@ -75,6 +75,8 @@ export type SubmitEnrollmentResult =
         | "ENROLLMENT_CLOSED"
         | "PRIORITY_LINK_IN_PROGRESS"
         | "PRIORITY_LINK_USED"
+        | "BUYER_REQUIRED"
+        | "IDEMPOTENCY_CONFLICT"
         | "INTERNAL_ERROR";
       class_status?: ClassStatus;
       opens_at?: string;
