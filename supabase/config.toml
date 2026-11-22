@@ -348,6 +348,26 @@ skip_nonce_check = false
 # If enabled, it will allow the user to successfully authenticate when the provider does not return an email address.
 email_optional = false
 
+# Google sign-in for buyers on /account (buyer accounts plan, Task 15).
+# Committed commented out, like [auth.hook.send_email] above: `supabase start`
+# fails if an env() secret below is unset, even with enabled = false.
+# To test Google locally:
+#   1. Uncomment the block (don't commit that change).
+#   2. Put SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID and
+#      SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET in a gitignored supabase/.env.
+#      In the Google Cloud OAuth client, the authorised redirect URI is
+#      http://127.0.0.1:54321/auth/v1/callback.
+#   3. Make sure additional_redirect_urls in [auth] allows
+#      http://localhost:3005/auth/callback.
+#   4. `npx supabase stop && npx supabase start`.
+# Never commit or print the secret.
+# [auth.external.google]
+# enabled = true
+# client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
+# secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
+# redirect_uri = ""
+# skip_nonce_check = false
+
 # Allow Solana wallet holders to sign in to your project via the Sign in with Solana (SIWS, EIP-4361) standard.
 # You can configure "web3" rate limit in the [auth.rate_limit] section and set up [auth.captcha] if self-hosting.
 [auth.web3.solana]

@@ -27,6 +27,9 @@ function token(methods: string[]): string {
 const OTP = token(["otp"]);
 const PASSWORD = token(["password"]);
 const PASSWORD_AND_OTP = token(["password", "otp"]);
+const GOOGLE = token(["oauth"]);
+const PASSWORD_AND_GOOGLE = token(["password", "oauth"]);
+const MAGICLINK = token(["magiclink"]);
 
 const EMAIL = "buyer.secret@example.test";
 const CLAIM = "11111111-2222-4333-8444-555555555555";
@@ -217,6 +220,38 @@ describe("ensureBuyerProfile", () => {
     expect(f.rpc).not.toHaveBeenCalled();
     expect(f.updateUserById).not.toHaveBeenCalled();
     expect(f.signOut).not.toHaveBeenCalled();
+  });
+
+  it("session with amr [password, oauth], no profile → 403 not_email_code; no rpc", async () => {
+    const f = makeFake();
+    const res = await ensureBuyerProfile({ user: USER, accessToken: PASSWORD_AND_GOOGLE }, f.deps);
+    expect(res).toEqual({ ok: false, status: 403, code: "FORBIDDEN", reason: "not_email_code" });
+    expect(f.rpc).not.toHaveBeenCalled();
+    expect(f.updateUserById).not.toHaveBeenCalled();
+  });
+
+  it("a method outside the allow list (magiclink), no profile → 403 not_email_code; no rpc", async () => {
+    const f = makeFake();
+    const res = await ensureBuyerProfile({ user: USER, accessToken: MAGICLINK }, f.deps);
+    expect(res).toEqual({ ok: false, status: 403, code: "FORBIDDEN", reason: "not_email_code" });
+    expect(f.rpc).not.toHaveBeenCalled();
+  });
+
+  it("Google session, no profile → the full happy-path order and 201 with a re-issue handle", async () => {
+    const row = profile();
+    const f = makeFake({ profiles: [ok(null), ok(row)] });
+    const res = await ensureBuyerProfile({ user: USER, accessToken: GOOGLE }, f.deps);
+    expect(res).toEqual({ ok: true, status: 201, profile: row, reissue: { hashedToken: HASHED } });
+    expect(f.calls).toEqual([
+      "read:users",
+      "read:buyer_profiles",
+      "rpc:claim_buyer_profile",
+      "rpc:buyer_profile_claim_held",
+      "auth:updateUserById",
+      "rpc:create_buyer_profile",
+      "read:buyer_profiles",
+      "auth:generateLink",
+    ]);
   });
 
   it("claim NULL → 503, nothing else called", async () => {

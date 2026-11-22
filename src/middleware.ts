@@ -275,5 +275,8 @@ export const config = {
     "/status",
     "/account",
     "/account/:path*",
+    // The Google return leg (buyer accounts plan, Task 15): tenant header
+    // and session handling exactly as on /account.
+    "/auth/callback",
   ],
 };
