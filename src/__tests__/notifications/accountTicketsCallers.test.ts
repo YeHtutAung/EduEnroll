@@ -276,6 +276,21 @@ describe("POST /api/admin/enrollments/[id]/resend-email — account orders", () 
     expect(mockSendEmail).toHaveBeenCalledWith(expect.objectContaining({ to: "buyer@example.test" }));
   });
 
+  it("an account order with no stored email refuses (never falls back to the form's address)", async () => {
+    for (const email of [null, ""]) {
+      routeTables({
+        enrollments: {
+          data: { ...ENROLLMENT, buyer_id: "buyer-1", email, form_data: { email: "form@example.test" } },
+          error: null,
+        },
+      });
+      mockParts.mockResolvedValue(PROTECTED_ONLY);
+      const res = await resend({});
+      expect(res.status).toBe(409);
+      expect(mockSendEmail).not.toHaveBeenCalled();
+    }
+  });
+
   it("an order without a buyer account still takes an override, as before", async () => {
     mockParts.mockResolvedValue(UNPROTECTED);
 

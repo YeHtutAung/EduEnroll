@@ -119,6 +119,9 @@ describe("e-ticket QR payload", () => {
       attachment: null,
       accountTickets: false,
     });
+    // The failure must stay visible: without this log, an order with a bad
+    // format would go out with no PDF and no trace.
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining("e-ticket PDF failed"), expect.anything());
     spy.mockRestore();
     expect(toDataURLSpy).not.toHaveBeenCalled();
   });

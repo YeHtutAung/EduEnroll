@@ -62,6 +62,15 @@ export async function POST(
   // email itself is not a different address, so that still resends.
   if (enrollment.buyer_id) {
     const accountEmail = (enrollment.email ?? "").trim().toLowerCase();
+    // Fail closed, like the order PATCH: an account order always has its
+    // email. Without one, never fall back to the form's address.
+    if (!accountEmail) {
+      console.error("[resend-email] account order without a stored email");
+      return NextResponse.json(
+        { error: "Conflict", message: "This order belongs to a buyer account but has no account email." },
+        { status: 409 },
+      );
+    }
     if (overrideEmail && overrideEmail.toLowerCase() !== accountEmail) {
       return NextResponse.json(
         {

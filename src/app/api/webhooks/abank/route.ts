@@ -239,6 +239,11 @@ export async function GET(request: NextRequest) {
           console.error("[abank-callback] e-ticket attachment failed:", err);
           return NO_TICKET_EMAIL_PARTS;
         });
+        // Without the tenant the link would land on the platform host, where
+        // there is no tenant or session. Keep that visible.
+        if (parts.accountTickets && !tenantInfo?.subdomain) {
+          console.error("[abank-callback] tenant unreadable; My Tickets link on the platform host");
+        }
         const emailData = enrollmentApprovedEmail({
           studentName: enrollment.student_name_en || "Student",
           enrollmentRef: enrollment.enrollment_ref,
