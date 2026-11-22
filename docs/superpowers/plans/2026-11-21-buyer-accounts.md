@@ -1681,8 +1681,14 @@ backup phone (design section 4.1, option (d)). The numbers are kept so reference
     redirect URI `https://fnfvwzwrdsnmwxunciti.supabase.co/auth/v1/callback`.
   - G2. Dev Supabase → Auth → Providers → Google: client id and secret (set in the dashboard, never
     pasted into chat or a commit).
-  - G3. Dev Supabase → Auth → URL configuration → Redirect URLs: the staging hosts' `/auth/callback`
-    (each tenant subdomain pattern and each custom domain used on staging).
+  - G3. Dev Supabase → Auth → URL configuration → Redirect URLs: the staging hosts' `/auth/callback/**`
+    (each tenant subdomain pattern and each custom domain used on staging). The trailing `/**` is
+    needed because the callback carries `?next=`. A host missing here sends Google sign-in back to
+    the Site URL, which has no PKCE verifier cookie, so every Google sign-in on that tenant fails
+    with "Google sign-in failed" (review of Task 15).
+  - Note for the owner: Supabase links a Google identity to any existing user with the same email,
+    staff included. A staff member who clicks Google gets a Google identity on their staff user; no
+    buyer profile is created and admin stays closed (staff gates need a password session).
   - G4. Merge to `dev`, promote to `staging`.
   - T1. Staging test: Google sign-in on a normal browser lands on the same account as the email
     code; the Google button is hidden in Messenger's browser; a staff email signed in with Google
