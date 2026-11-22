@@ -44,7 +44,8 @@ not require it.
 | Question | Decision |
 |---|---|
 | Where the buyer opens the ticket | Web profile now; the KuuNyi mobile app adopts the same scheme later |
-| Sign-in identity | Email code (Supabase Auth email OTP), shared by web and app — owner decision 2026-11-20, option (a) in section 4.1 |
+| Sign-in identity | The verified email is the identity, shared by web and app — owner decision 2026-11-20, option (a) in section 4.1 |
+| Ways to sign in | Email code, or "Continue with Google" (same account when the Google email matches). A verified backup phone can sign in by SMS code when the email is lost. Owner decision 2026-11-22, section 4.1 |
 | When the buyer signs in | Before checkout, on protected events |
 | Live QR method | Phone-bound key: non-extractable WebCrypto key, QR re-signed every 15 s |
 | Transfers | Inside the order only: the leader shares a seat by link with one account (one hop); the holder can give it back. Owner decision 2026-11-22 |
@@ -89,8 +90,64 @@ email OTP) on the web and in the app. One person, one account, one ticket list.
   `auth.updateUser({ email })` is blocked for buyers, and `requireBuyer` rejects a token whose auth
   email differs from `buyer_profiles.email`.
 - Phone becomes an optional, unverified contact field (`buyer_profiles.phone_e164`), used to pre-fill
-  forms. It is no longer unique or required.
-- No SMS cost per sign-in, and buyers without a Myanmar number can sign in.
+  forms. It is no longer unique or required. The **backup phone** below is a different, verified
+  field on the auth user.
+- No SMS cost per sign-in, and buyers without a Myanmar number can sign in. SMS is sent only to add
+  or change a backup phone and to recover an account.
+
+**Ways in (owner decision 2026-11-22).** Email is not used daily by many buyers in Myanmar, and some
+forget the address or its password. The identity stays the verified email; there are three ways to
+prove it or recover it:
+
+1. **Email code**, as above. Always offered.
+2. **"Continue with Google"** (Supabase Google provider, PKCE redirect through a new
+   `/auth/callback` route on the tenant host). Most Android phones already have a Google account
+   signed in, so there is nothing to remember or type. Google returns a verified email, and Supabase
+   links it to the existing auth user with the same address, so an email-code account and a Google
+   sign-in for the same email are **one account**, never two. The plan must prove that linking, and
+   that a Google sign-in for an address that has only an unconfirmed password sign-up does not
+   inherit that sign-up's password (the `ensureBuyerProfile` reset covers it if it does).
+   - Google refuses sign-in inside embedded browsers (Facebook, Messenger, Instagram, Viber and
+     similar in-app browsers), and that is how many links are opened in Myanmar. The sign-in page
+     detects them, hides the Google button there, and shows "Open in Chrome / Safari" with a
+     copy-link button. The email code works everywhere.
+   - Each tenant host (subdomains and custom domains such as `skyfestivalmm.com`) must be on the
+     Supabase Redirect URLs allowlist, or Google sign-in returns to the wrong site. The plan lists
+     it as an owner step per domain.
+3. **Backup phone, SMS code, for recovery.** Optional. A signed-in buyer adds a Myanmar mobile number
+   (`+959…` only) on `/account`; Supabase sends a code to it (`updateUser({ phone })`, verified with
+   type `phone_change`) and stores it as the auth user's verified `phone`. Later, "Can't get your
+   email code?" signs in with `signInWithOtp({ phone, options: { shouldCreateUser: false } })` and
+   the SMS code. The session is the same account: same email identity, same tickets.
+   - SMS goes out only through our **Send SMS Hook** (Standard Webhooks, like the Send Email Hook),
+     which sends through the existing SmsPoh client (`src/lib/sms.ts`) and refuses, without sending:
+     a number outside `+959`; an auth user with no live `buyer_profiles` row; a staff user (a `users`
+     row); a phone add on a profile younger than 24 hours; and anything over its caps (per number,
+     per user, and separate daily project budgets for adding a phone and for recovery, in the
+     durable rate-limit table), so SMS cost and SMS-pumping fraud are bounded. It never logs the
+     number or the code.
+   - **No phone-only accounts.** `shouldCreateUser` is a client flag and cannot be trusted. A Before
+     User Created hook rejects any new auth user created with a phone, so a phone can be attached
+     only to an existing email account. (Task 1 of Plan 2 found this hook cannot tell a password
+     sign-up from an email-code one, but it does see whether the new user has a phone.)
+   - Adding or changing the backup phone emails the account ("A backup phone was added"), so a
+     takeover is visible. The number is shown masked on `/account`. Email change is still not
+     offered, so a recovered buyer keeps their email identity and can keep using the phone or
+     Google.
+   - A phone that later belongs to someone else (Myanmar SIMs are recycled) is the same takeover risk
+     as a forwarded email code; accepted (section 13). The buyer can change the backup phone at any
+     time while signed in.
+
+All three sessions are buyer sessions. None is a `password` session, so every staff gate (section
+4.4) refuses them; staff keep signing in with a password. The plan must record the `amr` each one
+produces (email code `otp`; Google and SMS to be confirmed) and `ensureBuyerProfile` must accept
+the email-code and Google ones for creating a profile, never an SMS one (a backup phone exists only
+on an account that already has a profile). An SMS session probably also has `amr` `otp`, so as
+defence in depth `ensureBuyerProfile` refuses to create a profile for a user with a confirmed phone.
+
+The recovery page shows the same text whether or not a number is registered, but that hides it from
+the page only: Supabase's own answers, rate-limit responses and the duplicate-phone error on
+`updateUser` still let a direct API caller tell registered numbers apart (section 13).
 
 **What this changes in the mobile spec** (must be updated before either side builds buyer sign-in;
 that is the app team's document, not edited by this work):
@@ -106,6 +163,8 @@ that is the app team's document, not edited by this work):
   fields.
 - 11.2: web deletion is by email code (`signInWithOtp({ email, options: { shouldCreateUser: false } })`),
   with the same "if an account exists, it has been deleted" answer.
+- 4.1 (revision 2026-11-22): the app also offers native Google sign-in (`signInWithIdToken`) and
+  backup-phone recovery by SMS, on the same accounts, with the same rules as above.
 
 **Options not chosen**, kept for the record: (b) phone stays the identity and protected events add a
 verified email on the same account (SMS cost per web sign-in, `+959` numbers only); (c) separate web
@@ -536,6 +595,12 @@ conventions).
 - **Staff and email codes (section 4.4):** a staff account signed in with an email code gets 403 on
   admin and superadmin APIs and is sent away from `/admin`; the same account signed in with its
   password is unaffected.
+- **Ways in (section 4.1):** a Google sign-in for an existing email-code account lands on the same
+  auth user and profile; a Google sign-in creates a profile on first use; an SMS session never
+  creates one; the Send SMS Hook refuses a non-`+959` number, a user with no live profile, a staff
+  user and anything over each cap, sending nothing; creating an auth user with a phone is refused;
+  Google and SMS sessions get 403 on every staff gate; the Google button is hidden in in-app
+  browsers.
 - **`requireBuyer` (section 4.3):** auth email different from `buyer_profiles.email` → 401;
   Auth rejection → 401; Auth unreachable, timeout, 5xx and 429 →
   503 `SERVER`, never 401; staff account → 403; deleted profile → 401; token without `session_id`
@@ -562,8 +627,10 @@ conventions).
 3. Resend SMTP set for Supabase Auth on dev, then staging. Staff gates require a `password` sign-in
    (section 4.4) **before** email OTP is turned on in any project.
 4. **Plan 1** (#471): staff gates require a password session. Done on dev and staging.
-5. **Plan 2:** buyer email-code accounts (section 4). It also creates the durable
-   `consume_rate_limit` RPC that Plans 3 and 4 use.
+5. **Plan 2:** buyer accounts (section 4): email code first, then Google sign-in and the backup
+   phone. It also creates the durable `consume_rate_limit` RPC that Plans 3 and 4 use. Owner
+   prerequisites: a Google OAuth client for the Supabase Google provider, every tenant host on the
+   Redirect URLs allowlist, and SmsPoh credit and keys for the Send SMS Hook.
 6. kuunyi-scanner: send `token`, accept `k2.`. Needed before any gate test of Plan 3.
 7. **Plan 3:** the leader's phone (mode A): scope switch, checkout, binding with no limit, the `k2`
    QR, the scan path, closing the other QR surfaces, `/account/tickets`, the admin read-only view,
@@ -597,8 +664,19 @@ conventions).
 - **Organiser support load:** with no admin holder changes or reset, every seat problem is solved
   by the buyers themselves (share, give-back, re-bind). Organisers need the read-only history
   (section 9) to answer questions.
-- **Email deliverability:** every buyer sign-in, web and app, depends on Resend reaching the buyer.
-  Code emails must be monitored on launch day, and a Resend outage stops new sign-ins everywhere.
+- **Email deliverability:** email-code sign-in depends on Resend reaching the buyer. Code emails
+  must be monitored on launch day. Google sign-in and the backup phone keep existing buyers able to
+  sign in during a Resend outage; a new buyer without Google cannot.
+- **Google in in-app browsers:** Google blocks sign-in in Facebook, Messenger and similar embedded
+  browsers. The page hides the button there and says to open the page in Chrome or Safari; buyers
+  who don't will use the email code.
+- **SMS cost and fraud:** every SMS costs money. The Send SMS Hook's caps and the `+959`-only rule
+  bound it. Adding a phone and recovery have separate daily budgets, so mass phone-adding from cheap
+  accounts cannot starve recovery, but a flood can still use up the recovery budget on a bad day.
+- **Backup-phone enumeration:** a direct API caller can learn whether a number is someone's backup
+  phone (section 4.1). It reveals no email or ticket; accepted.
+- **Recycled or handed-over SIMs:** whoever holds the backup phone can sign in to the account. Same
+  class as account handover (section 1); adding or changing the phone is emailed.
 - **Staff accounts and email codes:** email OTP is project-wide, so staff gates must refuse
   non-password sessions (section 4.4) before it is turned on.
 - **App and web drift:** until the app supports bound tickets, protected events are invisible in
