@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireBuyer } from "@/lib/buyers/requireBuyer";
 import { acceptToken, readCookieToken } from "@/lib/buyers/sessionUser";
 import { buyerError } from "@/lib/buyers/errors";
+import { isSameOriginRequest } from "@/lib/auth/sameOrigin";
 import { ensureBuyerProfile, type EnsureResult } from "@/server/buyers/ensureBuyerProfile";
 import { settleReissue } from "@/server/buyers/reissueSession";
 
@@ -73,27 +74,6 @@ async function checkBody(request: Request): Promise<BodyCheck> {
   }
 }
 
-/**
- * CSRF hardening: the cookie rides along on cross-site requests, so refuse a
- * browser request that isn't same-origin. sec-fetch-site cross-site or
- * same-site, or an Origin whose host isn't this request's Host, is refused.
- * With neither header (not a browser) it's allowed: the cookie is still needed.
- */
-function isCrossSite(request: Request): boolean {
-  const site = request.headers.get("sec-fetch-site");
-  if (site === "cross-site" || site === "same-site") return true;
-  const origin = request.headers.get("origin");
-  if (origin === null) return false;
-  const host = request.headers.get("host");
-  let originHost: string;
-  try {
-    originHost = new URL(origin).host;
-  } catch {
-    return true;
-  }
-  return !host || originHost.toLowerCase() !== host.toLowerCase();
-}
-
 async function mapResult(result: EnsureResult): Promise<NextResponse> {
   if (result.ok) {
     const { email, name, locale } = result.profile;
@@ -132,7 +112,7 @@ async function mapResult(result: EnsureResult): Promise<NextResponse> {
 
 export async function POST(request: Request): Promise<NextResponse> {
   // Both checks come before any Auth call.
-  if (isCrossSite(request)) return buyerError(403, "FORBIDDEN", "Cross-site request refused.");
+  if (!isSameOriginRequest(request)) return buyerError(403, "FORBIDDEN", "Cross-site request refused.");
   const body = await checkBody(request);
   if (body === "too_large") return buyerError(413, "VALIDATION", "Request body too large.");
   if (body === "invalid") return buyerError(422, "VALIDATION", "Email can't be set here.");
