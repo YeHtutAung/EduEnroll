@@ -4,7 +4,7 @@ import type { Database } from "@/types/database";
 import { sendEmail } from "@/lib/email";
 import { verifyStandardWebhook } from "@/lib/auth/standardWebhook";
 import { authEmailMessages, type AuthHookPayload } from "@/lib/auth/authEmailCopy";
-import { CAPS, GROUP, emailKey, isAuthEmailType } from "@/lib/auth/authEmailLimits";
+import { CAPS, DEADLINE_MS, GROUP, emailKey, isAuthEmailType } from "@/lib/auth/authEmailLimits";
 import { createTimedAdminClient } from "@/server/buyers/adminClient";
 
 // ─── Supabase Send Email Hook ───────────────────────────────────────────────
@@ -26,9 +26,6 @@ import { createTimedAdminClient } from "@/server/buyers/adminClient";
 // token_hash or an address.
 
 export const dynamic = "force-dynamic";
-
-/** Under GoTrue's 5 s hook timeout, with room for the network. */
-export const DEADLINE_MS = 4_000;
 
 type Fns = Database["public"]["Functions"];
 type RateLimitResult = { data: Fns["consume_rate_limit"]["Returns"] | null; error: unknown };

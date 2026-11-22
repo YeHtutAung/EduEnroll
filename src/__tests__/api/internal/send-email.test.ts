@@ -15,7 +15,8 @@ vi.mock("@/lib/email", async (importOriginal) => {
 const rpc = vi.fn();
 vi.mock("@/server/buyers/adminClient", () => ({ createTimedAdminClient: () => ({ rpc }) }));
 
-import { POST, dynamic, DEADLINE_MS } from "@/app/api/internal/auth/send-email/route";
+import { POST, dynamic } from "@/app/api/internal/auth/send-email/route";
+import { DEADLINE_MS } from "@/lib/auth/authEmailLimits";
 
 // Throwaway test values, not real secrets.
 const RAW_KEY = Buffer.from("throwaway-hook-key-for-tests-only");

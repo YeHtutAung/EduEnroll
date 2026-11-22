@@ -39,3 +39,10 @@ export const CAPS: Record<LimitGroup, Array<[number, number, string]>> = {
 export function emailKey(email: string, secret: string): string {
   return createHmac("sha256", secret).update(email.trim().toLowerCase()).digest("hex");
 }
+
+/**
+ * The Send Email Hook route's whole-request deadline: under GoTrue's 5 s hook
+ * timeout, with room for the network. Lives here because a Next.js route file
+ * may export only its handlers and route config.
+ */
+export const DEADLINE_MS = 4_000;
