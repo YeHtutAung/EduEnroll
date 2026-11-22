@@ -73,6 +73,11 @@ function scanUnavailable(step: string, error: unknown) {
 // ticket doesn't exist. Any other error means we don't know.
 const TICKET_ABSENT_CODES = new Set(["PGRST116", "22P02"]);
 
+// A real ticket QR is well under 1 KB (a k2 QR is the longest, about 600
+// characters). Anything longer is not a ticket, and is refused before any
+// parsing, signature work or configuration check.
+const MAX_TOKEN_LENGTH = 4096;
+
 export async function POST(request: NextRequest) {
   // ── 1. Parse body ──────────────────────────────────────────────────────────
   let body: ScanBody;
@@ -102,6 +107,7 @@ export async function POST(request: NextRequest) {
       { status: 400 },
     );
   }
+  if (token.length > MAX_TOKEN_LENGTH) return notFound();
 
   // ── 4. Verify the token's signature ─────────────────────────────────────────
   // Checked before the configuration is trusted and before any query runs, so

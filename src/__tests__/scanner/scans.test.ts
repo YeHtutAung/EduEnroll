@@ -744,6 +744,63 @@ describe("POST /api/scans — protected tickets", () => {
     expect(mockAdminFrom).not.toHaveBeenCalled();
   });
 
+  it("refuses a bare bound token for an unprotected ticket too (copied out of browser storage)", async () => {
+    const { updateSpy } = setupTicketMock({
+      load: load({ intakes: { ticket_protection: false }, enrollments: { buyer_id: null } }),
+      claimed: CLAIMED,
+    });
+    const bare = signBoundTicket({ jti: "t1", eid: "intake-A", tier: "GA", admits: 1, exp: 4070908800 }, bound.dk);
+    const res = await scan(bare);
+    expect(res.status).toBe(404);
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  it("takes expiry from the ticket row, not from the k2 claims", async () => {
+    // The bound token says 2099; the database says the ticket has expired.
+    const { updateSpy } = setupTicketMock({
+      load: load({ exp: PAST_EXP }),
+      device: { public_key: bound.dk, buyer_id: BUYER },
+      claimed: CLAIMED,
+    });
+    const res = await scan(k2For(bound));
+    expect(res.status).toBe(404);
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  it("compares the phone key as an exact string", async () => {
+    const { updateSpy } = setupTicketMock({
+      load: load(),
+      device: { public_key: `${bound.dk}=`, buyer_id: BUYER },
+      claimed: CLAIMED,
+    });
+    const res = await scan(k2For(bound));
+    expect(res.status).toBe(404);
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  it("refuses a token over 4 KB before verifying it or touching the database", async () => {
+    setupTicketMock({ load: load(), device: { public_key: bound.dk, buyer_id: BUYER }, claimed: CLAIMED });
+    const res = await scan(`${k2For(bound)}${"A".repeat(4096)}`);
+    expect(res.status).toBe(404);
+    expect(mockAdminFrom).not.toHaveBeenCalled();
+  });
+
+  it("checks the length before anything else: an over-long token is 404 even with no signing key", async () => {
+    delete process.env.TICKET_SIGNING_KEY;
+    setupTicketMock({ load: load() });
+    const res = await scan("A".repeat(4097));
+    expect(res.status).toBe(404);
+    expect(mockAdminFrom).not.toHaveBeenCalled();
+  });
+
+  it("accepts a token of exactly 4 KB as far as the length check", async () => {
+    delete process.env.TICKET_SIGNING_KEY;
+    setupTicketMock({ load: load() });
+    // Past the cap check, the missing key is reported as before.
+    const res = await scan("A".repeat(4096));
+    expect(res.status).toBe(500);
+  });
+
   it("still admits an unprotected ticket with a plain token, without reading phones", async () => {
     const { updateSpy } = setupTicketMock({
       load: load({ intakes: { ticket_protection: false }, enrollments: { buyer_id: null } }),
