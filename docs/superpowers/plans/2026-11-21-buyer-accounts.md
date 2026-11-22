@@ -1570,7 +1570,7 @@ callback relies on 11a's re-issue.
 **Files:** none committed; findings go in the "Findings (Part B)" table at the end of this file.
 
 - [ ] **Step 1:** *(removed 2026-11-22 with the backup phone: no phone spike.)*
-- [ ] **Step 2 (dev project, owner-assisted): Google.** Needs owner steps G1–G3 of Task 19 on the
+- [x] **Step 2 (dev project, owner-assisted): Google.** Needs owner steps G1–G3 of Task 19 on the
   **dev** project only, with `http://localhost:3005/auth/callback` also on its Redirect URLs for the
   spike (removed afterwards). PKCE is finished by a throwaway page in the scratchpad (a local
   Next.js route or a tiny server on port 3005 calling `exchangeCodeForSession`), not committed; or
@@ -1584,7 +1584,7 @@ callback relies on 11a's re-issue.
      the link?);
   4. a staff address (Google session must still get 403 on `/admin` APIs).
   Delete the test users afterwards (SQL shown to the owner first).
-- [ ] **Step 3:** fill in the Part B findings table. If case 2 or case 3 does not end on one linked
+- [x] **Step 3:** fill in the Part B findings table. If case 2 or case 3 does not end on one linked
   user (a second user, or a refusal), stop and revisit the design: it assumes automatic linking.
 
 ---
@@ -1702,10 +1702,10 @@ backup phone (design section 4.1, option (d)). The numbers are kept so reference
 
 | Question | Result | Consequence |
 |---|---|---|
-| Google, new address: `amr`, confirmed? | | Task 14 |
-| Google on an existing email-code buyer: same user id? | | **stop if not** |
-| Google on an unconfirmed password sign-up: one linked user? password kept? | | **stop if not linked**; reset covers a kept password |
-| Google on a staff address: admin refused? | | design 4.4 |
+| Google, new address: `amr`, confirmed? | Dev project, 2026-11-22. A new user, confirmed, identity `google`, profile created, one session left (the re-issued one, `amr` `otp`). The Google session itself was ended by the reset, so its `amr` wasn't read directly; it passed `canCreateProfile`, which takes only `otp` or `oauth` without `password`, so it is `oauth` | Task 14 as built |
+| Google on an existing email-code buyer: same user id? | **Yes.** Same user id, identities `email` + `google`, one user for the address, one profile, one session; `GET /api/account/profile` 200 in the browser | design holds |
+| Google on an unconfirmed password sign-up: one linked user? password kept? | **One linked user**, same id, now confirmed. Auth **dropped the unconfirmed `email` identity**: only `google` is left. The password hash changed (fingerprint before ≠ after), so the pre-registered password no longer works; `ensureBuyerProfile`'s reset ran either way | design holds; the buyer can still sign in by email code (that recreates an email identity) |
+| Google on a staff address: admin refused? | Callback answers `notice=staff`: no profile, staff password unchanged, **no session left** (signed out locally). Auth still **linked a `google` identity to the staff user** (2 dev staff users now have one) | design 4.4 holds; staff gates need a password session anyway. T1 re-checks `/admin` on staging |
 
 ---
 
