@@ -3,9 +3,12 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { isPasswordSession } from "@/lib/authMethod";
+import { isInAppBrowser } from "@/lib/inAppBrowser";
 import {
   accountReducer,
+  hrefWithoutNotice,
   initialAccount,
+  noticeFromSearch,
   type AccountEffect,
   type AccountEvent,
   type AccountState,
@@ -54,6 +57,16 @@ const COPY = {
     en: "Something went wrong. Please try again.",
     mm: "တစ်ခုခု မှားယွင်းနေပါသည်။ ထပ်မံကြိုးစားပါ။",
   },
+  // needs native review (every mm string from here to the end of COPY)
+  continueWithGoogle: { en: "Continue with Google", mm: "Google ဖြင့် ဆက်လက်ရန်" },
+  openingGoogle: { en: "Opening Google…", mm: "Google ကို ဖွင့်နေသည်…" },
+  or: { en: "or", mm: "သို့မဟုတ်" },
+  inAppBrowser: {
+    en: "Google sign-in doesn't work inside this app. Open this page in Chrome or Safari, or use an email code.",
+    mm: "ဤ app အတွင်း၌ Google ဖြင့် ဝင်ရောက်၍ မရပါ။ ဤစာမျက်နှာကို Chrome သို့မဟုတ် Safari တွင် ဖွင့်ပါ၊ သို့မဟုတ် အီးမေးလ်ကုဒ်ကို သုံးပါ။",
+  },
+  copyLink: { en: "Copy link", mm: "လင့်ခ် ကူးယူရန်" },
+  linkCopied: { en: "Link copied", mm: "လင့်ခ် ကူးယူပြီးပါပြီ" },
 } satisfies Record<string, Bilingual>;
 
 const NOTICES: Record<Notice, Bilingual & { tone: "error" | "info" }> = {
@@ -109,6 +122,12 @@ const NOTICES: Record<Notice, Bilingual & { tone: "error" | "info" }> = {
     // needs native review
     mm: "သင့်အကောင့် အဆင်သင့်ဖြစ်ပါပြီ။ ဆက်လက်ရန် နောက်တစ်ကြိမ် ဝင်ရောက်ပါ။",
   },
+  googleFailed: {
+    tone: "error",
+    en: "We couldn't sign you in with Google. Please try again, or use an email code.",
+    // needs native review
+    mm: "Google ဖြင့် ဝင်ရောက်၍ မရပါ။ ထပ်မံကြိုးစားပါ သို့မဟုတ် အီးမေးလ်ကုဒ်ကို သုံးပါ။",
+  },
   generic: {
     tone: "error",
     en: "We couldn't sign you in. Please try again.",
@@ -127,6 +146,12 @@ export interface AccountViewProps {
   onSignOut: () => void;
   onRetryLoad: () => void;
   onRetryProfile: () => void;
+  onGoogle: () => void;
+  onCopyLink: () => void;
+  /** Embedded web view (Messenger, Facebook, …): Google refuses OAuth there. */
+  inAppBrowser: boolean;
+  /** Copy link just succeeded. */
+  linkCopied: boolean;
 }
 
 const inputClass =
@@ -170,6 +195,51 @@ function BusyLabel({ copy }: { copy: Bilingual }) {
 
 function Card({ children }: { children: ReactNode }) {
   return <div className="rounded-xl border border-gray-200 bg-white p-6 shadow-sm">{children}</div>;
+}
+
+const googleButton =
+  "flex w-full items-center justify-center gap-2 rounded-lg border border-gray-300 bg-white px-5 py-3 text-sm font-semibold text-gray-800 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
+
+/**
+ * Above the email field: "Continue with Google", or, inside an in-app browser
+ * where Google refuses OAuth, why not and a Copy link button.
+ */
+function GoogleSignIn(props: AccountViewProps & { state: Extract<AccountState, { step: "email" }> }) {
+  const { state } = props;
+  return (
+    <div className="mb-4">
+      {props.inAppBrowser ? (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          <p>{COPY.inAppBrowser.en}</p>
+          <p className="font-myanmar mt-0.5">{COPY.inAppBrowser.mm}</p>
+          <button type="button" onClick={props.onCopyLink} className={`mt-2 ${secondaryButton}`}>
+            {props.linkCopied ? (
+              <span role="status">
+                {COPY.linkCopied.en} / <span className="font-myanmar">{COPY.linkCopied.mm}</span>
+              </span>
+            ) : (
+              <>
+                {COPY.copyLink.en} / <span className="font-myanmar">{COPY.copyLink.mm}</span>
+              </>
+            )}
+          </button>
+        </div>
+      ) : (
+        <button type="button" onClick={props.onGoogle} disabled={state.busy} className={googleButton}>
+          {state.google ? (
+            <BusyLabel copy={COPY.openingGoogle} />
+          ) : (
+            <>
+              {COPY.continueWithGoogle.en} / <span className="font-myanmar">{COPY.continueWithGoogle.mm}</span>
+            </>
+          )}
+        </button>
+      )}
+      <p className="mt-4 text-center text-xs uppercase tracking-wide text-gray-400">
+        {COPY.or.en} / <span className="font-myanmar normal-case">{COPY.or.mm}</span>
+      </p>
+    </div>
+  );
 }
 
 function Body(props: AccountViewProps) {
@@ -228,6 +298,7 @@ function Body(props: AccountViewProps) {
             <Text copy={COPY.emailHelp} />
           </p>
           <NoticeBox notice={state.notice} />
+          <GoogleSignIn {...props} state={state} />
           <form method="post" onSubmit={onSubmit} noValidate aria-busy={state.busy}>
             <label htmlFor="account-email" className="mb-2 block text-sm font-medium text-gray-700">
               {COPY.emailLabel.en} / <span className="font-myanmar">{COPY.emailLabel.mm}</span>
@@ -247,7 +318,7 @@ function Body(props: AccountViewProps) {
               className={inputClass}
             />
             <button type="submit" disabled={state.busy} className={`mt-4 ${primaryButton}`}>
-              {state.busy && !state.signingOut ? (
+              {state.busy && !state.signingOut && !state.google ? (
                 <BusyLabel copy={COPY.sending} />
               ) : (
                 <>
@@ -391,11 +462,16 @@ export async function readProfileResponse(res: Response): Promise<{ email?: stri
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 export default function AccountSignIn() {
-  const start = useRef(initialAccount());
-  const stateRef = useRef<AccountState>(start.current.state);
-  const [state, setState] = useState<AccountState>(start.current.state);
+  // The server render and first paint show "loading"; the mount effect picks
+  // the real first transition, since it needs location's ?notice=.
+  const stateRef = useRef<AccountState>(initialAccount().state);
+  const [state, setState] = useState<AccountState>(stateRef.current);
+  /** ?notice= as first read (undefined: not read yet), kept across a dev double mount. */
+  const urlNotice = useRef<string | null | undefined>(undefined);
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
   const mounted = useRef(true);
+  const [inAppBrowser, setInAppBrowser] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   const supabase = () => (supabaseRef.current ??= createClient());
 
@@ -476,6 +552,23 @@ export default function AccountSignIn() {
         }
         return;
       }
+      case "startGoogle": {
+        try {
+          // PKCE: @supabase/ssr keeps the verifier in a cookie on this host,
+          // and /auth/callback exchanges the code with it. On success the
+          // browser leaves this page.
+          const { error } = await supabase().auth.signInWithOAuth({
+            provider: "google",
+            options: {
+              redirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(effect.next)}`,
+            },
+          });
+          if (error) dispatch({ type: "googleFailed" });
+        } catch {
+          dispatch({ type: "googleFailed" });
+        }
+        return;
+      }
       case "signOutLocal": {
         try {
           await supabase().auth.signOut({ scope: "local" });
@@ -490,10 +583,56 @@ export default function AccountSignIn() {
 
   useEffect(() => {
     mounted.current = true;
-    for (const effect of start.current.effects) void runRef.current(effect);
+    setInAppBrowser(isInAppBrowser(navigator.userAgent));
+
+    // /auth/callback's ?notice= picks the first screen, then leaves the URL so
+    // a reload or a shared link doesn't show it again.
+    if (urlNotice.current === undefined) {
+      urlNotice.current = noticeFromSearch(window.location.search);
+      if (urlNotice.current !== null) {
+        window.history.replaceState(window.history.state, "", hrefWithoutNotice(window.location.href));
+      }
+    }
+    const first = initialAccount(urlNotice.current);
+    stateRef.current = first.state;
+    setState(first.state);
+    for (const effect of first.effects) void runRef.current(effect);
+
+    // Back from Google's page via the back/forward cache: the page is restored
+    // still waiting on the redirect, so unlock it.
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) dispatch({ type: "googleReturned" });
+    };
+    window.addEventListener("pageshow", onPageShow);
     return () => {
       mounted.current = false;
+      window.removeEventListener("pageshow", onPageShow);
     };
+  }, [dispatch]);
+
+  const copyLink = useCallback(async () => {
+    const href = hrefWithoutNotice(window.location.href);
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(href);
+      copied = true;
+    } catch {
+      // Some in-app browsers have no Clipboard API: fall back to a selection.
+      try {
+        const field = document.createElement("textarea");
+        field.value = href;
+        field.setAttribute("readonly", "");
+        field.style.position = "fixed";
+        field.style.opacity = "0";
+        document.body.appendChild(field);
+        field.select();
+        copied = document.execCommand("copy");
+        document.body.removeChild(field);
+      } catch {
+        copied = false;
+      }
+    }
+    if (mounted.current) setLinkCopied(copied);
   }, []);
 
   return (
@@ -506,6 +645,10 @@ export default function AccountSignIn() {
       onSignOut={() => dispatch({ type: "signOut" })}
       onRetryLoad={() => dispatch({ type: "retryLoad" })}
       onRetryProfile={() => dispatch({ type: "retryProfile" })}
+      onGoogle={() => dispatch({ type: "googleClicked" })}
+      onCopyLink={() => void copyLink()}
+      inAppBrowser={inAppBrowser}
+      linkCopied={linkCopied}
     />
   );
 }

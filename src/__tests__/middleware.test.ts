@@ -569,3 +569,23 @@ describe("middleware — /account", () => {
     expect(slug(res)).toBe("flashtic");
   });
 });
+
+// ─── /auth/callback: the Google return leg (buyer accounts plan, Task 15) ────
+describe("middleware — /auth/callback", () => {
+  it("is in config.matcher", async () => {
+    const { config } = await import("@/middleware");
+    expect(config.matcher).toContain("/auth/callback");
+  });
+
+  it("passes through on a tenant host without a redirect", async () => {
+    const res = await get("https://nihon-moment.kuunyi.com/auth/callback?code=x&next=/account");
+    expect(res.headers.get("location")).toBeNull();
+    expect(slug(res)).toBe("nihon-moment");
+  });
+
+  it("passes through on a tenant's custom domain", async () => {
+    const res = await get("https://flashtic.com/auth/callback?code=x");
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.status).not.toBe(404);
+  });
+});

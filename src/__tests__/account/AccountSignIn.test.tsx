@@ -4,6 +4,7 @@ import path from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { AccountView, readProfileResponse } from "@/app/(public)/account/AccountSignIn";
 import type { AccountState } from "@/app/(public)/account/accountFlow";
+import { isInAppBrowser } from "@/lib/inAppBrowser";
 
 // Effects don't run under react-dom/server, so the presentational view is
 // rendered per state. The flow itself is covered in accountFlow.test.ts.
@@ -17,8 +18,11 @@ const handlers = {
   onSignOut: noop,
   onRetryLoad: noop,
   onRetryProfile: noop,
+  onGoogle: noop,
+  onCopyLink: noop,
 };
-const render = (state: AccountState) => renderToStaticMarkup(<AccountView state={state} {...handlers} />);
+const render = (state: AccountState, inAppBrowser = false) =>
+  renderToStaticMarkup(<AccountView state={state} inAppBrowser={inAppBrowser} linkCopied={false} {...handlers} />);
 
 // Any character in the Myanmar Unicode block.
 const MYANMAR = /[က-႟]/;
@@ -236,5 +240,64 @@ describe("readProfileResponse", () => {
     expect(await readProfileResponse(new Response("<html>502</html>", { status: 502 }))).toEqual({});
     expect(await readProfileResponse(new Response("", { status: 503 }))).toEqual({});
     expect(await readProfileResponse(new Response("null"))).toEqual({});
+  });
+});
+
+// ─── Continue with Google (buyer accounts plan, Task 15) ────────────────────
+describe("AccountView — Continue with Google", () => {
+  const CHROME =
+    "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36";
+  const MESSENGER =
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Messenger";
+  const email: AccountState = { step: "email", email: "", busy: false, notice: null };
+
+  it("a normal browser: the Google button, above the email field", () => {
+    const html = render(email, isInAppBrowser(CHROME));
+    expect(html).toMatch(/<button[^>]*type="button"[^>]*>[^]*Continue with Google/);
+    expect(html.indexOf("Continue with Google")).toBeLessThan(html.indexOf('type="email"'));
+    expect(html).not.toContain("doesn&#x27;t work inside this app");
+    expect(html).not.toContain("Copy link");
+  });
+
+  it("an in-app browser (Messenger): no Google button, the explanation and Copy link", () => {
+    const html = render(email, isInAppBrowser(MESSENGER));
+    expect(html).not.toContain("Continue with Google");
+    expect(html).toContain(
+      "Google sign-in doesn&#x27;t work inside this app. Open this page in Chrome or Safari, or use an email code.",
+    );
+    expect(html).toMatch(/<button[^>]*>[^]*Copy link/);
+    expect(html).toMatch(MYANMAR);
+    // The email code still works there.
+    expect(html).toMatch(/<input[^>]*type="email"/);
+  });
+
+  it("Copy link confirms once copied", () => {
+    const html = renderToStaticMarkup(
+      <AccountView state={email} inAppBrowser linkCopied {...handlers} />,
+    );
+    expect(html).toContain("Link copied");
+  });
+
+  it("the Google button is disabled while busy, and says it is opening Google", () => {
+    const html = render({ step: "email", email: "", busy: true, notice: null, google: true });
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>[^<]*Opening Google/);
+    expect(html).not.toContain("Sending…");
+  });
+
+  it("the google_failed notice, in both languages", () => {
+    const html = render({ step: "email", email: "", busy: false, notice: "googleFailed" });
+    expect(html).toContain("We couldn&#x27;t sign you in with Google");
+    expect(html).toContain('role="alert"');
+    expect(html).toMatch(MYANMAR);
+  });
+
+  it("only the email step offers Google", () => {
+    for (const state of [
+      { step: "code", email: "a@b.co", busy: false, notice: null },
+      { step: "signedIn", email: "a@b.co", busy: false },
+      { step: "profileFailed", email: "", busy: false },
+    ] as AccountState[]) {
+      expect(render(state)).not.toContain("Continue with Google");
+    }
   });
 });

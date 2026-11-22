@@ -20,6 +20,7 @@ export type Notice =
   | "deletion"
   | "expired"
   | "accountReady"
+  | "googleFailed"
   | "generic";
 
 /** What `getSession()` holds on this host, for the staff screen on load. */
@@ -39,8 +40,9 @@ export type AccountState =
   /**
    * 2. Email entry. `email` pre-fills the field after "Use another email".
    * `signingOut`: busy waiting for a local sign-out, not for a send.
+   * `google`: busy while the browser leaves for Google, not for a send.
    */
-  | { step: "email"; email: string; busy: boolean; notice: Notice | null; signingOut?: true }
+  | { step: "email"; email: string; busy: boolean; notice: Notice | null; signingOut?: true; google?: true }
   /** 3. Code entry for `email`. `resending`: busy on Resend, not on a verify. */
   | { step: "code"; email: string; busy: boolean; notice: Notice | null; resending?: true }
   /** 3. Code accepted, but creating the profile kept failing (503). */
@@ -55,7 +57,9 @@ export type AccountEffect =
   | { type: "verifyCode"; email: string; token: string }
   /** attempt 0 is the first POST; 1 and 2 are the retries after a 503. */
   | { type: "postProfile"; attempt: number; delayMs: number }
-  | { type: "signOutLocal" };
+  | { type: "signOutLocal" }
+  /** signInWithOAuth on the browser client; Google returns to /auth/callback?next=. */
+  | { type: "startGoogle"; next: string };
 
 export type AccountEvent =
   | { type: "profileLoaded"; status: number; email?: string }
@@ -72,7 +76,12 @@ export type AccountEvent =
   | { type: "profilePosted"; status: number; attempt: number; email?: string; reason?: string }
   | { type: "retryProfile" }
   | { type: "signOut" }
-  | { type: "signedOut" };
+  | { type: "signedOut" }
+  | { type: "googleClicked" }
+  /** signInWithOAuth answered with an error, so the browser never left. */
+  | { type: "googleFailed" }
+  /** The page came back from the back/forward cache after leaving for Google. */
+  | { type: "googleReturned" };
 
 export interface Transition {
   state: AccountState;
@@ -85,8 +94,44 @@ const RETRY_BASE_MS = 1000;
 
 export const CODE_PATTERN = /^\d{6}$/;
 
-export function initialAccount(): Transition {
-  return { state: { step: "loading" }, effects: [{ type: "loadProfile" }] };
+/**
+ * The first transition. `urlNotice` is /auth/callback's `?notice=` (Task 15);
+ * a known value starts on its own screen instead of the profile load, anything
+ * else is ignored.
+ */
+export function initialAccount(urlNotice?: string | null): Transition {
+  switch (urlNotice) {
+    case "staff":
+      return stay(emailStep("", "staff"));
+    case "deleting":
+      return stay(emailStep("", "deletion"));
+    case "google_failed":
+      return stay(emailStep("", "googleFailed"));
+    // The callback's re-issue failed: whatever session cookie is left is dead.
+    case "sign_in_again":
+      return signOutToEmail("", "accountReady");
+    // The callback kept the session but couldn't create the profile (503):
+    // the same POST, back-off and retries as after a code.
+    case "retry_profile":
+      return {
+        state: { step: "profileFailed", email: "", busy: true },
+        effects: [{ type: "postProfile", attempt: 0, delayMs: 0 }],
+      };
+    default:
+      return { state: { step: "loading" }, effects: [{ type: "loadProfile" }] };
+  }
+}
+
+/** `?notice=` from a location.search string, or null. */
+export function noticeFromSearch(search: string): string | null {
+  return new URLSearchParams(search).get("notice");
+}
+
+/** `href` without its `notice` parameter (for history.replaceState and Copy link). */
+export function hrefWithoutNotice(href: string): string {
+  const url = new URL(href);
+  url.searchParams.delete("notice");
+  return url.toString();
 }
 
 export function normalizeEmail(raw: string): string {
@@ -171,7 +216,7 @@ export function accountReducer(state: AccountState, event: AccountEvent): Transi
     }
 
     case "codeSent":
-      if (state.step === "email" && state.busy && !state.signingOut) {
+      if (state.step === "email" && state.busy && !state.signingOut && !state.google) {
         return stay({ step: "code", email: state.email, busy: false, notice: null });
       }
       if (state.step === "code" && state.busy && state.resending) {
@@ -181,7 +226,7 @@ export function accountReducer(state: AccountState, event: AccountEvent): Transi
 
     case "sendFailed": {
       const notice: Notice = event.status === 429 ? "tooManyCodes" : "sendFailed";
-      if (state.step === "email" && state.busy && !state.signingOut) {
+      if (state.step === "email" && state.busy && !state.signingOut && !state.google) {
         return stay({ step: "email", email: state.email, busy: false, notice });
       }
       if (state.step === "code" && state.busy && state.resending) {
@@ -189,6 +234,22 @@ export function accountReducer(state: AccountState, event: AccountEvent): Transi
       }
       return stay(state);
     }
+
+    // ── 2. Continue with Google (Task 15) ──────────────────────────────────
+    case "googleClicked":
+      if (state.step !== "email" || state.busy) return stay(state);
+      return {
+        state: { step: "email", email: state.email, busy: true, notice: null, google: true },
+        effects: [{ type: "startGoogle", next: "/account" }],
+      };
+
+    case "googleFailed":
+      if (state.step !== "email" || !state.google) return stay(state);
+      return stay(emailStep(state.email, "googleFailed"));
+
+    case "googleReturned":
+      if (state.step !== "email" || !state.google) return stay(state);
+      return stay(emailStep(state.email, null));
 
     // ── 3. Code ─────────────────────────────────────────────────────────────
     case "submitCode": {
