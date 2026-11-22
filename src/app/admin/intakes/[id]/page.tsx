@@ -13,6 +13,7 @@ import { useToast } from "@/components/ui/Toast";
 import { formatCurrencySimple } from "@/lib/utils";
 import { useTenantLabels } from "@/components/admin/TenantLabelsContext";
 import { useRole } from "@/components/admin/RoleContext";
+import AccountBoundToggle from "@/components/admin/AccountBoundToggle";
 import { createClient } from "@/lib/supabase/client";
 import { mm } from "@/lib/mm-labels";
 import { EMAIL_TERMS_MAX, ORGANISER_TERMS_MAX } from "@/lib/legal/terms";
@@ -1121,6 +1122,10 @@ export default function IntakeDetailPage({
   const [editEmailTerms, setEditEmailTerms] = useState("");
   const [editFontCssUrl, setEditFontCssUrl] = useState("");
   const [editFontFamily, setEditFontFamily] = useState("");
+  const [editTicketProtection, setEditTicketProtection] = useState(false);
+  // From GET /api/intakes/[id]. Missing (an older server) counts as true, so
+  // the switch is disabled rather than offered; the database decides anyway.
+  const [hasOrders, setHasOrders] = useState(true);
   const [savingIntake, setSavingIntake] = useState(false);
 
   // ── Channel management (language_school only) ─────────────────────────────
@@ -1168,6 +1173,7 @@ export default function IntakeDetailPage({
       if (!cRes.ok) throw new Error(`Failed to fetch classes (${cRes.status})`);
       const [intakeData, classesData] = await Promise.all([iRes.json(), cRes.json()]);
       setIntake(intakeData as Intake);
+      setHasOrders((intakeData as { has_orders?: unknown }).has_orders !== false);
       setClasses(classesData as Class[]);
 
       if (isLanguageSchool && results[2] && results[3]) {
@@ -1519,6 +1525,7 @@ export default function IntakeDetailPage({
     setEditEmailTerms(intake.email_terms ?? "");
     setEditFontCssUrl(intake.font_css_url ?? "");
     setEditFontFamily(intake.font_family ?? "");
+    setEditTicketProtection(intake.ticket_protection === true);
     setEditingIntake(true);
   }
 
@@ -1549,6 +1556,11 @@ export default function IntakeDetailPage({
         // clears it; the server validates the pair (see @/lib/eventFont).
         payload.font_css_url = editFontCssUrl;
         payload.font_family = editFontFamily;
+        // Only sent when switched: the database refuses any change once the
+        // event has orders (409, shown as the toast below).
+        if (editTicketProtection !== (intake?.ticket_protection === true)) {
+          payload.ticket_protection = editTicketProtection;
+        }
       }
       const res = await fetch(`/api/intakes/${params.id}`, {
         method: "PATCH",
@@ -2449,6 +2461,17 @@ export default function IntakeDetailPage({
                     font to a web project, then copy its link and the CSS font name shown there.
                     Myanmar text keeps its usual font. Leave both blank to use the template&rsquo;s fonts.
                   </p>
+                </div>
+              )}
+
+              {/* Account-bound tickets — events only, same gate as the priority window */}
+              {showInterest && (
+                <div className="border-t border-gray-100 pt-4">
+                  <AccountBoundToggle
+                    checked={editTicketProtection}
+                    hasOrders={hasOrders}
+                    onChange={setEditTicketProtection}
+                  />
                 </div>
               )}
 
