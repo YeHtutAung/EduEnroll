@@ -5,7 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { isSameOriginRequest } from "@/lib/auth/sameOrigin";
 import { tenantLinkOrigin } from "@/lib/origin";
 import { hashShareToken, newShareToken, shareLinkUrl } from "@/server/tickets/shareLinks";
-import { limitShare } from "@/server/tickets/sharingLimits";
+import { limitShare, limitShareCancel } from "@/server/tickets/sharingLimits";
 
 // ─── POST/DELETE /api/me/tickets/[id]/share (design 6.4) ────────────────────
 //
@@ -32,8 +32,12 @@ const unavailable = () => noStore(buyerError(503, "SERVER", "Please try again.")
 type Admin = ReturnType<typeof createAdminClient>;
 type Guarded = { ctx: BuyerContext; tenantId: string; admin: Admin };
 
-/** Same-origin, session, id, tenant and the share limit: in that order, before any RPC. */
-async function guard(request: Request, id: string): Promise<Guarded | NextResponse> {
+/** Same-origin, session, id, tenant and the method's limit: in that order, before any RPC. */
+async function guard(
+  request: Request,
+  id: string,
+  limit: typeof limitShare,
+): Promise<Guarded | NextResponse> {
   // Before any Auth call: a sibling tenant subdomain can't act with the buyer's cookie.
   if (!isSameOriginRequest(request)) return noStore(buyerError(403, "FORBIDDEN", "Not allowed."));
   const ctx = await requireBuyer();
@@ -43,14 +47,14 @@ async function guard(request: Request, id: string): Promise<Guarded | NextRespon
   if (tenantId instanceof NextResponse) return noStore(tenantId);
 
   const admin = createAdminClient();
-  const limited = await limitShare(admin, ctx.buyerId);
+  const limited = await limit(admin, ctx.buyerId);
   if (limited === "limited") return noStore(buyerError(429, "RATE_LIMITED", "Too many attempts. Try again later."));
   if (limited === "unavailable") return unavailable();
   return { ctx, tenantId, admin };
 }
 
 export async function POST(request: Request, { params }: { params: { id: string } }): Promise<NextResponse> {
-  const g = await guard(request, params.id);
+  const g = await guard(request, params.id, limitShare);
   if (g instanceof NextResponse) return g;
   const { ctx, tenantId, admin } = g;
 
@@ -85,7 +89,7 @@ export async function POST(request: Request, { params }: { params: { id: string 
 }
 
 export async function DELETE(request: Request, { params }: { params: { id: string } }): Promise<NextResponse> {
-  const g = await guard(request, params.id);
+  const g = await guard(request, params.id, limitShareCancel);
   if (g instanceof NextResponse) return g;
   const { ctx, tenantId, admin } = g;
 

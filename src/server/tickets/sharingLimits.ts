@@ -14,6 +14,10 @@ const ipKey = (headers: Headers) =>
 export const limitShare = (admin: Admin, buyerId: string) =>
   consumeRateLimit(admin, `share:${buyerId}`, 3600, 20);
 
+// Cancelling a link has its own budget so it can't use up the leader's shares.
+export const limitShareCancel = (admin: Admin, buyerId: string) =>
+  consumeRateLimit(admin, `sharecancel:${buyerId}`, 3600, 20);
+
 export const limitGiveBack = (admin: Admin, buyerId: string) =>
   consumeRateLimit(admin, `giveback:${buyerId}`, 3600, 10);
 

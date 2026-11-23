@@ -39,7 +39,11 @@ export interface AccountTicket {
   sharedWith: string | null;
   /** Masked address of the order's leader; holder only. */
   leaderEmail: string | null;
-  /** An unclaimed, uncancelled, unexpired link exists; leader only. */
+  /**
+   * An unclaimed, uncancelled link exists and the seat is still claimable
+   * (the live cutoff from the class's current event_date, not the stored
+   * expires_at, as claim_share_link decides); leader only.
+   */
   linkOpen: boolean;
   canShare: boolean;
   canGiveBack: boolean;
@@ -139,15 +143,15 @@ export async function GET(): Promise<NextResponse> {
   if (leaderHeldIds.length > 0) {
     const { data: links, error: linkError } = (await admin
       .from("ticket_share_links")
-      .select("ticket_id, expires_at")
+      .select("ticket_id")
       .in("ticket_id", leaderHeldIds)
       .is("claimed_at", null)
-      .is("cancelled_at", null)) as unknown as Read<{ ticket_id: string; expires_at: string }[]>;
+      .is("cancelled_at", null)) as unknown as Read<{ ticket_id: string }[]>;
     if (linkError || !links) {
       console.error("[me/tickets] link read failed", linkError?.code ?? "");
       return unavailable();
     }
-    openLinks = new Set(links.filter((l) => Date.parse(l.expires_at) > nowMs).map((l) => l.ticket_id));
+    openLinks = new Set(links.map((l) => l.ticket_id));
   }
 
   const emails = new Map<string, string | null>();
@@ -163,7 +167,8 @@ export async function GET(): Promise<NextResponse> {
     }
     for (const p of profiles) emails.set(p.id, p.email);
   }
-  // A deleted or missing profile shows "***".
+  // A deleted or missing profile shows "***". Presence here means a live
+  // profile: the read above filters deleted_at.
   const masked = (id: string | null | undefined) => maskEmail(id ? emails.get(id) : null);
 
   const nowSec = nowMs / 1000;
@@ -175,6 +180,7 @@ export async function GET(): Promise<NextResponse> {
       const movable =
         r.status === "valid" && r.first_scan_at === null && shareClosesAt !== null && nowSec < shareClosesAt;
       const sharedAway = role === "leader" && r.holder_buyer_id !== null;
+      const leaderId = r.enrollments?.buyer_id ?? null;
       return {
         id: r.id,
         status: r.status === "valid" ? ("valid" as const) : ("void" as const),
@@ -189,9 +195,11 @@ export async function GET(): Promise<NextResponse> {
         role,
         sharedWith: sharedAway ? masked(r.holder_buyer_id) : null,
         leaderEmail: role === "holder" ? masked(r.enrollments?.buyer_id) : null,
-        linkOpen: role === "leader" && !sharedAway && openLinks.has(r.id),
+        linkOpen: role === "leader" && !sharedAway && movable && openLinks.has(r.id),
         canShare: role === "leader" && !sharedAway && movable,
-        canGiveBack: role === "holder" && movable,
+        // give_back_seat refuses an order with no leader or a leader whose
+        // profile is deleted, so the flag does too.
+        canGiveBack: role === "holder" && movable && !!leaderId && emails.has(leaderId),
         shareClosesAt,
       };
     })

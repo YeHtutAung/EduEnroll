@@ -7,7 +7,7 @@ vi.mock("@/server/buyers/rateLimit", () => ({
   consumeRateLimit: (...args: unknown[]) => consume(...args),
 }));
 
-import { limitShare, limitGiveBack, limitClaim, limitPreview } from "@/server/tickets/sharingLimits";
+import { limitShare, limitShareCancel, limitGiveBack, limitClaim, limitPreview } from "@/server/tickets/sharingLimits";
 
 const admin = {} as unknown as SupabaseClient<Database>;
 const headers = new Headers({ "x-forwarded-for": "203.0.113.9" });
@@ -21,6 +21,11 @@ describe("sharing rate limits", () => {
   it("limitShare: share:<buyer>, 3600 s, 20", async () => {
     expect(await limitShare(admin, "b1")).toBe("ok");
     expect(consume).toHaveBeenCalledWith(admin, "share:b1", 3600, 20);
+  });
+
+  it("limitShareCancel: sharecancel:<buyer>, 3600 s, 20", async () => {
+    expect(await limitShareCancel(admin, "b1")).toBe("ok");
+    expect(consume).toHaveBeenCalledWith(admin, "sharecancel:b1", 3600, 20);
   });
 
   it("limitGiveBack: giveback:<buyer>, 3600 s, 10", async () => {

@@ -139,7 +139,7 @@ describe.each(["POST", "DELETE"] as const)("%s guards", (method) => {
     consumeRateLimit.mockResolvedValue("limited");
     await expectError(await call(method), 429, "RATE_LIMITED");
     expect(rpc).not.toHaveBeenCalled();
-    expect(consumeRateLimit.mock.calls[0][1]).toBe(`share:${BUYER}`);
+    expect(consumeRateLimit.mock.calls[0][1]).toBe(method === "POST" ? `share:${BUYER}` : `sharecancel:${BUYER}`);
   });
 
   it("limiter unavailable → 503 and no RPC", async () => {
@@ -252,10 +252,10 @@ describe("DELETE: cancel the open link", () => {
     await expectError(await call("DELETE"), 503, "SERVER");
   });
 
-  it("uses limitShare", async () => {
+  it("uses limitShareCancel, not the share budget", async () => {
     rpcResult = { data: "none", error: null };
     await call("DELETE");
-    expect(consumeRateLimit.mock.calls.map((c) => c[1])).toEqual([`share:${BUYER}`]);
+    expect(consumeRateLimit.mock.calls.map((c) => c[1])).toEqual([`sharecancel:${BUYER}`]);
   });
 });
 

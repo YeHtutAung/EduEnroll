@@ -366,8 +366,35 @@ describe("GET /api/me/tickets: seat sharing (plan 4 Task 9)", () => {
     );
   });
 
-  it("an expired link isn't open", async () => {
+  it("a link follows the live cutoff, not its stored expires_at: open while the seat is movable", async () => {
+    // The claim recomputes the cutoff from the class's current event_date, so a
+    // stale stored expiry (the event moved later) must not hide an open link.
     linksResult = { data: [{ ticket_id: "t1", expires_at: "2026-11-01T00:00:00Z" }], error: null };
+    expect((await ok()).tickets[0].linkOpen).toBe(true);
+    const select = String(calls.ticket_share_links.find((c) => c[0] === "select")?.[1]);
+    expect(select).not.toContain("expires_at");
+  });
+
+  it("an open link on a seat that is no longer movable isn't open", async () => {
+    ticketsResult = {
+      data: [
+        row("admitted", { first_scan_at: "2026-11-20T10:00:00Z" }),
+        row("void", { seat_no: 2, status: "void" }),
+        row("nodate", { seat_no: 3, classes: null }),
+      ],
+      error: null,
+    };
+    linksResult = {
+      data: ["admitted", "void", "nodate"].map((id) => ({ ticket_id: id, expires_at: "2026-12-18T17:30:00Z" })),
+      error: null,
+    };
+    const t = byId(await ok());
+    for (const id of ["admitted", "void", "nodate"]) expect(t[id].linkOpen).toBe(false);
+  });
+
+  it("an open link at the live cutoff isn't open, even if the stored expiry is later", async () => {
+    vi.setSystemTime(new Date(shareCutoffAt("2026-12-20")! * 1000));
+    linksResult = { data: [{ ticket_id: "t1", expires_at: "2027-01-01T00:00:00Z" }], error: null };
     expect((await ok()).tickets[0].linkOpen).toBe(false);
   });
 
@@ -396,16 +423,33 @@ describe("GET /api/me/tickets: seat sharing (plan 4 Task 9)", () => {
     expect(t.c.canGiveBack).toBe(false);
   });
 
-  it("canGiveBack: holder, valid, not scanned, before the cutoff", async () => {
+  it("canGiveBack: holder, valid, not scanned, before the cutoff, leader live", async () => {
     ticketsResult = { data: [], error: null };
     heldResult = {
       data: [held("yes"), held("void", { seat_no: 2, status: "void" }), held("scanned", { seat_no: 3, first_scan_at: "x" })],
       error: null,
     };
+    profilesResult = { data: [{ id: OTHER_BUYER, email: "leader@example.test" }], error: null };
     const t = byId(await ok());
     expect(t.yes).toMatchObject({ canGiveBack: true, canShare: false });
     expect(t.void.canGiveBack).toBe(false);
     expect(t.scanned.canGiveBack).toBe(false);
+  });
+
+  it("canGiveBack is false when the order has no leader (give_back_seat refuses buyer_id NULL)", async () => {
+    ticketsResult = { data: [], error: null };
+    heldResult = { data: [held("orphan", { enrollments: { buyer_id: null, status: "confirmed" } })], error: null };
+    profilesResult = { data: [{ id: OTHER_BUYER, email: "leader@example.test" }], error: null };
+    const t = byId(await ok());
+    expect(t.orphan).toMatchObject({ role: "holder", canGiveBack: false });
+  });
+
+  it("canGiveBack is false when the leader's profile isn't live (deleted or missing)", async () => {
+    ticketsResult = { data: [], error: null };
+    heldResult = { data: [held("c")], error: null };
+    profilesResult = { data: [], error: null };
+    const t = byId(await ok());
+    expect(t.c).toMatchObject({ role: "holder", canGiveBack: false });
   });
 
   it("shareClosesAt comes from shareCutoffAt(eventDate); null with no date", async () => {
