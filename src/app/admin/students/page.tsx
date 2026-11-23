@@ -681,6 +681,7 @@ function StudentDetailModal({
                 </div>
               </div>
             ) : null}
+            {detail && <OrderAccount enrollmentId={row.enrollment_id} />}
           </div>
         </div>
       </div>
@@ -709,6 +710,155 @@ function StudentDetailModal({
         </div>
       )}
     </>
+  );
+}
+
+interface OrderAccountView {
+  buyer: { email: string } | null;
+  tickets: {
+    id: string;
+    tier: string;
+    seatNo: number;
+    status: string;
+    bound: boolean;
+    lastBoundAt: string | null;
+  }[];
+  moves: {
+    createdAt: string;
+    from: string | null;
+    to: string | null;
+    reason: string;
+    movedBy: string;
+  }[];
+}
+
+function fmtDateTime(isoStr: string | null | undefined): string {
+  if (!isoStr) return "—";
+  return new Date(isoStr).toLocaleString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZone: "Asia/Yangon",
+  });
+}
+
+// NEEDS NATIVE REVIEW: every Myanmar line in this component is a draft.
+const ACCOUNT_MM = {
+  title: "အကောင့်",
+  buyer: "ဝယ်သူ အကောင့်",
+  tickets: "လက်မှတ်များ",
+  linked: "ဖုန်း ချိတ်ထားသည်",
+  notLinked: "ဖုန်း မချိတ်ရသေး",
+  moves: "အော်ဒါ ရွှေ့ပြောင်းမှု မှတ်တမ်း",
+};
+
+/**
+ * Read-only account view of an order (design 9): the buyer's masked email, each
+ * ticket's phone status and the move history. No "Reset phone" (design 2).
+ * Shown only when the order has a buyer or a move; a failed load shows nothing.
+ */
+function OrderAccount({ enrollmentId }: { enrollmentId: string }) {
+  const [view, setView] = useState<OrderAccountView | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/admin/enrollments/${enrollmentId}/account`);
+        if (!res.ok) return;
+        const data = (await res.json()) as OrderAccountView;
+        if (!cancelled) setView(data);
+      } catch {
+        // Quietly leave the section out; the rest of the order still shows.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [enrollmentId]);
+
+  if (!view || (!view.buyer && view.moves.length === 0)) return null;
+
+  return (
+    <div className="mt-6 pt-6 border-t border-gray-100 space-y-4">
+      <div>
+        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-wider">Account</h3>
+        <p className="text-xs font-myanmar text-gray-400">{ACCOUNT_MM.title}</p>
+      </div>
+
+      {view.buyer && (
+        <div>
+          <p className="text-xs text-gray-400 mb-0.5">
+            Buyer account <span className="font-myanmar">· {ACCOUNT_MM.buyer}</span>
+          </p>
+          <code className="text-sm text-gray-800">{view.buyer.email}</code>
+        </div>
+      )}
+
+      {view.tickets.length > 0 && (
+        <div>
+          <p className="text-xs text-gray-400 mb-1.5">
+            Tickets <span className="font-myanmar">· {ACCOUNT_MM.tickets}</span>
+          </p>
+          <div className="overflow-x-auto rounded-lg border border-gray-100">
+            <table className="w-full text-xs">
+              <thead className="bg-gray-50 text-gray-500">
+                <tr>
+                  <th className="px-3 py-2 text-left font-medium">Tier</th>
+                  <th className="px-3 py-2 text-left font-medium">Seat</th>
+                  <th className="px-3 py-2 text-left font-medium">Status</th>
+                  <th className="px-3 py-2 text-left font-medium">Phone</th>
+                  <th className="px-3 py-2 text-left font-medium">Last linked</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {view.tickets.map((t) => (
+                  <tr key={t.id}>
+                    <td className="px-3 py-2 text-gray-800">{t.tier}</td>
+                    <td className="px-3 py-2 text-gray-600">{t.seatNo}</td>
+                    <td className="px-3 py-2 text-gray-600">{t.status}</td>
+                    <td className="px-3 py-2">
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-0.5 font-medium ${
+                          t.bound
+                            ? "bg-green-50 text-green-700 border border-green-200"
+                            : "bg-gray-100 text-gray-500 border border-gray-200"
+                        }`}
+                        title={t.bound ? ACCOUNT_MM.linked : ACCOUNT_MM.notLinked}
+                      >
+                        {t.bound ? "Linked" : "Not linked"}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{fmtDateTime(t.lastBoundAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {view.moves.length > 0 && (
+        <div>
+          <p className="text-xs text-gray-400 mb-1.5">
+            Move history <span className="font-myanmar">· {ACCOUNT_MM.moves}</span>
+          </p>
+          <ul className="space-y-2">
+            {view.moves.map((m, i) => (
+              <li key={`${m.createdAt}:${i}`} className="rounded-lg border border-gray-100 bg-gray-50 p-3 text-xs space-y-1">
+                <p className="text-gray-500">{fmtDateTime(m.createdAt)} · by {m.movedBy}</p>
+                <p className="text-gray-800">
+                  <code>{m.from ?? "—"}</code> → <code>{m.to ?? "—"}</code>
+                </p>
+                <p className="text-gray-600 break-words">{m.reason}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 
