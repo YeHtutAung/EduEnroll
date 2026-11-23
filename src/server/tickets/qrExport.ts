@@ -62,7 +62,17 @@ export const QR_EXPORT_HEADER =
 // Burmese names. The BOM makes it read the file as UTF-8.
 const UTF8_BOM = "\uFEFF";
 
-export function qrExportCsv(format: TicketQrFormat, tickets: QrExportTicket[]): string {
+/**
+ * `protectedIntakes`: events with account-bound tickets (design 8.1). Their
+ * tickets keep their row and ticket_id but get an empty qr_text: their QR
+ * exists only on the buyer's phone, and the gate refuses a plain token for
+ * them anyway. Nothing is signed for them.
+ */
+export function qrExportCsv(
+  format: TicketQrFormat,
+  tickets: QrExportTicket[],
+  protectedIntakes: ReadonlySet<string> = new Set(),
+): string {
   const lines = tickets.map((t) => {
     const e = t.enrollments!;
     return [
@@ -75,7 +85,7 @@ export function qrExportCsv(format: TicketQrFormat, tickets: QrExportTicket[]): 
       csvField(String(t.admits)),
       csvField(String(t.seat_no)),
       csvField(new Date(t.exp).toISOString()),
-      csvField(ticketQrText(format, t)),
+      csvField(protectedIntakes.has(t.intake_id) ? "" : ticketQrText(format, t)),
       csvField(asText(typeof t.attendee?.label === "string" ? t.attendee.label : "")),
     ].join(",");
   });

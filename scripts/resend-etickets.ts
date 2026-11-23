@@ -13,7 +13,7 @@
 // Uses the app's own attachment builder and email template, so what buyers
 // receive is exactly what the admin "resend email" button would send.
 
-import { buildEticketEmailAttachment } from "@/server/tickets/eticketEmailAttachment";
+import { buildTicketEmailParts } from "@/server/tickets/eticketEmailAttachment";
 import { enrollmentApprovedEmail, sendEmail } from "@/lib/email";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { tenantLinkOrigin } from "@/lib/origin";
@@ -154,7 +154,10 @@ async function main() {
   for (const [index, { order, to }] of sendable.entries()) {
     const ref = order.enrollment_ref;
     try {
-      const attachment = await buildEticketEmailAttachment(order.id);
+      // 'uuid' events only (checked above), and an account-bound event must be
+      // 'jwt' (intakes_ticket_protection_needs_jwt), so no ticket here is ever
+      // protected; the helper leaves any such ticket out of the PDF anyway.
+      const { attachment } = await buildTicketEmailParts(order.id);
       if (!attachment) throw new Error("no valid tickets to attach");
 
       const tiers = ticketCounts.get(order.id)!;

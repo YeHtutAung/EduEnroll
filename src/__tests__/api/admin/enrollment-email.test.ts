@@ -6,6 +6,7 @@ type Result = { data: unknown; error: unknown };
 let lookup: Result;
 let rpcResult: Result;
 const eqCalls: [string, unknown][] = [];
+const selectCalls: string[] = [];
 const rpc = vi.fn(() => Promise.resolve(rpcResult));
 
 vi.mock("@/lib/api", async (importOriginal) => {
@@ -18,7 +19,10 @@ vi.mock("@/lib/supabase/admin", () => ({
     rpc,
     from: () => {
       const chain = {
-        select: () => chain,
+        select: (cols: string) => {
+          selectCalls.push(cols);
+          return chain;
+        },
         eq: (column: string, value: unknown) => {
           eqCalls.push([column, value]);
           return chain;
@@ -145,6 +149,23 @@ describe("PATCH /api/admin/enrollments/[id]/email", () => {
     const res = await send({ email: "a@gmail.com" });
 
     expect(res.status).toBe(500);
+  });
+
+  it("refuses an order that belongs to a buyer account, and never changes it", async () => {
+    lookup = {
+      data: { id: "order-1", email: "a@gmail.con", form_data: { email: "a@gmail.con" }, buyer_id: "buyer-1" },
+      error: null,
+    };
+    const res = await send({ email: "a@gmail.com" });
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({
+      error: "Conflict",
+      message: "This order belongs to a buyer account; its email is the account's email.",
+    });
+    expect(rpc).not.toHaveBeenCalled();
+    // Without buyer_id in the lookup the 409 would silently switch off.
+    expect(selectCalls.at(-1)).toContain("buyer_id");
   });
 
   it("reports a failed lookup as a failure, not as a missing order", async () => {

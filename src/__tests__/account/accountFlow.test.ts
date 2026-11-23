@@ -2,10 +2,12 @@ import { describe, it, expect } from "vitest";
 import {
   accountReducer,
   bootOnce,
+  googleRedirectTo,
   hrefWithoutNotice,
   initialAccount,
   MAX_PROFILE_RETRIES,
   normalizeCode,
+  nextFromSearch,
   noticeFromSearch,
   type AccountEvent,
   type Notice,
@@ -572,5 +574,95 @@ describe("accountFlow — bootOnce", () => {
   it("each page gets its own boot", () => {
     expect(bootOnce({ started: false }, initialAccount("sign_in_again"))?.effects).toEqual([{ type: "signOutLocal" }]);
     expect(bootOnce({ started: false }, initialAccount("sign_in_again"))?.effects).toEqual([{ type: "signOutLocal" }]);
+  });
+});
+
+// ─── ?next=: back to the page that asked for sign-in (Plan 3, Task 11) ──────
+// The ticket pages link to /account?next=<url-encoded path>. `next` goes
+// through safeNext(); anything it rejects is /account, which means "stay".
+describe("accountFlow — ?next= after sign-in", () => {
+  const TICKET = "/account/tickets/3f2b8c1e-9d4a-4c6b-a1e2-7f8e9d0c1b2a";
+
+  it("nextFromSearch round-trips an encoded ticket path", () => {
+    expect(nextFromSearch(`?next=${encodeURIComponent(TICKET)}`)).toBe(TICKET);
+  });
+
+  it("nextFromSearch keeps a query inside next", () => {
+    expect(nextFromSearch("?next=/enroll/form?slug=x")).toBe("/enroll/form?slug=x");
+    expect(nextFromSearch(`?next=${encodeURIComponent("/enroll/form?slug=x&a=1")}`)).toBe("/enroll/form?slug=x&a=1");
+  });
+
+  it.each([
+    ["no next", ""],
+    ["an empty next", "?next="],
+    ["protocol-relative", `?next=${encodeURIComponent("//evil.example")}`],
+    ["protocol-relative, raw", "?next=//evil.example/x"],
+    ["absolute https", `?next=${encodeURIComponent("https://evil.example/")}`],
+    ["backslash", `?next=${encodeURIComponent("/\\x")}`],
+    ["javascript:", `?next=${encodeURIComponent("javascript:alert(1)")}`],
+    ["double-encoded //", "?next=%252F%252Fevil.example"],
+  ])("nextFromSearch falls back to /account for %s", (_n, search) => {
+    expect(nextFromSearch(search)).toBe("/account");
+  });
+
+  it("a code sign-in ends by navigating to next", () => {
+    const ctx = { next: TICKET };
+    let t = accountReducer(codeState, { type: "submitCode", code: CODE }, ctx);
+    t = accountReducer(t.state, { type: "codeVerified" }, ctx);
+    t = accountReducer(t.state, { type: "profilePosted", status: 201, attempt: 0, email: "buyer@example.com" }, ctx);
+    expect(t.state).toEqual({ step: "signedIn", email: "buyer@example.com", busy: false });
+    expect(t.effects).toEqual([{ type: "goNext", to: TICKET }]);
+  });
+
+  it("a code sign-in after a profile retry also navigates to next", () => {
+    const ctx = { next: "/enroll/form?slug=x" };
+    const failed: AccountState = { step: "profileFailed", email: "buyer@example.com", busy: false };
+    let t = accountReducer(failed, { type: "retryProfile" }, ctx);
+    t = accountReducer(t.state, { type: "profilePosted", status: 200, attempt: 0, email: "buyer@example.com" }, ctx);
+    expect(t.effects).toEqual([{ type: "goNext", to: "/enroll/form?slug=x" }]);
+  });
+
+  it("already signed in on load → straight to next", () => {
+    const t = accountReducer(
+      { step: "loading" },
+      { type: "profileLoaded", status: 200, email: "a@b.co" },
+      { next: TICKET },
+    );
+    expect(t.state).toEqual({ step: "signedIn", email: "a@b.co", busy: false });
+    expect(t.effects).toEqual([{ type: "goNext", to: TICKET }]);
+  });
+
+  it("next of /account (the default, or a rejected next) → stays, no navigation", () => {
+    const ok = accountReducer(posting(), { type: "profilePosted", status: 201, attempt: 0, email: "a@b.co" }, { next: "/account" });
+    expect(ok.state.step).toBe("signedIn");
+    expect(ok.effects).toEqual([]);
+    const noCtx = accountReducer(posting(), { type: "profilePosted", status: 201, attempt: 0, email: "a@b.co" });
+    expect(noCtx.effects).toEqual([]);
+  });
+
+  it("sign_in_again does not navigate; the buyer signs in once more first", () => {
+    const t = accountReducer(
+      posting(),
+      { type: "profilePosted", status: 201, attempt: 0, email: "a@b.co", reason: "sign_in_again" },
+      { next: TICKET },
+    );
+    expect(t.effects).toEqual([{ type: "signOutLocal" }]);
+  });
+
+  it("Continue with Google returns to next", () => {
+    const t = accountReducer(emailState, { type: "googleClicked" }, { next: TICKET });
+    expect(t.effects).toEqual([{ type: "startGoogle", next: TICKET }]);
+  });
+
+  it("Google's redirectTo carries next, encoded, through /auth/callback", () => {
+    expect(googleRedirectTo("https://t.kuunyi.com", TICKET)).toBe(
+      `https://t.kuunyi.com/auth/callback?next=${encodeURIComponent(TICKET)}`,
+    );
+    expect(googleRedirectTo("https://t.kuunyi.com", "/enroll/form?slug=x&a=1")).toBe(
+      "https://t.kuunyi.com/auth/callback?next=%2Fenroll%2Fform%3Fslug%3Dx%26a%3D1",
+    );
+    // What /auth/callback reads back is the same path.
+    const url = new URL(googleRedirectTo("https://t.kuunyi.com", "/enroll/form?slug=x&a=1"));
+    expect(url.searchParams.get("next")).toBe("/enroll/form?slug=x&a=1");
   });
 });

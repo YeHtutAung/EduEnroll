@@ -16,6 +16,7 @@ import type { TemplateProps, EventTemplateProps } from "@/components/enrollment/
 import { applyPriorityUnlock, capturePriorityToken, hideLinkOnlyTiers, isLinkOnlyTier, onlyUnlockedLinkTiers } from "@/lib/interest/priorityUnlock";
 import { readableTextColor } from "@/lib/readableText";
 import { beginCheckoutPayload, claimNavigation, hardNavigate, pushDataLayer, viewItemPayload } from "@/lib/tagManager";
+import ProtectedNotice from "@/components/enroll/ProtectedNotice";
 
 // Shell wrapper for non-template states (loading, error, coming-soon, etc.)
 function PageShell({ children }: { children: React.ReactNode }) {
@@ -65,6 +66,8 @@ interface PublicIntake {
   priority_open_at?: string | null;
   font_css_url?: string | null;
   font_family?: string | null;
+  /** Account-bound tickets (Task 13): shows the "Smartphone required" notice. */
+  ticket_protection?: boolean;
 }
 
 interface TenantLabels {
@@ -449,6 +452,11 @@ function IntakeLandingContent() {
     <InterestBanner slug={params.slug} levels={coveredLevels} primaryColor={appearance.primary_color || "#2563eb"} />
   ) : null;
 
+  // Account-bound tickets: "Smartphone required" above the event. Nothing for
+  // any other event, which renders exactly as before.
+  const protectedNotice =
+    intake.ticket_protection === true ? <ProtectedNotice className="mx-auto mb-4 max-w-4xl" /> : null;
+
   // All classes full — show generic full page
   const allFull = allClasses.length > 0 && allClasses.every((c) => c.seat_remaining === 0 || c.status === "full");
   if (allFull) return <PageShell><AllClassesFullPage intake={intake} labels={tl} /></PageShell>;
@@ -479,12 +487,12 @@ function IntakeLandingContent() {
       onCartCheckout: handleCartCheckout,
     };
     if (effectiveTemplateId === "ev-festival") {
-      return <><EvFestivalTemplate {...eventProps} />{interestBanner}</>;
+      return <>{protectedNotice}<EvFestivalTemplate {...eventProps} />{interestBanner}</>;
     }
     if (effectiveTemplateId === "ev-corporate") {
-      return <><EvCorporateTemplate {...eventProps} />{interestBanner}</>;
+      return <>{protectedNotice}<EvCorporateTemplate {...eventProps} />{interestBanner}</>;
     }
-    return <><EvLuxuryTemplate {...eventProps} />{interestBanner}</>;
+    return <>{protectedNotice}<EvLuxuryTemplate {...eventProps} />{interestBanner}</>;
   }
 
   // ── Language school / default templates ───────────────────────
@@ -497,10 +505,10 @@ function IntakeLandingContent() {
     onSelectClass: handleSelectClass,
   };
   if (effectiveTemplateId === "ls-modern") {
-    return <><LsModernTemplate {...templateProps} />{interestBanner}</>;
+    return <>{protectedNotice}<LsModernTemplate {...templateProps} />{interestBanner}</>;
   }
   if (effectiveTemplateId === "ls-warm") {
-    return <><LsWarmTemplate {...templateProps} />{interestBanner}</>;
+    return <>{protectedNotice}<LsWarmTemplate {...templateProps} />{interestBanner}</>;
   }
-  return <><LsClassicTemplate {...templateProps} />{interestBanner}</>;
+  return <>{protectedNotice}<LsClassicTemplate {...templateProps} />{interestBanner}</>;
 }

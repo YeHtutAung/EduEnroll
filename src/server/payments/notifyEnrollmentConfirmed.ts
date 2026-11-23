@@ -6,7 +6,11 @@ import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
 import { resolveEmailFromFormData, resolvePhoneFromFormData } from "@/lib/utils";
 import { sendSms } from "@/lib/sms";
-import { buildEticketEmailAttachment } from "@/server/tickets/eticketEmailAttachment";
+import {
+  accountTicketsUrl,
+  buildTicketEmailParts,
+  NO_TICKET_EMAIL_PARTS,
+} from "@/server/tickets/eticketEmailAttachment";
 import { loadEventEmailTerms } from "@/server/notifications/eventEmailTerms";
 import { loadEventEmailImages } from "@/server/notifications/eventEmailImages";
 import { loadPartialPayment } from "@/server/payments/partialPayment";
@@ -175,6 +179,12 @@ export async function notifyEnrollmentConfirmed(enrollmentId: string): Promise<v
       console.error("[payment-notify] settled payment lookup failed:", error);
     }
 
+    // Asked first: an order with account-bound tickets gets "Open My Tickets"
+    // in the body instead of their QR in the PDF (design 8.1).
+    const parts = await buildTicketEmailParts(enrollmentId).catch((error) => {
+      console.error("[payment-notify] e-ticket attachment failed:", error);
+      return NO_TICKET_EMAIL_PARTS;
+    });
     const email = enrollmentApprovedEmail({
       studentName: enrollment.student_name_en || "Student",
       enrollmentRef: enrollment.enrollment_ref,
@@ -191,16 +201,14 @@ export async function notifyEnrollmentConfirmed(enrollmentId: string): Promise<v
       orgType: tenantInfo?.org_type,
       tenantName: tenantInfo?.name,
       logoUrl: tenantInfo?.logo_url ?? undefined,
-    });
-    const attachment = await buildEticketEmailAttachment(enrollmentId).catch((error) => {
-      console.error("[payment-notify] e-ticket attachment failed:", error);
-      return null;
+      // statusUrl is already on the tenant's host.
+      ...(parts.accountTickets ? { myTicketsUrl: accountTicketsUrl(statusUrl) } : {}),
     });
     tasks.push(
       sendEmail({
         to: enrollEmail,
         ...email,
-        ...(attachment ? { attachments: [attachment] } : {}),
+        ...(parts.attachment ? { attachments: [parts.attachment] } : {}),
       }).catch((error) =>
         console.error("[payment-notify] email failed:", error),
       ),

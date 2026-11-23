@@ -127,7 +127,10 @@ export async function POST(
     console.error("[me/tickets/device] active key read failed");
     return unavailable();
   }
-  if (active?.public_key !== publicKey) {
+  // A first link (this buyer has no active phone on the ticket) isn't counted
+  // either: it happens once per ticket, so a leader opening 40 seats on one
+  // phone is never locked out. Only moving an active ticket to another key is.
+  if (active && active.public_key !== publicKey) {
     const limited = await consumeRateLimit(admin, `bind:${ctx.buyerId}`, BIND_LIMIT.windowSeconds, BIND_LIMIT.limit);
     if (limited === "limited") {
       return noStore(buyerError(429, "RATE_LIMITED", "Too many attempts. Try again later."));

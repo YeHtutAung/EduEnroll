@@ -16,6 +16,12 @@ export interface SingleEnrollmentInput {
   priority_token_hash?: string | null;
   /** Runners already validated by the route; written only to a pending order whose lines match. */
   attendees?: Attendee[];
+  /**
+   * The verified buyer (requireBuyer's buyerId), set by the route only for a
+   * protected class. Never from the request body. Absent: no p_buyer_id, so a
+   * guest order is exactly as before.
+   */
+  buyer_id?: string | null;
 }
 
 // Use Extract to narrow to the success branch
@@ -48,7 +54,7 @@ export type SingleEnrollmentOutcome = SingleEnrollmentSuccess | SingleEnrollment
 export async function createEnrollment(
   input: SingleEnrollmentInput,
 ): Promise<SingleEnrollmentOutcome> {
-  const { class_id, form_data, idempotency_key, quantity, messenger_psid, priority_token_hash, attendees } = input;
+  const { class_id, form_data, idempotency_key, quantity, messenger_psid, priority_token_hash, attendees, buyer_id } = input;
 
   if (!class_id || !UUID_RE.test(class_id)) {
     return { ok: false, status: 400, error: "Validation Error", message: "class_id must be a valid UUID." };
@@ -67,6 +73,7 @@ export async function createEnrollment(
       p_idempotency_key: idemKey,
       p_quantity: qty,
       p_priority_token_hash: priorityTokenHash,
+      ...(typeof buyer_id === "string" && buyer_id ? { p_buyer_id: buyer_id } : {}),
     } as never,
   );
 

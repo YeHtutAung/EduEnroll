@@ -14,7 +14,11 @@ import EmailTypoHint from "@/components/enrollment/EmailTypoHint";
 import SizePicker from "@/components/enrollment/SizePicker";
 import type { SizeNote } from "@/lib/enrollment/sizeChart";
 import { emailBlockedFor, emailBlockedMessage, emailTypoToConfirm } from "@/lib/enrollment/emailAddress";
+import { isAccountEmailKey } from "@/lib/enrollment/accountEmail";
 import AttendeeSection, { AttendeeTotals, type AttendeeCardSlot } from "@/components/enrollment/AttendeeSection";
+import ProtectedNotice from "@/components/enroll/ProtectedNotice";
+import ProtectedGate, { AccountEmailField } from "@/components/enroll/ProtectedGate";
+import { currentSignInHref, resolveProtectedGate, type GateState } from "@/lib/enrollment/protectedGate";
 import {
   attendeeFieldErrors,
   attendeeLabel,
@@ -42,6 +46,8 @@ interface IntakeInfo {
   name: string;
   year: number;
   status: string;
+  /** Account-bound tickets: buy signed in, email = the account's (Task 13). */
+  ticket_protection?: boolean;
 }
 
 interface TenantLabels {
@@ -238,11 +244,14 @@ function DynamicField({
   value,
   error,
   onChange,
+  lockedEmail = null,
 }: {
   field: FormFieldDef;
   value: string;
   error?: string;
   onChange: (val: string) => void;
+  /** A protected event's account email: the email field shows it, read-only. */
+  lockedEmail?: string | null;
 }) {
   const hasError = !!error;
   const cls = `${INPUT_BASE} ${hasError ? INPUT_ERROR : ""}`;
@@ -269,6 +278,18 @@ function DynamicField({
           requiredMark={field.is_required && <span className="ml-1 text-red-500">*</span>}
         />
         {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+      </div>
+    );
+  }
+
+  // Protected event: the order email is the account email, whatever is typed
+  // (the server overwrites it), so the field shows it and can't change. Locked
+  // are exactly the fields the server overwrites (isAccountEmailKey).
+  if (lockedEmail !== null && isAccountEmailKey(field.field_key)) {
+    return (
+      <div className="mb-5">
+        <label className="mb-1.5 block text-sm font-medium text-gray-700">{field.field_label}</label>
+        <AccountEmailField email={lockedEmail} className={`${INPUT_BASE} bg-gray-50`} />
       </div>
     );
   }
@@ -473,6 +494,10 @@ function EnrollmentFormPage() {
   const [primaryColor, setPrimaryColor] = useState("#1a6b3c");
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [schoolName, setSchoolName] = useState("");
+  // Protected event (account-bound tickets): settled before any field shows.
+  // "open" for every other event, which renders exactly as before.
+  const [gate, setGate] = useState<GateState>("open");
+  const [accountEmail, setAccountEmail] = useState<string | null>(null);
 
   // Form state
   const [step, setStep] = useState<1 | 2>(1);
@@ -574,6 +599,11 @@ function EnrollmentFormPage() {
           return;
         }
         const json = await res.json();
+        // A protected event asks who is signed in before showing any field.
+        // An unprotected one makes no profile call.
+        const gateResult = await resolveProtectedGate(json.intake?.ticket_protection === true);
+        setGate(gateResult.state);
+        setAccountEmail(gateResult.email);
         setIntake(json.intake);
         if (json.labels) setLabels(json.labels);
         if (json.appearance?.primary_color) setPrimaryColor(json.appearance.primary_color);
@@ -605,7 +635,8 @@ function EnrollmentFormPage() {
           // Initialize form data with empty values
           const initial: Record<string, string> = {};
           for (const f of fields) {
-            initial[f.field_key] = "";
+            initial[f.field_key] =
+              gateResult.email && isAccountEmailKey(f.field_key) ? gateResult.email : "";
           }
           setFormData(initial);
         }
@@ -642,7 +673,9 @@ function EnrollmentFormPage() {
         } else if (emailBlockedFor(val)) {
           const blocked = emailBlockedMessage(emailBlockedFor(val)!);
           errors[field.field_key] = `${blocked.en} ${blocked.mm}`;
-        } else {
+        } else if (!(accountEmail && isAccountEmailKey(field.field_key))) {
+          // Not asked of the account email: the buyer can't change it. Any
+          // other email field (e.g. a guardian's) still gets the prompt.
           const suggestion = emailTypoToConfirm(val, emailTyposQueried.current);
           if (suggestion) {
             errors[field.field_key] =
@@ -867,6 +900,18 @@ function EnrollmentFormPage() {
 
   if (!intake || (!classInfo && !isCartMode)) return null;
 
+  // Protected event, and not (or not checkably) signed in as a buyer: the gate
+  // replaces the form. The server refuses the order the same way (Task 12).
+  if (gate !== "open" && gate !== "signedIn") {
+    return (
+      <PageWrapper schoolName={schoolName} primaryColor={primaryColor} logoUrl={logoUrl}>
+        <ProtectedNotice className="mx-auto mb-6 max-w-md" />
+        <ProtectedGate state={gate} next={currentSignInHref()} />
+      </PageWrapper>
+    );
+  }
+  const protectedNotice = gate === "signedIn" ? <ProtectedNotice className="mb-6" /> : null;
+
   const isEvent = labels?.orgType === "event";
   const intakeNameMM = isEvent ? null : getIntakeNameMM(intake.name, intake.year);
 
@@ -876,6 +921,7 @@ function EnrollmentFormPage() {
       <PageWrapper schoolName={schoolName} primaryColor={primaryColor} logoUrl={logoUrl}>
       <div className="mx-auto max-w-md">
         <StepIndicator step={1} color={primaryColor} />
+        {protectedNotice}
 
         {/* Selected class/cart summary */}
         {isCartMode ? (
@@ -967,6 +1013,7 @@ function EnrollmentFormPage() {
             value={formData[field.field_key] ?? ""}
             error={fieldErrors[field.field_key]}
             onChange={(val) => updateField(field.field_key, val)}
+            lockedEmail={accountEmail}
           />
         ))}
 
@@ -1010,12 +1057,14 @@ function EnrollmentFormPage() {
 
   // ── Step 2: Review & Confirm ─────────────────────────────────
   const reviewEmailField = formFields.find(isEmailField);
-  const reviewEmail = reviewEmailField ? (formData[reviewEmailField.field_key] ?? "").trim() : "";
+  const reviewEmail =
+    accountEmail ?? (reviewEmailField ? (formData[reviewEmailField.field_key] ?? "").trim() : "");
 
   return (
     <PageWrapper schoolName={schoolName} primaryColor={primaryColor} logoUrl={logoUrl}>
     <div className="mx-auto max-w-md">
       <StepIndicator step={2} color={primaryColor} />
+      {protectedNotice}
 
       <h2 className="mb-6 text-lg font-semibold text-gray-900">
         Review & Confirm / <span className="font-myanmar">ပြန်လည်စစ်ဆေးပြီး အတည်ပြုပါ</span>

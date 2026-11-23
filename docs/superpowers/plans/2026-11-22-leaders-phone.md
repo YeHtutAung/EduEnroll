@@ -1480,7 +1480,7 @@ The server (Task 12) is the control; this task is the experience.
   - section 13: "**Tag scripts on the same site:** a script on the tenant's host runs as the signed-in buyer and could bind its own phone. Tenant tag scripts are off on the whole host while the tenant has a live protected event (owner decision 2026-11-23, Plan 3 decision 8)."
 
   Commit: `feat(admin): no Edit Email on account orders; design notes from Plan 3`.
-- [ ] **Step 3 (owner-assisted, before this PR merges): QR size spike (design 6.2).**
+- [x] **Step 3 (owner-assisted, before this PR merges): QR size spike (design 6.2).** Done 2026-11-23; see Findings.
   1. Run Part B on its Vercel preview, which reads the dev DB, or locally.
   2. Protect a **new test** intake that has no orders (on the dev DB the owner runs the SQL, shown first).
   3. Buy as a test buyer, bind a phone and open `/account/tickets/<id>`.
@@ -1617,6 +1617,10 @@ Branch `feat/leaders-phone-c` from `origin/dev` after Part B merges.
 
 | Question | Result | Consequence |
 |---|---|---|
-| `k2` QR length, and whether a phone reads it at 240 px (Task 16 step 3) | | stop and shorten if it doesn't read |
+| `k2` QR length, and whether a phone reads it at 240 px (Task 16 step 3) | **Reads fine** (owner, 2026-11-23). On a local run of this branch against the dev DB, a protected test event was bought with Google sign-in, paid by bank transfer and approved. The order got `buyer_id` and one valid ticket, and opening `/account/tickets/<id>` created one active `ticket_devices` row. The owner's phone camera read the live QR shown on a desktop screen. The QR text length was **not measured**, and kuunyi-scanner wasn't tried because it doesn't accept `k2.` yet | no shortening needed; the scanner read is still owed in Task 21 |
 | iPhone: does the key survive in a Home Screen web app (Task 16 step 4, staging test) | | design 6.3 notice wording |
 | `classes.end_time` type at the time of Task 1 | DATE (migration 031), confirmed in plan review 2026-11-22 | `greatest()` is safe |
+| Live QR timing as built (Task 8) | Each QR is signed 5 s ahead of its slot start, and the clock offset is anchored to the arrival of the bind response. A QR on screen spans about −11 to +5 s of server time | about 9 s is left for the scanner's upload; recorded in design 6.2 |
+| Order of the checks in `POST /api/public/enroll` (Task 12) | The protection check runs after the blocked-email check, not before it as the task reads | known departure; unreachable in practice, because the protected form's email is read-only and is the account's |
+| What the `PATCH /api/public/enrollment/[ref]` keeps on an account order (Task 12) | The stored email: the body's email is ignored and never written, and the form's email fields carry the stored one | the checkout page shows the order's stored email, not the session's |
+| Staging and production prerequisite for Part B | Part A's migration must be on a database before Part B's layout code reaches it. Otherwise the live-protected-event check can't be read, fails closed, and tags switch off silently on every tenant custom domain | promote the migration first; check it on each database before the code |
