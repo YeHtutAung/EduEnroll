@@ -760,7 +760,9 @@ const ACCOUNT_MM = {
  * Shown only when the order has a buyer or a move; a failed load shows nothing.
  */
 function OrderAccount({ enrollmentId }: { enrollmentId: string }) {
+  const role = useRole();
   const [view, setView] = useState<OrderAccountView | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -777,7 +779,7 @@ function OrderAccount({ enrollmentId }: { enrollmentId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [enrollmentId]);
+  }, [enrollmentId, reloadKey]);
 
   if (!view || (!view.buyer && view.moves.length === 0)) return null;
 
@@ -795,6 +797,14 @@ function OrderAccount({ enrollmentId }: { enrollmentId: string }) {
           </p>
           <code className="text-sm text-gray-800">{view.buyer.email}</code>
         </div>
+      )}
+
+      {/* Owner only: the server refuses everyone else (requireOwner). */}
+      {view.buyer && role === "owner" && (
+        <MoveOrderToAccount
+          enrollmentId={enrollmentId}
+          onMoved={() => setReloadKey((k) => k + 1)}
+        />
       )}
 
       {view.tickets.length > 0 && (
@@ -856,6 +866,173 @@ function OrderAccount({ enrollmentId }: { enrollmentId: string }) {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const MOVE_REASON_MAX = 500;
+
+/**
+ * "Move order to another account" (design 4.7): for a buyer who lost the old
+ * account and signed up again. The organiser checks the request first; the
+ * server refuses with one message for every reason, which is shown as is.
+ */
+function MoveOrderToAccount({
+  enrollmentId,
+  onMoved,
+}: {
+  enrollmentId: string;
+  onMoved: () => void;
+}) {
+  const toast = useToast();
+  const [step, setStep] = useState<"closed" | "form" | "confirm">("closed");
+  const [email, setEmail] = useState("");
+  const [reason, setReason] = useState("");
+  const [moving, setMoving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const trimmedEmail = email.trim();
+  const trimmedReason = reason.trim();
+  const ready =
+    trimmedEmail.length > 0 && trimmedReason.length > 0 && trimmedReason.length <= MOVE_REASON_MAX;
+
+  function close() {
+    setStep("closed");
+    setEmail("");
+    setReason("");
+    setError(null);
+  }
+
+  async function move() {
+    setMoving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/enrollments/${enrollmentId}/move-buyer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: trimmedEmail, reason: trimmedReason }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { message?: string };
+      if (res.status === 409) {
+        setError(data.message || "This order can't be moved to that account.");
+        setStep("form");
+        return;
+      }
+      if (!res.ok) {
+        setError(
+          res.status === 400 && data.message ? data.message : "Could not move the order. Try again.",
+        );
+        setStep("form");
+        return;
+      }
+      toast.success("Order moved. Both addresses were emailed.");
+      close();
+      onMoved();
+    } catch {
+      setError("Could not move the order. Try again.");
+      setStep("form");
+    } finally {
+      setMoving(false);
+    }
+  }
+
+  if (step === "closed") {
+    return (
+      <button
+        type="button"
+        onClick={() => setStep("form")}
+        className="w-full text-center px-3 py-2 text-xs font-medium text-amber-800 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors"
+      >
+        Move order to another account
+      </button>
+    );
+  }
+
+  return (
+    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 space-y-3">
+      <p className="text-xs font-semibold text-amber-900">Move order to another account</p>
+      <p className="text-xs text-amber-900">
+        Check the order reference, the payment proof or payer details, and the contact phone on
+        the order before moving.
+      </p>
+
+      <label className="block text-xs text-gray-700">
+        New account email
+        <input
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          disabled={step === "confirm" || moving}
+          autoComplete="off"
+          className="mt-1 w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm disabled:bg-gray-100"
+        />
+      </label>
+
+      <label className="block text-xs text-gray-700">
+        Reason (required)
+        <textarea
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          maxLength={MOVE_REASON_MAX}
+          rows={3}
+          required
+          disabled={step === "confirm" || moving}
+          className="mt-1 w-full rounded-lg border border-gray-300 px-2.5 py-1.5 text-sm disabled:bg-gray-100"
+        />
+        <span className="block text-right text-[11px] text-gray-400">
+          {reason.length}/{MOVE_REASON_MAX}
+        </span>
+      </label>
+
+      {error && <p className="text-xs text-red-600">{error}</p>}
+
+      {step === "form" ? (
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setStep("confirm");
+            }}
+            disabled={!ready}
+            className="flex-1 px-3 py-2 text-xs font-medium text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+          >
+            Continue
+          </button>
+          <button
+            type="button"
+            onClick={close}
+            className="px-3 py-2 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <p className="text-xs text-red-700">
+            The order moves to <strong>{trimmedEmail}</strong>. Phones linked to its tickets are
+            unlinked, and both addresses are emailed.
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={move}
+              disabled={moving}
+              className="flex-1 px-3 py-2 text-xs font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors"
+            >
+              {moving ? "Moving…" : "Move"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setStep("form")}
+              disabled={moving}
+              className="px-3 py-2 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
+            >
+              Back
+            </button>
+          </div>
         </div>
       )}
     </div>
