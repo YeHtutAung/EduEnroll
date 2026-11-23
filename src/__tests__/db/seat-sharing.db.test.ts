@@ -408,6 +408,24 @@ describe("create_share_link", () => {
       expect({ label, n: (await links(t)).length }).toEqual({ label, n: before });
     }
   });
+
+  it("2b. a token_hash collision is refused, not an error, and leaves the open link alone", async () => {
+    const taken = await sharedSeat();
+    const s = await sharedSeat();
+    const before = await links(s.ticket);
+    const eventsBefore = await events(s.ticket);
+
+    // Another seat's hash: the unique index on token_hash fires.
+    expect(await create(s.ticket, T1, s.leader, taken.hash)).toEqual({ result: "refused", expires_at: null });
+    expect(await links(s.ticket)).toEqual(before);
+    expect((await openLinks(s.ticket)).map((l) => l.token_hash)).toEqual([s.hash]);
+    expect(await events(s.ticket)).toEqual(eventsBefore);
+
+    // Its own current hash: same refusal, the link is not cancelled.
+    expect(await create(s.ticket, T1, s.leader, s.hash)).toEqual({ result: "refused", expires_at: null });
+    expect((await openLinks(s.ticket)).map((l) => l.token_hash)).toEqual([s.hash]);
+    expect(await openLinks(taken.ticket)).toHaveLength(1);
+  });
 });
 
 // ── 3. cancel_share_link ────────────────────────────────────────────────────
@@ -644,6 +662,9 @@ describe("void_enrollment_tickets", () => {
         { event: "voided", actor_buyer_id: null, actor_staff_id: null, from_buyer_id: null, to_buyer_id: null },
       ]);
     }
+    // Plan decision 7: the void cancels t1's open link but logs no link_cancelled.
+    expect((await events(t1)).map((e) => e.event)).toEqual(["link_created", "voided"]);
+    expect((await events(t2)).map((e) => e.event)).toEqual(["link_created", "claimed", "voided"]);
 
     const n1 = (await events(t1)).length;
     const n2 = (await events(t2)).length;
@@ -724,12 +745,14 @@ describe("move_order_buyer and shared seats", () => {
     expect((await events(seat1)).filter((e) => e.event === "order_moved")).toEqual([
       { event: "order_moved", actor_buyer_id: null, actor_staff_id: S1, from_buyer_id: s.leader, to_buyer_id: B3 },
     ]);
+    // Plan decision 7: the move cancels seat1's open link but logs no link_cancelled.
+    expect((await events(seat1)).map((e) => e.event)).toEqual(["link_created", "order_moved"]);
 
     expect(await holder(seat2)).toBe(friend);
     const active2 = await activeDevices(seat2);
     expect(active2).toHaveLength(1);
     expect(active2[0].public_key).toBe(friendKey);
-    expect((await events(seat2)).filter((e) => e.event === "order_moved")).toHaveLength(0);
+    expect((await events(seat2)).map((e) => e.event)).toEqual(["link_created", "claimed"]);
 
     expect(await bind(seat1, T1, B3, newKey())).toBe("bound_first");
   });
@@ -859,13 +882,7 @@ describe("share_cutoff and seat_open_for_sharing", () => {
   });
 
   it("15. one second either side of the cutoff", async () => {
-    // event_date is a date, so the cutoff can't be put one second from now();
-    // test the comparison seat_open_for_sharing makes against computed times.
-    const [row] = await sql<{ before: boolean; at: boolean; after: boolean }>(
-      `SELECT (c - interval '1 second') < c AS before, c < c AS at, (c + interval '1 second') < c AS after
-         FROM (SELECT public.share_cutoff('2026-12-05') AS c) x`,
-    );
-    expect(row).toEqual({ before: true, at: false, after: false });
+    // event_date is a DATE, so second precision can only be pinned via the operator.
     const [{ src }] = await sql<{ src: string }>(
       `SELECT replace(prosrc, chr(13), '') AS src FROM pg_proc
         WHERE oid = 'public.seat_open_for_sharing(uuid,uuid)'::regprocedure`,

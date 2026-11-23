@@ -6,10 +6,17 @@
 --
 -- DATA LOSS: tickets.holder_buyer_id, every ticket_share_links row and every
 -- ticket_holder_events row are gone for good. A rollback after links were
--- claimed RETURNS EVERY CLAIMED SEAT TO ITS LEADER: the friend's bound phone
--- stays active but the restored bind refuses the friend from then on, and the
--- leader can bind again. Deploy the code that no longer calls the sharing
--- functions first.
+-- claimed RETURNS EVERY CLAIMED SEAT TO ITS LEADER: the friend's active phone
+-- is revoked here (revoked_by 'holder_changed'), so it can no longer pass a
+-- bound-phone scan, and the leader can bind again.
+--
+-- Revert and deploy the code first: not only the code that calls the sharing
+-- functions, but every reader of tickets.holder_buyer_id, including the scan
+-- route (src/app/api/scans/route.ts) and /api/me/tickets. They fail once the
+-- column is dropped.
+--
+-- The indexes on ticket_share_links and ticket_holder_events go with their
+-- tables; tickets_holder_buyer_id_idx is dropped explicitly.
 
 BEGIN;
 
@@ -208,8 +215,14 @@ DROP FUNCTION public.share_cutoff(date);
 
 -- ── Tables, index and column ────────────────────────────────────────────────
 
-DROP TABLE public.ticket_holder_events;
-DROP TABLE public.ticket_share_links;
+-- A friend's phone must not stay bound to a seat that returns to its leader.
+UPDATE public.ticket_devices d
+   SET revoked_at = now(), revoked_by = 'holder_changed'
+  FROM public.tickets t
+ WHERE d.ticket_id = t.id AND t.holder_buyer_id IS NOT NULL AND d.revoked_at IS NULL;
+
+DROP TABLE public.ticket_holder_events;   -- its indexes go with it
+DROP TABLE public.ticket_share_links;     -- its indexes go with it
 DROP INDEX public.tickets_holder_buyer_id_idx;
 ALTER TABLE public.tickets DROP COLUMN holder_buyer_id;
 

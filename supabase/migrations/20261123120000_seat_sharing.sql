@@ -7,6 +7,8 @@
 
 BEGIN;
 
+SET LOCAL lock_timeout = '5s';
+
 -- ── 1. The current holder ───────────────────────────────────────────────────
 -- NULL means the seat is with the order's buyer. The current holder is
 -- coalesce(tickets.holder_buyer_id, enrollments.buyer_id) everywhere.
@@ -31,6 +33,10 @@ CREATE UNIQUE INDEX ticket_share_links_one_open ON public.ticket_share_links (ti
   WHERE claimed_at IS NULL AND cancelled_at IS NULL;
 CREATE INDEX ticket_share_links_open_by_creator ON public.ticket_share_links (created_by)
   WHERE claimed_at IS NULL AND cancelled_at IS NULL;
+-- Plain indexes for the ticket cascade, move/void lookups and the auth.users
+-- ON DELETE SET NULL on claimed_by.
+CREATE INDEX ticket_share_links_ticket_id_idx ON public.ticket_share_links (ticket_id);
+CREATE INDEX ticket_share_links_claimed_by_idx ON public.ticket_share_links (claimed_by);
 ALTER TABLE public.ticket_share_links ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.ticket_share_links FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON public.ticket_share_links FROM service_role;   -- Supabase default privileges grant ALL
@@ -50,6 +56,10 @@ CREATE TABLE public.ticket_holder_events (
   CONSTRAINT ticket_holder_events_one_actor CHECK (actor_buyer_id IS NULL OR actor_staff_id IS NULL)
 );
 CREATE INDEX ticket_holder_events_ticket_idx ON public.ticket_holder_events (ticket_id, created_at);
+-- For the auth.users ON DELETE SET NULL on each buyer column.
+CREATE INDEX ticket_holder_events_from_buyer_id_idx ON public.ticket_holder_events (from_buyer_id);
+CREATE INDEX ticket_holder_events_to_buyer_id_idx ON public.ticket_holder_events (to_buyer_id);
+CREATE INDEX ticket_holder_events_actor_buyer_id_idx ON public.ticket_holder_events (actor_buyer_id);
 ALTER TABLE public.ticket_holder_events ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON public.ticket_holder_events FROM PUBLIC, anon, authenticated;
 REVOKE ALL ON public.ticket_holder_events FROM service_role;
@@ -97,7 +107,8 @@ $$;
 
 -- ── 6. create_share_link ────────────────────────────────────────────────────
 -- ('created', cutoff) or ('refused', NULL). Replacing a link logs only
--- link_created (plan decision 7).
+-- link_created (plan decision 7). A token_hash collision is a refusal, not
+-- an error, and leaves the existing open link as it was.
 CREATE FUNCTION public.create_share_link(
   p_ticket_id uuid, p_tenant_id uuid, p_leader_id uuid, p_token_hash text)
 RETURNS TABLE (result text, expires_at timestamptz)
@@ -106,7 +117,8 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
 DECLARE
-  v_t record;
+  v_t          record;
+  v_constraint text;
 BEGIN
   IF p_ticket_id IS NULL OR p_tenant_id IS NULL OR p_leader_id IS NULL
      OR p_token_hash IS NULL OR p_token_hash !~ '^[0-9a-f]{64}$' THEN
@@ -136,12 +148,24 @@ BEGIN
     RETURN QUERY SELECT 'refused'::text, NULL::timestamptz; RETURN;
   END IF;
 
-  UPDATE public.ticket_share_links
-     SET cancelled_at = now()
-   WHERE ticket_id = p_ticket_id AND claimed_at IS NULL AND cancelled_at IS NULL;
+  -- Cancel and insert in one subtransaction: a token_hash collision rolls back
+  -- both, so a refused create leaves the existing open link untouched. Any
+  -- other unique violation is unexpected (the ticket lock serialises creates)
+  -- and is re-raised.
+  BEGIN
+    UPDATE public.ticket_share_links
+       SET cancelled_at = now()
+     WHERE ticket_id = p_ticket_id AND claimed_at IS NULL AND cancelled_at IS NULL;
 
-  INSERT INTO public.ticket_share_links (ticket_id, token_hash, created_by, expires_at)
-  VALUES (p_ticket_id, p_token_hash, p_leader_id, public.share_cutoff(v_t.event_date));
+    INSERT INTO public.ticket_share_links (ticket_id, token_hash, created_by, expires_at)
+    VALUES (p_ticket_id, p_token_hash, p_leader_id, public.share_cutoff(v_t.event_date));
+  EXCEPTION WHEN unique_violation THEN
+    GET STACKED DIAGNOSTICS v_constraint = CONSTRAINT_NAME;
+    IF v_constraint IS DISTINCT FROM 'ticket_share_links_token_hash_key' THEN
+      RAISE;
+    END IF;
+    RETURN QUERY SELECT 'refused'::text, NULL::timestamptz; RETURN;
+  END;
 
   INSERT INTO public.ticket_holder_events (ticket_id, event, actor_buyer_id, from_buyer_id)
   VALUES (p_ticket_id, 'link_created', p_leader_id, p_leader_id);
@@ -693,6 +717,29 @@ BEGIN
     FROM pg_proc WHERE oid = 'public.revoke_buyer_ticket_devices(uuid)'::regprocedure;
   IF v_src NOT LIKE '%holder_deleted%' THEN
     RAISE EXCEPTION 'revoke_buyer_ticket_devices body is not the expected one';
+  END IF;
+
+  -- The two tables: RLS on, no client reads, history append-only.
+  FOREACH v_fn IN ARRAY ARRAY['public.ticket_share_links', 'public.ticket_holder_events'] LOOP
+    IF NOT (SELECT c.relrowsecurity FROM pg_class c WHERE c.oid = v_fn::regclass) THEN
+      RAISE EXCEPTION '% does not have row level security enabled', v_fn;
+    END IF;
+    IF to_regrole('anon') IS NOT NULL AND has_table_privilege('anon', v_fn, 'SELECT') THEN
+      RAISE EXCEPTION '% is readable by anon', v_fn;
+    END IF;
+    IF to_regrole('authenticated') IS NOT NULL AND has_table_privilege('authenticated', v_fn, 'SELECT') THEN
+      RAISE EXCEPTION '% is readable by authenticated', v_fn;
+    END IF;
+  END LOOP;
+
+  IF to_regrole('service_role') IS NOT NULL THEN
+    IF has_table_privilege('service_role', 'public.ticket_holder_events', 'UPDATE')
+       OR has_table_privilege('service_role', 'public.ticket_holder_events', 'DELETE') THEN
+      RAISE EXCEPTION 'public.ticket_holder_events is updatable or deletable by service_role';
+    END IF;
+    IF has_table_privilege('service_role', 'public.ticket_share_links', 'DELETE') THEN
+      RAISE EXCEPTION 'public.ticket_share_links is deletable by service_role';
+    END IF;
   END IF;
 END $$;
 
