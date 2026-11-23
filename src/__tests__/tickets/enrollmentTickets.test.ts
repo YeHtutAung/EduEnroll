@@ -60,15 +60,19 @@ const TICKETS = [
   },
 ];
 
-type IntakeFormats = { data: { id: string; ticket_qr_format: string }[] | null; error: unknown };
+type IntakeFormats = {
+  data: { id: string; ticket_qr_format: string; ticket_protection?: boolean }[] | null;
+  error: unknown;
+};
 
 function setupMocks(
   enrollmentStatus: string,
-  opts: { withTickets?: boolean; intakes?: IntakeFormats } = {},
+  opts: { withTickets?: boolean; intakes?: IntakeFormats; tickets?: unknown[] } = {},
 ) {
   const {
     withTickets = false,
     intakes = { data: [{ id: "intake-1", ticket_qr_format: "jwt" }], error: null },
+    tickets = TICKETS,
   } = opts;
 
   mockAdminFrom.mockImplementation((table: string) => {
@@ -104,7 +108,7 @@ function setupMocks(
       return {
         select: vi.fn().mockReturnThis(),
         eq: vi.fn().mockResolvedValue({
-          data: withTickets ? TICKETS : [],
+          data: withTickets ? tickets : [],
           error: null,
         }),
       };
@@ -244,5 +248,77 @@ describe("GET /api/public/enrollment/[ref] tickets", () => {
 
     expect(body.tickets).toEqual([]);
     expect(mockAdminFrom).not.toHaveBeenCalledWith("tickets");
+  });
+});
+
+// Task 15 (design 8.1): a ticket on an account-bound (protected) event is never
+// signed or returned here. It lives only on /account/tickets; the response says
+// how many there are so the pages can send the buyer there.
+describe("GET /api/public/enrollment/[ref] — account-bound tickets", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const MIXED = [
+    { id: "open-1", intake_id: "intake-open", tier: "GA", admits: 1, exp: "2026-12-31T00:00:00.000Z", status: "valid" },
+    { id: "bound-1", intake_id: "intake-bound", tier: "VIP", admits: 1, exp: "2026-12-31T00:00:00.000Z", status: "valid" },
+    { id: "bound-2", intake_id: "intake-bound", tier: "VIP", admits: 1, exp: "2026-12-31T00:00:00.000Z", status: "valid" },
+    { id: "bound-void", intake_id: "intake-bound", tier: "VIP", admits: 1, exp: "2026-12-31T00:00:00.000Z", status: "void" },
+  ];
+  const INTAKES: IntakeFormats = {
+    data: [
+      { id: "intake-open", ticket_qr_format: "jwt", ticket_protection: false },
+      { id: "intake-bound", ticket_qr_format: "jwt", ticket_protection: true },
+    ],
+    error: null,
+  };
+
+  it("leaves protected tickets out entirely and counts them", async () => {
+    setupMocks("confirmed", { withTickets: true, tickets: MIXED, intakes: INTAKES });
+
+    const res = await GET(makeRequest(), { params: { ref: "NM-2026-0001" } });
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    const body = JSON.parse(text);
+
+    expect(body.tickets.map((t: { jti: string }) => t.jti)).toEqual(["open-1"]);
+    expect(body.account_ticket_count).toBe(2);
+    // No id, token or QR for a protected ticket anywhere in the body.
+    expect(text).not.toContain("bound-1");
+    expect(text).not.toContain("bound-2");
+    expect(verifyTicketJwt(body.tickets[0].jwt).jti).toBe("open-1");
+  });
+
+  it("an all-protected order returns no tickets and the count", async () => {
+    setupMocks("confirmed", {
+      withTickets: true,
+      tickets: MIXED.filter((t) => t.intake_id === "intake-bound"),
+      intakes: INTAKES,
+    });
+
+    const body = await (await GET(makeRequest(), { params: { ref: "NM-2026-0001" } })).json();
+    expect(body.tickets).toEqual([]);
+    expect(body.account_ticket_count).toBe(2);
+  });
+
+  it("an unprotected order's response has no account_ticket_count, exactly as before", async () => {
+    setupMocks("confirmed", {
+      withTickets: true,
+      intakes: { data: [{ id: "intake-1", ticket_qr_format: "jwt", ticket_protection: false }], error: null },
+    });
+
+    const body = await (await GET(makeRequest(), { params: { ref: "NM-2026-0001" } })).json();
+    expect(body.tickets).toHaveLength(2);
+    expect(body).not.toHaveProperty("account_ticket_count");
+  });
+
+  it("reads ticket_protection with the QR format", async () => {
+    const intakeSelect = vi.fn().mockReturnThis();
+    setupMocks("confirmed", { withTickets: true, intakes: INTAKES, tickets: MIXED });
+    const route = mockAdminFrom.getMockImplementation()!;
+    mockAdminFrom.mockImplementation((table: string) =>
+      table === "intakes" ? { select: intakeSelect, in: vi.fn().mockResolvedValue(INTAKES) } : route(table),
+    );
+
+    await GET(makeRequest(), { params: { ref: "NM-2026-0001" } });
+    expect(intakeSelect).toHaveBeenCalledWith(expect.stringContaining("ticket_protection"));
   });
 });

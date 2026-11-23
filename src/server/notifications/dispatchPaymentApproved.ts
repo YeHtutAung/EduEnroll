@@ -4,7 +4,13 @@ import { sendSms } from "@/lib/sms";
 import { sendStatusNotification } from "@/lib/messenger/notify";
 import { sendTelegramStatusNotification } from "@/lib/telegram/notify";
 import { sendChannelInviteIfEligible } from "@/lib/telegram/channel-invite";
-import { buildEticketEmailAttachment } from "@/server/tickets/eticketEmailAttachment";
+import {
+  accountTicketsUrl,
+  buildTicketEmailParts,
+  NO_TICKET_EMAIL_PARTS,
+} from "@/server/tickets/eticketEmailAttachment";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { tenantLinkOrigin } from "@/lib/origin";
 import { loadEventEmailTerms } from "@/server/notifications/eventEmailTerms";
 import { loadEventEmailImages } from "@/server/notifications/eventEmailImages";
 
@@ -40,6 +46,12 @@ export async function dispatchPaymentApproved(input: ApprovalNotificationInput):
   const tasks: Promise<unknown>[] = [];
 
   if (input.email) {
+    // Asked first: an order with account-bound tickets gets "Open My Tickets"
+    // in the body instead of their QR in the PDF (design 8.1).
+    const parts = await buildTicketEmailParts(input.enrollmentId).catch((err) => {
+      console.error("[dispatchPaymentApproved] e-ticket attachment failed:", err);
+      return NO_TICKET_EMAIL_PARTS;
+    });
     const emailData = enrollmentApprovedEmail({
       studentName: input.studentName,
       enrollmentRef: input.enrollmentRef,
@@ -52,16 +64,13 @@ export async function dispatchPaymentApproved(input: ApprovalNotificationInput):
       orgType: input.orgType,
       tenantName: input.tenantName,
       logoUrl: input.logoUrl,
-    });
-    const attachment = await buildEticketEmailAttachment(input.enrollmentId).catch((err) => {
-      console.error("[dispatchPaymentApproved] e-ticket attachment failed:", err);
-      return null;
+      ...(parts.accountTickets ? { myTicketsUrl: await myTicketsUrlFor(input.tenantId, input.statusUrl) } : {}),
     });
     tasks.push(
       sendEmail({
         to: input.email,
         ...emailData,
-        ...(attachment ? { attachments: [attachment] } : {}),
+        ...(parts.attachment ? { attachments: [parts.attachment] } : {}),
       }).catch((err) => {
         console.error("[dispatchPaymentApproved] Email failed:", err);
       }),
@@ -129,4 +138,24 @@ export async function dispatchPaymentApproved(input: ApprovalNotificationInput):
   }
 
   await Promise.allSettled(tasks);
+}
+
+/**
+ * /account/tickets on the tenant's own host. Read from the tenant row, not from
+ * `statusUrl`: some callers (the PayPay and HitPay webhooks) pass a status link
+ * on the platform root, where there is no tenant and no buyer session.
+ */
+async function myTicketsUrlFor(tenantId: string, statusUrl: string): Promise<string> {
+  try {
+    const { data, error } = (await createAdminClient()
+      .from("tenants")
+      .select("subdomain")
+      .eq("id", tenantId)
+      .single()) as { data: { subdomain: string | null } | null; error: unknown };
+    if (!error && data) return accountTicketsUrl(tenantLinkOrigin(data.subdomain));
+  } catch {
+    // Falls through to the status link's host.
+  }
+  console.error("[dispatchPaymentApproved] tenant host lookup failed; using the status link host");
+  return accountTicketsUrl(statusUrl);
 }

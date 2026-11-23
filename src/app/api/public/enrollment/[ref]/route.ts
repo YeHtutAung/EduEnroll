@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { checkAttendees } from "@/server/enrollment/attendeeContext";
+import { withAccountEmail } from "@/server/enrollment/protection";
 import type { Attendee, AttendeeResult } from "@/lib/enrollment/attendees";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveTenantId } from "@/lib/api";
@@ -214,6 +215,9 @@ export async function GET(
 
   // Build signed ticket JWTs for confirmed enrollments only.
   let tickets: { jti: string; tier: string; admits: number; jwt: string; qr: string; holder: string | null }[] = [];
+  // Tickets on an account-bound (protected) event: never signed or returned
+  // here, only counted. They live on /account/tickets (design 8.1).
+  let accountTicketCount = 0;
   if (enrollment.status === "confirmed") {
     const loadTicketRows = async () =>
       ((await supabase
@@ -243,8 +247,8 @@ export async function GET(
     // What each QR encodes is chosen per event. A separate query, not a column
     // on the enrollment select above, so that if this code ever runs ahead of
     // its migration only ticket display fails — not every order lookup.
-    const formats = await loadQrFormats(supabase, validRows);
-    if (!formats) {
+    const events = await loadTicketEvents(supabase, validRows);
+    if (!events) {
       // Unknown is not "the default": a jwt QR on a uuid event is a ticket the
       // gate cannot read. The page treats 503 as an error and blocks download.
       return NextResponse.json(
@@ -253,7 +257,10 @@ export async function GET(
       );
     }
 
-    tickets = validRows.map((t) => {
+    const { formats, protectedIntakes } = events;
+    accountTicketCount = validRows.filter((t) => protectedIntakes.has(t.intake_id)).length;
+
+    tickets = validRows.filter((t) => !protectedIntakes.has(t.intake_id)).map((t) => {
       const jwt = signTicketJwt({
         jti: t.id,
         eid: t.intake_id,
@@ -325,6 +332,8 @@ export async function GET(
     card_brand: verifiedPayment?.card_brand ?? null,
     card_last4: verifiedPayment?.card_last4 ?? null,
     tickets,
+    // Only when there are some, so an unprotected order's response is unchanged.
+    ...(accountTicketCount > 0 ? { account_ticket_count: accountTicketCount } : {}),
     ...(stripeClientSecret ? { stripe_client_secret: stripeClientSecret } : {}),
   });
 }
@@ -374,7 +383,7 @@ export async function PATCH(
 
   const { data: enrollment, error: lookupError } = (await supabase
     .from("enrollments")
-    .select("id, status, class_id, quantity, enrollment_items(class_id, quantity)")
+    .select("id, status, class_id, quantity, buyer_id, email, enrollment_items(class_id, quantity)")
     .eq("enrollment_ref", params.ref.trim())
     .eq("tenant_id", tenantId)
     .single()) as {
@@ -383,6 +392,8 @@ export async function PATCH(
       status: string;
       class_id: string | null;
       quantity: number | null;
+      buyer_id?: string | null;
+      email?: string | null;
       enrollment_items: { class_id: string; quantity: number }[] | null;
     } | null;
     error: unknown;
@@ -422,6 +433,23 @@ export async function PATCH(
     runners = check.attendees;
   }
 
+  // An account order (buyer_id set, Plan 3): its email is the buyer's account
+  // email, written by the submit RPC. The body's email is ignored and never
+  // written, and the form's email fields carry the stored one. No session is
+  // read here: the order's buyer was fixed by the POST.
+  const accountOrder = typeof enrollment.buyer_id === "string" && enrollment.buyer_id !== "";
+  // Fail closed: an account order always has its email (the RPC refuses one
+  // without). If it somehow doesn't, never pass the body's raw form_data
+  // through, or its email fields would become where the tickets go.
+  if (accountOrder && !(typeof enrollment.email === "string" && enrollment.email)) {
+    console.error("[enrollment] account order without a stored email");
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+  }
+  const formData =
+    accountOrder && form_data && typeof enrollment.email === "string" && enrollment.email
+      ? withAccountEmail(form_data, enrollment.email)
+      : form_data;
+
   // The pending check above is a read; payment can settle between it and this
   // write (checkout in one tab, payment in another). Ticket issuing copies the
   // runners once and never rewrites a ticket, so the write itself must refuse
@@ -430,8 +458,8 @@ export async function PATCH(
     .from("enrollments")
     .update({
       student_name_en: student_name_en.trim(),
-      email: email.trim(),
-      ...(form_data && Object.keys(form_data).length > 0 ? { form_data } : {}),
+      ...(accountOrder ? {} : { email: email.trim() }),
+      ...(formData && Object.keys(formData).length > 0 ? { form_data: formData } : {}),
       ...(runners.length > 0 ? { attendees: runners } : {}),
     } as never)
     .eq("id", enrollment.id)
@@ -453,19 +481,22 @@ export async function PATCH(
  * of them cannot be read with certainty — a failed query, a missing event, or a
  * value this code does not recognise all come back as null, never as a guess.
  */
-async function loadQrFormats(
+async function loadTicketEvents(
   supabase: ReturnType<typeof createAdminClient>,
   rows: TicketRow[],
-): Promise<Map<string, TicketQrFormat> | null> {
+): Promise<{ formats: Map<string, TicketQrFormat>; protectedIntakes: Set<string> } | null> {
   const formats = new Map<string, TicketQrFormat>();
-  if (rows.length === 0) return formats;
+  const protectedIntakes = new Set<string>();
+  if (rows.length === 0) return { formats, protectedIntakes };
 
+  // Protection is read in the same query as the format, so a ticket is shown
+  // only once both are known; any failure is the 503 below (fails closed).
   const intakeIds = [...new Set(rows.map((t) => t.intake_id))];
   const { data, error } = (await supabase
     .from("intakes")
-    .select("id, ticket_qr_format")
+    .select("id, ticket_qr_format, ticket_protection")
     .in("id", intakeIds)) as unknown as {
-    data: { id: string; ticket_qr_format: unknown }[] | null;
+    data: { id: string; ticket_qr_format: unknown; ticket_protection?: unknown }[] | null;
     error: unknown;
   };
 
@@ -477,6 +508,7 @@ async function loadQrFormats(
 
   for (const intake of data) {
     if (isTicketQrFormat(intake.ticket_qr_format)) formats.set(intake.id, intake.ticket_qr_format);
+    if (intake.ticket_protection === true) protectedIntakes.add(intake.id);
   }
 
   const unknown = intakeIds.filter((id) => !formats.has(id));
@@ -484,7 +516,7 @@ async function loadQrFormats(
     console.error(`[enrollment] no readable ticket QR format for ${unknown.length} event(s)`);
     return null;
   }
-  return formats;
+  return { formats, protectedIntakes };
 }
 
 // ─── Internal types ───────────────────────────────────────────────────────────

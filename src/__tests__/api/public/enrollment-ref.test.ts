@@ -621,3 +621,98 @@ describe("PATCH /api/public/enrollment/[ref] — runners", () => {
     expect(updateFilters).toContainEqual(["status", "pending_payment"]);
   });
 });
+
+// ─── PATCH: account orders keep the account email (Plan 3, Task 12) ─────────
+// A draft with buyer_id set was stored with the buyer's email by the submit
+// RPC. The PATCH ignores the body's email for it and never writes another;
+// every other field updates as before. No session is read or trusted here.
+
+describe("PATCH /api/public/enrollment/[ref] — account orders", () => {
+  const ACCOUNT_CLASS = "22222222-2222-2222-2222-222222222222";
+
+  function orderMock(order: Record<string, unknown>) {
+    const updates: Record<string, unknown>[] = [];
+    const selects: string[] = [];
+    const chain = (result: unknown, onUpdate?: (p: Record<string, unknown>) => void) => {
+      const c: Record<string, unknown> = {};
+      let isUpdate = false;
+      for (const m of ["in", "order", "single", "eq"]) c[m] = () => c;
+      c.select = (cols: string) => {
+        if (!isUpdate) selects.push(cols);
+        return c;
+      };
+      c.update = (p: Record<string, unknown>) => {
+        isUpdate = true;
+        onUpdate?.(p);
+        return c;
+      };
+      c.then = (resolve: (v: unknown) => unknown) =>
+        Promise.resolve(isUpdate ? { data: [{ id: "e1" }], error: null } : result).then(resolve);
+      return c;
+    };
+    const client = {
+      from: vi.fn((table: string) => {
+        if (table === "classes") return chain({ data: [{ id: ACCOUNT_CLASS, intake_id: "i1", pack_size: 1 }], error: null });
+        if (table === "intake_form_fields") return chain({ data: [], error: null });
+        if (table === "enrollments") return chain({ data: order, error: null }, (p) => updates.push(p));
+        return chain({ data: null, error: { message: "unexpected table" } });
+      }),
+    };
+    return { client, updates, selects };
+  }
+
+  const ORDER = {
+    id: "e1", status: "pending_payment", class_id: ACCOUNT_CLASS, quantity: 1, enrollment_items: [],
+    email: "leader@example.com",
+  };
+  const body = {
+    student_name_en: "New Name",
+    email: "someone-else@example.com",
+    form_data: { name_en: "New Name", email: "someone-else@example.com", custom_email_7: "x@example.com" },
+  };
+
+  beforeEach(() => {
+    vi.mocked(resolveTenantId).mockResolvedValue("tenant-uuid");
+    publicEnrollmentLookupLimiter.reset();
+  });
+
+  it("selects buyer_id with the order", async () => {
+    const { client, selects } = orderMock({ ...ORDER, buyer_id: null });
+    vi.mocked(createAdminClient).mockReturnValue(client as never);
+    await PATCH(makeRequest("PATCH", body) as never, routeParams);
+    expect(selects[0]).toContain("buyer_id");
+  });
+
+  it("an order with buyer_id: the body's email is ignored, other fields update", async () => {
+    const { client, updates } = orderMock({ ...ORDER, buyer_id: "buyer-1" });
+    vi.mocked(createAdminClient).mockReturnValue(client as never);
+    const res = await PATCH(makeRequest("PATCH", body) as never, routeParams);
+    expect(res.status).toBe(200);
+    expect(updates).toHaveLength(1);
+    expect(updates[0]).not.toHaveProperty("email");
+    expect(updates[0].student_name_en).toBe("New Name");
+    expect(updates[0].form_data).toEqual({
+      name_en: "New Name", email: "leader@example.com", custom_email_7: "leader@example.com",
+    });
+    expect(JSON.stringify(updates)).not.toContain("someone-else");
+  });
+
+  it("a guest order (no buyer_id) updates the email exactly as before", async () => {
+    const { client, updates } = orderMock({ ...ORDER, buyer_id: null, email: null });
+    vi.mocked(createAdminClient).mockReturnValue(client as never);
+    const res = await PATCH(makeRequest("PATCH", body) as never, routeParams);
+    expect(res.status).toBe(200);
+    expect(updates[0].email).toBe("someone-else@example.com");
+    expect(updates[0].form_data).toEqual(body.form_data);
+  });
+
+  it("an account order with no stored email refuses the write (fails closed, never passes the body's email through)", async () => {
+    for (const email of [null, ""]) {
+      const { client, updates } = orderMock({ ...ORDER, buyer_id: "buyer-1", email });
+      vi.mocked(createAdminClient).mockReturnValue(client as never);
+      const res = await PATCH(makeRequest("PATCH", body) as never, routeParams);
+      expect(res.status).toBe(500);
+      expect(updates).toHaveLength(0);
+    }
+  });
+});

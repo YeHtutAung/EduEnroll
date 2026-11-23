@@ -39,11 +39,16 @@ export async function PATCH(
 
   const { data: enrollment, error: lookupError } = (await admin
     .from("enrollments")
-    .select("id, email, form_data")
+    .select("id, email, form_data, buyer_id")
     .eq("id", params.id)
     .eq("tenant_id", tenantId)
     .maybeSingle()) as {
-    data: { id: string; email: string | null; form_data: Record<string, unknown> | null } | null;
+    data: {
+      id: string;
+      email: string | null;
+      form_data: Record<string, unknown> | null;
+      buyer_id?: string | null;
+    } | null;
     error: unknown;
   };
 
@@ -52,6 +57,18 @@ export async function PATCH(
     return NextResponse.json({ error: "Could not change the email." }, { status: 500 });
   }
   if (!enrollment) return notFound("Enrollment");
+
+  // An account order's email is the buyer's sign-in identity, on the web and in
+  // the app. It changes only with the account, never from here (Plan 3, decision 4).
+  if (enrollment.buyer_id) {
+    return NextResponse.json(
+      {
+        error: "Conflict",
+        message: "This order belongs to a buyer account; its email is the account's email.",
+      },
+      { status: 409 },
+    );
+  }
 
   // Senders fall back to the saved answers when the column is empty, so that is
   // the address this order is really using.

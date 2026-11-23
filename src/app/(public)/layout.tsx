@@ -2,6 +2,7 @@ import { headers } from "next/headers";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { extractSubdomainFromHost } from "@/lib/tenant";
 import { gtmAllowedOnHost } from "@/lib/tagManager";
+import { tenantHasLiveProtectedEvent } from "@/server/tickets/liveProtectedEvent";
 import TenantTagManager from "@/components/tracking/TenantTagManager";
 import AdClickCapture from "@/components/tracking/AdClickCapture";
 import WalkInNotice from "@/components/tenant/WalkInNotice";
@@ -48,7 +49,7 @@ export default async function PublicLayout({ children }: { children: React.React
   // GTM runs in production only on the tenant's own custom domain, and outside
   // production only when the deployment opts in. Computed here because
   // gtmAllowedOnHost reads TENANT_CUSTOM_DOMAINS and the opt-in is server-only.
-  const gtmAllowed =
+  const gtmOnHost =
     !!slug &&
     gtmAllowedOnHost({
       host: headersList.get("host") ?? "",
@@ -56,6 +57,16 @@ export default async function PublicLayout({ children }: { children: React.React
       isProduction: process.env.VERCEL_ENV === "production",
       allowNonProduction: process.env.GTM_ALLOW_NON_PRODUCTION === "true",
     });
+
+  // Decision 8 (account-bound tickets): tags off on the whole host while the
+  // tenant has a live protected event, because any script on this origin
+  // could bind a phone to a buyer's ticket. Asked only when tags would
+  // otherwise run. Never throws; a read error answers "live" (tags off) and
+  // the page renders as usual.
+  const gtmAllowed =
+    gtmOnHost &&
+    !!gtmContainerId &&
+    !(await tenantHasLiveProtectedEvent(createAdminClient(), slug));
 
   return (
     <div className="flex min-h-screen flex-col bg-white">

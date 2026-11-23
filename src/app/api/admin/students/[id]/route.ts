@@ -143,6 +143,8 @@ export async function GET(
     nrc_number:      row.nrc_number ?? null,
     phone:           row.phone,
     email:           row.email ?? null,
+    // Set on an account order: its email is the account's, so Edit Email is hidden.
+    buyer_id:        row.buyer_id ?? null,
     form_data:       (row as unknown as Record<string, unknown>).form_data ?? {},
     form_fields:     formFieldDefs,
     status:          row.status,

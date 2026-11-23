@@ -219,3 +219,37 @@ describe("GET /api/public/enroll/[slug] — organiser rules", () => {
     expect(body.organiser_terms_sha256).toBeNull();
   });
 });
+
+// ─── Account-bound tickets (Plan 3, Task 12) ────────────────────────────────
+describe("GET /api/public/enroll/[slug] — ticket_protection", () => {
+  beforeEach(() => {
+    vi.mocked(resolveTenantId).mockResolvedValue("tenant-uuid");
+  });
+
+  it("selects ticket_protection and returns it on the intake", async () => {
+    const mock = makeSupabaseMock({
+      intakes: { data: [{ ...BASE_INTAKE, ticket_protection: true }], error: null },
+      classes: { data: [makeClass({})], error: null },
+    });
+    vi.mocked(createAdminClient).mockReturnValue(mock as never);
+
+    const res = await GET(makeRequest() as never, routeParams);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.intake.ticket_protection).toBe(true);
+
+    const intakesChain = mock.from.mock.results.find((_r, i) => mock.from.mock.calls[i][0] === "intakes")!
+      .value as { select: ReturnType<typeof vi.fn> };
+    expect(String(intakesChain.select.mock.calls[0][0])).toContain("ticket_protection");
+  });
+
+  it("answers false for an unprotected event, and for a row without the column", async () => {
+    for (const intake of [{ ...BASE_INTAKE, ticket_protection: false }, BASE_INTAKE]) {
+      vi.mocked(createAdminClient).mockReturnValue(
+        makeSupabaseMock({ intakes: { data: [intake], error: null }, classes: { data: [], error: null } }) as never,
+      );
+      const body = await (await GET(makeRequest() as never, routeParams)).json();
+      expect(body.intake.ticket_protection).toBe(false);
+    }
+  });
+});

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth, requireOwner, badRequest, notFound } from "@/lib/api";
+import { requireAuth, requireOwner, badRequest, notFound, type AuthContext } from "@/lib/api";
 import type { Intake, IntakeStatus } from "@/types/database";
 import { EMAIL_TERMS_MAX, normaliseOrganiserTerms, ORGANISER_TERMS_MAX } from "@/lib/legal/terms";
 import { validateEventFont } from "@/lib/eventFont";
@@ -10,6 +10,9 @@ type IntakeResult = { data: Intake | null; error: unknown };
 
 // ─── GET /api/intakes/[id] ────────────────────────────────────────────────────
 // Fetch a single intake. RLS ensures only the caller's tenant is visible.
+// Adds `has_orders`: whether any order (single or cart) is on the intake's
+// classes. The edit form disables the "Account-bound tickets" switch then; the
+// database trigger intakes_lock_ticket_protection is the actual control.
 
 export async function GET(
   _request: NextRequest,
@@ -30,14 +33,15 @@ export async function GET(
 
   if (error || !data) return notFound("Intake");
 
-  return NextResponse.json(data);
+  const has_orders = await intakeHasOrders(supabase, params.id);
+  return NextResponse.json({ ...data, has_orders });
 }
 
 // ─── PATCH /api/intakes/[id] ──────────────────────────────────────────────────
 // Partially update an intake. All body fields are optional.
 //
 // Allowed fields: name, year, status, hero_image_url, priority_open_at, organiser_terms,
-// email_terms, font_css_url + font_family (together)
+// email_terms, font_css_url + font_family (together), ticket_protection
 
 export async function PATCH(
   request: NextRequest,
@@ -56,7 +60,7 @@ export async function PATCH(
     return badRequest("Request body must be valid JSON.");
   }
 
-  const { name, year, status, hero_image_url, priority_open_at, organiser_terms, email_terms, font_css_url, font_family } = body as Record<
+  const { name, year, status, hero_image_url, priority_open_at, organiser_terms, email_terms, font_css_url, font_family, ticket_protection } = body as Record<
     string,
     unknown
   >;
@@ -148,6 +152,17 @@ export async function PATCH(
     update.font_family = font.value.font_family;
   }
 
+  // ticket_protection — account-bound tickets (design 3). Owner only, like
+  // every field here (requireOwner above). The database refuses a change once
+  // the intake has orders, and true unless the QR format is jwt; both are
+  // mapped to 409 below.
+  if ("ticket_protection" in (body as object)) {
+    if (typeof ticket_protection !== "boolean") {
+      return badRequest("ticket_protection must be a boolean.");
+    }
+    update.ticket_protection = ticket_protection;
+  }
+
   if (Object.keys(update).length === 0) {
     return badRequest("No valid fields provided for update.");
   }
@@ -168,6 +183,10 @@ export async function PATCH(
     // found", or as a raw P0001. Neither tells them their date is the problem.
     const windowMessage = priorityWindowMessage(error);
     if (windowMessage) return badRequest(windowMessage);
+    const protectionMessage = ticketProtectionMessage(error);
+    if (protectionMessage) {
+      return NextResponse.json({ error: "Conflict", message: protectionMessage }, { status: 409 });
+    }
     return notFound("Intake");
   }
 
@@ -199,4 +218,51 @@ function priorityWindowMessage(error: unknown): string | null {
     "sale time. Move the priority window earlier, or move that tier's sale " +
     "time later."
   );
+}
+
+/**
+ * The two database refusals of the "Account-bound tickets" switch
+ * (20261122130000_leaders_phone.sql):
+ * - the trigger intakes_lock_ticket_protection raises `ticket_protection_locked`
+ *   (P0001) when the intake already has orders;
+ * - the CHECK intakes_ticket_protection_needs_jwt (23514) refuses protection
+ *   unless the QR format is jwt.
+ */
+function ticketProtectionMessage(error: unknown): string | null {
+  const e = (error ?? {}) as { code?: string; message?: string; details?: string };
+  const text = `${e.message ?? ""} ${e.details ?? ""}`;
+  if (text.includes("ticket_protection_locked")) {
+    return "This event already has orders, so account-bound tickets can't be switched.";
+  }
+  if (e.code === "23514" && text.includes("intakes_ticket_protection_needs_jwt")) {
+    return "Account-bound tickets need the signed QR format.";
+  }
+  return null;
+}
+
+/**
+ * Whether any order sits on the intake's classes: one enrollments count (single
+ * orders) and one enrollment_items count (cart orders), as the trigger checks.
+ * A failed count answers true, so the switch is disabled rather than offered.
+ */
+async function intakeHasOrders(
+  supabase: AuthContext["supabase"],
+  intakeId: string,
+): Promise<boolean> {
+  try {
+    const [single, cart] = await Promise.all([
+      supabase
+        .from("enrollments")
+        .select("id, classes!inner(intake_id)", { count: "exact", head: true })
+        .eq("classes.intake_id", intakeId),
+      supabase
+        .from("enrollment_items")
+        .select("id, classes!inner(intake_id)", { count: "exact", head: true })
+        .eq("classes.intake_id", intakeId),
+    ]);
+    if (single.error || cart.error) return true;
+    return (single.count ?? 0) > 0 || (cart.count ?? 0) > 0;
+  } catch {
+    return true;
+  }
 }
