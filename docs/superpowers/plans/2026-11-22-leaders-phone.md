@@ -1513,7 +1513,7 @@ Branch `feat/leaders-phone-c` from `origin/dev` after Part B merges.
 - Create: `src/lib/maskEmail.ts`
 - Test: `src/__tests__/lib/maskEmail.test.ts`
 
-- [ ] **Step 1:**
+- [x] **Step 1:**
   1. Write the test: `maskEmail("kyaw@gmail.com") === "k***@gmail.com"`, `maskEmail("a@x.io") === "a***@x.io"`, and `maskEmail("not-an-email") === "***"`.
   2. Implement it in a few lines.
   3. Commit: `feat(lib): mask an email for staff views`.
@@ -1527,15 +1527,15 @@ Branch `feat/leaders-phone-c` from `origin/dev` after Part B merges.
 - Modify: `src/app/admin/students/page.tsx` (`StudentDetailModal`)
 - Test: `src/__tests__/api/admin/enrollmentAccount.test.ts`
 
-- [ ] **Step 1: Write the failing tests** for `GET /api/admin/enrollments/[id]/account`:
+- [x] **Step 1: Write the failing tests** for `GET /api/admin/enrollments/[id]/account`:
   - Gate: `requireAuth`, with the enrollment scoped to `ctx.tenantId`. Another tenant's order → 404. An agent session (`ctx.isAgent`) → 403, as the Edit Email route does.
   - The response is `{ buyer: { email: "k***@gmail.com" } | null, tickets: [{ id, tier, seatNo, status, bound, lastBoundAt }], moves: [{ createdAt, from, to, reason, movedBy }] }`.
   - Emails are masked and `movedBy` is the staff `full_name` or "Staff".
   - `bound` and `lastBoundAt` come from `ticket_devices`: the active row, and the latest `created_at` per ticket.
   - No public key and no token ever appear in the response.
   - An order with no `buyer_id` and no moves → `{ buyer: null, tickets: [...], moves: [] }`.
-- [ ] **Step 2: Implement** with the admin client, scoped by tenant. In `StudentDetailModal`, add an "Account" section, shown only when the response has a buyer or moves: the masked buyer email, a table of tickets with phone status, and the move history. It is read-only; there is no Reset phone (design 2).
-- [ ] **Step 3:** Tests pass. Commit: `feat(admin): read-only account, phone and move history on an order`.
+- [x] **Step 2: Implement** with the admin client, scoped by tenant. In `StudentDetailModal`, add an "Account" section, shown only when the response has a buyer or moves: the masked buyer email, a table of tickets with phone status, and the move history. It is read-only; there is no Reset phone (design 2).
+- [x] **Step 3:** Tests pass. Commit: `feat(admin): read-only account, phone and move history on an order`.
 
 ---
 
@@ -1547,7 +1547,7 @@ Branch `feat/leaders-phone-c` from `origin/dev` after Part B merges.
 - Modify: `src/app/admin/students/page.tsx`
 - Test: `src/__tests__/api/admin/moveBuyer.test.ts`
 
-- [ ] **Step 1: Write the failing tests:**
+- [x] **Step 1: Write the failing tests:**
   1. Not an owner (`requireOwner` → 403) → 403. An owner without a password session gets Plan 1's 403 from `requireOwner`; test that the route uses `requireOwner`, not `requireAuth`.
   2. Body validation: `email` is a string that looks like an email; `reason` is 1–500 chars after trimming. Otherwise → 400.
   3. A target email with no live `buyer_profiles` row → 409 `{ error: "Conflict", message: "This order can't be moved to that account." }`, with no RPC call.
@@ -1560,18 +1560,18 @@ Branch `feat/leaders-phone-c` from `origin/dev` after Part B merges.
 
      Both carry the order reference and the tenant name. A failed send still answers 200, with a fixed-string log.
   6. An agent session (`ctx.isAgent`) → 403, as the Edit Email route does.
-- [ ] **Step 2: Implement** the route. Look up the target with `buyer_profiles` `.eq("email", email.trim().toLowerCase()).is("deleted_at", null).maybeSingle()`. Write the emails bilingual on `baseLayout`:
+- [x] **Step 2: Implement** the route. Look up the target with `buyer_profiles` `.eq("email", email.trim().toLowerCase()).is("deleted_at", null).maybeSingle()`. Write the emails bilingual on `baseLayout`:
   - away: "Order <ref> was moved to another account by <organiser>. If you didn't ask for this, contact <organiser>.";
   - in: "Order <ref> was added to your account. Sign in on <site> to open your tickets."
 
   Mark the Myanmar text for review.
-- [ ] **Step 3: UI.** In the modal's Account section, show a "Move order to another account" button when the order has a buyer. Clicking it opens a form with:
+- [x] **Step 3: UI.** In the modal's Account section, show a "Move order to another account" button when the order has a buyer. Clicking it opens a form with:
   - the new account's email;
   - a required reason;
   - the checks list from design 4.7 step 2: "Check the order reference, the payment proof or payer details, and the contact phone on the order before moving."
 
   Confirming shows a final "Move" button. A 409 shows the server message; success refreshes the section.
-- [ ] **Step 4:** Tests pass. Commit: `feat(admin): owner can move an order to the buyer's new account`.
+- [x] **Step 4:** Tests pass. Commit: `feat(admin): owner can move an order to the buyer's new account`.
 
 ---
 
@@ -1581,7 +1581,7 @@ Branch `feat/leaders-phone-c` from `origin/dev` after Part B merges.
 - Create: `src/server/buyers/revokeTicketDevices.ts`
 - Test: `src/__tests__/server/buyers/revokeTicketDevices.test.ts`
 
-- [ ] **Step 1:**
+- [x] **Step 1:**
   1. Write the test: `revokeBuyerTicketDevices(admin, buyerId)` calls `revoke_buyer_ticket_devices` with `{ p_buyer_id }` and returns `{ ok: true, revoked: n }`. An error returns `{ ok: false }` and never throws.
   2. Implement it. The doc comment says: "Account deletion (mobile spec 11.1 step 1a, design 9) calls this after `deleted_at` is set and before `auth.admin.deleteUser`, and the deletion sweep calls it again. It is idempotent."
   3. Commit: `feat(buyers): deletion step revokes bound phones`.
@@ -1623,4 +1623,5 @@ Branch `feat/leaders-phone-c` from `origin/dev` after Part B merges.
 | Live QR timing as built (Task 8) | Each QR is signed 5 s ahead of its slot start, and the clock offset is anchored to the arrival of the bind response. A QR on screen spans about −11 to +5 s of server time | about 9 s is left for the scanner's upload; recorded in design 6.2 |
 | Order of the checks in `POST /api/public/enroll` (Task 12) | The protection check runs after the blocked-email check, not before it as the task reads | known departure; unreachable in practice, because the protected form's email is read-only and is the account's |
 | What the `PATCH /api/public/enrollment/[ref]` keeps on an account order (Task 12) | The stored email: the body's email is ignored and never written, and the form's email fields carry the stored one | the checkout page shows the order's stored email, not the session's |
+| Part C review (2026-11-23) | No critical or important findings. `revokeBuyerTicketDevices` has no caller yet: the account-deletion path that must call it is the mobile spec's (#451). Cancelling share links on a move and the `ticket_holder_events` history in the admin view belong to Plan 4, which doesn't exist yet | the #451 hand-over says to call it before `deleteUser` and in the sweep; Plan 4 adds the rest |
 | Staging and production prerequisite for Part B | Part A's migration must be on a database before Part B's layout code reaches it. Otherwise the live-protected-event check can't be read, fails closed, and tags switch off silently on every tenant custom domain | promote the migration first; check it on each database before the code |

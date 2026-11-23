@@ -30,7 +30,7 @@
 |---|---|---|---|
 | 1 | Staff password sessions (`2026-11-20-staff-password-sessions.md`) | nothing | **done**: #471 on dev, staging via #488; migration on the dev DB |
 | 2 | **Buyer accounts** (this file): Part A email code, Part B Google on the website | Plan 1; mobile spec at #311 | **done**: Part A #491, Part B #492 on dev; migration on the dev DB |
-| 3 | The leader's phone (mode A): scope switch, protected checkout, binding with no limit, `k2` QR, `/api/scans` protected path, closing QR surfaces, `/account/tickets`, admin read-only view, order move for a lost account (design 4.7), deletion step (design section 12, revised 2026-11-22) | Plan 2; kuunyi-scanner sends `token` | written: `2026-11-22-leaders-phone.md` |
+| 3 | The leader's phone (mode A): scope switch, protected checkout, binding with no limit, `k2` QR, `/api/scans` protected path, closing QR surfaces, `/account/tickets`, admin read-only view, order move for a lost account (design 4.7), deletion step (design section 12, revised 2026-11-22) | Plan 2; kuunyi-scanner sends `token` | **built** (`2026-11-22-leaders-phone.md`): Part A #495 and Part B #496 on dev, migration on the dev DB; Part C (`feat/leaders-phone-c`) open for review, no migration; kuunyi-scanner `k2` support and the staging tests still owed |
 | 4 | Seat sharing (mode B, design section 6.4) | Plan 3 | after Plan 3 |
 
 **In this plan:**
