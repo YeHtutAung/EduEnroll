@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireOwner, badRequest } from "@/lib/api";
+import { requireOwner, badRequest, notFound } from "@/lib/api";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isValidEmail } from "@/lib/enrollment/emailAddress";
 import { sendEmail, orderMovedAwayEmail, orderMovedInEmail } from "@/lib/email";
@@ -20,6 +20,7 @@ import { ACCOUNT_TICKETS_PATH } from "@/lib/tickets/accountTickets";
 // or fail the move: the move is already committed and logged in order_moves.
 
 const MAX_REASON = 500;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const REFUSED = { error: "Conflict", message: "This order can't be moved to that account." };
 
 type Profile = { id: string; email: string | null; deleted_at?: string | null };
@@ -40,6 +41,9 @@ export async function POST(
       { status: 403 },
     );
   }
+
+  // A malformed id would make PostgREST fail the uuid cast: a 404, not a 500.
+  if (!UUID_RE.test(params.id)) return notFound("Enrollment");
 
   let body: { email?: unknown; reason?: unknown };
   try {

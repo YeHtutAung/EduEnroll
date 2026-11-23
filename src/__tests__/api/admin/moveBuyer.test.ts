@@ -52,11 +52,11 @@ const OLD = { id: "buyer-old", email: "old@gmail.com", deleted_at: null };
 
 function send(body: unknown) {
   return POST(
-    new NextRequest("http://localhost/api/admin/enrollments/order-1/move-buyer", {
+    new NextRequest("http://localhost/api/admin/enrollments/11111111-1111-4111-8111-111111111111/move-buyer", {
       method: "POST",
       body: typeof body === "string" ? body : JSON.stringify(body),
     }),
-    { params: { id: "order-1" } },
+    { params: { id: "11111111-1111-4111-8111-111111111111" } },
   );
 }
 
@@ -209,12 +209,38 @@ describe("POST /api/admin/enrollments/[id]/move-buyer", () => {
     await expect(res.json()).resolves.toEqual({ ok: true });
     expect(rpc).toHaveBeenCalledTimes(1);
     expect(rpc).toHaveBeenCalledWith("move_order_buyer", {
-      p_enrollment_id: "order-1",
+      p_enrollment_id: "11111111-1111-4111-8111-111111111111",
       p_tenant_id: "tenant-A",
       p_staff_user_id: "owner-1",
       p_to_buyer_id: "buyer-new",
       p_reason: "Lost the old mailbox; checked payment proof.",
     });
+  });
+
+  it("escapes the organiser name and the reference in both emails", async () => {
+    queues.enrollments = [{ data: { enrollment_ref: "R<1>&\"" }, error: null }];
+    queues.tenants = [{ data: { name: "A&B <script>\"x\"", subdomain: "skyfestival", logo_url: null }, error: null }];
+    await send(good);
+
+    for (const [m] of vi.mocked(sendEmail).mock.calls) {
+      expect(m.html).not.toContain("<script>");
+      expect(m.html).not.toContain("R<1>");
+      expect(m.html).toContain("A&amp;B &lt;script&gt;");
+    }
+  });
+
+  it("answers 404 for a malformed order id and reads nothing", async () => {
+    const res = await POST(
+      new NextRequest("http://localhost/api/admin/enrollments/not-a-uuid/move-buyer", {
+        method: "POST",
+        body: JSON.stringify(good),
+      }),
+      { params: { id: "not-a-uuid" } },
+    );
+
+    expect(res.status).toBe(404);
+    expect(calls).toHaveLength(0);
+    expect(rpc).not.toHaveBeenCalled();
   });
 
   it("emails the old address and the new one, with the reference and the organiser", async () => {
@@ -231,10 +257,12 @@ describe("POST /api/admin/enrollments/[id]/move-buyer", () => {
     expect(into?.html).toContain("SF2-1104-ABC123");
     expect(into?.html).toContain("Sky Festival");
     expect(into?.html).toContain("/account/tickets");
+    // The link is on the tenant's own host, never the request's.
+    expect(into?.html).toMatch(/https?:\/\/[^"'\s<]*skyfestival[^"'\s<]*\/account\/tickets/);
 
     // The old profile is read by the id the database returned; the order by tenant.
     expect(callsOn("buyer_profiles")).toContainEqual({ table: "buyer_profiles", op: "eq", args: ["id", "buyer-old"] });
-    expect(callsOn("enrollments")).toContainEqual({ table: "enrollments", op: "eq", args: ["id", "order-1"] });
+    expect(callsOn("enrollments")).toContainEqual({ table: "enrollments", op: "eq", args: ["id", "11111111-1111-4111-8111-111111111111"] });
     expect(callsOn("enrollments")).toContainEqual({ table: "enrollments", op: "eq", args: ["tenant_id", "tenant-A"] });
   });
 

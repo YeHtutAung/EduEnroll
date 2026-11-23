@@ -38,8 +38,8 @@ const BUYER_A = "buyer-aaaa-1111";
 const BUYER_B = "buyer-bbbb-2222";
 
 function get() {
-  return GET(new NextRequest("http://localhost/api/admin/enrollments/order-1/account"), {
-    params: { id: "order-1" },
+  return GET(new NextRequest("http://localhost/api/admin/enrollments/11111111-1111-4111-8111-111111111111/account"), {
+    params: { id: "11111111-1111-4111-8111-111111111111" },
   });
 }
 
@@ -60,7 +60,7 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   signedIn();
   results = {
-    enrollments: { data: { id: "order-1", buyer_id: BUYER_B }, error: null },
+    enrollments: { data: { id: "11111111-1111-4111-8111-111111111111", buyer_id: BUYER_B }, error: null },
     tickets: {
       data: [
         { id: "t-1", tier: "VIP", seat_no: 1, status: "valid" },
@@ -102,6 +102,15 @@ beforeEach(() => {
 });
 
 describe("GET /api/admin/enrollments/[id]/account", () => {
+  it("answers 404 for a malformed order id and reads nothing", async () => {
+    const res = await GET(new NextRequest("http://localhost/api/admin/enrollments/not-a-uuid/account"), {
+      params: { id: "not-a-uuid" },
+    });
+
+    expect(res.status).toBe(404);
+    expect(calls).toHaveLength(0);
+  });
+
   it("shows the masked account, each ticket's phone status and the move history", async () => {
     const res = await get();
 
@@ -145,9 +154,9 @@ describe("GET /api/admin/enrollments/[id]/account", () => {
     await get();
 
     expect(callsOn("enrollments", "eq")).toContainEqual({ table: "enrollments", op: "eq", args: ["tenant_id", "tenant-A"] });
-    expect(callsOn("tickets", "eq")).toContainEqual({ table: "tickets", op: "eq", args: ["enrollment_id", "order-1"] });
+    expect(callsOn("tickets", "eq")).toContainEqual({ table: "tickets", op: "eq", args: ["enrollment_id", "11111111-1111-4111-8111-111111111111"] });
     expect(callsOn("tickets", "eq")).toContainEqual({ table: "tickets", op: "eq", args: ["tenant_id", "tenant-A"] });
-    expect(callsOn("order_moves", "eq")).toContainEqual({ table: "order_moves", op: "eq", args: ["enrollment_id", "order-1"] });
+    expect(callsOn("order_moves", "eq")).toContainEqual({ table: "order_moves", op: "eq", args: ["enrollment_id", "11111111-1111-4111-8111-111111111111"] });
     expect(callsOn("order_moves", "eq")).toContainEqual({ table: "order_moves", op: "eq", args: ["tenant_id", "tenant-A"] });
     expect(callsOn("ticket_devices", "in")).toContainEqual({ table: "ticket_devices", op: "in", args: ["ticket_id", ["t-1", "t-2"]] });
     expect(callsOn("users", "eq")).toContainEqual({ table: "users", op: "eq", args: ["tenant_id", "tenant-A"] });
@@ -200,7 +209,7 @@ describe("GET /api/admin/enrollments/[id]/account", () => {
   );
 
   it("a guest order with no moves has no account and no history", async () => {
-    results.enrollments = { data: { id: "order-1", buyer_id: null }, error: null };
+    results.enrollments = { data: { id: "11111111-1111-4111-8111-111111111111", buyer_id: null }, error: null };
     results.order_moves = { data: [], error: null };
     results.ticket_devices = { data: [], error: null };
     const res = await get();

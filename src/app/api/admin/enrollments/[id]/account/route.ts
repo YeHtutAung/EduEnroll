@@ -28,6 +28,8 @@ type Profile = { id: string; email: string | null; deleted_at: string | null };
 type Staff = { id: string; full_name: string | null };
 type Read<T> = { data: T[] | null; error: unknown };
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: { id: string } },
@@ -43,6 +45,9 @@ export async function GET(
       { status: 403 },
     );
   }
+
+  // A malformed id would make PostgREST fail the uuid cast: a 404, not a 500.
+  if (!UUID_RE.test(params.id)) return notFound("Enrollment");
 
   const admin = createAdminClient();
   const failed = () => {

@@ -769,11 +769,14 @@ function OrderAccount({ enrollmentId }: { enrollmentId: string }) {
     (async () => {
       try {
         const res = await fetch(`/api/admin/enrollments/${enrollmentId}/account`);
-        if (!res.ok) return;
+        if (!res.ok) throw new Error("account load failed");
         const data = (await res.json()) as OrderAccountView;
         if (!cancelled) setView(data);
       } catch {
         // Quietly leave the section out; the rest of the order still shows.
+        // Clearing matters on a reload after a move: never keep showing the
+        // old buyer and a Move button for an order that has already moved.
+        if (!cancelled) setView(null);
       }
     })();
     return () => {
