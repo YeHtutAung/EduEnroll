@@ -801,6 +801,76 @@ export function ticketNewPhoneEmail(params: {
   };
 }
 
+// ── Order moved to another account (design 4.7 step 6) ───────────────────────
+// Sent to both addresses after the tenant owner moves an order. The old one has
+// no link: it exists so a real owner notices a wrong move and calls the organiser.
+//
+// NEEDS NATIVE REVIEW: every Myanmar line in these two emails is a draft.
+
+export function orderMovedAwayEmail(params: {
+  enrollmentRef: string;
+  tenantName: string;
+  logoUrl?: string;
+}): { subject: string; html: string } {
+  const ref = escapeEmailText(params.enrollmentRef);
+  const org = escapeEmailText(params.tenantName);
+  return {
+    subject: `Your order ${params.enrollmentRef} was moved to another account`,
+    html: baseLayout(`
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="margin: 0; font-size: 22px; color: #1a1a1a;">Your order was moved</h1>
+        <p style="margin: 4px 0 0; color: #6b7280; font-family: 'Noto Sans Myanmar', sans-serif;">သင့်အော်ဒါကို ရွှေ့ပြောင်းလိုက်ပါသည်</p>
+      </div>
+
+      <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 16px; margin: 20px 0;">
+        <p style="margin: 0; font-size: 14px; color: #92400e;">
+          Order <strong>${ref}</strong> was moved to another account by ${org}. If you didn't ask for this, contact ${org}.
+        </p>
+        <p style="margin: 6px 0 0; font-size: 13px; color: #a16207; font-family: 'Noto Sans Myanmar', sans-serif;">
+          အော်ဒါ <strong>${ref}</strong> ကို ${org} မှ အခြားအကောင့်တစ်ခုသို့ ရွှေ့လိုက်ပါသည်။ သင် မတောင်းဆိုခဲ့ပါက ${org} ကို ဆက်သွယ်ပါ။
+        </p>
+      </div>
+    `, org, params.logoUrl),
+  };
+}
+
+export function orderMovedInEmail(params: {
+  enrollmentRef: string;
+  tenantName: string;
+  /** /account/tickets on the tenant's own host. */
+  myTicketsUrl: string;
+  logoUrl?: string;
+}): { subject: string; html: string } {
+  const ref = escapeEmailText(params.enrollmentRef);
+  const org = escapeEmailText(params.tenantName);
+  const href = escapeEmailText(params.myTicketsUrl);
+  let host = params.myTicketsUrl;
+  try {
+    host = new URL(params.myTicketsUrl).host;
+  } catch {
+    // Shows the whole link when it can't be parsed.
+  }
+  const site = `<a href="${href}" style="color: #1a3f8a; font-weight: 600;">${escapeEmailText(host)}</a>`;
+  return {
+    subject: `Order ${params.enrollmentRef} was added to your account`,
+    html: baseLayout(`
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="margin: 0; font-size: 22px; color: #1a1a1a;">An order was added to your account</h1>
+        <p style="margin: 4px 0 0; color: #6b7280; font-family: 'Noto Sans Myanmar', sans-serif;">သင့်အကောင့်ထဲသို့ အော်ဒါတစ်ခု ထည့်ပြီးပါပြီ</p>
+      </div>
+
+      <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin: 20px 0;">
+        <p style="margin: 0; font-size: 14px; color: #1e3a8a;">
+          Order <strong>${ref}</strong> was added to your account. Sign in on ${site} to open your tickets.
+        </p>
+        <p style="margin: 6px 0 0; font-size: 13px; color: #1e40af; font-family: 'Noto Sans Myanmar', sans-serif;">
+          အော်ဒါ <strong>${ref}</strong> ကို သင့်အကောင့်ထဲသို့ ထည့်ပြီးပါပြီ။ သင့်လက်မှတ်များကို ဖွင့်ရန် ${site} တွင် အကောင့်ဝင်ပါ။
+        </p>
+      </div>
+    `, org, params.logoUrl),
+  };
+}
+
 // ── Priority window reminder email (sent by an admin) ────────────────────────
 //
 // An invitation is explicitly permitted BEFORE the window opens and AFTER it
