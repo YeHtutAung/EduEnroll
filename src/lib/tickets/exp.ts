@@ -57,3 +57,14 @@ export function ticketExpiry(eventDate: string | null, tz: string): number {
   const offsetMs = getOffsetMs(new Date(guess), tz);
   return Math.floor((guess - offsetMs) / 1000);
 }
+
+// Display only (plan 4 decision 5): the share cutoff, in Unix seconds. SQL's
+// share_cutoff() decides; it hard-codes Asia/Yangon, so this uses the default
+// zone and never TICKET_TZ.
+export function shareCutoffAt(eventDate: string | null): number | null {
+  if (!eventDate) return null;
+  const [y, m, d] = eventDate.split("-").map(Number);
+  const guess = Date.UTC(y, m - 1, d, 0, 0, 0);
+  const startOfDay = guess - getOffsetMs(new Date(guess), DEFAULT_TICKET_TZ);
+  return Math.floor(startOfDay / 1000) - 24 * 3600;
+}
