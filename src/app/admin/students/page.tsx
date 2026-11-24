@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { orderTotals, runnerExportCells, type RunnerRow } from "@/lib/enrollment/attendees";
 import StatusBadge from "@/components/ui/StatusBadge";
 import LoadingSpinner from "@/components/ui/LoadingSpinner";
@@ -722,6 +722,16 @@ interface OrderAccountView {
     status: string;
     bound: boolean;
     lastBoundAt: string | null;
+    /** Masked friend holding the seat; null while it is with the buyer. */
+    holder: string | null;
+    linkOpen: boolean;
+    history: {
+      at: string;
+      event: string;
+      by: string | null;
+      from: string | null;
+      to: string | null;
+    }[];
   }[];
   moves: {
     createdAt: string;
@@ -743,6 +753,16 @@ function fmtDateTime(isoStr: string | null | undefined): string {
     timeZone: "Asia/Yangon",
   });
 }
+
+const HOLDER_EVENT_LABEL: Record<string, string> = {
+  link_created: "Share link created",
+  link_cancelled: "Share link cancelled",
+  claimed: "Seat claimed",
+  given_back: "Seat given back",
+  holder_deleted: "Holder deleted their account",
+  voided: "Seat voided",
+  order_moved: "Order moved to another account",
+};
 
 // NEEDS NATIVE REVIEW: every Myanmar line in this component is a draft.
 const ACCOUNT_MM = {
@@ -824,11 +844,14 @@ function OrderAccount({ enrollmentId }: { enrollmentId: string }) {
                   <th className="px-3 py-2 text-left font-medium">Status</th>
                   <th className="px-3 py-2 text-left font-medium">Phone</th>
                   <th className="px-3 py-2 text-left font-medium">Last linked</th>
+                  <th className="px-3 py-2 text-left font-medium">Holder</th>
+                  <th className="px-3 py-2 text-left font-medium">Link</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {view.tickets.map((t) => (
-                  <tr key={t.id}>
+                  <Fragment key={t.id}>
+                  <tr>
                     <td className="px-3 py-2 text-gray-800">{t.tier}</td>
                     <td className="px-3 py-2 text-gray-600">{t.seatNo}</td>
                     <td className="px-3 py-2 text-gray-600">{t.status}</td>
@@ -845,7 +868,32 @@ function OrderAccount({ enrollmentId }: { enrollmentId: string }) {
                       </span>
                     </td>
                     <td className="px-3 py-2 text-gray-600 whitespace-nowrap">{fmtDateTime(t.lastBoundAt)}</td>
+                    <td className="px-3 py-2 text-gray-600">
+                      {t.holder ? <code>{t.holder}</code> : "Buyer"}
+                    </td>
+                    <td className="px-3 py-2 text-gray-600">{t.linkOpen ? "Open" : "—"}</td>
                   </tr>
+                  {t.history.length > 0 && (
+                    <tr>
+                      <td colSpan={7} className="px-3 pb-2">
+                        <details>
+                          <summary className="cursor-pointer text-gray-500">
+                            History ({t.history.length})
+                          </summary>
+                          <ul className="mt-1 space-y-1">
+                            {t.history.map((h, i) => (
+                              <li key={`${h.at}:${i}`} className="text-gray-600">
+                                {fmtDateTime(h.at)} · {HOLDER_EVENT_LABEL[h.event] ?? h.event}
+                                {h.by ? ` · by ${h.by}` : ""}
+                                {h.from || h.to ? ` · ${h.from ?? "—"} → ${h.to ?? "—"}` : ""}
+                              </li>
+                            ))}
+                          </ul>
+                        </details>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
