@@ -273,5 +273,13 @@ export const config = {
     "/api/:path*",
     "/enroll/:path*",
     "/status",
+    "/account",
+    "/account/:path*",
+    // The Google return leg (buyer accounts plan, Task 15): tenant header
+    // and session handling exactly as on /account.
+    "/auth/callback",
+    // /t/claim (plan 4 decision 10): a share link's landing page. Sanitized
+    // tenant headers and the session refresh, as on /account.
+    "/t/:path*",
   ],
 };

@@ -141,4 +141,29 @@ describe("createEnrollment", () => {
       expect(result.message_mm).toBeTruthy();
     }
   });
+
+  // Account-bound tickets (Plan 3, Task 12): the route passes the verified
+  // buyer only for a protected class; a guest order sends no p_buyer_id.
+  it("forwards buyer_id as p_buyer_id, and omits it when absent", async () => {
+    mockRpc.mockResolvedValue({ data: { success: false, error: "CLASS_NOT_FOUND" }, error: null });
+    await createEnrollment({ class_id: "00000000-0000-0000-0000-000000000001", buyer_id: "buyer-1" });
+    expect(mockRpc.mock.calls[0][1]).toMatchObject({ p_buyer_id: "buyer-1" });
+
+    mockRpc.mockClear();
+    await createEnrollment({ class_id: "00000000-0000-0000-0000-000000000001" });
+    expect(mockRpc.mock.calls[0][1]).not.toHaveProperty("p_buyer_id");
+
+    mockRpc.mockClear();
+    await createEnrollment({ class_id: "00000000-0000-0000-0000-000000000001", buyer_id: null });
+    expect(mockRpc.mock.calls[0][1]).not.toHaveProperty("p_buyer_id");
+  });
+
+  it.each([
+    ["BUYER_REQUIRED", 401, "Unauthorized"],
+    ["IDEMPOTENCY_CONFLICT", 409, "Conflict"],
+  ])("maps %s to %i", async (code, status, error) => {
+    mockRpc.mockResolvedValue({ data: { success: false, error: code }, error: null });
+    const result = await createEnrollment({ class_id: "00000000-0000-0000-0000-000000000001", buyer_id: "buyer-1" });
+    expect(result).toMatchObject({ ok: false, status, error });
+  });
 });

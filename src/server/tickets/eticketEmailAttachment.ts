@@ -21,13 +21,42 @@ type TicketRow = {
 type EmailTicket = TicketRow & { eventName: string; qrFormat: TicketQrFormat };
 
 /**
+ * What a confirmation email carries for an order's tickets (design 8.1).
+ *
+ * - `attachment`: the PDF of the order's tickets that are NOT on an
+ *   account-bound (protected) event, or null when there are none or the PDF
+ *   could not be made.
+ * - `accountTickets`: true when at least one ticket is on a protected event.
+ *   Those tickets are never signed, drawn or attached here; the email links to
+ *   /account/tickets on the tenant's host instead.
+ *
+ * The one helper every confirmation email asks, so no caller can forget the
+ * rule. A PDF failure gives `attachment: null` with `accountTickets` still
+ * right; only a failure to read the tickets or their events throws, and
+ * callers then fall back to NO_TICKET_EMAIL_PARTS (no PDF, no button).
+ */
+export type TicketEmailParts = {
+  attachment: EmailAttachment | null;
+  accountTickets: boolean;
+};
+
+/** What a caller uses when buildTicketEmailParts throws: today's "no PDF". */
+export const NO_TICKET_EMAIL_PARTS: TicketEmailParts = Object.freeze({
+  attachment: null,
+  accountTickets: false,
+}) as TicketEmailParts;
+
+/** The signed-in ticket page on the same (tenant) host as `tenantUrl`. */
+export function accountTicketsUrl(tenantUrl: string): string {
+  return new URL("/account/tickets", tenantUrl).toString();
+}
+
+/**
  * Builds the PDF attached to a paid event's confirmation email. The browser
  * renderer cannot run in a payment webhook, so this intentionally uses only
  * server-compatible jsPDF and QRCode APIs.
  */
-export async function buildEticketEmailAttachment(
-  enrollmentId: string,
-): Promise<EmailAttachment | null> {
+export async function buildTicketEmailParts(enrollmentId: string): Promise<TicketEmailParts> {
   const supabase = createAdminClient();
 
   const [enrollmentResult, ticketResult] = await Promise.all([
@@ -49,42 +78,58 @@ export async function buildEticketEmailAttachment(
 
   if (enrollmentError) throw new Error("could not load enrollment for e-ticket attachment");
   if (ticketError) throw new Error("could not load issued tickets for e-ticket attachment");
-  if (!enrollment || !rows?.length) return null;
+  if (!enrollment || !rows?.length) return { attachment: null, accountTickets: false };
 
   // Seat order, so each runner's page follows the order they were entered in.
   const ticketRows = [...(rows as TicketRow[])].sort(bySeat);
   const intakeIds = [...new Set(ticketRows.map((ticket) => ticket.intake_id))];
   const intakeResult = await supabase
     .from("intakes")
-    .select("id, name, ticket_qr_format")
+    .select("id, name, ticket_qr_format, ticket_protection")
     .in("id", intakeIds);
   const { data: intakes, error: intakeError } = intakeResult as unknown as {
-    data: { id: string; name: string; ticket_qr_format: unknown }[] | null;
+    data: { id: string; name: string; ticket_qr_format: unknown; ticket_protection: unknown }[] | null;
     error: unknown;
   };
 
-  if (intakeError) throw new Error("could not load event details for e-ticket attachment");
-  const names = new Map((intakes ?? []).map((intake) => [intake.id, intake.name]));
-  const formats = new Map((intakes ?? []).map((intake) => [intake.id, intake.ticket_qr_format]));
+  if (intakeError || !intakes) throw new Error("could not load event details for e-ticket attachment");
+  const byId = new Map(intakes.map((intake) => [intake.id, intake]));
+  // Protection must be known for every ticket before anything is drawn: a
+  // ticket whose event is missing could be a protected one.
+  if (intakeIds.some((id) => !byId.has(id))) {
+    throw new Error("could not load event details for every ticket");
+  }
 
-  // Checked for every ticket before any is drawn: an event whose format cannot
-  // be read gets no attachment rather than a QR its gate may not accept. The
-  // callers already treat a thrown error as "send the email without it".
-  const tickets = ticketRows.map((ticket) => {
-    const qrFormat = formats.get(ticket.intake_id);
-    if (!isTicketQrFormat(qrFormat)) throw new Error("unknown ticket QR format");
+  const isProtected = (ticket: TicketRow) => byId.get(ticket.intake_id)!.ticket_protection === true;
+  const accountTickets = ticketRows.some(isProtected);
+  const open = ticketRows.filter((ticket) => !isProtected(ticket));
+  if (open.length === 0) return { attachment: null, accountTickets };
+
+  try {
+    // Checked for every ticket before any is drawn: an event whose format cannot
+    // be read gets no attachment rather than a QR its gate may not accept.
+    const tickets = open.map((ticket) => {
+      const intake = byId.get(ticket.intake_id)!;
+      if (!isTicketQrFormat(intake.ticket_qr_format)) throw new Error("unknown ticket QR format");
+      return {
+        ...ticket,
+        eventName: intake.name ?? "Event",
+        qrFormat: intake.ticket_qr_format,
+      };
+    });
+
+    const content = await renderEticketPdf(enrollment.enrollment_ref, tickets);
     return {
-      ...ticket,
-      eventName: names.get(ticket.intake_id) ?? "Event",
-      qrFormat,
+      attachment: {
+        filename: `eticket-${safeFilename(enrollment.enrollment_ref)}.pdf`,
+        content,
+      },
+      accountTickets,
     };
-  });
-
-  const content = await renderEticketPdf(enrollment.enrollment_ref, tickets);
-  return {
-    filename: `eticket-${safeFilename(enrollment.enrollment_ref)}.pdf`,
-    content,
-  };
+  } catch (error) {
+    console.error("[ticket-email] e-ticket PDF failed:", error instanceof Error ? error.message : "unknown");
+    return { attachment: null, accountTickets };
+  }
 }
 
 export async function renderEticketPdf(

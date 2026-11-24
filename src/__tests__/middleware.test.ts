@@ -9,12 +9,16 @@ import { middleware } from "@/middleware";
 const authState = vi.hoisted(() => ({
   user: null as null | { id: string },
   accessToken: null as string | null,
+  getUserCalls: 0,
 }));
 
 vi.mock("@supabase/ssr", () => ({
   createServerClient: () => ({
     auth: {
-      getUser: async () => ({ data: { user: authState.user } }),
+      getUser: async () => {
+        authState.getUserCalls += 1;
+        return { data: { user: authState.user } };
+      },
       getSession: async () => ({
         data: { session: authState.accessToken ? { access_token: authState.accessToken } : null },
       }),
@@ -46,6 +50,7 @@ afterEach(() => {
   for (const k of ENV_KEYS) restoreEnv(k);
   authState.user = null;
   authState.accessToken = null;
+  authState.getUserCalls = 0;
 });
 
 // ─── Host-aware request factory — REQUIRED, do not inline NextRequest ────────
@@ -516,5 +521,119 @@ describe("middleware — staff pages need a password session", () => {
     signIn("otp");
     const res = await devGet("/onboarding");
     expect(location(res)).toContain("/login");
+  });
+});
+
+// ─── /account: buyer sign-in page (buyer accounts plan, Task 9) ─────────────
+// In the matcher so the Supabase session cookie is refreshed there. It is not a
+// staff page, so the password rule above must not redirect anyone from it.
+describe("middleware — /account", () => {
+  function sessionToken(method: string): string {
+    const enc = (v: unknown) => Buffer.from(JSON.stringify(v)).toString("base64url");
+    return `${enc({ alg: "HS256" })}.${enc({ sub: "u1", amr: [{ method, timestamp: 1 }] })}.sig`;
+  }
+
+  it("is in config.matcher, with its subpaths", async () => {
+    const { config } = await import("@/middleware");
+    expect(config.matcher).toContain("/account");
+    expect(config.matcher).toContain("/account/:path*");
+  });
+
+  it("refreshes the session for a signed-out visitor on a tenant host, without a redirect", async () => {
+    const res = await get("https://nihon-moment.kuunyi.com/account");
+    expect(authState.getUserCalls).toBe(1);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+    expect(slug(res)).toBe("nihon-moment");
+  });
+
+  it("does not redirect a buyer signed in with an email code", async () => {
+    authState.user = { id: "u1" };
+    authState.accessToken = sessionToken("otp");
+    const res = await get("https://nihon-moment.kuunyi.com/account");
+    expect(authState.getUserCalls).toBe(1);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("does not redirect a staff password session either", async () => {
+    authState.user = { id: "u1" };
+    authState.accessToken = sessionToken("password");
+    const res = await get("https://nihon-moment.kuunyi.com/account");
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("serves /account on a tenant's custom domain", async () => {
+    const res = await get("https://flashtic.com/account");
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.status).not.toBe(404);
+    expect(slug(res)).toBe("flashtic");
+  });
+});
+
+// ─── /auth/callback: the Google return leg (buyer accounts plan, Task 15) ────
+describe("middleware — /auth/callback", () => {
+  it("is in config.matcher", async () => {
+    const { config } = await import("@/middleware");
+    expect(config.matcher).toContain("/auth/callback");
+  });
+
+  it("passes through on a tenant host without a redirect", async () => {
+    const res = await get("https://nihon-moment.kuunyi.com/auth/callback?code=x&next=/account");
+    expect(res.headers.get("location")).toBeNull();
+    expect(slug(res)).toBe("nihon-moment");
+  });
+
+  it("passes through on a tenant's custom domain", async () => {
+    const res = await get("https://flashtic.com/auth/callback?code=x");
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.status).not.toBe(404);
+  });
+});
+
+// ─── /t/claim: claim a shared seat (plan 4, Task 12, decision 10) ───────────
+// In the matcher for the same reasons as /account: sanitized tenant headers
+// and the session refresh. The custom-domain split must not redirect it.
+describe("middleware — /t/claim", () => {
+  const ENV = process.env.VERCEL_ENV;
+  afterEach(() => {
+    if (ENV === undefined) delete process.env.VERCEL_ENV;
+    else process.env.VERCEL_ENV = ENV;
+  });
+
+  it("is in config.matcher", async () => {
+    const { config } = await import("@/middleware");
+    expect(config.matcher).toContain("/t/:path*");
+  });
+
+  it("refreshes the session on a tenant host, without a redirect", async () => {
+    const res = await get("https://nihon-moment.kuunyi.com/t/claim");
+    expect(authState.getUserCalls).toBe(1);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+    expect(slug(res)).toBe("nihon-moment");
+  });
+
+  it("serves /t/claim on a tenant's custom domain", async () => {
+    const res = await get("https://flashtic.com/t/claim");
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.status).not.toBe(404);
+    expect(slug(res)).toBe("flashtic");
+  });
+
+  it("replaces a forged tenant header with the host's tenant", async () => {
+    process.env.VERCEL_ENV = "production";
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"flashtic"}';
+    const res = await middleware(
+      middlewareRequest("https://flashtic.com/t/claim", { headers: { "x-tenant-slug": "victim" } }),
+    );
+    expect(slug(res)).toBe("flashtic");
+  });
+
+  it("drops a forged tenant header on the platform root", async () => {
+    process.env.VERCEL_ENV = "production";
+    const res = await middleware(
+      middlewareRequest("https://kuunyi.com/t/claim", { headers: { "x-tenant-slug": "victim" } }),
+    );
+    expect(slug(res)).not.toBe("victim");
   });
 });

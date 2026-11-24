@@ -12,6 +12,8 @@ import { formatCurrencySimple, formatAmount } from "@/lib/utils";
 import QRPaymentModal from "@/components/payments/QRPaymentModal";
 import PayNowQrSaveButton from "@/components/payments/PayNowQrSaveButton";
 import ETicketEmailNotice from "@/components/payments/ETicketEmailNotice";
+import OpenMyTickets from "@/components/enroll/OpenMyTickets";
+import { accountTicketCountOf, orderTicketsMissing } from "@/lib/tickets/accountTickets";
 import BrandHeader from "@/components/enrollment/BrandHeader";
 import { OrderItemAmount } from "@/components/payments/OrderItemAmount";
 import html2canvas from "html2canvas";
@@ -833,7 +835,7 @@ function DownloadReceiptButton({
    */
   ticketFetch:
     | { state: "loading" }
-    | { state: "loaded"; tickets: TicketData[]; ctx: TicketRenderContext }
+    | { state: "loaded"; tickets: TicketData[]; ctx: TicketRenderContext; accountTicketCount?: number }
     | { state: "error" }
     | null;
   qrMap: QrMap | null;
@@ -860,6 +862,10 @@ function DownloadReceiptButton({
 
   const loaded = ticketFetch?.state === "loaded" ? ticketFetch : null;
   const tickets = loaded?.tickets ?? [];
+  // Tickets on an account-bound event: issued, but opened only on
+  // /account/tickets, never as a QR or PDF here (design 8.1).
+  const accountTickets = loaded?.accountTicketCount ?? 0;
+  const onlyAccountTickets = tickets.length === 0 && accountTickets > 0;
 
   // Whether this order has a ticket is still unknown: the lookup has not
   // started or has not answered. Downloading now would silently produce the
@@ -880,7 +886,9 @@ function DownloadReceiptButton({
   // out a receipt. Unknown is not an answer here — it is the same failure the
   // rest of this gating exists to close, one field further out.
   const ticketsExpected = enrollment.org_type !== "language_school";
-  const ticketsMissing = loaded !== null && tickets.length === 0 && ticketsExpected;
+  const ticketsMissing =
+    loaded !== null &&
+    orderTicketsMissing({ ticketCount: tickets.length, accountTicketCount: accountTickets, ticketsExpected });
 
   const preparing = ticketsUnknown || (tickets.length > 0 && !qrMap && !qrError);
   const blocked = ticketsFailed || ticketsMissing;
@@ -1069,42 +1077,47 @@ function DownloadReceiptButton({
         </div>
       </div>
 
-      {/* Download button */}
-      <div className="mt-4 text-center">
-        <button
-          onClick={handleDownload}
-          disabled={generating || preparing || blocked}
-          className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:opacity-50"
-        >
-          {generating || preparing ? (
-            <>
-              <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
-                <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
-              </svg>
-              {preparing ? "Preparing ticket..." : "Generating..."}
-            </>
-          ) : (
-            <>
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17v3a2 2 0 002 2h14a2 2 0 002-2v-3" />
-              </svg>
-              Download E-Ticket / <span className="font-myanmar">E-Ticket ကိုရယူပါ</span>
-            </>
-          )}
-        </button>
-        {ticketsMissing ? (
-          <p className="mt-2 text-xs text-amber-700">
-            No e-ticket was issued for this order. Contact support quoting{" "}
-            {enrollment.enrollment_ref}.
-          </p>
-        ) : blocked ? (
-          <p className="mt-2 text-xs text-amber-700">
-            Your e-ticket could not be prepared. Reload the page, or contact support
-            quoting {enrollment.enrollment_ref}.
-          </p>
-        ) : null}
-      </div>
+      <OpenMyTickets count={accountTickets} className="mt-4" />
+
+      {/* Download button. Not for an order whose tickets are all on the
+          account: there is no e-ticket to download, only the receipt. */}
+      {!onlyAccountTickets && (
+        <div className="mt-4 text-center">
+          <button
+            onClick={handleDownload}
+            disabled={generating || preparing || blocked}
+            className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:opacity-50"
+          >
+            {generating || preparing ? (
+              <>
+                <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+                  <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
+                </svg>
+                {preparing ? "Preparing ticket..." : "Generating..."}
+              </>
+            ) : (
+              <>
+                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 10v6m0 0l-3-3m3 3l3-3M3 17v3a2 2 0 002 2h14a2 2 0 002-2v-3" />
+                </svg>
+                Download E-Ticket / <span className="font-myanmar">E-Ticket ကိုရယူပါ</span>
+              </>
+            )}
+          </button>
+          {ticketsMissing ? (
+            <p className="mt-2 text-xs text-amber-700">
+              No e-ticket was issued for this order. Contact support quoting{" "}
+              {enrollment.enrollment_ref}.
+            </p>
+          ) : blocked ? (
+            <p className="mt-2 text-xs text-amber-700">
+              Your e-ticket could not be prepared. Reload the page, or contact support
+              quoting {enrollment.enrollment_ref}.
+            </p>
+          ) : null}
+        </div>
+      )}
     </>
   );
 }
@@ -1369,7 +1382,7 @@ export default function PaymentInstructionsPage() {
   // both cases. "Unknown" has to be its own answer, and it fails closed.
   const [ticketFetch, setTicketFetch] = useState<
     | { state: "loading" }
-    | { state: "loaded"; tickets: TicketData[]; ctx: TicketRenderContext }
+    | { state: "loaded"; tickets: TicketData[]; ctx: TicketRenderContext; accountTicketCount?: number }
     | { state: "error" }
     | null
   >(null);
@@ -1387,6 +1400,7 @@ export default function PaymentInstructionsPage() {
         if (!res.ok) throw new Error(`enrollment lookup failed: ${res.status}`);
         const d = (await res.json()) as {
           tickets?: TicketData[];
+          account_ticket_count?: number;
           event_name?: string;
           sponsor_config?: SponsorPlacements | null;
           enrollment_ref?: string;
@@ -1397,6 +1411,7 @@ export default function PaymentInstructionsPage() {
         setTicketFetch({
           state: "loaded",
           tickets: d.tickets ?? [],
+          accountTicketCount: accountTicketCountOf(d),
           ctx: {
             enrollmentRef: d.enrollment_ref ?? params.ref,
             eventName: d.event_name ?? "",

@@ -13,7 +13,11 @@ import {
 } from "@/lib/email";
 import { resolveEmailFromFormData } from "@/lib/utils";
 import type { Enrollment, Payment } from "@/types/database";
-import { buildEticketEmailAttachment } from "@/server/tickets/eticketEmailAttachment";
+import {
+  accountTicketsUrl,
+  buildTicketEmailParts,
+  NO_TICKET_EMAIL_PARTS,
+} from "@/server/tickets/eticketEmailAttachment";
 import { loadEventEmailTerms } from "@/server/notifications/eventEmailTerms";
 import { loadEventEmailImages } from "@/server/notifications/eventEmailImages";
 
@@ -52,6 +56,32 @@ export async function POST(
     .single() as EnrollmentResult;
 
   if (enrollErr || !enrollment) return notFound("Enrollment");
+
+  // An order bought from a buyer account has the account's email, and its
+  // emails go there and nowhere else (plan decision 4). Typing the account
+  // email itself is not a different address, so that still resends.
+  if (enrollment.buyer_id) {
+    const accountEmail = (enrollment.email ?? "").trim().toLowerCase();
+    // Fail closed, like the order PATCH: an account order always has its
+    // email. Without one, never fall back to the form's address.
+    if (!accountEmail) {
+      console.error("[resend-email] account order without a stored email");
+      return NextResponse.json(
+        { error: "Conflict", message: "This order belongs to a buyer account but has no account email." },
+        { status: 409 },
+      );
+    }
+    if (overrideEmail && overrideEmail.toLowerCase() !== accountEmail) {
+      return NextResponse.json(
+        {
+          error: "Conflict",
+          message: "This order belongs to a buyer account; its email is the account's email.",
+        },
+        { status: 409 },
+      );
+    }
+    overrideEmail = null;
+  }
 
   // Resolve email: override > column > form_data
   const fd = enrollment.form_data as Record<string, string> | null;
@@ -122,6 +152,16 @@ export async function POST(
   let emailContent: { subject: string; html: string };
   const status = enrollment.status;
 
+  // Asked first, and only for a confirmed order: an order with account-bound
+  // tickets gets "Open My Tickets" in the body instead of their QR in the PDF.
+  const parts =
+    status === "confirmed"
+      ? await buildTicketEmailParts(enrollment.id).catch((error) => {
+          console.error("[resend-email] e-ticket attachment failed:", error);
+          return NO_TICKET_EMAIL_PARTS;
+        })
+      : NO_TICKET_EMAIL_PARTS;
+
   if (status === "confirmed") {
     emailContent = enrollmentApprovedEmail({
       studentName: enrollment.student_name_en,
@@ -135,6 +175,8 @@ export async function POST(
       orgType,
       tenantName,
       logoUrl,
+      // statusUrl is already on the tenant's host.
+      ...(parts.accountTickets ? { myTicketsUrl: accountTicketsUrl(statusUrl) } : {}),
     });
   } else if (status === "rejected") {
     emailContent = enrollmentRejectedEmail({
@@ -200,13 +242,7 @@ export async function POST(
   }
 
   // ── Send ───────────────────────────────────────────────────────────────────
-  const attachment =
-    status === "confirmed"
-      ? await buildEticketEmailAttachment(enrollment.id).catch((error) => {
-          console.error("[resend-email] e-ticket attachment failed:", error);
-          return null;
-        })
-      : null;
+  const attachment = parts.attachment;
   const sent = await sendEmail({
     to: enrollEmail,
     subject: emailContent.subject,

@@ -13,7 +13,10 @@
 // qr_text is built by the same code as the order page and the e-ticket email:
 // the bare ticket id on a 'uuid' event, the signed token on a 'jwt' event.
 //
-// Every row is a working entry pass. The file is refused inside the repository
+// An account-bound (ticket_protection) event's rows carry ticket ids only, with
+// an empty qr_text: those QRs exist only on the buyer's phone (design 8.1).
+//
+// Every other row is a working entry pass. The file is refused inside the repository
 // so it can never be committed. It also holds buyers' names, phones and
 // emails. Keep it private and delete it when done.
 //
@@ -61,11 +64,11 @@ async function main() {
 
   const { data: intake, error: intakeError } = (await supabase
     .from("intakes")
-    .select("id, name, ticket_qr_format")
+    .select("id, name, ticket_qr_format, ticket_protection")
     .eq("tenant_id", tenant.id)
     .eq("slug", intakeSlug)
     .single()) as {
-    data: { id: string; name: string; ticket_qr_format: unknown } | null;
+    data: { id: string; name: string; ticket_qr_format: unknown; ticket_protection: unknown } | null;
     error: unknown;
   };
   if (intakeError || !intake) {
@@ -78,10 +81,18 @@ async function main() {
     process.exit(1);
   }
   const format = intake.ticket_qr_format;
+  // Unknown is not "unprotected": refuse rather than write working QRs for an
+  // event whose tickets may be account-bound.
+  if (typeof intake.ticket_protection !== "boolean") {
+    console.error(`"${intakeSlug}" has an unreadable account-bound setting. Nothing written.`);
+    process.exit(1);
+  }
+  const accountBound = intake.ticket_protection;
 
-  // Fail before reading tickets if a jwt event has no key to sign with.
+  // Fail before reading tickets if a jwt event has no key to sign with. An
+  // account-bound event signs nothing here, so it needs no key.
   let kid: string | null = null;
-  if (format === "jwt") {
+  if (format === "jwt" && !accountBound) {
     if (!process.env.TICKET_SIGNING_KEY || !process.env.TICKET_KID) {
       console.error("TICKET_SIGNING_KEY / TICKET_KID are not set in this env file. Nothing written.");
       process.exit(1);
@@ -125,10 +136,15 @@ async function main() {
     process.exit(1);
   }
 
-  writeFileSync(outPath, qrExportCsv(format, admissible), { encoding: "utf8" });
+  writeFileSync(
+    outPath,
+    qrExportCsv(format, admissible, new Set(accountBound ? [intake.id] : [])),
+    { encoding: "utf8" },
+  );
 
   const orders = new Set(admissible.map((t) => t.enrollments!.enrollment_ref)).size;
   console.log(`Event:    ${intake.name} (${intakeSlug}), QR format '${format}'${kid ? `, signing kid '${kid}'` : ""}`);
+  if (accountBound) console.log("Account-bound event: ticket ids only, qr_text left empty.");
   console.log(`Valid tickets read:       ${rows.length}`);
   console.log(`Excluded (not confirmed / internal test): ${rows.length - admissible.length}`);
   console.log(`Exported: ${admissible.length} tickets across ${orders} orders`);

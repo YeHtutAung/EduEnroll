@@ -22,30 +22,41 @@ interface SendEmailParams {
   subject: string;
   html: string;
   attachments?: EmailAttachment[];
+  /** Aborts the Resend request (the SDK spreads its options into fetch). */
+  signal?: AbortSignal;
 }
 
-export async function sendEmail({ to, subject, html, attachments }: SendEmailParams): Promise<boolean> {
+/**
+ * Logs fixed fields only. Resend writes the error message itself and it may
+ * repeat the recipient address, so never log the message or the object.
+ */
+export async function sendEmail({ to, subject, html, attachments, signal }: SendEmailParams): Promise<boolean> {
   if (!process.env.RESEND_API_KEY) {
     console.warn("[email] RESEND_API_KEY not set — skipping email send.");
     return false;
   }
 
   try {
-    const { error } = await getResend().emails.send({
-      from: FROM_EMAIL,
-      to,
-      subject,
-      html,
-      attachments,
-    });
+    const { error } = await getResend().emails.send(
+      {
+        from: FROM_EMAIL,
+        to,
+        subject,
+        html,
+        attachments,
+      },
+      // PostOptions doesn't declare signal, but Resend spreads the options
+      // into its fetch() init, so it reaches fetch.
+      (signal ? { signal } : {}) as Parameters<ReturnType<typeof getResend>["emails"]["send"]>[1],
+    );
 
     if (error) {
-      console.error("[email] Resend error:", error);
+      console.error("[email] Resend error:", String(error.name), Number(error.statusCode) || null);
       return false;
     }
     return true;
   } catch (err) {
-    console.error("[email] Send failed:", err);
+    console.error("[email] Send failed:", err instanceof Error ? err.name : "unknown");
     return false;
   }
 }
@@ -316,6 +327,27 @@ function escapeEmailText(text: string): string {
 }
 
 /**
+ * "Open My Tickets" for an order with account-bound tickets (design 6.3, 8.1).
+ * Nothing at all without a link, so every other email is unchanged.
+ *
+ * NEEDS NATIVE REVIEW: the four Myanmar lines below are drafts.
+ */
+function myTicketsSection(myTicketsUrl: string | undefined): string {
+  if (!myTicketsUrl) return "";
+  return `
+
+      <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin: 20px 0; text-align: center;">
+        <a href="${escapeEmailText(myTicketsUrl)}" style="display: inline-block; padding: 12px 28px; background: #0f1f42; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px;">Open My Tickets <span class="myanmar" style="font-family: 'Noto Sans Myanmar', sans-serif;">/ ကျွန်ုပ်၏ လက်မှတ်များကို ဖွင့်ရန်</span></a>
+        <p style="margin: 12px 0 0; font-size: 14px; color: #1e3a8a;">Your ticket is on your account. Sign in on this site to open it.</p>
+        <p class="myanmar" style="margin: 4px 0 0; font-size: 13px; color: #1e40af; font-family: 'Noto Sans Myanmar', sans-serif;">သင့်လက်မှတ်သည် သင့်အကောင့်ထဲတွင် ရှိပါသည်။ ဤဝက်ဘ်ဆိုက်တွင် အကောင့်ဝင်၍ ဖွင့်ပါ။</p>
+        <p style="margin: 8px 0 0; font-size: 13px; color: #1e3a8a;">Open it again on your phone before the event day, and keep the page open at the gate.</p>
+        <p class="myanmar" style="margin: 4px 0 0; font-size: 13px; color: #1e40af; font-family: 'Noto Sans Myanmar', sans-serif;">ပွဲနေ့မတိုင်မီ သင့်ဖုန်းတွင် ပြန်ဖွင့်ထားပြီး ဝင်ပေါက်တွင် ထိုစာမျက်နှာကို ဖွင့်ထားပါ။</p>
+        <p style="margin: 8px 0 0; font-size: 13px; color: #1e3a8a;">You can share a seat with a friend from My Tickets until 24 hours before the event.</p>
+        <p class="myanmar" style="margin: 4px 0 0; font-size: 13px; color: #1e40af; font-family: 'Noto Sans Myanmar', sans-serif;">ပွဲမစတင်မီ ၂၄ နာရီအထိ "ကျွန်ုပ်၏ လက်မှတ်များ" မှ ထိုင်ခုံတစ်ခုကို သူငယ်ချင်းတစ်ဦးနှင့် မျှဝေနိုင်ပါသည်။</p>
+      </div>`;
+}
+
+/**
  * One line per runner (per-ticket answers), as entered at checkout. Nothing at
  * all for an order without runners, so other events' emails are unchanged.
  * The labels are buyer-typed, so they are escaped.
@@ -380,6 +412,12 @@ export function enrollmentApprovedEmail(params: {
   eventImages?: { url: string; alt: string }[] | null;
   /** One per ticket when the event asks per-ticket questions (runner name, size). */
   runners?: { tier: string; label: string }[] | null;
+  /**
+   * Set when the order has account-bound tickets (design 8.1): /account/tickets
+   * on the TENANT's host. Those tickets are not in the PDF; the email shows an
+   * "Open My Tickets" button instead. Unset, the email is unchanged.
+   */
+  myTicketsUrl?: string;
   orgType?: string;
   tenantName?: string;
   logoUrl?: string;
@@ -389,6 +427,7 @@ export function enrollmentApprovedEmail(params: {
     enrollmentRef,
     classLevel,
     statusUrl,
+    myTicketsUrl,
     feeFormatted,
     ticketSubtotalFormatted,
     platformFeeFormatted,
@@ -475,7 +514,7 @@ export function enrollmentApprovedEmail(params: {
         </div>
         ${ticketRows}
         ${paymentRows}
-      </div>${runnersSection(runners)}
+      </div>${runnersSection(runners)}${myTicketsSection(myTicketsUrl)}
 
       <div style="text-align: center; margin: 24px 0;">
         <a href="${statusUrl}" style="display: inline-block; padding: 12px 28px; background: #1a6b3c; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 14px;">View ${l.enrollLabel} Details</a>
@@ -725,6 +764,184 @@ export function interestConfirmationEmail(params: {
       </div>
       ${tierCoverageSection(coveredTiers)}
     `, tenantName, logoUrl),
+  };
+}
+
+// ── New-phone notice (an account-bound ticket was bound to another phone) ───
+//
+// The only anti-takeover signal for an account-bound ticket: sent when a
+// ticket moves from one phone to another (bind_ticket_device → bound_again).
+// It carries no link, token or key. The Myanmar line needs native review.
+
+export function ticketNewPhoneEmail(params: {
+  tier: string;
+  tenantName?: string;
+  logoUrl?: string;
+}): { subject: string; html: string } {
+  const { tier, tenantName, logoUrl } = params;
+  return {
+    subject: "Your ticket was opened on a new phone",
+    html: baseLayout(`
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="margin: 0; font-size: 22px; color: #1a1a1a;">Your ticket is on a new phone</h1>
+        <p style="margin: 4px 0 0; color: #6b7280; font-family: 'Noto Sans Myanmar', sans-serif;">သင့်လက်မှတ်ကို ဖုန်းအသစ်တွင် ဖွင့်ထားပါသည်</p>
+      </div>
+
+      <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 16px; margin: 20px 0;">
+        <p style="margin: 0; font-size: 14px; color: #92400e;">
+          Your ticket was opened on a new phone. If this wasn't you, sign in and open your ticket again to move it back.
+        </p>
+        <p style="margin: 6px 0 0; font-size: 13px; color: #a16207; font-family: 'Noto Sans Myanmar', sans-serif;">
+          သင့်လက်မှတ်ကို ဖုန်းအသစ်တစ်လုံးတွင် ဖွင့်ထားပါသည်။ သင်မဟုတ်ပါက အကောင့်သို့ ဝင်ပြီး လက်မှတ်ကို ပြန်ဖွင့်၍ သင့်ဖုန်းသို့ ပြန်ရွှေ့ပါ။
+        </p>
+      </div>
+
+      <p style="font-size: 13px; color: #374151; text-align: center;">
+        Ticket: <strong>${escapeEmailText(tier)}</strong>
+      </p>
+    `, tenantName ? escapeEmailText(tenantName) : undefined, logoUrl),
+  };
+}
+
+// ── Seat sharing (design 6.4) ────────────────────────────────────────────────
+// Sent to the leader when a friend claims a shared seat, and when a friend
+// gives one back. Neither carries a link or token. `claimedBy` is already
+// masked by the caller; the full address never reaches this builder.
+//
+// NEEDS NATIVE REVIEW: every Myanmar line in these two emails is a draft.
+
+export function seatClaimedEmail(params: {
+  tier: string;
+  /** Masked address of the friend who claimed the seat. */
+  claimedBy: string;
+  tenantName: string;
+  logoUrl?: string;
+}): { subject: string; html: string } {
+  const tier = escapeEmailText(params.tier);
+  const who = escapeEmailText(params.claimedBy);
+  const org = escapeEmailText(params.tenantName);
+  return {
+    subject: `Your ${params.tier} seat was claimed`,
+    html: baseLayout(`
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="margin: 0; font-size: 22px; color: #1a1a1a;">Your seat was claimed</h1>
+        <p style="margin: 4px 0 0; color: #6b7280; font-family: 'Noto Sans Myanmar', sans-serif;">သင့်နေရာကို လက်ခံယူလိုက်ပါပြီ</p>
+      </div>
+
+      <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin: 20px 0;">
+        <p style="margin: 0; font-size: 14px; color: #1e3a8a;">
+          Your seat was claimed by <strong>${who}</strong>. Only their phone can show its QR now.
+        </p>
+        <p style="margin: 6px 0 0; font-size: 13px; color: #1e40af; font-family: 'Noto Sans Myanmar', sans-serif;">
+          သင့်နေရာကို <strong>${who}</strong> က လက်ခံယူလိုက်ပါပြီ။ ယခု သူ၏ဖုန်းမှသာ QR ကို ပြနိုင်ပါသည်။
+        </p>
+      </div>
+
+      <p style="font-size: 13px; color: #374151; text-align: center;">
+        Ticket: <strong>${tier}</strong>
+      </p>
+    `, org, params.logoUrl),
+  };
+}
+
+export function seatGivenBackEmail(params: {
+  tier: string;
+  tenantName: string;
+  logoUrl?: string;
+}): { subject: string; html: string } {
+  const tier = escapeEmailText(params.tier);
+  const org = escapeEmailText(params.tenantName);
+  return {
+    subject: `A ${params.tier} seat was given back to you`,
+    html: baseLayout(`
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="margin: 0; font-size: 22px; color: #1a1a1a;">A seat was given back to you</h1>
+        <p style="margin: 4px 0 0; color: #6b7280; font-family: 'Noto Sans Myanmar', sans-serif;">နေရာတစ်ခုကို သင့်ထံ ပြန်ပေးလိုက်ပါပြီ</p>
+      </div>
+
+      <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin: 20px 0;">
+        <p style="margin: 0; font-size: 14px; color: #1e3a8a;">
+          A seat you shared was given back to you. Open it in My Tickets to show its QR.
+        </p>
+        <p style="margin: 6px 0 0; font-size: 13px; color: #1e40af; font-family: 'Noto Sans Myanmar', sans-serif;">
+          သင်မျှဝေခဲ့သော နေရာတစ်ခုကို သင့်ထံ ပြန်ပေးလိုက်ပါပြီ။ QR ကိုပြရန် My Tickets တွင် ဖွင့်ပါ။
+        </p>
+      </div>
+
+      <p style="font-size: 13px; color: #374151; text-align: center;">
+        Ticket: <strong>${tier}</strong>
+      </p>
+    `, org, params.logoUrl),
+  };
+}
+
+// ── Order moved to another account (design 4.7 step 6) ───────────────────────
+// Sent to both addresses after the tenant owner moves an order. The old one has
+// no link: it exists so a real owner notices a wrong move and calls the organiser.
+//
+// NEEDS NATIVE REVIEW: every Myanmar line in these two emails is a draft.
+
+export function orderMovedAwayEmail(params: {
+  enrollmentRef: string;
+  tenantName: string;
+  logoUrl?: string;
+}): { subject: string; html: string } {
+  const ref = escapeEmailText(params.enrollmentRef);
+  const org = escapeEmailText(params.tenantName);
+  return {
+    subject: `Your order ${params.enrollmentRef} was moved to another account`,
+    html: baseLayout(`
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="margin: 0; font-size: 22px; color: #1a1a1a;">Your order was moved</h1>
+        <p style="margin: 4px 0 0; color: #6b7280; font-family: 'Noto Sans Myanmar', sans-serif;">သင့်အော်ဒါကို ရွှေ့ပြောင်းလိုက်ပါသည်</p>
+      </div>
+
+      <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 16px; margin: 20px 0;">
+        <p style="margin: 0; font-size: 14px; color: #92400e;">
+          Order <strong>${ref}</strong> was moved to another account by ${org}. If you didn't ask for this, contact ${org}.
+        </p>
+        <p style="margin: 6px 0 0; font-size: 13px; color: #a16207; font-family: 'Noto Sans Myanmar', sans-serif;">
+          အော်ဒါ <strong>${ref}</strong> ကို ${org} မှ အခြားအကောင့်တစ်ခုသို့ ရွှေ့လိုက်ပါသည်။ သင် မတောင်းဆိုခဲ့ပါက ${org} ကို ဆက်သွယ်ပါ။
+        </p>
+      </div>
+    `, org, params.logoUrl),
+  };
+}
+
+export function orderMovedInEmail(params: {
+  enrollmentRef: string;
+  tenantName: string;
+  /** /account/tickets on the tenant's own host. */
+  myTicketsUrl: string;
+  logoUrl?: string;
+}): { subject: string; html: string } {
+  const ref = escapeEmailText(params.enrollmentRef);
+  const org = escapeEmailText(params.tenantName);
+  const href = escapeEmailText(params.myTicketsUrl);
+  let host = params.myTicketsUrl;
+  try {
+    host = new URL(params.myTicketsUrl).host;
+  } catch {
+    // Shows the whole link when it can't be parsed.
+  }
+  const site = `<a href="${href}" style="color: #1a3f8a; font-weight: 600;">${escapeEmailText(host)}</a>`;
+  return {
+    subject: `Order ${params.enrollmentRef} was added to your account`,
+    html: baseLayout(`
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="margin: 0; font-size: 22px; color: #1a1a1a;">An order was added to your account</h1>
+        <p style="margin: 4px 0 0; color: #6b7280; font-family: 'Noto Sans Myanmar', sans-serif;">သင့်အကောင့်ထဲသို့ အော်ဒါတစ်ခု ထည့်ပြီးပါပြီ</p>
+      </div>
+
+      <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin: 20px 0;">
+        <p style="margin: 0; font-size: 14px; color: #1e3a8a;">
+          Order <strong>${ref}</strong> was added to your account. Sign in on ${site} to open your tickets.
+        </p>
+        <p style="margin: 6px 0 0; font-size: 13px; color: #1e40af; font-family: 'Noto Sans Myanmar', sans-serif;">
+          အော်ဒါ <strong>${ref}</strong> ကို သင့်အကောင့်ထဲသို့ ထည့်ပြီးပါပြီ။ သင့်လက်မှတ်များကို ဖွင့်ရန် ${site} တွင် အကောင့်ဝင်ပါ။
+        </p>
+      </div>
+    `, org, params.logoUrl),
   };
 }
 

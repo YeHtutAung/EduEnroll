@@ -75,6 +75,8 @@ export type SubmitEnrollmentResult =
         | "ENROLLMENT_CLOSED"
         | "PRIORITY_LINK_IN_PROGRESS"
         | "PRIORITY_LINK_USED"
+        | "BUYER_REQUIRED"
+        | "IDEMPOTENCY_CONFLICT"
         | "INTERNAL_ERROR";
       class_status?: ClassStatus;
       opens_at?: string;
@@ -255,6 +257,8 @@ export interface Intake {
   email_terms: string | null; // organiser's terms printed in the confirmation email; not shown at checkout; null = none
   font_css_url: string | null; // Adobe Fonts stylesheet for the landing page; see src/lib/eventFont.ts
   font_family: string | null; // CSS font-family from that stylesheet; set with font_css_url
+  /** Account-bound tickets: bought signed in, shown only on the buyer's phone (20261122130000). */
+  ticket_protection: boolean;
   created_at: string;
 }
 
@@ -316,6 +320,8 @@ export interface Enrollment {
   telegram_phone: string | null;
   telegram_link_token: string | null;
   telegram_link_token_expires_at: string | null;
+  /** The signed-in buyer (auth.users.id) who placed the order; null for guest orders. */
+  buyer_id: string | null;
 }
 
 export interface Payment {
@@ -423,6 +429,8 @@ export interface Ticket {
   last_scan_date: string | null;
   last_scan_at: string | null;
   last_scan_gate: string | null;
+  /** A friend who claimed this seat. NULL: the seat is with the order's buyer. */
+  holder_buyer_id: string | null;
   created_at: string;
 }
 
@@ -470,6 +478,94 @@ export interface MarketingPageVersion {
   created_at: string;
   updated_at: string;
   published_at: string | null;
+}
+
+// ─── Buyer accounts (service-role only) ───────────────────────────────────────
+
+export interface BuyerProfile {
+  id: string;
+  email: string;
+  // Unverified contact number; never used to sign in or find orders.
+  phone_e164: string | null;
+  name: string | null;
+  locale: "my" | "en";
+  is_reviewer: boolean;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface BuyerProfileClaim {
+  user_id: string;
+  token: string;
+  claimed_at: string;
+}
+
+export interface MobileRateLimit {
+  key: string;
+  window_start: string;
+  count: number;
+}
+
+// ─── Account-bound tickets (service-role only, 20261122130000) ────────────────
+
+export type TicketDeviceRevokedBy = "rebind" | "holder_changed" | "account_deleted" | "order_moved";
+
+export interface TicketDevice {
+  id: string;
+  ticket_id: string;
+  buyer_id: string | null;
+  /** Raw uncompressed P-256 point, base64url without padding (87 chars). */
+  public_key: string;
+  created_at: string;
+  revoked_at: string | null;
+  revoked_by: TicketDeviceRevokedBy | null;
+}
+
+export interface TicketShareLink {
+  id: string;
+  ticket_id: string;
+  /** SHA-256 hex of the link's token. The token itself is never stored. */
+  token_hash: string;
+  created_by: string | null;
+  created_at: string;
+  /** Display only; every function recomputes the cutoff. */
+  expires_at: string | null;
+  claimed_by: string | null;
+  claimed_at: string | null;
+  cancelled_at: string | null;
+}
+
+export type TicketHolderEventType =
+  | "link_created"
+  | "link_cancelled"
+  | "claimed"
+  | "given_back"
+  | "holder_deleted"
+  | "voided"
+  | "order_moved";
+
+export interface TicketHolderEvent {
+  id: string;
+  ticket_id: string;
+  event: TicketHolderEventType;
+  actor_buyer_id: string | null;
+  /** A public.users row (order_moved); at most one actor column is set. */
+  actor_staff_id: string | null;
+  from_buyer_id: string | null;
+  to_buyer_id: string | null;
+  created_at: string;
+}
+
+export interface OrderMove {
+  id: string;
+  enrollment_id: string;
+  tenant_id: string;
+  from_buyer_id: string | null;
+  to_buyer_id: string | null;
+  moved_by: string | null;
+  reason: string;
+  created_at: string;
 }
 
 // ─── Supabase Database shape ──────────────────────────────────────────────────
@@ -525,6 +621,50 @@ export interface Database {
         Insert: Partial<MarketingPageVersion> & { status: MarketingPageVersion["status"]; content: unknown };
         Update: Partial<MarketingPageVersion>;
       };
+      buyer_profiles: {
+        Row: BuyerProfile;
+        Insert: Pick<BuyerProfile, "id" | "email"> &
+          Partial<Omit<BuyerProfile, "id" | "email">>;
+        Update: Partial<Omit<BuyerProfile, "id" | "created_at">>;
+      };
+      buyer_profile_claims: {
+        Row: BuyerProfileClaim;
+        Insert: BuyerProfileClaim;
+        Update: Partial<BuyerProfileClaim>;
+      };
+      mobile_rate_limits: {
+        Row: MobileRateLimit;
+        Insert: Omit<MobileRateLimit, "count"> & { count?: number };
+        Update: Partial<MobileRateLimit>;
+      };
+      // Audit trail: service_role may SELECT, INSERT, UPDATE; never DELETE.
+      ticket_devices: {
+        Row: TicketDevice;
+        Insert: Pick<TicketDevice, "ticket_id" | "public_key"> &
+          Partial<Omit<TicketDevice, "ticket_id" | "public_key">>;
+        Update: Partial<Omit<TicketDevice, "id" | "created_at">>;
+      };
+      // Append-only: service_role may SELECT, INSERT.
+      order_moves: {
+        Row: OrderMove;
+        Insert: Pick<OrderMove, "enrollment_id" | "tenant_id" | "reason"> &
+          Partial<Omit<OrderMove, "enrollment_id" | "tenant_id" | "reason">>;
+        Update: Record<string, never>;
+      };
+      // service_role: ticket_share_links SELECT, INSERT, UPDATE; ticket_holder_events
+      // SELECT, INSERT only (append-only).
+      ticket_share_links: {
+        Row: TicketShareLink;
+        Insert: Pick<TicketShareLink, "ticket_id" | "token_hash"> &
+          Partial<Omit<TicketShareLink, "ticket_id" | "token_hash">>;
+        Update: Partial<Omit<TicketShareLink, "id" | "created_at">>;
+      };
+      ticket_holder_events: {
+        Row: TicketHolderEvent;
+        Insert: Pick<TicketHolderEvent, "ticket_id" | "event"> &
+          Partial<Omit<TicketHolderEvent, "ticket_id" | "event">>;
+        Update: Record<string, never>;
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -545,7 +685,13 @@ export interface Database {
         Returns: void;
       };
       submit_cart_enrollment: {
-        Args: { p_items: string; p_tenant_id?: string | null };
+        Args: {
+          p_items: string;
+          p_tenant_id?: string | null;
+          p_priority_token_hash?: string | null;
+          p_idempotency_key?: string | null;
+          p_buyer_id?: string | null;
+        };
         Returns: SubmitCartEnrollmentResult;
       };
       submit_enrollment: {
@@ -553,8 +699,84 @@ export interface Database {
           p_class_id: string;
           p_idempotency_key?: string | null;
           p_quantity?: number;
+          p_priority_token_hash?: string | null;
+          p_buyer_id?: string | null;
         };
         Returns: SubmitEnrollmentResult;
+      };
+      // Buyer accounts: service_role only.
+      claim_buyer_profile: {
+        Args: { p_user_id: string };
+        // A claim token (uuid), 'exists', or null while another caller holds a fresh claim.
+        Returns: string | null;
+      };
+      buyer_profile_claim_held: {
+        Args: { p_user_id: string; p_token: string };
+        Returns: boolean;
+      };
+      create_buyer_profile: {
+        Args: { p_user_id: string; p_token: string; p_email: string };
+        Returns: "created" | "existing" | "lost";
+      };
+      release_buyer_profile_claim: {
+        Args: { p_user_id: string; p_token: string };
+        Returns: void;
+      };
+      consume_rate_limit: {
+        Args: { p_key: string; p_window_seconds: number; p_limit: number };
+        Returns: boolean;
+      };
+      // Account-bound tickets: service_role only. One generic refusal each.
+      bind_ticket_device: {
+        Args: { p_ticket_id: string; p_tenant_id: string; p_buyer_id: string; p_public_key: string };
+        Returns: "bound_first" | "bound_again" | "unchanged" | "refused";
+      };
+      move_order_buyer: {
+        Args: {
+          p_enrollment_id: string;
+          p_tenant_id: string;
+          p_staff_user_id: string;
+          p_to_buyer_id: string;
+          p_reason: string;
+        };
+        Returns: { result: "moved" | "refused"; from_buyer_id: string | null }[];
+      };
+      revoke_buyer_ticket_devices: {
+        Args: { p_buyer_id: string };
+        Returns: number;
+      };
+      // Seat sharing (plan 4): service_role only. One generic refusal each.
+      share_cutoff: {
+        Args: { p_event_date: string | null };
+        Returns: string | null;
+      };
+      seat_open_for_sharing: {
+        Args: { p_ticket_id: string; p_tenant_id: string };
+        Returns: boolean;
+      };
+      create_share_link: {
+        Args: { p_ticket_id: string; p_tenant_id: string; p_leader_id: string; p_token_hash: string };
+        Returns: { result: "created" | "refused"; expires_at: string | null }[];
+      };
+      cancel_share_link: {
+        Args: { p_ticket_id: string; p_tenant_id: string; p_leader_id: string };
+        Returns: "cancelled" | "none" | "refused";
+      };
+      preview_share_link: {
+        Args: { p_token_hash: string; p_tenant_id: string; p_claimer_id: string };
+        Returns: { event_name: string; tier: string; seat_no: number; event_date: string }[];
+      };
+      claim_share_link: {
+        Args: { p_token_hash: string; p_tenant_id: string; p_claimer_id: string };
+        Returns: { result: "claimed" | "refused"; ticket_id: string | null; leader_id: string | null }[];
+      };
+      give_back_seat: {
+        Args: { p_ticket_id: string; p_tenant_id: string; p_holder_id: string };
+        Returns: { result: "given_back" | "refused"; leader_id: string | null }[];
+      };
+      void_enrollment_tickets: {
+        Args: { p_enrollment_id: string };
+        Returns: number;
       };
     };
     Enums: {

@@ -1,3 +1,8 @@
+// The default event time zone when TICKET_TZ is unset. move_order_buyer
+// (20261122130000_leaders_phone.sql) hard-codes the same zone; a database
+// test keeps the two equal.
+export const DEFAULT_TICKET_TZ = "Asia/Yangon";
+
 // Returns the tz's UTC offset (in ms) at the instant `date`, computed via
 // Intl.DateTimeFormat so it does not depend on the host system's own timezone.
 function getOffsetMs(date: Date, tz: string): number {
@@ -51,4 +56,15 @@ export function ticketExpiry(eventDate: string | null, tz: string): number {
   // offset(tz) at that date: difference between the tz's local time and UTC.
   const offsetMs = getOffsetMs(new Date(guess), tz);
   return Math.floor((guess - offsetMs) / 1000);
+}
+
+// Display only (plan 4 decision 5): the share cutoff, in Unix seconds. SQL's
+// share_cutoff() decides; it hard-codes Asia/Yangon, so this uses the default
+// zone and never TICKET_TZ.
+export function shareCutoffAt(eventDate: string | null): number | null {
+  if (!eventDate) return null;
+  const [y, m, d] = eventDate.split("-").map(Number);
+  const guess = Date.UTC(y, m - 1, d, 0, 0, 0);
+  const startOfDay = guess - getOffsetMs(new Date(guess), DEFAULT_TICKET_TZ);
+  return Math.floor(startOfDay / 1000) - 24 * 3600;
 }

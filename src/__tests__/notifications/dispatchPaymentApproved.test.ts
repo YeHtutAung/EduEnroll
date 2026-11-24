@@ -15,8 +15,14 @@ vi.mock("@/lib/email", () => ({
 
 const mockBuildEticketEmailAttachment = vi.fn().mockResolvedValue(null);
 
-vi.mock("@/server/tickets/eticketEmailAttachment", () => ({
-  buildEticketEmailAttachment: (...args: unknown[]) => mockBuildEticketEmailAttachment(...args),
+// Task 15: the helper is now buildTicketEmailParts; an unprotected order's
+// parts are { attachment, accountTickets: false }.
+vi.mock("@/server/tickets/eticketEmailAttachment", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/server/tickets/eticketEmailAttachment")>()),
+  buildTicketEmailParts: async (...args: unknown[]) => ({
+    attachment: await mockBuildEticketEmailAttachment(...args),
+    accountTickets: false,
+  }),
 }));
 
 const mockLoadEventEmailTerms = vi.fn().mockResolvedValue(null);

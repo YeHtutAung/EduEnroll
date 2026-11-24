@@ -15,6 +15,8 @@ import { resolveSponsorPlacements } from "@/lib/sponsors";
 import { renderTicketPng, buildQrMap } from "@/lib/tickets/render/ticketPng";
 import { buildTicketPdf } from "@/lib/tickets/render/ticketPdf";
 import type { TicketRenderContext } from "@/lib/tickets/render/types";
+import OpenMyTickets from "@/components/enroll/OpenMyTickets";
+import { accountTicketCountOf } from "@/lib/tickets/accountTickets";
 
 interface TicketData {
   jti: string;
@@ -43,6 +45,8 @@ interface EnrollmentData {
   card_last4?: string | null;
   payment_method?: string | null;
   tickets?: TicketData[];
+  /** Tickets on an account-bound event: not in `tickets`, opened on /account/tickets. */
+  account_ticket_count?: number;
 }
 
 function SuccessContent() {
@@ -244,6 +248,10 @@ function SuccessContent() {
   const ticketSummary = data.items.map((i) => `${i.level} × ${i.quantity}`).join(", ");
   const tickets = data.tickets ?? [];
   const ticketReady = tickets.length > 0;
+  // Account-bound tickets are issued too, just not shown here (design 8.1), so
+  // an order of only those is "successful", not "processing".
+  const accountTickets = accountTicketCountOf(data);
+  const orderIssued = ticketReady || accountTickets > 0;
   const paymentNeedsAttention = data.status === "rejected";
   const sponsors = resolveSponsorPlacements(data.sponsor_config);
 
@@ -273,7 +281,7 @@ function SuccessContent() {
         <h1 className="text-[14px] font-extrabold" style={{ color: "#0f1f42" }}>
           {paymentNeedsAttention
             ? "Payment needs attention"
-            : ticketReady
+            : orderIssued
               ? "Payment successful"
               : isPayNow
                 ? "PayNow confirmation is processing"
@@ -286,14 +294,19 @@ function SuccessContent() {
             ? `No ticket was issued. Contact support and quote ${data.enrollment_ref}.`
             : ticketReady
               ? "Your e-ticket is ready below"
-              : data.status === "payment_submitted"
-                ? "We'll verify your payment before issuing a ticket"
-                : "Do not submit another payment — check again shortly"}
+              : orderIssued
+                ? "Your ticket is on your account"
+                : data.status === "payment_submitted"
+                  ? "We'll verify your payment before issuing a ticket"
+                  : "Do not submit another payment — check again shortly"}
         </p>
       </div>
 
+      {/* Account-bound tickets: a link to the signed-in ticket page, no QR */}
+      <OpenMyTickets count={accountTickets} className="mb-4" />
+
       {/* Ticket stub(s) — one real, scannable e-ticket per admission when confirmed */}
-      {tickets.length > 0 ? (
+      {accountTickets > 0 && tickets.length === 0 ? null : tickets.length > 0 ? (
         <div className="mb-4 space-y-3">
           {tickets.map((ticket, i) => (
             <div

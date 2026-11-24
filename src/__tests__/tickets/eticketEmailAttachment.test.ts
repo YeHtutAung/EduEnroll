@@ -18,7 +18,7 @@ vi.mock("qrcode", async (importOriginal) => {
   return { default: { ...actual.default, toDataURL: toDataURLSpy } };
 });
 
-const { buildEticketEmailAttachment, renderEticketPdf } =
+const { buildTicketEmailParts, renderEticketPdf } =
   await import("@/server/tickets/eticketEmailAttachment");
 
 const ticket = (number: number, qrFormat: "jwt" | "uuid" = "jwt") => ({
@@ -101,7 +101,7 @@ describe("e-ticket QR payload", () => {
       error: null,
     });
 
-    await buildEticketEmailAttachment("enrollment-1");
+    await buildTicketEmailParts("enrollment-1");
 
     expect(encodedTexts()).toEqual(["e063be0c-1234-4000-8000-000000000001"]);
   });
@@ -112,17 +112,25 @@ describe("e-ticket QR payload", () => {
       error: null,
     });
 
-    await expect(buildEticketEmailAttachment("enrollment-1")).rejects.toThrow(
-      /unknown ticket QR format/,
-    );
+    // Task 15: a format error is a PDF failure, so it gives no attachment
+    // rather than throwing (the protection answer must survive it).
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    await expect(buildTicketEmailParts("enrollment-1")).resolves.toEqual({
+      attachment: null,
+      accountTickets: false,
+    });
+    // The failure must stay visible: without this log, an order with a bad
+    // format would go out with no PDF and no trace.
+    expect(spy).toHaveBeenCalledWith(expect.stringContaining("e-ticket PDF failed"), expect.anything());
+    spy.mockRestore();
     expect(toDataURLSpy).not.toHaveBeenCalled();
   });
 
   it("refuses to build an attachment when a ticket's event is missing from the lookup", async () => {
     mockAttachmentQueries({ data: [], error: null });
 
-    await expect(buildEticketEmailAttachment("enrollment-1")).rejects.toThrow(
-      /unknown ticket QR format/,
+    await expect(buildTicketEmailParts("enrollment-1")).rejects.toThrow(
+      /could not load event details for every ticket/,
     );
   });
 });
@@ -151,7 +159,10 @@ describe("renderEticketPdf", () => {
       table === "enrollments" ? enrollmentQuery : ticketsQuery,
     );
 
-    await expect(buildEticketEmailAttachment("enrollment-1")).resolves.toBeNull();
+    await expect(buildTicketEmailParts("enrollment-1")).resolves.toEqual({
+      attachment: null,
+      accountTickets: false,
+    });
     expect(mockAdmin.from).toHaveBeenCalledWith("enrollments");
     expect(mockAdmin.from).toHaveBeenCalledWith("tickets");
     expect(mockAdmin.from).not.toHaveBeenCalledWith("intakes");
@@ -181,7 +192,7 @@ describe("renderEticketPdf", () => {
       return intakesQuery;
     });
 
-    const attachment = await buildEticketEmailAttachment("enrollment-1");
+    const { attachment } = await buildTicketEmailParts("enrollment-1");
 
     expect(mockAdmin.from).toHaveBeenNthCalledWith(1, "enrollments");
     expect(mockAdmin.from).toHaveBeenNthCalledWith(2, "tickets");
