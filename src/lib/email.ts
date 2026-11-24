@@ -330,7 +330,7 @@ function escapeEmailText(text: string): string {
  * "Open My Tickets" for an order with account-bound tickets (design 6.3, 8.1).
  * Nothing at all without a link, so every other email is unchanged.
  *
- * NEEDS NATIVE REVIEW: the three Myanmar lines below are drafts.
+ * NEEDS NATIVE REVIEW: the four Myanmar lines below are drafts.
  */
 function myTicketsSection(myTicketsUrl: string | undefined): string {
   if (!myTicketsUrl) return "";
@@ -342,6 +342,8 @@ function myTicketsSection(myTicketsUrl: string | undefined): string {
         <p class="myanmar" style="margin: 4px 0 0; font-size: 13px; color: #1e40af; font-family: 'Noto Sans Myanmar', sans-serif;">သင့်လက်မှတ်သည် သင့်အကောင့်ထဲတွင် ရှိပါသည်။ ဤဝက်ဘ်ဆိုက်တွင် အကောင့်ဝင်၍ ဖွင့်ပါ။</p>
         <p style="margin: 8px 0 0; font-size: 13px; color: #1e3a8a;">Open it again on your phone before the event day, and keep the page open at the gate.</p>
         <p class="myanmar" style="margin: 4px 0 0; font-size: 13px; color: #1e40af; font-family: 'Noto Sans Myanmar', sans-serif;">ပွဲနေ့မတိုင်မီ သင့်ဖုန်းတွင် ပြန်ဖွင့်ထားပြီး ဝင်ပေါက်တွင် ထိုစာမျက်နှာကို ဖွင့်ထားပါ။</p>
+        <p style="margin: 8px 0 0; font-size: 13px; color: #1e3a8a;">You can share a seat with a friend from My Tickets until 24 hours before the event.</p>
+        <p class="myanmar" style="margin: 4px 0 0; font-size: 13px; color: #1e40af; font-family: 'Noto Sans Myanmar', sans-serif;">ပွဲမစတင်မီ ၂၄ နာရီအထိ "ကျွန်ုပ်၏ လက်မှတ်များ" မှ ထိုင်ခုံတစ်ခုကို သူငယ်ချင်းတစ်ဦးနှင့် မျှဝေနိုင်ပါသည်။</p>
       </div>`;
 }
 
