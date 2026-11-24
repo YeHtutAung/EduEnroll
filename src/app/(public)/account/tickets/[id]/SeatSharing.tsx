@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, type Ref } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Ref } from "react";
 import type { AccountTicket } from "@/app/api/me/tickets/route";
 import { Inline, Text, primaryButton, type Bilingual } from "../TicketList";
+import { canShareSheet, isPhoneUserAgent, shareSheet, shareTargets } from "./shareTargets";
 
 // ─── Seat sharing on /account/tickets/[id] (design 6.4, plan 4 Task 11) ─────
 //
@@ -61,7 +62,26 @@ const COPY = {
     en: "Something went wrong. Please try again.",
     mm: "တစ်ခုခု မှားယွင်းနေပါသည်။ ထပ်မံကြိုးစားပါ။",
   },
+  shareSheet: { en: "Share…", mm: "မျှဝေရန်…" }, // NEEDS NATIVE REVIEW
+  // {event} is replaced with the event's name, or with anEvent.
+  shareMessage: {
+    en: "I'm sharing a seat for {event} with you. Open this link to claim it:",
+    mm: "{event} အတွက် ထိုင်ခုံတစ်ခုကို သင့်ထံ မျှဝေပေးပါသည်။ ရယူရန် ဤလင့်ခ်ကို ဖွင့်ပါ:", // NEEDS NATIVE REVIEW
+  },
+  anEvent: { en: "an event", mm: "ပွဲတစ်ခု" }, // NEEDS NATIVE REVIEW
 } satisfies Record<string, Bilingual>;
+
+/**
+ * The text sent with the share link: English, then Myanmar. The API falls
+ * back to "Event" when it has no name, so that counts as no name too.
+ */
+export function shareMessage(eventName: string | null | undefined): string {
+  const name = eventName?.trim();
+  const known = name && name !== "Event" ? name : null;
+  const en = COPY.shareMessage.en.replace("{event}", known ?? COPY.anEvent.en);
+  const mm = COPY.shareMessage.mm.replace("{event}", known ?? COPY.anEvent.mm);
+  return `${en}\n${mm}`;
+}
 
 const secondaryButton =
   "inline-block w-full rounded-lg border border-gray-300 bg-white px-5 py-3 text-center text-sm font-semibold text-gray-800 hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed";
@@ -109,6 +129,50 @@ export interface SeatSharingViewProps {
   urlInputRef?: Ref<HTMLInputElement>;
   /** Unix seconds; tests pin it. Defaults to the current time. */
   now?: number;
+  /** Known only after mount (user agent); false on the server render. Shows Viber and Messenger. */
+  isPhone?: boolean;
+  /** navigator.share exists; known only after mount. Shows "Share…". */
+  shareSheetAvailable?: boolean;
+  onShareSheet?: () => void;
+}
+
+const appButton =
+  "inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm font-semibold text-gray-800 hover:bg-gray-50";
+
+function ShareToApps({ url, eventName, isPhone, shareSheetAvailable, onShareSheet }: {
+  url: string;
+  eventName: string;
+  isPhone: boolean;
+  shareSheetAvailable: boolean;
+  onShareSheet?: () => void;
+}) {
+  const links = shareTargets(url, shareMessage(eventName));
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {shareSheetAvailable && onShareSheet ? (
+        <button
+          type="button"
+          onClick={onShareSheet}
+          className="inline-flex items-center justify-center rounded-lg bg-[#1a6b3c] px-4 py-2 text-sm font-semibold text-white hover:bg-[#155d33]"
+        >
+          <Inline copy={COPY.shareSheet} />
+        </button>
+      ) : null}
+      {isPhone ? (
+        <>
+          <a href={links.messenger} className={appButton}>
+            Messenger
+          </a>
+          <a href={links.viber} className={appButton}>
+            Viber
+          </a>
+        </>
+      ) : null}
+      <a href={links.telegram} target="_blank" rel="noopener noreferrer" className={appButton}>
+        Telegram
+      </a>
+    </div>
+  );
 }
 
 function ClosesAt({ at }: { at: number | null }) {
@@ -163,6 +227,13 @@ function LeaderSharing(props: SeatSharingViewProps) {
               {ui.copied ? <Inline copy={COPY.copied} /> : <Inline copy={COPY.copy} />}
             </button>
           </div>
+          <ShareToApps
+            url={ui.url}
+            eventName={ticket.eventName}
+            isPhone={props.isPhone ?? false}
+            shareSheetAvailable={props.shareSheetAvailable ?? false}
+            onShareSheet={props.onShareSheet}
+          />
         </div>
       ) : ui.linkOpen ? (
         <p className="mb-3 text-center text-sm font-medium text-gray-800">
@@ -327,6 +398,19 @@ export default function SeatSharing({ ticket }: { ticket: AccountTicket }) {
     }
   }, [patch]);
 
+  // Device facts are read after mount so the first client render matches the
+  // server's (Telegram only, no Share…): no hydration mismatch.
+  const [device, setDevice] = useState({ isPhone: false, shareSheetAvailable: false });
+  useEffect(() => {
+    setDevice({ isPhone: isPhoneUserAgent(navigator.userAgent), shareSheetAvailable: canShareSheet(navigator) });
+  }, []);
+
+  const onShareSheet = useCallback(() => {
+    if (!ui.url) return;
+    // Cancelled or failed: nothing to show; Copy and the app links stay.
+    void shareSheet(navigator, ui.url, shareMessage(ticket.eventName));
+  }, [ui.url, ticket.eventName]);
+
   return (
     <SeatSharingView
       ticket={ticket}
@@ -338,6 +422,9 @@ export default function SeatSharing({ ticket }: { ticket: AccountTicket }) {
       onConfirmGiveBack={() => void requests.giveBack()}
       onKeep={() => patch({ confirmingGiveBack: false })}
       urlInputRef={inputRef}
+      isPhone={device.isPhone}
+      shareSheetAvailable={device.shareSheetAvailable}
+      onShareSheet={onShareSheet}
     />
   );
 }
