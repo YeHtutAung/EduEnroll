@@ -38,6 +38,13 @@ function ticket(over: Partial<AccountTicket> = {}): AccountTicket {
     eventDate: "2026-12-20",
     endDate: null,
     bound: false,
+    role: "leader",
+    sharedWith: null,
+    leaderEmail: null,
+    linkOpen: false,
+    canShare: false,
+    canGiveBack: false,
+    shareClosesAt: null,
     ...over,
   };
 }

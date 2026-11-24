@@ -429,6 +429,8 @@ export interface Ticket {
   last_scan_date: string | null;
   last_scan_at: string | null;
   last_scan_gate: string | null;
+  /** A friend who claimed this seat. NULL: the seat is with the order's buyer. */
+  holder_buyer_id: string | null;
   created_at: string;
 }
 
@@ -518,6 +520,41 @@ export interface TicketDevice {
   created_at: string;
   revoked_at: string | null;
   revoked_by: TicketDeviceRevokedBy | null;
+}
+
+export interface TicketShareLink {
+  id: string;
+  ticket_id: string;
+  /** SHA-256 hex of the link's token. The token itself is never stored. */
+  token_hash: string;
+  created_by: string | null;
+  created_at: string;
+  /** Display only; every function recomputes the cutoff. */
+  expires_at: string | null;
+  claimed_by: string | null;
+  claimed_at: string | null;
+  cancelled_at: string | null;
+}
+
+export type TicketHolderEventType =
+  | "link_created"
+  | "link_cancelled"
+  | "claimed"
+  | "given_back"
+  | "holder_deleted"
+  | "voided"
+  | "order_moved";
+
+export interface TicketHolderEvent {
+  id: string;
+  ticket_id: string;
+  event: TicketHolderEventType;
+  actor_buyer_id: string | null;
+  /** A public.users row (order_moved); at most one actor column is set. */
+  actor_staff_id: string | null;
+  from_buyer_id: string | null;
+  to_buyer_id: string | null;
+  created_at: string;
 }
 
 export interface OrderMove {
@@ -614,6 +651,20 @@ export interface Database {
           Partial<Omit<OrderMove, "enrollment_id" | "tenant_id" | "reason">>;
         Update: Record<string, never>;
       };
+      // service_role: ticket_share_links SELECT, INSERT, UPDATE; ticket_holder_events
+      // SELECT, INSERT only (append-only).
+      ticket_share_links: {
+        Row: TicketShareLink;
+        Insert: Pick<TicketShareLink, "ticket_id" | "token_hash"> &
+          Partial<Omit<TicketShareLink, "ticket_id" | "token_hash">>;
+        Update: Partial<Omit<TicketShareLink, "id" | "created_at">>;
+      };
+      ticket_holder_events: {
+        Row: TicketHolderEvent;
+        Insert: Pick<TicketHolderEvent, "ticket_id" | "event"> &
+          Partial<Omit<TicketHolderEvent, "ticket_id" | "event">>;
+        Update: Record<string, never>;
+      };
     };
     Views: Record<string, never>;
     Functions: {
@@ -692,6 +743,39 @@ export interface Database {
       };
       revoke_buyer_ticket_devices: {
         Args: { p_buyer_id: string };
+        Returns: number;
+      };
+      // Seat sharing (plan 4): service_role only. One generic refusal each.
+      share_cutoff: {
+        Args: { p_event_date: string | null };
+        Returns: string | null;
+      };
+      seat_open_for_sharing: {
+        Args: { p_ticket_id: string; p_tenant_id: string };
+        Returns: boolean;
+      };
+      create_share_link: {
+        Args: { p_ticket_id: string; p_tenant_id: string; p_leader_id: string; p_token_hash: string };
+        Returns: { result: "created" | "refused"; expires_at: string | null }[];
+      };
+      cancel_share_link: {
+        Args: { p_ticket_id: string; p_tenant_id: string; p_leader_id: string };
+        Returns: "cancelled" | "none" | "refused";
+      };
+      preview_share_link: {
+        Args: { p_token_hash: string; p_tenant_id: string; p_claimer_id: string };
+        Returns: { event_name: string; tier: string; seat_no: number; event_date: string }[];
+      };
+      claim_share_link: {
+        Args: { p_token_hash: string; p_tenant_id: string; p_claimer_id: string };
+        Returns: { result: "claimed" | "refused"; ticket_id: string | null; leader_id: string | null }[];
+      };
+      give_back_seat: {
+        Args: { p_ticket_id: string; p_tenant_id: string; p_holder_id: string };
+        Returns: { result: "given_back" | "refused"; leader_id: string | null }[];
+      };
+      void_enrollment_tickets: {
+        Args: { p_enrollment_id: string };
         Returns: number;
       };
     };

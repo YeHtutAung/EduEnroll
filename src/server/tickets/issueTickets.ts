@@ -250,13 +250,17 @@ async function issueTicketsInner(enrollmentId: string): Promise<void> {
   if (error) throw new Error(`issueTickets upsert failed: ${JSON.stringify(error)}`);
 }
 
-/** Marks every ticket belonging to an enrollment as void (e.g. on refund/cancellation). */
+/**
+ * Voids the order's tickets, cancels their open share links and logs `voided`,
+ * under the ticket locks (design 6.4). No caller yet (plan 4 decision 1).
+ */
 export async function voidTicketsForEnrollment(enrollmentId: string): Promise<void> {
   const supabase = createAdminClient();
-  await supabase
-    .from("tickets")
-    .update({ status: "void" } as never)
-    .eq("enrollment_id", enrollmentId);
+  const { error } = await supabase.rpc("void_enrollment_tickets" as never, { p_enrollment_id: enrollmentId } as never);
+  if (error) {
+    console.error("[voidTicketsForEnrollment] void failed", (error as { code?: string }).code ?? "");
+    throw new Error("void failed");
+  }
 }
 
 /**
