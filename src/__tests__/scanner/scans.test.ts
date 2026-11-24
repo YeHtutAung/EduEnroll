@@ -69,6 +69,7 @@ interface TicketLoadRow {
   exp: string;
   first_scan_at: string | null;
   first_scan_gate: string | null;
+  holder_buyer_id?: string | null;
   classes?: { event_date: string | null; end_time: string | null } | null;
   intakes?: { ticket_protection: boolean } | null;
   enrollments?: { buyer_id: string | null } | null;
@@ -744,6 +745,66 @@ describe("POST /api/scans — protected tickets", () => {
   it("refuses when the order embed is missing and the phone has no buyer", async () => {
     const { updateSpy } = setupTicketMock({
       load: load({ enrollments: null }),
+      device: { public_key: bound.dk, buyer_id: null },
+      claimed: CLAIMED,
+    });
+    const res = await scan(k2For(bound));
+    expect(res.status).toBe(404);
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  // ── Seat sharing: the phone must be the current holder's (design 7 step 5) ──
+  const FRIEND = "friend-1";
+
+  it("asks for the seat's holder alongside the order's buyer", async () => {
+    const { ticketSelectSpy } = setupTicketMock({
+      load: load(),
+      device: { public_key: bound.dk, buyer_id: BUYER },
+      claimed: CLAIMED,
+    });
+    await scan(k2For(bound));
+    const sel = String(ticketSelectSpy.mock.calls[0]?.[0] ?? "");
+    expect(sel).toContain("holder_buyer_id");
+  });
+
+  it("admits a claimed seat from the active phone of the friend who holds it", async () => {
+    const { updateSpy } = setupTicketMock({
+      load: load({ holder_buyer_id: FRIEND }),
+      device: { public_key: bound.dk, buyer_id: FRIEND },
+      claimed: CLAIMED,
+    });
+    const res = await scan(k2For(bound));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(updateSpy).toHaveBeenCalled();
+  });
+
+  it("refuses a claimed seat when the active phone is the leader's", async () => {
+    const { updateSpy } = setupTicketMock({
+      load: load({ holder_buyer_id: FRIEND }),
+      device: { public_key: bound.dk, buyer_id: BUYER },
+      claimed: CLAIMED,
+    });
+    const res = await scan(k2For(bound));
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: "Not Found", message: "Ticket not found." });
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  it("admits the leader's phone when nobody has claimed the seat", async () => {
+    const { updateSpy } = setupTicketMock({
+      load: load({ holder_buyer_id: null }),
+      device: { public_key: bound.dk, buyer_id: BUYER },
+      claimed: CLAIMED,
+    });
+    const res = await scan(k2For(bound));
+    expect(res.status).toBe(200);
+    expect(updateSpy).toHaveBeenCalled();
+  });
+
+  it("refuses a claimed seat when the friend's phone has no buyer, even with the order embed missing", async () => {
+    const { updateSpy } = setupTicketMock({
+      load: load({ holder_buyer_id: FRIEND, enrollments: null }),
       device: { public_key: bound.dk, buyer_id: null },
       claimed: CLAIMED,
     });

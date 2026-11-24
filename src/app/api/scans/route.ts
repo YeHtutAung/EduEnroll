@@ -27,7 +27,7 @@ import { lastEventDate, todayInTz } from "@/lib/tickets/exp";
 // `k2.<bound token>.<ts>.<devsig>`, signed every 15 seconds by the buyer's
 // phone (design section 7). Its envelope, both signatures and its time window
 // are checked before any query; the phone must then be the ticket's active
-// device for the order's buyer. A plain token for a protected ticket, or a k2
+// device for the seat's current holder. A plain token for a protected ticket, or a k2
 // QR for an unprotected one, is not an admission.
 //
 // `jti`/`eid` are optional and advisory. The verified claims are the source of
@@ -41,6 +41,8 @@ interface TicketRow {
   exp: string;
   first_scan_at: string | null;
   first_scan_gate: string | null;
+  // A friend who claimed the seat (seat sharing). NULL: the order's buyer holds it.
+  holder_buyer_id: string | null;
   classes: { event_date: string | null; end_time: string | null } | null;
   intakes: { ticket_protection: boolean } | null;
   enrollments: { buyer_id: string | null } | null;
@@ -173,7 +175,7 @@ export async function POST(request: NextRequest) {
   const { data: ticket, error: loadError } = (await supabase
     .from("tickets")
     .select(
-      "id, intake_id, status, exp, first_scan_at, first_scan_gate, classes(event_date, end_time), intakes(ticket_protection), enrollments(buyer_id)",
+      "id, intake_id, status, exp, first_scan_at, first_scan_gate, holder_buyer_id, classes(event_date, end_time), intakes(ticket_protection), enrollments(buyer_id)",
     )
     .eq("id", jti)
     .eq("tenant_id", tenantId)
@@ -211,21 +213,22 @@ export async function POST(request: NextRequest) {
       error: unknown;
     };
     if (deviceError) return scanUnavailable("device load", deviceError);
-    // The phone must be the active one, and it must belong to the order's
-    // buyer. Both buyer ids must be present: two missing buyers are not a match.
+    // The phone must be the active one, and it must belong to the current
+    // holder (design 7 step 5): the friend who claimed the seat, or else the
+    // order's buyer. Both ids must be present: two missing buyers are not a match.
     //
     // A rebind that lands between this check and the admission UPDATE below
     // can admit the old phone once. Accepted (plan decision 6, design section
     // 13); closing it would mean moving admission into SQL.
-    const buyerId = ticket.enrollments?.buyer_id ?? null;
+    const holderId = ticket.holder_buyer_id ?? ticket.enrollments?.buyer_id ?? null;
     const deviceBuyerId = device?.buyer_id ?? null;
     if (
       !device ||
       !deviceKey ||
       device.public_key !== deviceKey ||
-      !buyerId ||
+      !holderId ||
       !deviceBuyerId ||
-      deviceBuyerId !== buyerId
+      deviceBuyerId !== holderId
     ) {
       return notFound();
     }

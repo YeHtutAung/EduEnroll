@@ -801,6 +801,78 @@ export function ticketNewPhoneEmail(params: {
   };
 }
 
+// ── Seat sharing (design 6.4) ────────────────────────────────────────────────
+// Sent to the leader when a friend claims a shared seat, and when a friend
+// gives one back. Neither carries a link or token. `claimedBy` is already
+// masked by the caller; the full address never reaches this builder.
+//
+// NEEDS NATIVE REVIEW: every Myanmar line in these two emails is a draft.
+
+export function seatClaimedEmail(params: {
+  tier: string;
+  /** Masked address of the friend who claimed the seat. */
+  claimedBy: string;
+  tenantName: string;
+  logoUrl?: string;
+}): { subject: string; html: string } {
+  const tier = escapeEmailText(params.tier);
+  const who = escapeEmailText(params.claimedBy);
+  const org = escapeEmailText(params.tenantName);
+  return {
+    subject: `Your ${params.tier} seat was claimed`,
+    html: baseLayout(`
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="margin: 0; font-size: 22px; color: #1a1a1a;">Your seat was claimed</h1>
+        <p style="margin: 4px 0 0; color: #6b7280; font-family: 'Noto Sans Myanmar', sans-serif;">သင့်နေရာကို လက်ခံယူလိုက်ပါပြီ</p>
+      </div>
+
+      <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin: 20px 0;">
+        <p style="margin: 0; font-size: 14px; color: #1e3a8a;">
+          Your seat was claimed by <strong>${who}</strong>. Only their phone can show its QR now.
+        </p>
+        <p style="margin: 6px 0 0; font-size: 13px; color: #1e40af; font-family: 'Noto Sans Myanmar', sans-serif;">
+          သင့်နေရာကို <strong>${who}</strong> က လက်ခံယူလိုက်ပါပြီ။ ယခု သူ၏ဖုန်းမှသာ QR ကို ပြနိုင်ပါသည်။
+        </p>
+      </div>
+
+      <p style="font-size: 13px; color: #374151; text-align: center;">
+        Ticket: <strong>${tier}</strong>
+      </p>
+    `, org, params.logoUrl),
+  };
+}
+
+export function seatGivenBackEmail(params: {
+  tier: string;
+  tenantName: string;
+  logoUrl?: string;
+}): { subject: string; html: string } {
+  const tier = escapeEmailText(params.tier);
+  const org = escapeEmailText(params.tenantName);
+  return {
+    subject: `A ${params.tier} seat was given back to you`,
+    html: baseLayout(`
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="margin: 0; font-size: 22px; color: #1a1a1a;">A seat was given back to you</h1>
+        <p style="margin: 4px 0 0; color: #6b7280; font-family: 'Noto Sans Myanmar', sans-serif;">နေရာတစ်ခုကို သင့်ထံ ပြန်ပေးလိုက်ပါပြီ</p>
+      </div>
+
+      <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 16px; margin: 20px 0;">
+        <p style="margin: 0; font-size: 14px; color: #1e3a8a;">
+          A seat you shared was given back to you. Open it in My Tickets to show its QR.
+        </p>
+        <p style="margin: 6px 0 0; font-size: 13px; color: #1e40af; font-family: 'Noto Sans Myanmar', sans-serif;">
+          သင်မျှဝေခဲ့သော နေရာတစ်ခုကို သင့်ထံ ပြန်ပေးလိုက်ပါပြီ။ QR ကိုပြရန် My Tickets တွင် ဖွင့်ပါ။
+        </p>
+      </div>
+
+      <p style="font-size: 13px; color: #374151; text-align: center;">
+        Ticket: <strong>${tier}</strong>
+      </p>
+    `, org, params.logoUrl),
+  };
+}
+
 // ── Order moved to another account (design 4.7 step 6) ───────────────────────
 // Sent to both addresses after the tenant owner moves an order. The old one has
 // no link: it exists so a real owner notices a wrong move and calls the organiser.

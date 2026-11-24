@@ -91,8 +91,7 @@ vi.mock("@/server/conversions/sendPendingConversions", () => ({
   sendPendingConversions: (...a: unknown[]) => mockSendPending(...a),
 }));
 
-const { issueTicketsForEnrollment, voidTicketsForEnrollment } =
-  await import("@/server/tickets/issueTickets");
+const { issueTicketsForEnrollment } = await import("@/server/tickets/issueTickets");
 
 beforeAll(() => {
   const { privateKey } = generateKeyPairSync("ed25519");
@@ -254,15 +253,7 @@ describe("issueTicketsForEnrollment — ticket packages", () => {
   });
 });
 
-describe("voidTicketsForEnrollment", () => {
-  it("marks all tickets for the enrollment as void", async () => {
-    await voidTicketsForEnrollment("e1");
-
-    expect(mockAdminFrom).toHaveBeenCalledWith("tickets");
-    expect(mockUpdate).toHaveBeenCalledWith({ status: "void" });
-    expect(mockUpdateEq).toHaveBeenCalledWith("enrollment_id", "e1");
-  });
-});
+// voidTicketsForEnrollment: see src/__tests__/server/tickets/voidTickets.test.ts.
 
 // ─── Admission guard (#oversell) ─────────────────────────────────────
 // A ticket is an admission. Issuing one for an enrollment that is no longer

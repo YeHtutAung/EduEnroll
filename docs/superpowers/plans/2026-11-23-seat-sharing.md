@@ -55,7 +55,7 @@ Part B branches from `dev` after Part A merges.
    - The claim function stays the authority.
 5. **The cutoff appears in TypeScript only for display.** `shareCutoffAt(eventDate)` in `src/lib/tickets/exp.ts` uses `DEFAULT_TICKET_TZ` (never `TICKET_TZ`), because the SQL hard-codes `Asia/Yangon`. A database test compares the two for a fixed date. Every decision is made in SQL, under the lock.
 6. **Hashing the claim IP.** The claim's per-IP limit key is `claimip:` plus the first 22 characters of the base64url SHA-256 of `clientIpFrom(headers)`. A raw IP never goes into `rate_limit_counters`.
-7. **Replacing a link logs only `link_created`.** Design 6.4 says create "cancels any open link, inserts the new one, logs `link_created`". The replaced link has `cancelled_at` set, and its replacement is visible as a second `link_created`. `link_cancelled` is logged only by an explicit cancel, a void, a move or a deletion.
+7. **Replacing a link logs only `link_created`.** Design 6.4 says create "cancels any open link, inserts the new one, logs `link_created`". The replaced link has `cancelled_at` set, and its replacement is visible as a second `link_created`. `link_cancelled` is logged only by an explicit cancel or a deletion. A void or a move also cancels the open link, but logs only `voided` or `order_moved`.
 8. **Deletion stays one call.** `revoke_buyer_ticket_devices(buyer)` keeps its name, signature and return value, so the wrapper and the #451 hand-over stay valid. It now also:
    - logs `holder_deleted` for seats the buyer holds as a friend, once per (ticket, buyer), so a retried or swept deletion doesn't log twice;
    - cancels the buyer's open links and logs `link_cancelled`.
