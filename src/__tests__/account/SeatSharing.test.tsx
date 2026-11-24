@@ -9,6 +9,7 @@ import SeatSharing, {
   initialSharingUi,
   sharingRequests,
   shareClosesLabel,
+  shareMessage,
   type SharingUi,
 } from "@/app/(public)/account/tickets/[id]/SeatSharing";
 
@@ -112,6 +113,87 @@ describe("SeatSharingView: leader", () => {
   it("busy: the buttons are disabled", () => {
     const html = render(ticket({ canShare: true }), { busy: true });
     expect(html).toMatch(/<button[^>]+disabled=""/);
+  });
+});
+
+describe("SeatSharingView: share to an app", () => {
+  const shown = { url: URL_SECRET, linkOpen: true };
+  const renderWith = (ui: Partial<SharingUi>, extra: { isPhone?: boolean; shareSheetAvailable?: boolean } = {}) => {
+    const t = ticket({ canShare: true });
+    return renderToStaticMarkup(
+      <SeatSharingView
+        ticket={t}
+        ui={{ ...initialSharingUi(t), ...ui }}
+        now={BEFORE_CUTOFF}
+        {...actions}
+        onShareSheet={noop}
+        {...extra}
+      />,
+    );
+  };
+
+  it("Telegram on every device, opening in a new tab without a referrer", () => {
+    const html = renderWith(shown);
+    expect(html).toContain("https://t.me/share/url?url=");
+    expect(html).toMatch(/<a[^>]+href="https:\/\/t\.me\/share\/url[^"]*"[^>]*target="_blank"/);
+    expect(html).toMatch(/<a[^>]+t\.me[^>]+rel="noopener noreferrer"/);
+    expect(html).toContain("Telegram");
+  });
+
+  it("Viber and Messenger only on a phone", () => {
+    const desktop = renderWith(shown);
+    expect(desktop).not.toContain("viber://");
+    expect(desktop).not.toContain("fb-messenger://");
+
+    const phone = renderWith(shown, { isPhone: true });
+    expect(phone).toContain("viber://forward?text=");
+    expect(phone).toContain("fb-messenger://share?link=");
+    expect(phone).toContain("Viber");
+    expect(phone).toContain("Messenger");
+  });
+
+  it("Share… only when the browser has a share sheet", () => {
+    expect(renderWith(shown)).not.toContain("Share…");
+    expect(renderWith(shown, { shareSheetAvailable: true })).toContain("Share…");
+  });
+
+  it("no app buttons before a link exists, or when only 'Link sent' is known", () => {
+    for (const ui of [{}, { linkOpen: true }]) {
+      const html = renderWith(ui, { isPhone: true, shareSheetAvailable: true });
+      expect(html).not.toContain("t.me");
+      expect(html).not.toContain("viber://");
+      expect(html).not.toContain("fb-messenger://");
+      expect(html).not.toContain("Share…");
+    }
+  });
+
+  it("the default export's first render shows Telegram only (phone and share sheet are known after mount)", () => {
+    // Static render runs no effects: same markup as the server, so no hydration mismatch.
+    const html = renderWith(shown);
+    expect(html).toContain("t.me/share/url");
+    expect(html).not.toContain("viber://");
+  });
+
+  it("the shared text names the event, in both languages, and the hrefs carry the encoded secret", () => {
+    const html = renderWith(shown, { isPhone: true });
+    // (The apostrophe in "I'm" is HTML-escaped in the attribute, so match after it.)
+    expect(html).toContain(encodeURIComponent("sharing a seat for Sky Festival with you. Open this link to claim it:"));
+    expect(html).toContain("%23AbCdEf");
+  });
+});
+
+describe("shareMessage", () => {
+  it("names the event, English then Myanmar", () => {
+    const m = shareMessage("Sky Festival");
+    expect(m).toContain("I'm sharing a seat for Sky Festival with you. Open this link to claim it:");
+    expect(m).toMatch(MYANMAR);
+    expect(m.indexOf("I'm sharing")).toBe(0);
+  });
+
+  it("no event name (or the API's 'Event' placeholder): an event", () => {
+    for (const name of ["", "   ", "Event", null]) {
+      expect(shareMessage(name)).toContain("I'm sharing a seat for an event with you.");
+    }
   });
 });
 
