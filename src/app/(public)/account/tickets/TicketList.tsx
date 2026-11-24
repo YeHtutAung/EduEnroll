@@ -22,6 +22,9 @@ const COPY = {
   ticket: { en: "Ticket", mm: "လက်မှတ်" },
   phoneLinked: { en: "Phone linked", mm: "ဖုန်းနှင့် ချိတ်ဆက်ထားသည်" },
   open: { en: "Show QR", mm: "QR ပြရန်" },
+  claimedBy: { en: "Claimed by", mm: "ရယူသူ" }, // NEEDS NATIVE REVIEW
+  from: { en: "From", mm: "ပေးသူ" }, // NEEDS NATIVE REVIEW
+  linkSent: { en: "Link sent", mm: "လင့်ခ် ပို့ပြီး" }, // NEEDS NATIVE REVIEW
   somethingWrong: {
     en: "Something went wrong. Please try again.",
     mm: "တစ်ခုခု မှားယွင်းနေပါသည်။ ထပ်မံကြိုးစားပါ။",
@@ -116,8 +119,32 @@ function TicketRow({ t }: { t: AccountTicket }) {
           <Inline copy={COPY.phoneLinked} />
         </p>
       ) : null}
+      {t.status === "valid" && t.role === "holder" && t.leaderEmail ? (
+        <p className="mt-0.5 text-xs text-gray-500">
+          {COPY.from.en} {t.leaderEmail} / <span className="font-myanmar">{COPY.from.mm} {t.leaderEmail}</span>
+        </p>
+      ) : null}
+      {t.status === "valid" && t.linkOpen && !t.sharedWith ? (
+        <p className="mt-0.5 text-xs text-gray-500">
+          <Inline copy={COPY.linkSent} />
+        </p>
+      ) : null}
     </div>
   );
+  if (t.status === "valid" && t.sharedWith) {
+    // A friend holds this seat: the leader has no QR for it, so no link to the ticket page.
+    return (
+      <li className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
+        {label}
+        <span className="shrink-0 text-right text-xs font-medium text-gray-700">
+          {COPY.claimedBy.en} {t.sharedWith}
+          <span className="font-myanmar block">
+            {COPY.claimedBy.mm} {t.sharedWith}
+          </span>
+        </span>
+      </li>
+    );
+  }
   if (t.status === "void") {
     return (
       <li className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4 opacity-75">

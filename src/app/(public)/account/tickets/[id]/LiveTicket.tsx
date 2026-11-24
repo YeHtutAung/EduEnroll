@@ -6,6 +6,7 @@ import type { AccountTicket } from "@/app/api/me/tickets/route";
 import { clearToken, deviceKey, k2TextAt, loadToken, saveToken } from "@/lib/tickets/deviceKey";
 import { K2_PERIOD_SECONDS, qrSlot, qrTs, secondsLeftAt } from "@/lib/tickets/liveClock";
 import { canFallBack, decide, profileStep, type BindOutcome } from "./liveTicketFlow";
+import SeatSharing from "./SeatSharing";
 import {
   Card,
   Inline,
@@ -43,6 +44,10 @@ const COPY = {
     en: "This ticket isn't available on this account.",
     mm: "ဤလက်မှတ်ကို ဤအကောင့်တွင် အသုံးပြု၍ မရပါ။",
   },
+  withSomeoneElse: {
+    en: "This seat is with someone else now.",
+    mm: "ဤထိုင်ခုံသည် ယခု အခြားသူထံတွင် ရှိနေပါသည်။", // NEEDS NATIVE REVIEW
+  },
   error: {
     en: "We couldn't load your ticket. Check your connection and try again.",
     mm: "သင့်လက်မှတ်ကို ဖွင့်၍ မရပါ။ အင်တာနက် ချိတ်ဆက်မှုကို စစ်ဆေးပြီး ထပ်မံကြိုးစားပါ။",
@@ -77,7 +82,7 @@ const COPY = {
 export type LiveTicketState =
   | { kind: "loading" }
   | { kind: "signedOut" }
-  | { kind: "notAvailable" }
+  | { kind: "notAvailable"; sharedAway?: boolean }
   | { kind: "noStorage" }
   | { kind: "error" }
   | {
@@ -158,6 +163,7 @@ function Body({ ticketId, state, onRetry }: LiveTicketViewProps) {
       return (
         <Card>
           <Message copy={COPY.notAvailable} />
+          {state.sharedAway ? <Message copy={COPY.withSomeoneElse} /> : null}
         </Card>
       );
     case "noStorage":
@@ -213,6 +219,7 @@ function Body({ ticketId, state, onRetry }: LiveTicketViewProps) {
               <Text copy={COPY.homeScreen} />
             </div>
           ) : null}
+          {state.ticket ? <SeatSharing ticket={state.ticket} /> : null}
           <p className="mt-4 text-center text-xs text-gray-500">
             <Inline copy={COPY.signedInAs} />
           </p>
@@ -251,7 +258,8 @@ interface Session {
 }
 
 type Loaded =
-  | { kind: "signedOut" | "notAvailable" | "noStorage" | "error" }
+  | { kind: "signedOut" | "noStorage" | "error" }
+  | { kind: "notAvailable"; sharedAway: boolean }
   | { kind: "ready"; email: string; ticket: AccountTicket | null; session: Session; notice: "stale" | null };
 
 const fetchJson = (url: string, init?: RequestInit) =>
@@ -337,7 +345,8 @@ async function load(ticketId: string): Promise<Loaded> {
       return { kind: d.kind };
     case "notAvailable":
       await clearToken(buyerId, ticketId).catch(() => undefined);
-      return { kind: "notAvailable" };
+      // The bind answers one 404; the list says whether a friend claimed this seat.
+      return { kind: "notAvailable", sharedAway: !!ticket?.sharedWith };
     case "ready":
       // A failed save only costs the offline fallback; the QR still works now.
       if (d.save) await saveToken(buyerId, ticketId, d.save).catch(() => undefined);
@@ -426,6 +435,7 @@ export default function LiveTicket({ ticketId }: { ticketId: string }) {
 
   let state: LiveTicketState;
   if (!loaded) state = { kind: "loading" };
+  else if (loaded.kind === "notAvailable") state = { kind: "notAvailable", sharedAway: loaded.sharedAway };
   else if (loaded.kind !== "ready") state = { kind: loaded.kind };
   else if (qrFailed) state = { kind: "error" };
   else
