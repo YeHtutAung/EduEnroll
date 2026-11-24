@@ -14,8 +14,18 @@ import { maskEmail } from "@/lib/maskEmail";
 // - a move's from / to: null when that side has no buyer id; "***" when the id is
 //   set but the profile is missing or deleted.
 // - movedBy: the staff member's full_name, or "Staff".
+// - holder: the masked friend who holds a seat, or null while it is with the buyer
+//   ("***" when that account was deleted or is missing).
+// - history[].by: a masked buyer email, the staff member's name (or "Staff"), or
+//   null when nobody acted (voided). from / to follow the same masking as moves.
 
-type Ticket = { id: string; tier: string; seat_no: number; status: string };
+type Ticket = {
+  id: string;
+  tier: string;
+  seat_no: number;
+  status: string;
+  holder_buyer_id: string | null;
+};
 type Device = { ticket_id: string; created_at: string; revoked_at: string | null };
 type Move = {
   created_at: string;
@@ -23,6 +33,15 @@ type Move = {
   to_buyer_id: string | null;
   moved_by: string | null;
   reason: string;
+};
+type HolderEvent = {
+  ticket_id: string;
+  event: string;
+  actor_buyer_id: string | null;
+  actor_staff_id: string | null;
+  from_buyer_id: string | null;
+  to_buyer_id: string | null;
+  created_at: string;
 };
 type Profile = { id: string; email: string | null; deleted_at: string | null };
 type Staff = { id: string; full_name: string | null };
@@ -74,7 +93,7 @@ export async function GET(
   const [ticketRead, moveRead] = (await Promise.all([
     admin
       .from("tickets")
-      .select("id, tier, seat_no, status")
+      .select("id, tier, seat_no, status, holder_buyer_id")
       .eq("enrollment_id", enrollment.id)
       .eq("tenant_id", tenantId)
       .order("seat_no", { ascending: true }),
@@ -90,38 +109,71 @@ export async function GET(
   const tickets = ticketRead.data;
   const moves = moveRead.data;
 
-  const buyerIds = Array.from(
-    new Set(
-      [enrollment.buyer_id, ...moves.flatMap((m) => [m.from_buyer_id, m.to_buyer_id])].filter(
-        (id): id is string => !!id,
-      ),
-    ),
-  );
-  const staffIds = Array.from(
-    new Set(moves.map((m) => m.moved_by).filter((id): id is string => !!id)),
-  );
   const none = Promise.resolve({ data: [], error: null });
+  const ticketIds = tickets.map((t) => t.id);
 
-  const [deviceRead, profileRead, staffRead] = (await Promise.all([
+  const [deviceRead, linkRead, eventRead] = (await Promise.all([
     tickets.length > 0
       ? admin
           .from("ticket_devices" as never)
           .select("ticket_id, created_at, revoked_at")
-          .in(
-            "ticket_id",
-            tickets.map((t) => t.id),
-          )
+          .in("ticket_id", ticketIds)
       : none,
+    // Open links only: not claimed, not cancelled. Only the ticket id is read.
+    tickets.length > 0
+      ? admin
+          .from("ticket_share_links" as never)
+          .select("ticket_id")
+          .in("ticket_id", ticketIds)
+          .is("claimed_at", null)
+          .is("cancelled_at", null)
+      : none,
+    tickets.length > 0
+      ? admin
+          .from("ticket_holder_events" as never)
+          .select("ticket_id, event, actor_buyer_id, actor_staff_id, from_buyer_id, to_buyer_id, created_at")
+          .in("ticket_id", ticketIds)
+          .order("created_at", { ascending: true })
+      : none,
+  ])) as unknown as [Read<Device>, Read<{ ticket_id: string }>, Read<HolderEvent>];
+
+  if (
+    deviceRead.error || !deviceRead.data ||
+    linkRead.error || !linkRead.data ||
+    eventRead.error || !eventRead.data
+  ) {
+    return failed();
+  }
+  const events = eventRead.data;
+
+  const buyerIds = Array.from(
+    new Set(
+      [
+        enrollment.buyer_id,
+        ...tickets.map((t) => t.holder_buyer_id),
+        ...moves.flatMap((m) => [m.from_buyer_id, m.to_buyer_id]),
+        ...events.flatMap((e) => [e.actor_buyer_id, e.from_buyer_id, e.to_buyer_id]),
+      ].filter((id): id is string => !!id),
+    ),
+  );
+  const staffIds = Array.from(
+    new Set(
+      [...moves.map((m) => m.moved_by), ...events.map((e) => e.actor_staff_id)].filter(
+        (id): id is string => !!id,
+      ),
+    ),
+  );
+
+  const [profileRead, staffRead] = (await Promise.all([
     buyerIds.length > 0
       ? admin.from("buyer_profiles" as never).select("id, email, deleted_at").in("id", buyerIds)
       : none,
     staffIds.length > 0
       ? admin.from("users").select("id, full_name").in("id", staffIds).eq("tenant_id", tenantId)
       : none,
-  ])) as unknown as [Read<Device>, Read<Profile>, Read<Staff>];
+  ])) as unknown as [Read<Profile>, Read<Staff>];
 
   if (
-    deviceRead.error || !deviceRead.data ||
     profileRead.error || !profileRead.data ||
     staffRead.error || !staffRead.data
   ) {
@@ -135,6 +187,28 @@ export async function GET(
   const shownEmail = (id: string | null) => (id ? (emailById.get(id) ?? "***") : null);
 
   const staffName = new Map(staffRead.data.map((s) => [s.id, s.full_name]));
+  const staffShown = (id: string) => staffName.get(id)?.trim() || "Staff";
+
+  // linkOpen: an open link row exists (not claimed, not cancelled). The claim
+  // itself re-checks the cutoff, so a link that is past it can still read as open here.
+  const openLinks = new Set(linkRead.data.map((l) => l.ticket_id));
+  const historyByTicket = new Map<string, unknown[]>();
+  for (const e of events) {
+    const by = e.actor_buyer_id
+      ? shownEmail(e.actor_buyer_id)
+      : e.actor_staff_id
+        ? staffShown(e.actor_staff_id)
+        : null;
+    const list = historyByTicket.get(e.ticket_id) ?? [];
+    list.push({
+      at: e.created_at,
+      event: e.event,
+      by,
+      from: shownEmail(e.from_buyer_id),
+      to: shownEmail(e.to_buyer_id),
+    });
+    historyByTicket.set(e.ticket_id, list);
+  }
 
   const active = new Set<string>();
   const lastBound = new Map<string, string>();
@@ -156,13 +230,16 @@ export async function GET(
         status: t.status,
         bound: active.has(t.id),
         lastBoundAt: lastBound.get(t.id) ?? null,
+        holder: shownEmail(t.holder_buyer_id),
+        linkOpen: openLinks.has(t.id),
+        history: historyByTicket.get(t.id) ?? [],
       })),
       moves: moves.map((m) => ({
         createdAt: m.created_at,
         from: shownEmail(m.from_buyer_id),
         to: shownEmail(m.to_buyer_id),
         reason: m.reason,
-        movedBy: (m.moved_by && staffName.get(m.moved_by)?.trim()) || "Staff",
+        movedBy: m.moved_by ? staffShown(m.moved_by) : "Staff",
       })),
     },
     { headers: { "Cache-Control": "no-store" } },

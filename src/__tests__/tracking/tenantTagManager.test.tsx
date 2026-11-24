@@ -161,6 +161,8 @@ describe("TenantTagManager", () => {
     "/enroll/x/status",
     "/enroll/x/interest",
     "/status",
+    // Plan 4 decision 10: the claim page carries a share-link secret.
+    "/t/claim",
   ])("renders nothing on %s", (path) => {
     expect(mount(GOOD, path).second).toBeNull();
   });
