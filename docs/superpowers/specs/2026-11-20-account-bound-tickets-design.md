@@ -323,6 +323,8 @@ email to the old address are the controls (section 13).
   route uses `tickets.exp` and the event dates from the DB, as it does today, so a later expiry
   change needs no re-bind.
 
+**Built (Plan 4):** "first bind" for a holder counts from the seat's latest holder change (claim, give-back, order move, holder deleted), so a friend's first phone and a leader's first phone after a give-back send no new-phone email (plan decision 3).
+
 ### 6.2 What the QR holds
 
 ```
@@ -457,6 +459,12 @@ seat".
   leader**, who can open or re-share it.
 - The leader's account: open links are cancelled; seats still with the leader stop working, as in
   section 9; seats already claimed by friends keep working, since their holder still exists.
+
+**Built (Plan 4):**
+- Holder events record a staff actor in their own column, `actor_staff_id`, for order moves (plan decision 2).
+- The claim page's preview is its own read-only SQL function, `preview_share_link`, with the claim's checks and no locks (plan decision 4).
+- The share link uses the tenant's public host (custom domain or subdomain), like other buyer links (plan decision 9).
+- `void_enrollment_tickets` voids an order's tickets and cancels their links, but nothing calls it yet: no refund or cancel path voids tickets (plan decision 1; see section 13).
 
 ## 7. Scanning
 
@@ -734,3 +742,4 @@ conventions).
   The admin and public routes are guarded; closing it in the database (a column-level revoke, or a
   trigger refusing changes to those columns on an account order unless the caller is the service
   role) is a follow-up, not done in Plan 3, and should land before protection is used in production.
+- **Voiding is not wired to refunds (Plan 4 finding):** no in-app action cancels, refunds or deletes a confirmed order, and the scan checks only the ticket's own status, never the order's. So when an organiser refunds an order outside the system, its seats keep admitting until a void path is built (`void_enrollment_tickets` exists for it). Found by reading the code, not by a run.

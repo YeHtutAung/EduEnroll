@@ -31,6 +31,20 @@ describe("enrollmentApprovedEmail — myTicketsUrl", () => {
     expect(html).toMatch(/Open My Tickets[\s\S]*font-myanmar|Noto Sans Myanmar/);
   });
 
+  it("says a seat can be shared until 24 hours before the event, in both languages", () => {
+    const { html } = enrollmentApprovedEmail({
+      ...base,
+      myTicketsUrl: "https://skyfestival.kuunyi.com/account/tickets",
+    });
+    expect(html).toContain(
+      "You can share a seat with a friend from My Tickets until 24 hours before the event.",
+    );
+    // The Myanmar paragraph follows the "Open it again" one (NEEDS NATIVE REVIEW).
+    const afterOpen = html.slice(html.indexOf("keep the page open at the gate."));
+    expect(afterOpen).toMatch(/class="myanmar"[^>]*>[^<]*[က-႟]+[^<]*<\/p>[\s\S]*share a seat/);
+    expect(afterOpen).toMatch(/share a seat[\s\S]*class="myanmar"[^>]*>[^<]*[က-႟]/);
+  });
+
   it("escapes the link", () => {
     const { html } = enrollmentApprovedEmail({ ...base, myTicketsUrl: 'https://x.test/account/tickets?a="b' });
     expect(html).toContain('href="https://x.test/account/tickets?a=&quot;b"');
@@ -40,6 +54,7 @@ describe("enrollmentApprovedEmail — myTicketsUrl", () => {
     const without = enrollmentApprovedEmail(base);
     expect(without.html).not.toContain("/account/tickets");
     expect(without.html).not.toContain("Open My Tickets");
+    expect(without.html).not.toContain("share a seat");
     expect(enrollmentApprovedEmail({ ...base, myTicketsUrl: undefined })).toEqual(without);
   });
 });

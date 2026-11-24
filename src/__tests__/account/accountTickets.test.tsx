@@ -107,6 +107,42 @@ describe("TicketListView", () => {
   });
 });
 
+describe("TicketListView: shared seats (plan 4 Task 11)", () => {
+  it("a leader's seat a friend claimed: Claimed by, no Show QR, not a link", () => {
+    const html = renderList({
+      kind: "list",
+      tickets: [ticket({ id: "s1", sharedWith: "k***@gmail.com" })],
+    });
+    expect(html).toContain("Claimed by k***@gmail.com");
+    expect(html).toMatch(MYANMAR);
+    expect(html).not.toContain("Show QR");
+    expect(html).not.toContain("<a href=\"/account/tickets/s1\"");
+    expect(html).not.toContain("/account/tickets/s1");
+    expect(html).not.toContain("Link sent");
+  });
+
+  it("an open link: Link sent, and the seat still links to its QR", () => {
+    const html = renderList({ kind: "list", tickets: [ticket({ id: "l1", linkOpen: true, canShare: true })] });
+    expect(html).toContain("Link sent");
+    expect(html).toContain('href="/account/tickets/l1"');
+  });
+
+  it("no open link (claimed, cancelled or after admission): no Link sent", () => {
+    const html = renderList({ kind: "list", tickets: [ticket({ id: "n1", linkOpen: false })] });
+    expect(html).not.toContain("Link sent");
+  });
+
+  it("a holder's seat: From the leader, linking to its QR", () => {
+    const html = renderList({
+      kind: "list",
+      tickets: [ticket({ id: "h1", role: "holder", leaderEmail: "k***@gmail.com", canGiveBack: true })],
+    });
+    expect(html).toContain("From k***@gmail.com");
+    expect(html).toContain('href="/account/tickets/h1"');
+    expect(html).toContain("Show QR");
+  });
+});
+
 describe("list helpers", () => {
   it("eventDateLabel: single day, multi-day, same day twice, none", () => {
     expect(eventDateLabel("2026-12-20", null)).toBe("20 Dec 2026");
@@ -206,6 +242,26 @@ describe("LiveTicketView", () => {
     const html = renderLive({ kind: "notAvailable" });
     expect(html).toContain("This ticket isn&#x27;t available on this account.");
     expect(html).not.toContain("<img");
+    expect(html).not.toContain("This seat is with someone else now.");
+  });
+
+  it("not available because a friend claimed the seat: says it is with someone else", () => {
+    const html = renderLive({ kind: "notAvailable", sharedAway: true });
+    expect(html).toContain("This ticket isn&#x27;t available on this account.");
+    expect(html).toContain("This seat is with someone else now.");
+    expect(html).not.toContain("<img");
+  });
+
+  it("ready: mounts seat sharing under the QR for a leader who can share", () => {
+    const html = renderLive(ready({ ticket: ticket({ canShare: true, shareClosesAt: 1_797_613_200 }) }));
+    expect(html).toContain("Share this seat");
+    expect(html.indexOf("<img")).toBeLessThan(html.indexOf("Share this seat"));
+  });
+
+  it("ready without details: no seat sharing", () => {
+    const html = renderLive(ready({ ticket: null }));
+    expect(html).not.toContain("Share this seat");
+    expect(html).not.toContain("Sharing has closed");
   });
 
   it("error: Try again", () => {
@@ -255,6 +311,7 @@ describe("secrets stay out of logs and the page", () => {
     "src/app/(public)/account/tickets/[id]/liveTicketFlow.ts",
     "src/app/(public)/account/tickets/TicketList.tsx",
     "src/app/(public)/account/tickets/[id]/LiveTicket.tsx",
+    "src/app/(public)/account/tickets/[id]/SeatSharing.tsx",
     "src/app/api/me/tickets/route.ts",
   ];
 

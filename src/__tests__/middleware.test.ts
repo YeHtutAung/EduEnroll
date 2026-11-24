@@ -589,3 +589,51 @@ describe("middleware — /auth/callback", () => {
     expect(res.status).not.toBe(404);
   });
 });
+
+// ─── /t/claim: claim a shared seat (plan 4, Task 12, decision 10) ───────────
+// In the matcher for the same reasons as /account: sanitized tenant headers
+// and the session refresh. The custom-domain split must not redirect it.
+describe("middleware — /t/claim", () => {
+  const ENV = process.env.VERCEL_ENV;
+  afterEach(() => {
+    if (ENV === undefined) delete process.env.VERCEL_ENV;
+    else process.env.VERCEL_ENV = ENV;
+  });
+
+  it("is in config.matcher", async () => {
+    const { config } = await import("@/middleware");
+    expect(config.matcher).toContain("/t/:path*");
+  });
+
+  it("refreshes the session on a tenant host, without a redirect", async () => {
+    const res = await get("https://nihon-moment.kuunyi.com/t/claim");
+    expect(authState.getUserCalls).toBe(1);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+    expect(slug(res)).toBe("nihon-moment");
+  });
+
+  it("serves /t/claim on a tenant's custom domain", async () => {
+    const res = await get("https://flashtic.com/t/claim");
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.status).not.toBe(404);
+    expect(slug(res)).toBe("flashtic");
+  });
+
+  it("replaces a forged tenant header with the host's tenant", async () => {
+    process.env.VERCEL_ENV = "production";
+    process.env.TENANT_CUSTOM_DOMAINS = '{"flashtic.com":"flashtic"}';
+    const res = await middleware(
+      middlewareRequest("https://flashtic.com/t/claim", { headers: { "x-tenant-slug": "victim" } }),
+    );
+    expect(slug(res)).toBe("flashtic");
+  });
+
+  it("drops a forged tenant header on the platform root", async () => {
+    process.env.VERCEL_ENV = "production";
+    const res = await middleware(
+      middlewareRequest("https://kuunyi.com/t/claim", { headers: { "x-tenant-slug": "victim" } }),
+    );
+    expect(slug(res)).not.toBe("victim");
+  });
+});
