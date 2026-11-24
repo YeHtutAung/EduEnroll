@@ -1181,5 +1181,5 @@ Model both on `src/app/api/me/tickets/[id]/device/route.ts`: same mocks, `noStor
 | Question | Result | Consequence |
 |---|---|---|
 | Does a refunded order's ticket still admit at the gate (Task 15) | Yes. No in-app path cancels, refunds or deletes a confirmed order, and the scan checks only `tickets.status`. Code reading, 2026-11-24, not a run | Known gap in design 13; owner told in chat; a void path is a separate change |
-| Local claim and give-back run against the dev DB (Task 16 step 2) | | |
+| Local claim and give-back run against the dev DB (Task 16 step 2) | Passed 2026-11-24 on `02ba9f9` (order LM-1123-7GXSC4, one seat): leader shared (twice: the second link replaced the first), friend in a second browser claimed and saw a live QR, gave it back, and the leader re-opened it. `ticket_holder_events`: link_created ×2, claimed (friend → friend), given_back (friend → leader); the leader's phone was revoked `holder_changed` at the claim; one active phone at each step, the current holder's. Local evidence only | Two local-setup snags, not code: Google sign-in returns to `localhost:3000` because `*.localhost:3005` isn't in the dev project's Redirect URLs; `.env.local` maps Brave to an offline ngrok custom domain, so the share link used that host |
 | Staging phone test with a claimed seat (Task 16 step 3) | | |
