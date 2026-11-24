@@ -1180,6 +1180,6 @@ Model both on `src/app/api/me/tickets/[id]/device/route.ts`: same mocks, `noStor
 
 | Question | Result | Consequence |
 |---|---|---|
-| Does a refunded order's ticket still admit at the gate (Task 15) | | known gap in design 13, or none |
+| Does a refunded order's ticket still admit at the gate (Task 15) | Yes. No in-app path cancels, refunds or deletes a confirmed order, and the scan checks only `tickets.status`. Code reading, 2026-11-24, not a run | Known gap in design 13; owner told in chat; a void path is a separate change |
 | Local claim and give-back run against the dev DB (Task 16 step 2) | | |
 | Staging phone test with a claimed seat (Task 16 step 3) | | |
