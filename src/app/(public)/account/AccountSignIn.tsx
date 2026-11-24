@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { isPasswordSession } from "@/lib/authMethod";
 import { isInAppBrowser } from "@/lib/inAppBrowser";
+import { signOutLocal } from "./signOutLocal";
 import {
   accountReducer,
   bootOnce,
@@ -591,11 +592,8 @@ export default function AccountSignIn() {
         return;
       }
       case "signOutLocal": {
-        try {
-          await supabase().auth.signOut({ scope: "local" });
-        } catch {
-          // Local sign-out clears this tab's storage; nothing to recover here.
-        }
+        // Never throws; on a failed /logout it expires the session cookies.
+        await signOutLocal(supabase(), document);
         dispatch({ type: "signedOut" });
         return;
       }
