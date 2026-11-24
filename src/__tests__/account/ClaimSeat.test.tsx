@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { renderToStaticMarkup } from "react-dom/server";
 import { ClaimSeatView } from "@/app/(public)/t/claim/ClaimSeat";
 import type { ClaimSeatState } from "@/app/(public)/t/claim/claimFlow";
@@ -24,6 +26,7 @@ const ALL: ClaimSeatState[] = [
   { kind: "ready", preview, claiming: true },
   { kind: "signIn" },
   { kind: "gone" },
+  { kind: "noToken" },
   { kind: "limited", canRetry: true },
   { kind: "limited", canRetry: false },
   { kind: "error", canRetry: true },
@@ -64,6 +67,13 @@ describe("ClaimSeatView", () => {
     expect(html).toContain("If you shared it, it&#x27;s still your seat.");
   });
 
+  it("noToken says to open the link again, not that the link is dead", () => {
+    const html = render({ kind: "noToken" });
+    expect(html).toContain("Open the link again from the message you received.");
+    expect(html).not.toContain("This link no longer works.");
+    expect(html).not.toContain("new link");
+  });
+
   it("limited says to try later", () => {
     expect(render({ kind: "limited", canRetry: true })).toContain("Too many tries. Try again later.");
   });
@@ -82,6 +92,16 @@ describe("ClaimSeatView", () => {
 });
 
 describe("/t/claim page", () => {
+  it("warns that no performance or analytics script may be added (the navigation entry keeps the fragment)", () => {
+    const src = readFileSync(path.resolve(process.cwd(), "src/app/(public)/t/claim/page.tsx"), "utf8");
+    expect(src).toContain('performance.getEntriesByType("navigation")');
+  });
+
+  it("ClaimSeat runs the backup strip before it reads the token", () => {
+    const src = readFileSync(path.resolve(process.cwd(), "src/app/(public)/t/claim/ClaimSeat.tsx"), "utf8");
+    expect(src).toContain("takeClaimToken(");
+  });
+
   it("renders the strip script as its first element, then the claim view", () => {
     const html = renderToStaticMarkup(<ClaimPage />);
     expect(html.startsWith(`<script>${STRIP_FRAGMENT_JS}</script>`)).toBe(true);

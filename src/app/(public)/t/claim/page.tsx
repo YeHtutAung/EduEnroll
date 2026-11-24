@@ -11,6 +11,12 @@ import { STRIP_FRAGMENT_JS } from "./stripFragment";
 // scripts that could run before it are the app's own bundles, which don't
 // read the fragment. The token never reaches the server in the URL: a
 // fragment isn't sent with the request.
+//
+// No performance, RUM or analytics script may be added to /t/claim. The
+// navigation timing entry (performance.getEntriesByType("navigation")[0].name)
+// keeps the ORIGINAL URL, fragment and token included, for the life of the
+// page: replaceState changes the address bar and history entry, not that
+// entry. Anything that reports navigation timing would send the token.
 export default function ClaimPage() {
   return (
     <>

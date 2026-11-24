@@ -11,6 +11,7 @@ import { mm } from "@/lib/mm-labels";
 import { formatCurrencySimple, resolveEmailFromFormData } from "@/lib/utils";
 import EmailTypoHint from "@/components/enrollment/EmailTypoHint";
 import type { EnrollmentStatus, Intake, JlptLevel, PaymentStatus } from "@/types/database";
+import { holderHistoryLine } from "./holderHistory";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -754,16 +755,6 @@ function fmtDateTime(isoStr: string | null | undefined): string {
   });
 }
 
-const HOLDER_EVENT_LABEL: Record<string, string> = {
-  link_created: "Share link created",
-  link_cancelled: "Share link cancelled",
-  claimed: "Seat claimed",
-  given_back: "Seat given back",
-  holder_deleted: "Holder deleted their account",
-  voided: "Seat voided",
-  order_moved: "Order moved to another account",
-};
-
 // NEEDS NATIVE REVIEW: every Myanmar line in this component is a draft.
 const ACCOUNT_MM = {
   title: "အကောင့်",
@@ -883,9 +874,7 @@ function OrderAccount({ enrollmentId }: { enrollmentId: string }) {
                           <ul className="mt-1 space-y-1">
                             {t.history.map((h, i) => (
                               <li key={`${h.at}:${i}`} className="text-gray-600">
-                                {fmtDateTime(h.at)} · {HOLDER_EVENT_LABEL[h.event] ?? h.event}
-                                {h.by ? ` · by ${h.by}` : ""}
-                                {h.from || h.to ? ` · ${h.from ?? "—"} → ${h.to ?? "—"}` : ""}
+                                {fmtDateTime(h.at)} · {holderHistoryLine(h)}
                               </li>
                             ))}
                           </ul>

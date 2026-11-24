@@ -12,23 +12,24 @@ import {
   type Bilingual,
 } from "@/app/(public)/account/tickets/TicketList";
 import {
-  afterClaim,
   decide,
   finishClaim,
   readClaimToken,
   readPreview,
-  readTicketId,
-  ticketHref,
+  submitClaim,
+  takeClaimToken,
   type ClaimSeatState,
 } from "./claimFlow";
 
 // ─── /t/claim: a friend claims a shared seat (plan 4, Task 12) ──────────────
 //
 // ClaimSeatView renders a state (static-rendered in tests) and is never handed
-// the token. The default export reads the token that STRIP_FRAGMENT_JS stored,
+// the token. The default export reads the token that STRIP_FRAGMENT_JS stored
+// (running the same strip as a backup if the fragment is still there),
 // previews the seat, and claims it on "Claim this seat". The token is sent
-// only to the two claim endpoints and forgotten as soon as the claim answers
-// (or the preview says the link no longer works). Logs nothing.
+// only to the two claim endpoints and forgotten as soon as the claim answers,
+// except a 401, which keeps it for the sign-in round trip (or as soon as the
+// preview says the link no longer works). Logs nothing.
 
 // Myanmar text: every `mm` string in this file is new. NEEDS NATIVE REVIEW.
 const COPY = {
@@ -47,6 +48,10 @@ const COPY = {
   goneHelp: {
     en: "Ask the person who shared it for a new link. If you shared it, it's still your seat.",
     mm: "မျှဝေပေးသူထံမှ လင့်ခ်အသစ် တောင်းပါ။ ဤလင့်ခ်ကို သင်ကိုယ်တိုင် မျှဝေခဲ့ပါက ထိုင်ခုံသည် သင့်ထံတွင်သာ ရှိနေဆဲဖြစ်ပါသည်။",
+  },
+  noToken: {
+    en: "Open the link again from the message you received.",
+    mm: "သင်လက်ခံရရှိသော မက်ဆေ့ချ်ထဲမှ လင့်ခ်ကို ပြန်ဖွင့်ပါ။", // NEEDS NATIVE REVIEW
   },
   limited: { en: "Too many tries. Try again later.", mm: "ကြိုးစားမှု များလွန်းပါသည်။ နောက်မှ ထပ်မံကြိုးစားပါ။" },
   somethingWrong: {
@@ -132,6 +137,14 @@ function Body({ state, onClaim, onRetry }: { state: ClaimSeatState; onClaim: () 
           </p>
         </Card>
       );
+    case "noToken":
+      return (
+        <Card>
+          <p className="text-center text-sm text-gray-700">
+            <Text copy={COPY.noToken} />
+          </p>
+        </Card>
+      );
     case "limited":
       return <Problem copy={COPY.limited} canRetry={state.canRetry} onRetry={onRetry} />;
     case "error":
@@ -182,9 +195,11 @@ export default function ClaimSeat() {
   // Preview: what the seat is, or why the link can't be claimed.
   useEffect(() => {
     let cancelled = false;
-    const token = readClaimToken();
+    // Backup strip: if the inline script didn't run (a client-side render),
+    // the fragment is still in the URL; take it out before reading the token.
+    const token = takeClaimToken();
     if (!token) {
-      setState({ kind: "gone" });
+      setState({ kind: "noToken" });
       return;
     }
     setState({ kind: "loading" });
@@ -226,33 +241,19 @@ export default function ClaimSeat() {
     if (busy.current || state.kind !== "ready") return;
     const token = readClaimToken();
     if (!token) {
-      setState({ kind: "gone" });
+      setState({ kind: "noToken" });
       return;
     }
     busy.current = true;
     setState({ ...state, claiming: true });
-    let res: Response;
-    try {
-      res = await postToken("/api/me/tickets/claim", token);
-    } catch {
-      // No answer: the token is kept, so trying again previews it afresh.
-      busy.current = false;
-      setState({ kind: "error", canRetry: true });
-      return;
-    }
-    finishClaim();
-    if (res.ok) {
-      const ticketId = readTicketId(await res.json().catch(() => null));
-      if (ticketId) {
-        window.location.replace(ticketHref(ticketId));
-        return;
-      }
-      busy.current = false;
-      setState({ kind: "error", canRetry: false });
+    // No answer or 401 keeps the token (retry / sign-in); any other answer forgets it.
+    const result = await submitClaim(token, postToken);
+    if ("redirect" in result) {
+      window.location.replace(result.redirect);
       return;
     }
     busy.current = false;
-    setState(afterClaim(res.status));
+    setState(result.state);
   }, [state]);
 
   return <ClaimSeatView state={state} onClaim={() => void claim()} onRetry={retry} />;

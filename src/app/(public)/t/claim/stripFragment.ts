@@ -12,6 +12,11 @@
 //
 // The script refers to `window` only, so the tests run it with
 // new Function("window", STRIP_FRAGMENT_JS) against a fake window.
+//
+// stripFragment() is the same logic in TypeScript, a backup for when the
+// inline script didn't run (a client-side render, e.g. under MSW): ClaimSeat
+// calls it on mount if location.hash is still non-empty. The inline script
+// stays primary, because it runs before any bundle.
 
 export const SEAT_CLAIM_KEY = "seat_claim";
 
@@ -19,3 +24,33 @@ export const SEAT_CLAIM_KEY = "seat_claim";
 export const SHARE_TOKEN_PATTERN = "^[A-Za-z0-9_-]{43}$";
 
 export const STRIP_FRAGMENT_JS = `(function(){var w=window,t=null;try{var h=w.location.hash||"";if(h){if(h.charAt(0)==="#")h=h.slice(1);if(/${SHARE_TOKEN_PATTERN}/.test(h))t=h;w.history.replaceState(null,"","/t/claim")}}catch(e){}if(t){try{w.sessionStorage.setItem("${SEAT_CLAIM_KEY}",t)}catch(e){w.__seatClaim=t}}})();`;
+
+interface StripWindow {
+  location: { hash: string };
+  history: { replaceState: (data: unknown, unused: string, url: string) => void };
+  sessionStorage: Pick<Storage, "setItem">;
+  __seatClaim?: string;
+}
+
+const TOKEN_RE = new RegExp(SHARE_TOKEN_PATTERN);
+
+/** STRIP_FRAGMENT_JS, callable: strip the fragment, keep a well-formed token. */
+export function stripFragment(win: StripWindow): void {
+  let token: string | null = null;
+  try {
+    let h = win.location.hash || "";
+    if (h) {
+      if (h.charAt(0) === "#") h = h.slice(1);
+      if (TOKEN_RE.test(h)) token = h;
+      win.history.replaceState(null, "", "/t/claim");
+    }
+  } catch {
+    // As the inline script: never throw on a strange window.
+  }
+  if (!token) return;
+  try {
+    win.sessionStorage.setItem(SEAT_CLAIM_KEY, token);
+  } catch {
+    win.__seatClaim = token;
+  }
+}

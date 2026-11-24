@@ -1,7 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { STRIP_FRAGMENT_JS, SEAT_CLAIM_KEY, SHARE_TOKEN_PATTERN } from "@/app/(public)/t/claim/stripFragment";
+import {
+  STRIP_FRAGMENT_JS,
+  SEAT_CLAIM_KEY,
+  SHARE_TOKEN_PATTERN,
+  stripFragment,
+} from "@/app/(public)/t/claim/stripFragment";
 import {
   afterClaim,
+  submitClaim,
+  takeClaimToken,
   decide,
   finishClaim,
   readClaimToken,
@@ -131,6 +138,99 @@ describe("STRIP_FRAGMENT_JS", () => {
   });
 });
 
+// The backup strip, for when the inline script didn't run (a client-side
+// render): the same rules as STRIP_FRAGMENT_JS.
+describe("stripFragment (backup for the inline script)", () => {
+  it("stores a token from the fragment and takes it out of the URL", () => {
+    const win = fakeWindow(`https://sky.example.com/t/claim#${TOKEN}`);
+    stripFragment(win);
+    expect(win.sessionStorage.map.get(SEAT_CLAIM_KEY)).toBe(TOKEN);
+    expect(win.history.calls).toEqual([[null, "", "/t/claim"]]);
+    expect(win.location.href).not.toContain("#");
+  });
+
+  it("strips a hash that isn't a token and stores nothing", () => {
+    const win = fakeWindow("https://sky.example.com/t/claim#short");
+    stripFragment(win);
+    expect(win.sessionStorage.map.size).toBe(0);
+    expect(win.__seatClaim).toBeUndefined();
+    expect(win.location.href).not.toContain("#");
+  });
+
+  it("falls back to window.__seatClaim when sessionStorage throws", () => {
+    const win = fakeWindow(`https://sky.example.com/t/claim#${TOKEN}`, { storageGetterThrows: true });
+    stripFragment(win);
+    expect(win.__seatClaim).toBe(TOKEN);
+    expect(win.location.href).not.toContain("#");
+  });
+});
+
+describe("takeClaimToken", () => {
+  it("runs the backup strip when the fragment is still there, then reads the token", () => {
+    const win = fakeWindow(`https://sky.example.com/t/claim#${TOKEN}`);
+    expect(takeClaimToken(win)).toBe(TOKEN);
+    expect(win.history.calls).toEqual([[null, "", "/t/claim"]]);
+    expect(win.location.href).not.toContain("#");
+  });
+
+  it("reads what the inline script stored, and leaves the URL alone", () => {
+    const win = fakeWindow("https://sky.example.com/t/claim");
+    win.sessionStorage.map.set(SEAT_CLAIM_KEY, TOKEN);
+    expect(takeClaimToken(win)).toBe(TOKEN);
+    expect(win.history.calls).toEqual([]);
+  });
+
+  it("is null when no token was ever stored", () => {
+    expect(takeClaimToken(fakeWindow("https://sky.example.com/t/claim"))).toBeNull();
+    expect(takeClaimToken(null)).toBeNull();
+  });
+});
+
+describe("submitClaim", () => {
+  const answer = (status: number, body: unknown = null) => async () =>
+    new Response(body === null ? null : JSON.stringify(body), { status });
+
+  function held() {
+    const win = fakeWindow("https://sky.example.com/t/claim");
+    win.sessionStorage.map.set(SEAT_CLAIM_KEY, TOKEN);
+    return win;
+  }
+
+  it("401 keeps the token and asks the friend to sign in", async () => {
+    const win = held();
+    expect(await submitClaim(TOKEN, answer(401), win)).toEqual({ state: { kind: "signIn" } });
+    expect(readClaimToken(win)).toBe(TOKEN);
+  });
+
+  it.each([
+    [404, { kind: "gone" }],
+    [429, { kind: "limited", canRetry: false }],
+    [403, { kind: "error", canRetry: false }],
+    [500, { kind: "error", canRetry: false }],
+  ] as const)("%i forgets the token", async (status, state) => {
+    const win = held();
+    expect(await submitClaim(TOKEN, answer(status), win)).toEqual({ state });
+    expect(readClaimToken(win)).toBeNull();
+  });
+
+  it("200 forgets the token and goes to the ticket", async () => {
+    const win = held();
+    expect(await submitClaim(TOKEN, answer(200, { ticketId: "t-1" }), win)).toEqual({
+      redirect: "/account/tickets/t-1",
+    });
+    expect(readClaimToken(win)).toBeNull();
+  });
+
+  it("no answer keeps the token and offers a retry", async () => {
+    const win = held();
+    const fail = async (): Promise<Response> => {
+      throw new Error("offline");
+    };
+    expect(await submitClaim(TOKEN, fail, win)).toEqual({ state: { kind: "error", canRetry: true } });
+    expect(readClaimToken(win)).toBe(TOKEN);
+  });
+});
+
 function storedWindow(opts: { stored?: string | null; fallback?: string; storageThrows?: boolean } = {}) {
   const storage = fakeStorage({ throws: opts.storageThrows });
   if (opts.stored) storage.map.set(SEAT_CLAIM_KEY, opts.stored);
@@ -186,7 +286,7 @@ describe("claimFlow", () => {
   it("afterClaim: the token is gone, so no state offers a retry", () => {
     expect(afterClaim(404)).toEqual({ kind: "gone" });
     expect(afterClaim(429)).toEqual({ kind: "limited", canRetry: false });
-    expect(afterClaim(401)).toEqual({ kind: "error", canRetry: false });
+    expect(afterClaim(403)).toEqual({ kind: "error", canRetry: false });
     expect(afterClaim(503)).toEqual({ kind: "error", canRetry: false });
   });
 

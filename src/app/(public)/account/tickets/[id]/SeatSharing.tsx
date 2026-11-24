@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState, type Ref } from "react";
+import { useCallback, useMemo, useRef, useState, type Ref } from "react";
 import type { AccountTicket } from "@/app/api/me/tickets/route";
 import { Inline, Text, primaryButton, type Bilingual } from "../TicketList";
 
@@ -11,6 +11,8 @@ import { Inline, Text, primaryButton, type Bilingual } from "../TicketList";
 //   Share       POST   /api/me/tickets/<id>/share     → { url, expiresAt }
 //   Cancel link DELETE /api/me/tickets/<id>/share
 //   Give back   POST   /api/me/tickets/<id>/give-back → back to /account/tickets
+// A 404 from any of them means the seat can't be shared or given back any
+// more: the buttons go and a short line says so.
 //
 // The share URL carries the link's secret in its fragment. It lives only in
 // this component's React state and is shown only in the read-only field right
@@ -47,6 +49,10 @@ const COPY = {
     en: "Sharing has closed for this event.",
     mm: "ဤပွဲအတွက် မျှဝေခြင်း ပိတ်သွားပါပြီ။", // NEEDS NATIVE REVIEW
   },
+  gone: {
+    en: "This seat can't be shared or given back any more.",
+    mm: "ဤထိုင်ခုံကို မျှဝေခြင်း သို့မဟုတ် ပြန်ပေးခြင်း မပြုလုပ်နိုင်တော့ပါ။", // NEEDS NATIVE REVIEW
+  },
   tooMany: {
     en: "Too many tries. Try again later.",
     mm: "ကြိုးစားမှု များလွန်းပါသည်။ နောက်မှ ထပ်မံကြိုးစားပါ။", // NEEDS NATIVE REVIEW
@@ -77,6 +83,8 @@ export interface SharingUi {
   error: "limited" | "generic" | null;
   confirmingGiveBack: boolean;
   copied: boolean;
+  /** Share, cancel or give-back answered 404: the seat can't be shared or given back any more. */
+  gone: boolean;
 }
 
 export const initialSharingUi = (ticket: AccountTicket): SharingUi => ({
@@ -86,6 +94,7 @@ export const initialSharingUi = (ticket: AccountTicket): SharingUi => ({
   error: null,
   confirmingGiveBack: false,
   copied: false,
+  gone: false,
 });
 
 export interface SeatSharingViewProps {
@@ -98,6 +107,8 @@ export interface SeatSharingViewProps {
   onConfirmGiveBack: () => void;
   onKeep: () => void;
   urlInputRef?: Ref<HTMLInputElement>;
+  /** Unix seconds; tests pin it. Defaults to the current time. */
+  now?: number;
 }
 
 function ClosesAt({ at }: { at: number | null }) {
@@ -206,18 +217,26 @@ function HolderGiveBack(props: SeatSharingViewProps) {
   );
 }
 
+function Note({ copy }: { copy: Bilingual }) {
+  return (
+    <p className="text-center text-sm text-gray-600">
+      <Text copy={copy} />
+    </p>
+  );
+}
+
 export function SeatSharingView(props: SeatSharingViewProps) {
-  const { ticket } = props;
+  const { ticket, ui } = props;
   if (ticket.status !== "valid") return null;
+  const now = props.now ?? Math.floor(Date.now() / 1000);
   let body;
-  if (ticket.role === "leader" && ticket.canShare) body = <LeaderSharing {...props} />;
+  if (ui.gone) body = <Note copy={COPY.gone} />;
+  else if (ticket.role === "leader" && ticket.canShare) body = <LeaderSharing {...props} />;
   else if (ticket.role === "holder" && ticket.canGiveBack) body = <HolderGiveBack {...props} />;
-  else
-    body = (
-      <p className="text-center text-sm text-gray-600">
-        <Text copy={COPY.closed} />
-      </p>
-    );
+  // "Closed" only once the cutoff has passed. Other no-action seats (admitted,
+  // or a holder whose leader is gone) show nothing.
+  else if (ticket.shareClosesAt !== null && now >= ticket.shareClosesAt) body = <Note copy={COPY.closed} />;
+  else return null;
   return <div className="mt-4 rounded-lg border border-gray-200 p-4">{body}</div>;
 }
 
@@ -228,36 +247,72 @@ const post = (url: string, method: "POST" | "DELETE") =>
 
 const errorFor = (status: number): SharingUi["error"] => (status === 429 ? "limited" : "generic");
 
+/** A 404 from any of the three: the seat can't be shared or given back any more. */
+const GONE: Partial<SharingUi> = {
+  busy: false,
+  error: null,
+  gone: true,
+  url: null,
+  linkOpen: false,
+  confirmingGiveBack: false,
+  copied: false,
+};
+
+const failed = (status: number): Partial<SharingUi> =>
+  status === 404 ? GONE : { busy: false, error: errorFor(status) };
+
+/**
+ * The default export's request handlers, separate so tests can drive them
+ * without a DOM. `patch` merges into the UI state; `goTo` navigates.
+ */
+export function sharingRequests(
+  ticketId: string,
+  patch: (next: Partial<SharingUi>) => void,
+  goTo: (href: string) => void = (href) => window.location.assign(href),
+) {
+  const base = `/api/me/tickets/${encodeURIComponent(ticketId)}`;
+  return {
+    async share() {
+      patch({ busy: true, error: null, copied: false });
+      try {
+        const res = await post(`${base}/share`, "POST");
+        if (!res.ok) return patch(failed(res.status));
+        const b = (await res.json()) as { url?: unknown };
+        if (typeof b.url !== "string") return patch({ busy: false, error: "generic" });
+        patch({ busy: false, url: b.url, linkOpen: true });
+      } catch {
+        patch({ busy: false, error: "generic" });
+      }
+    },
+    async cancelLink() {
+      patch({ busy: true, error: null });
+      try {
+        const res = await post(`${base}/share`, "DELETE");
+        if (!res.ok) return patch(failed(res.status));
+        patch({ busy: false, url: null, linkOpen: false, copied: false });
+      } catch {
+        patch({ busy: false, error: "generic" });
+      }
+    },
+    async giveBack() {
+      patch({ busy: true, error: null });
+      try {
+        const res = await post(`${base}/give-back`, "POST");
+        if (!res.ok) return patch({ ...failed(res.status), confirmingGiveBack: false });
+        goTo("/account/tickets");
+      } catch {
+        patch({ busy: false, error: "generic", confirmingGiveBack: false });
+      }
+    },
+  };
+}
+
 export default function SeatSharing({ ticket }: { ticket: AccountTicket }) {
   const [ui, setUi] = useState<SharingUi>(() => initialSharingUi(ticket));
   const inputRef = useRef<HTMLInputElement>(null);
-  const base = `/api/me/tickets/${encodeURIComponent(ticket.id)}`;
 
   const patch = useCallback((next: Partial<SharingUi>) => setUi((u) => ({ ...u, ...next })), []);
-
-  const onShare = useCallback(async () => {
-    patch({ busy: true, error: null, copied: false });
-    try {
-      const res = await post(`${base}/share`, "POST");
-      if (!res.ok) return patch({ busy: false, error: errorFor(res.status) });
-      const b = (await res.json()) as { url?: unknown };
-      if (typeof b.url !== "string") return patch({ busy: false, error: "generic" });
-      patch({ busy: false, url: b.url, linkOpen: true });
-    } catch {
-      patch({ busy: false, error: "generic" });
-    }
-  }, [base, patch]);
-
-  const onCancelLink = useCallback(async () => {
-    patch({ busy: true, error: null });
-    try {
-      const res = await post(`${base}/share`, "DELETE");
-      if (!res.ok) return patch({ busy: false, error: errorFor(res.status) });
-      patch({ busy: false, url: null, linkOpen: false, copied: false });
-    } catch {
-      patch({ busy: false, error: "generic" });
-    }
-  }, [base, patch]);
+  const requests = useMemo(() => sharingRequests(ticket.id, patch), [ticket.id, patch]);
 
   const onCopy = useCallback(async () => {
     const field = inputRef.current;
@@ -272,26 +327,15 @@ export default function SeatSharing({ ticket }: { ticket: AccountTicket }) {
     }
   }, [patch]);
 
-  const onConfirmGiveBack = useCallback(async () => {
-    patch({ busy: true, error: null });
-    try {
-      const res = await post(`${base}/give-back`, "POST");
-      if (!res.ok) return patch({ busy: false, error: errorFor(res.status), confirmingGiveBack: false });
-      window.location.assign("/account/tickets");
-    } catch {
-      patch({ busy: false, error: "generic", confirmingGiveBack: false });
-    }
-  }, [base, patch]);
-
   return (
     <SeatSharingView
       ticket={ticket}
       ui={ui}
-      onShare={onShare}
-      onCancelLink={onCancelLink}
+      onShare={() => void requests.share()}
+      onCancelLink={() => void requests.cancelLink()}
       onCopy={onCopy}
       onAskGiveBack={() => patch({ confirmingGiveBack: true, error: null })}
-      onConfirmGiveBack={onConfirmGiveBack}
+      onConfirmGiveBack={() => void requests.giveBack()}
       onKeep={() => patch({ confirmingGiveBack: false })}
       urlInputRef={inputRef}
     />

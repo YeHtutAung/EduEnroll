@@ -7,6 +7,7 @@ import { shareCutoffAt } from "@/lib/tickets/exp";
 import SeatSharing, {
   SeatSharingView,
   initialSharingUi,
+  sharingRequests,
   shareClosesLabel,
   type SharingUi,
 } from "@/app/(public)/account/tickets/[id]/SeatSharing";
@@ -52,8 +53,13 @@ const actions = {
   onKeep: noop,
 };
 
-const render = (t: AccountTicket, ui: Partial<SharingUi> = {}) =>
-  renderToStaticMarkup(<SeatSharingView ticket={t} ui={{ ...initialSharingUi(t), ...ui }} {...actions} />);
+const BEFORE_CUTOFF = CUTOFF - 3600;
+const AFTER_CUTOFF = CUTOFF + 1;
+
+const render = (t: AccountTicket, ui: Partial<SharingUi> = {}, now = BEFORE_CUTOFF) =>
+  renderToStaticMarkup(
+    <SeatSharingView ticket={t} ui={{ ...initialSharingUi(t), ...ui }} now={now} {...actions} />,
+  );
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -128,22 +134,44 @@ describe("SeatSharingView: holder", () => {
 });
 
 describe("SeatSharingView: closed or void", () => {
-  it("neither flag on a valid seat: Sharing has closed for this event.", () => {
-    const html = render(ticket());
+  it("neither flag once the cutoff has passed: Sharing has closed for this event.", () => {
+    const html = render(ticket(), {}, AFTER_CUTOFF);
     expect(html).toContain("Sharing has closed for this event.");
     expect(html).not.toContain("Share this seat");
     expect(html).not.toContain("Give back");
     expect(html).not.toContain("<button");
   });
 
-  it("a holder whose seat can't be given back any more: closed too", () => {
-    expect(render(ticket({ role: "holder", leaderEmail: "k***@gmail.com" }))).toContain(
+  it("neither flag before the cutoff (an admitted seat): nothing at all", () => {
+    expect(render(ticket(), {}, BEFORE_CUTOFF)).toBe("");
+  });
+
+  it("a holder whose seat can't be given back (the leader is gone), before the cutoff: nothing", () => {
+    expect(render(ticket({ role: "holder", leaderEmail: "k***@gmail.com" }), {}, BEFORE_CUTOFF)).toBe("");
+  });
+
+  it("a holder after the cutoff: closed", () => {
+    expect(render(ticket({ role: "holder", leaderEmail: "k***@gmail.com" }), {}, AFTER_CUTOFF)).toContain(
       "Sharing has closed for this event.",
     );
   });
 
+  it("no cutoff known: nothing", () => {
+    expect(render(ticket({ shareClosesAt: null }), {}, AFTER_CUTOFF)).toBe("");
+  });
+
   it("a void seat: nothing at all", () => {
     expect(render(ticket({ status: "void", canShare: true, linkOpen: true }))).toBe("");
+  });
+
+  it("after a 404: a short line, in both languages, and no buttons", () => {
+    for (const t of [ticket({ canShare: true, linkOpen: true }), ticket({ role: "holder", canGiveBack: true })]) {
+      const html = render(t, { gone: true, linkOpen: false });
+      expect(html).toContain("This seat can&#x27;t be shared or given back any more.");
+      expect(html).toMatch(MYANMAR);
+      expect(html).not.toContain("<button");
+      expect(html).not.toContain("Something went wrong");
+    }
   });
 });
 
@@ -174,5 +202,80 @@ describe("the share URL stays out of storage, logs and the page", () => {
 
   it("the initial state has no URL", () => {
     expect(initialSharingUi(ticket({ canShare: true, linkOpen: true })).url).toBeNull();
+  });
+});
+
+// No DOM in this suite (vitest runs in node, without jsdom or Testing
+// Library), so the default export's request handlers are driven directly.
+describe("sharingRequests", () => {
+  function harness(t: AccountTicket = ticket({ canShare: true })) {
+    let ui = initialSharingUi(t);
+    const goTo = vi.fn();
+    const reqs = sharingRequests(t.id, (next) => (ui = { ...ui, ...next }), goTo);
+    return { reqs, goTo, ui: () => ui };
+  }
+
+  const respond = (status: number, body: unknown = null) =>
+    vi.fn(async () => new Response(body === null ? null : JSON.stringify(body), { status }));
+
+  it("share: the URL lands in the field, and neither storage is written", async () => {
+    const local = { setItem: vi.fn(), getItem: vi.fn(), removeItem: vi.fn(), clear: vi.fn(), key: vi.fn(), length: 0 };
+    const session = { setItem: vi.fn(), getItem: vi.fn(), removeItem: vi.fn(), clear: vi.fn(), key: vi.fn(), length: 0 };
+    vi.stubGlobal("localStorage", local);
+    vi.stubGlobal("sessionStorage", session);
+    const fetchMock = respond(200, { url: URL_SECRET, expiresAt: CUTOFF });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const h = harness();
+    await h.reqs.share();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/me/tickets/11111111-2222-4333-8444-555555555555/share",
+      expect.objectContaining({ method: "POST" }),
+    );
+    expect(h.ui()).toMatchObject({ url: URL_SECRET, linkOpen: true, busy: false, error: null });
+    for (const s of [local, session]) {
+      expect(s.setItem).not.toHaveBeenCalled();
+      expect(s.getItem).not.toHaveBeenCalled();
+    }
+    const html = renderToStaticMarkup(
+      <SeatSharingView ticket={ticket({ canShare: true })} ui={h.ui()} now={BEFORE_CUTOFF} {...actions} />,
+    );
+    expect(html).toContain(`value="${URL_SECRET}"`);
+  });
+
+  it("share: 429 → limited; 500 → generic, buttons still there", async () => {
+    vi.stubGlobal("fetch", respond(429));
+    const a = harness();
+    await a.reqs.share();
+    expect(a.ui()).toMatchObject({ error: "limited", busy: false, gone: false });
+
+    vi.stubGlobal("fetch", respond(500));
+    const b = harness();
+    await b.reqs.share();
+    expect(b.ui()).toMatchObject({ error: "generic", busy: false, gone: false });
+  });
+
+  it("a 404 from share, cancel or give-back switches to the gone state", async () => {
+    vi.stubGlobal("fetch", respond(404));
+    const share = harness();
+    await share.reqs.share();
+    expect(share.ui()).toMatchObject({ gone: true, busy: false, error: null, url: null, linkOpen: false });
+
+    const cancel = harness(ticket({ canShare: true, linkOpen: true }));
+    await cancel.reqs.cancelLink();
+    expect(cancel.ui()).toMatchObject({ gone: true, busy: false, error: null, linkOpen: false });
+
+    const giveBack = harness(ticket({ role: "holder", canGiveBack: true }));
+    await giveBack.reqs.giveBack();
+    expect(giveBack.ui()).toMatchObject({ gone: true, busy: false, error: null, confirmingGiveBack: false });
+    expect(giveBack.goTo).not.toHaveBeenCalled();
+  });
+
+  it("give back: 200 goes to /account/tickets", async () => {
+    vi.stubGlobal("fetch", respond(200, { ok: true }));
+    const h = harness(ticket({ role: "holder", canGiveBack: true }));
+    await h.reqs.giveBack();
+    expect(h.goTo).toHaveBeenCalledWith("/account/tickets");
   });
 });
