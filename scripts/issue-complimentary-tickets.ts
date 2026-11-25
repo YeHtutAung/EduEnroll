@@ -245,9 +245,13 @@ async function main() {
       const order = existing.get(complimentaryKey(intake.id, row.email));
       if (!order) continue;
       if (order.missingLine) {
-        await repairLine(order, classByLevel.get(row.tierLevel)!.id, tenant.id);
+        const result = await repairLine(order, classByLevel.get(row.tierLevel)!.id, tenant.id);
         order.missingLine = false;
-        console.log(`  repaired ${order.enrollment_ref}  line ${row.line} (added its missing order line)`);
+        console.log(
+          result === "added"
+            ? `  repaired ${order.enrollment_ref}  line ${row.line} (added its missing order line)`
+            : `  repaired ${order.enrollment_ref}  line ${row.line} (another run already added its line)`,
+        );
       }
       await issueTicketsForEnrollment(order.id);
     }
@@ -353,6 +357,9 @@ async function createOrder(c: Klass, insert: Record<string, unknown>): Promise<O
   }
 
   const { error: itemError } = await supabase.from("enrollment_items").insert({
+    // The order's own id: one line per complimentary order, enforced by the
+    // primary key (see repairLine).
+    id: order.id,
     enrollment_id: order.id,
     class_id: c.id,
     tenant_id: insert.tenant_id,
@@ -378,16 +385,31 @@ async function createOrder(c: Klass, insert: Record<string, unknown>): Promise<O
  * then shows one seat fewer than expected; add it back by hand. A database
  * transaction would close this, but needs a new function (a migration), which
  * this script deliberately does without.
+ *
+ * Two runs repairing the same order at once must not add two lines: that
+ * would issue two tickets for one seat, as enrollment_items has no unique key
+ * on (enrollment_id, class_id). The line's id is the order's id, so the
+ * primary key admits exactly one; the run that loses gets 23505 and moves on.
  */
-async function repairLine(order: Order, classId: string, tenantId: string): Promise<void> {
-  const { error } = await supabase.from("enrollment_items").insert({
+async function repairLine(order: Order, classId: string, tenantId: string): Promise<"added" | "already"> {
+  const { error } = (await supabase.from("enrollment_items").insert({
+    id: order.id,
     enrollment_id: order.id,
     class_id: classId,
     tenant_id: tenantId,
     quantity: 1,
     fee_amount: 0,
-  } as never);
+  } as never)) as { error: { code?: string; message: string } | null };
+  if (error?.code === "23505") return "already";
   if (error) fail(`Could not repair ${order.enrollment_ref}: ${error.message}`);
+  // Belt and braces: a line added another way (not by this script) would make
+  // two. Stop before issuing rather than hand out a second ticket.
+  const { count } = await supabase
+    .from("enrollment_items")
+    .select("id", { count: "exact", head: true })
+    .eq("enrollment_id", order.id);
+  if (count !== 1) fail(`${order.enrollment_ref} now has ${count} order lines; check it by hand before issuing.`);
+  return "added";
 }
 
 /**
