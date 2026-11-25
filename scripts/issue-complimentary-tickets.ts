@@ -339,8 +339,10 @@ function buyerFieldKeys(fields: Field[]) {
 
 /**
  * One free order: take the seat, insert the confirmed order, insert its 0-priced
- * line. Each step undoes the earlier ones if it fails, so a failure leaves
- * neither a lost seat nor an order without a line.
+ * line. The seat is taken first, so any order that exists holds its seat. A
+ * failure after the order exists keeps both and stops; the next --apply adds
+ * the line (repairLine). Only a failed order insert, with no order saved,
+ * gives the seat back.
  */
 async function createOrder(c: Klass, insert: Record<string, unknown>): Promise<Order> {
   await takeSeat(c.id);
@@ -349,13 +351,30 @@ async function createOrder(c: Klass, insert: Record<string, unknown>): Promise<O
     .from("enrollments")
     .insert(insert as never)
     .select("id, enrollment_ref, idempotency_key, status, status_notified_at")
-    .single()) as { data: Order | null; error: { message: string } | null };
+    .single()) as { data: Order | null; error: { code?: string; message: string } | null };
   if (error || !order) {
-    await giveSeatBack(c.id);
-    throw new Error(`order insert failed: ${error?.message ?? "no row"}`);
+    // 23505 on the idempotency key: an overlapping run created this person's
+    // order first, holding its own seat, so the one taken here is extra.
+    if (error?.code === "23505") {
+      await giveSeatBack(c.id);
+      throw new Error("another run created this order at the same time; re-run --apply to check it.");
+    }
+    // Otherwise the seat goes back only when no order holds it: an insert can
+    // report an error yet have landed (a dropped connection), and that order
+    // would later be repaired, so it must keep its seat.
+    const { data: landed, error: lookupError } = await supabase
+      .from("enrollments")
+      .select("id")
+      .eq("idempotency_key", insert.idempotency_key as string)
+      .maybeSingle();
+    if (!lookupError && !landed) await giveSeatBack(c.id);
+    throw new Error(
+      `order insert failed: ${error?.message ?? "no row"}` +
+        (landed || lookupError ? ". The seat was kept, as the order may exist; re-run --apply to finish it." : ""),
+    );
   }
 
-  const { error: itemError } = await supabase.from("enrollment_items").insert({
+  const { error: itemError } = (await supabase.from("enrollment_items").insert({
     // The order's own id: one line per complimentary order, enforced by the
     // primary key (see repairLine).
     id: order.id,
@@ -364,12 +383,26 @@ async function createOrder(c: Klass, insert: Record<string, unknown>): Promise<O
     tenant_id: insert.tenant_id,
     quantity: 1,
     fee_amount: 0,
-  } as never);
+  } as never)) as { error: { code?: string; message: string } | null };
+
+  // 23505: the line exists already, added by an overlapping run's repair.
+  // Anything else: the order stays WITH its seat and no line, which the next
+  // --apply repairs. Nothing is deleted or given back here, because a rollback
+  // that half-fails, or races a repair, returns a seat an order still holds.
+  if (itemError && itemError.code !== "23505") {
+    throw new Error(
+      `order line insert failed: ${itemError.message}. ${order.enrollment_ref} was kept with its seat; re-run --apply to finish it.`,
+    );
+  }
   if (itemError) {
-    // The order has no line yet, so its delete trigger restores nothing.
-    await supabase.from("enrollments").delete().eq("id", order.id);
-    await giveSeatBack(c.id);
-    throw new Error(`order line insert failed: ${itemError.message}`);
+    const { data: line } = (await supabase
+      .from("enrollment_items")
+      .select("class_id, quantity, fee_amount")
+      .eq("id", order.id)
+      .maybeSingle()) as { data: { class_id: string; quantity: number; fee_amount: number } | null };
+    if (!line || line.class_id !== c.id || line.quantity !== 1 || line.fee_amount !== 0) {
+      throw new Error(`${order.enrollment_ref} already has a different order line; check it by hand.`);
+    }
   }
   return order;
 }
