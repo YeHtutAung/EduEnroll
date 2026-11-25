@@ -45,8 +45,16 @@ import {
 } from "@/lib/complimentary/rows";
 
 type Field = AttendeeField & { per_attendee: boolean };
-type Klass = { id: string; level: string; seat_remaining: number; seat_total: number; status: string };
-type Order = { id: string; enrollment_ref: string; idempotency_key: string; status: string; status_notified_at: string | null };
+type Klass = { id: string; level: string; seat_remaining: number; seat_total: number; status: string; pack_size: number | null };
+type Order = {
+  id: string;
+  enrollment_ref: string;
+  idempotency_key: string;
+  status: string;
+  status_notified_at: string | null;
+  /** A run stopped between inserting the order and its line (see repairLine). */
+  missingLine?: boolean;
+};
 
 const supabase = createAdminClient();
 
@@ -96,23 +104,33 @@ async function main() {
   // makes guest orders, so it stops rather than create tickets nobody can open.
   if (intake.ticket_protection) fail(`"${intakeSlug}" has account-bound tickets; this script cannot issue them.`);
 
-  const { data: classRows } = (await supabase
+  const { data: classRows, error: classesError } = (await supabase
     .from("classes")
-    .select("id, level, seat_remaining, seat_total, status")
-    .eq("intake_id", intake.id)) as { data: Klass[] | null };
-  const classByLevel = new Map((classRows ?? []).map((c) => [c.level, c]));
+    .select("id, level, seat_remaining, seat_total, status, pack_size")
+    .eq("intake_id", intake.id)) as { data: Klass[] | null; error: { message: string } | null };
+  if (classesError || !classRows) fail(`Could not load the event's ticket types: ${classesError?.message ?? "no data"}`);
+  const classByLevel = new Map(classRows.map((c) => [c.level, c]));
   for (const level of Array.from(new Set(tiers.values()))) {
-    if (!classByLevel.has(level)) {
+    const c = classByLevel.get(level);
+    if (!c) {
       fail(`Tier "${level}" is not in "${intakeSlug}". Tiers: ${(classRows ?? []).map((c) => `"${c.level}"`).join(", ")}`);
+    }
+    // A package tier issues pack_size tickets per unit (issueTicketsForEnrollment),
+    // so one free unit would hand one person several tickets.
+    if ((c.pack_size ?? 1) !== 1) {
+      fail(`Tier "${level}" is a ${c.pack_size}-ticket package. Map each distance to a single-ticket tier.`);
     }
   }
 
-  const { data: fieldRows } = (await supabase
+  const { data: fieldRows, error: fieldsError } = (await supabase
     .from("intake_form_fields")
     .select("field_key, field_label, field_type, is_required, options, per_attendee")
     .eq("intake_id", intake.id)
-    .order("sort_order")) as { data: Field[] | null };
-  const fields = fieldRows ?? [];
+    .order("sort_order")) as { data: Field[] | null; error: { message: string } | null };
+  // A failed lookup is not "no questions": treating it so would issue tickets
+  // without the runner's name and size, and a re-run would not add them.
+  if (fieldsError || !fieldRows) fail(`Could not load the event's form questions: ${fieldsError?.message ?? "no data"}`);
+  const fields = fieldRows;
   const buyer = buyerFieldKeys(fields);
   const runnerFields = fields.filter((f) => f.per_attendee);
   const runnerName = runnerFields.find((f) => f.field_type === "text");
@@ -121,8 +139,12 @@ async function main() {
   if (unknown.length) {
     fail(`The form asks each ticket for ${unknown.map((f) => `"${f.field_label}"`).join(", ")}, which this list has no column for.`);
   }
-  const sizes = Array.isArray(runnerSize?.options) ? (runnerSize!.options as unknown[]).map(String) : [];
-  if (runnerSize && sizes.length === 0) fail(`"${runnerSize.field_label}" has no choices to check sizes against.`);
+  // null: the event does not ask each ticket for a size, so the list needs none.
+  let sizes: string[] | null = null;
+  if (runnerSize) {
+    sizes = Array.isArray(runnerSize.options) ? (runnerSize.options as unknown[]).map(String) : [];
+    if (sizes.length === 0) fail(`"${runnerSize.field_label}" has no choices to check sizes against.`);
+  }
 
   // ── List ───────────────────────────────────────────────────────────────────
   const parsed = parseComplimentaryRows(parseCsv(readFileSync(csvPath, "utf8")), tiers, sizes);
@@ -171,9 +193,13 @@ async function main() {
   }
   for (const r of rows) {
     const order = existing.get(complimentaryKey(intake.id, r.email));
-    const state = order ? `exists ${order.enrollment_ref}${order.status_notified_at ? ", emailed" : ""}` : "new";
+    const state = !order
+      ? "new"
+      : order.missingLine
+        ? `exists ${order.enrollment_ref}, MISSING ITS ORDER LINE (--apply repairs it)`
+        : `exists ${order.enrollment_ref}${order.status_notified_at ? ", emailed" : ""}`;
     const note = paid.has(r.email) ? "  (also has a paid order)" : "";
-    console.log(`  line ${String(r.line).padStart(3)}  ${r.tierLevel.padEnd(20)} ${r.size.padEnd(7)} ${mask(r.email).padEnd(24)} ${state}${note}`);
+    console.log(`  line ${String(r.line).padStart(3)}  ${r.tierLevel.padEnd(20)} ${(r.size || "-").padEnd(7)} ${mask(r.email).padEnd(24)} ${state}${note}`);
   }
 
   if (!apply && !send) {
@@ -218,6 +244,15 @@ async function main() {
     for (const row of rows) {
       const order = existing.get(complimentaryKey(intake.id, row.email));
       if (!order) continue;
+      if (order.missingLine) {
+        const result = await repairLine(order, classByLevel.get(row.tierLevel)!.id, tenant.id);
+        order.missingLine = false;
+        console.log(
+          result === "added"
+            ? `  repaired ${order.enrollment_ref}  line ${row.line} (added its missing order line)`
+            : `  repaired ${order.enrollment_ref}  line ${row.line} (another run already added its line)`,
+        );
+      }
       await issueTicketsForEnrollment(order.id);
     }
     const ticketless = await ordersWithoutTickets(Array.from(existing.values()).map((o) => o.id));
@@ -229,6 +264,7 @@ async function main() {
   if (send) {
     const origin = tenantLinkOrigin(tenant.subdomain);
     const failed: number[] = [];
+    const unmarked: string[] = [];
     let sent = 0;
     const queue = rows.flatMap((row) => {
       const order = existing.get(complimentaryKey(intake.id, row.email));
@@ -259,12 +295,19 @@ async function main() {
         });
         const ok = await sendEmail({ to: row.email, subject: content.subject, html: content.html, attachments: [parts.attachment] });
         if (!ok) throw new Error("email provider rejected the send");
-        await supabase
+        sent++;
+        // The marker is what stops a later --send emailing this person again, so
+        // a failure to save it is reported, never counted as a clean send.
+        const { error: markError } = await supabase
           .from("enrollments")
           .update({ status_notified_at: new Date().toISOString() } as never)
           .eq("id", order.id);
-        sent++;
-        console.log(`  sent    ${order.enrollment_ref}  ${mask(row.email)}`);
+        if (markError) {
+          unmarked.push(order.enrollment_ref);
+          console.error(`  SENT, NOT RECORDED  ${order.enrollment_ref}: ${markError.message}`);
+        } else {
+          console.log(`  sent    ${order.enrollment_ref}  ${mask(row.email)}`);
+        }
       } catch (err) {
         failed.push(row.line);
         console.error(`  FAILED  ${order.enrollment_ref} (line ${row.line}): ${(err as Error).message}`);
@@ -272,10 +315,16 @@ async function main() {
       if (index < queue.length - 1) await new Promise((r) => setTimeout(r, delayMs));
     }
     console.log(`\nSent ${sent} of ${queue.length}.`);
+    if (unmarked.length) {
+      console.log(
+        `Emailed but NOT recorded: ${unmarked.join(", ")}. A re-run with --send would email these again. ` +
+          "Set status_notified_at on these orders by hand before re-running.",
+      );
+    }
     if (failed.length) {
       console.log(`Failed lines: ${failed.join(", ")}. Re-run with --send to retry only those.`);
-      process.exit(1);
     }
+    if (failed.length || unmarked.length) process.exit(1);
   }
 }
 
@@ -291,8 +340,10 @@ function buyerFieldKeys(fields: Field[]) {
 
 /**
  * One free order: take the seat, insert the confirmed order, insert its 0-priced
- * line. Each step undoes the earlier ones if it fails, so a failure leaves
- * neither a lost seat nor an order without a line.
+ * line. The seat is taken first, so any order that exists holds its seat. A
+ * failure after the order exists keeps both and stops; the next --apply adds
+ * the line (repairLine). Only a failed order insert, with no order saved,
+ * gives the seat back.
  */
 async function createOrder(c: Klass, insert: Record<string, unknown>): Promise<Order> {
   await takeSeat(c.id);
@@ -301,26 +352,97 @@ async function createOrder(c: Klass, insert: Record<string, unknown>): Promise<O
     .from("enrollments")
     .insert(insert as never)
     .select("id, enrollment_ref, idempotency_key, status, status_notified_at")
-    .single()) as { data: Order | null; error: { message: string } | null };
+    .single()) as { data: Order | null; error: { code?: string; message: string } | null };
   if (error || !order) {
-    await giveSeatBack(c.id);
-    throw new Error(`order insert failed: ${error?.message ?? "no row"}`);
+    // 23505 on the idempotency key: an overlapping run created this person's
+    // order first, holding its own seat, so the one taken here is extra.
+    if (error?.code === "23505") {
+      await giveSeatBack(c.id);
+      throw new Error("another run created this order at the same time; re-run --apply to check it.");
+    }
+    // Otherwise the seat goes back only when no order holds it: an insert can
+    // report an error yet have landed (a dropped connection), and that order
+    // would later be repaired, so it must keep its seat.
+    const { data: landed, error: lookupError } = await supabase
+      .from("enrollments")
+      .select("id")
+      .eq("idempotency_key", insert.idempotency_key as string)
+      .maybeSingle();
+    if (!lookupError && !landed) await giveSeatBack(c.id);
+    throw new Error(
+      `order insert failed: ${error?.message ?? "no row"}` +
+        (landed || lookupError ? ". The seat was kept, as the order may exist; re-run --apply to finish it." : ""),
+    );
   }
 
-  const { error: itemError } = await supabase.from("enrollment_items").insert({
+  const { error: itemError } = (await supabase.from("enrollment_items").insert({
+    // The order's own id: one line per complimentary order, enforced by the
+    // primary key (see repairLine).
+    id: order.id,
     enrollment_id: order.id,
     class_id: c.id,
     tenant_id: insert.tenant_id,
     quantity: 1,
     fee_amount: 0,
-  } as never);
+  } as never)) as { error: { code?: string; message: string } | null };
+
+  // 23505: the line exists already, added by an overlapping run's repair.
+  // Anything else: the order stays WITH its seat and no line, which the next
+  // --apply repairs. Nothing is deleted or given back here, because a rollback
+  // that half-fails, or races a repair, returns a seat an order still holds.
+  if (itemError && itemError.code !== "23505") {
+    throw new Error(
+      `order line insert failed: ${itemError.message}. ${order.enrollment_ref} was kept with its seat; re-run --apply to finish it.`,
+    );
+  }
   if (itemError) {
-    // The order has no line yet, so its delete trigger restores nothing.
-    await supabase.from("enrollments").delete().eq("id", order.id);
-    await giveSeatBack(c.id);
-    throw new Error(`order line insert failed: ${itemError.message}`);
+    const { data: line } = (await supabase
+      .from("enrollment_items")
+      .select("class_id, quantity, fee_amount")
+      .eq("id", order.id)
+      .maybeSingle()) as { data: { class_id: string; quantity: number; fee_amount: number } | null };
+    if (!line || line.class_id !== c.id || line.quantity !== 1 || line.fee_amount !== 0) {
+      throw new Error(`${order.enrollment_ref} already has a different order line; check it by hand.`);
+    }
   }
   return order;
+}
+
+/**
+ * Adds the 0-priced line to an order a run left without one (it stopped after
+ * inserting the order). No seat is taken: createOrder takes the seat BEFORE it
+ * inserts the order, so an order that exists already holds its seat.
+ *
+ * Not covered: a run that stops after taking the seat but before inserting the
+ * order leaves one seat taken and no order, which nothing records. The tier
+ * then shows one seat fewer than expected; add it back by hand. A database
+ * transaction would close this, but needs a new function (a migration), which
+ * this script deliberately does without.
+ *
+ * Two runs repairing the same order at once must not add two lines: that
+ * would issue two tickets for one seat, as enrollment_items has no unique key
+ * on (enrollment_id, class_id). The line's id is the order's id, so the
+ * primary key admits exactly one; the run that loses gets 23505 and moves on.
+ */
+async function repairLine(order: Order, classId: string, tenantId: string): Promise<"added" | "already"> {
+  const { error } = (await supabase.from("enrollment_items").insert({
+    id: order.id,
+    enrollment_id: order.id,
+    class_id: classId,
+    tenant_id: tenantId,
+    quantity: 1,
+    fee_amount: 0,
+  } as never)) as { error: { code?: string; message: string } | null };
+  if (error?.code === "23505") return "already";
+  if (error) fail(`Could not repair ${order.enrollment_ref}: ${error.message}`);
+  // Belt and braces: a line added another way (not by this script) would make
+  // two. Stop before issuing rather than hand out a second ticket.
+  const { count } = await supabase
+    .from("enrollment_items")
+    .select("id", { count: "exact", head: true })
+    .eq("enrollment_id", order.id);
+  if (count !== 1) fail(`${order.enrollment_ref} now has ${count} order lines; check it by hand before issuing.`);
+  return "added";
 }
 
 /**
@@ -373,12 +495,15 @@ async function loadOrders(keys: string[]): Promise<Map<string, Order>> {
   for (let i = 0; i < keys.length; i += 100) {
     const { data, error } = (await supabase
       .from("enrollments")
-      .select("id, enrollment_ref, idempotency_key, status, status_notified_at")
-      .in("idempotency_key", keys.slice(i, i + 100))) as { data: Order[] | null; error: { message: string } | null };
+      .select("id, enrollment_ref, idempotency_key, status, status_notified_at, enrollment_items(id)")
+      .in("idempotency_key", keys.slice(i, i + 100))) as {
+      data: (Order & { enrollment_items: { id: string }[] | null })[] | null;
+      error: { message: string } | null;
+    };
     if (error || !data) fail(`Order lookup failed: ${error?.message ?? "no data"}`);
-    for (const o of data) {
+    for (const { enrollment_items, ...o } of data) {
       if (o.status !== "confirmed") fail(`${o.enrollment_ref} (${o.idempotency_key}) is ${o.status}, not confirmed. Check it by hand.`);
-      map.set(o.idempotency_key, o);
+      map.set(o.idempotency_key, { ...o, missingLine: !enrollment_items?.length });
     }
   }
   return map;
