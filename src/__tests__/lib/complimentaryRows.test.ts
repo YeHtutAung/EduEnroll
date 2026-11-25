@@ -25,6 +25,19 @@ describe("parseCsv", () => {
     ]);
   });
 
+  it("refuses a quote that is never closed instead of swallowing the rest", () => {
+    expect(() => parseCsv('name,note\nA,"unfinished note\nB,fine\nC,fine\n')).toThrow(
+      "unclosed quote starting on line 2",
+    );
+  });
+
+  it("names the right line for an unclosed quote with CRLF or CR line ends", () => {
+    expect(() => parseCsv('name,note\r\nA,ok\r\nB,"unfinished')).toThrow("starting on line 3");
+    expect(() => parseCsv('name,note\rA,ok\rB,"unfinished')).toThrow("starting on line 3");
+    // A line break inside a closed quoted field still counts.
+    expect(() => parseCsv('name,note\r\nA,"two\r\nlines"\r\nB,"unfinished')).toThrow("starting on line 4");
+  });
+
   it("drops blank lines and keeps a last line without a newline", () => {
     expect(parseCsv("a,b\n\n,\nc,d")).toEqual([
       ["a", "b"],

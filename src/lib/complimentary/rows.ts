@@ -27,15 +27,23 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // Myanmar mobile numbers: 09 + 7 to 9 digits, or the same with +95 / 959.
 const PHONE_RE = /^(09|\+?959)\d{7,9}$/;
 
-/** Minimal RFC 4180 reader: quoted fields, doubled quotes, CRLF, a BOM. */
+/**
+ * Minimal RFC 4180 reader: quoted fields, doubled quotes, CRLF, a BOM.
+ * Throws on a quote that is never closed: it would otherwise swallow every
+ * later line into one field and silently drop those people from the list.
+ */
 export function parseCsv(text: string): string[][] {
   const src = text.replace(/^﻿/, "");
   const records: string[][] = [];
   let field = "";
   let record: string[] = [];
   let quoted = false;
+  let line = 1;
+  let quoteLine = 0;
   for (let i = 0; i < src.length; i++) {
     const ch = src[i];
+    // One line break is LF, CR or CRLF; count a CRLF once, at its CR.
+    if (ch === "\r" || (ch === "\n" && src[i - 1] !== "\r")) line++;
     if (quoted) {
       if (ch === '"' && src[i + 1] === '"') {
         field += '"';
@@ -47,6 +55,7 @@ export function parseCsv(text: string): string[][] {
       }
     } else if (ch === '"') {
       quoted = true;
+      quoteLine = line;
     } else if (ch === ",") {
       record.push(field);
       field = "";
@@ -60,6 +69,7 @@ export function parseCsv(text: string): string[][] {
       field += ch;
     }
   }
+  if (quoted) throw new Error(`The list has an unclosed quote starting on line ${quoteLine}.`);
   if (field !== "" || record.length > 0) {
     record.push(field);
     records.push(record);
