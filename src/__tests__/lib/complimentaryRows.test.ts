@@ -25,6 +25,12 @@ describe("parseCsv", () => {
     ]);
   });
 
+  it("refuses a quote that is never closed instead of swallowing the rest", () => {
+    expect(() => parseCsv('name,note\nA,"unfinished note\nB,fine\nC,fine\n')).toThrow(
+      "unclosed quote starting on line 2",
+    );
+  });
+
   it("drops blank lines and keeps a last line without a newline", () => {
     expect(parseCsv("a,b\n\n,\nc,d")).toEqual([
       ["a", "b"],
