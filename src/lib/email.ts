@@ -380,11 +380,17 @@ export function enrollmentApprovedEmail(params: {
   eventImages?: { url: string; alt: string }[] | null;
   /** One per ticket when the event asks per-ticket questions (runner name, size). */
   runners?: { tier: string; label: string }[] | null;
+  /**
+   * A free ticket given by the organiser (scripts/issue-complimentary-tickets.ts).
+   * No payment was made, so the email must not say one was verified.
+   */
+  complimentary?: boolean;
   orgType?: string;
   tenantName?: string;
   logoUrl?: string;
 }): { subject: string; html: string } {
   const {
+    complimentary,
     studentName,
     enrollmentRef,
     classLevel,
@@ -460,11 +466,15 @@ export function enrollmentApprovedEmail(params: {
 
       <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 16px; margin: 20px 0;">
         <p style="margin: 0; font-size: 14px; color: #166534;">
-          <strong>${studentName}</strong>, your payment has been verified and your ${l.enrollLabel.toLowerCase()}${singleTicketBold} is now confirmed.
+          ${complimentary
+            ? `<strong>${studentName}</strong>, your free ticket${singleTicketBold} is confirmed.`
+            : `<strong>${studentName}</strong>, your payment has been verified and your ${l.enrollLabel.toLowerCase()}${singleTicketBold} is now confirmed.`}
         </p>
         ${ticketListHtml}
         <p class="myanmar" style="margin: 8px 0 0; font-size: 13px; color: #15803d;">
-          သင့်ငွေပေးချေမှု အတည်ပြုပြီးဖြစ်ပြီး ${l.enrollLabelMm} အတည်ပြုပြီးပါပြီ။
+          ${complimentary
+            ? "သင့်အခမဲ့လက်မှတ် အတည်ပြုပြီးပါပြီ။"
+            : `သင့်ငွေပေးချေမှု အတည်ပြုပြီးဖြစ်ပြီး ${l.enrollLabelMm} အတည်ပြုပြီးပါပြီ။`}
         </p>
       </div>
 
