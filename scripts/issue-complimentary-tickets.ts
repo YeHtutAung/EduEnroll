@@ -54,7 +54,17 @@ type Order = {
   status_notified_at: string | null;
   /** A run stopped between inserting the order and its line (see repairLine). */
   missingLine?: boolean;
+  /** The tier its seat was taken from (RESERVED_TIER_KEY), for a repair. */
+  reservedClassId?: string | null;
 };
+
+/**
+ * Hidden form_data key recording the tier a complimentary order's seat came
+ * from. A repair must add the line on THAT tier, whatever the list or --tier
+ * say on the retry. The admin page and exports only show the event's own form
+ * fields, so this key is never displayed.
+ */
+const RESERVED_TIER_KEY = "_complimentary_class_id";
 
 const supabase = createAdminClient();
 
@@ -146,7 +156,13 @@ async function main() {
   }
 
   // ── List ───────────────────────────────────────────────────────────────────
-  const parsed = parseComplimentaryRows(parseCsv(readFileSync(csvPath, "utf8")), tiers, sizes);
+  let records: string[][];
+  try {
+    records = parseCsv(readFileSync(csvPath, "utf8"));
+  } catch (err) {
+    fail(`${(err as Error).message} Nothing was written.`);
+  }
+  const parsed = parseComplimentaryRows(records, tiers, sizes);
   if (!parsed.ok) {
     console.error(`The list has ${parsed.errors.length} problem(s). Nothing was written.`);
     for (const e of parsed.errors) console.error(`  ${e}`);
@@ -168,6 +184,30 @@ async function main() {
 
   const existing = await loadOrders(rows.map((r) => complimentaryKey(intake.id, r.email)));
   const toCreate = rows.filter((r) => !existing.has(complimentaryKey(intake.id, r.email)));
+
+  // An order waiting for its line is repaired on the tier its seat came from.
+  // If the list now maps that person to another tier, stop before any write:
+  // repairing on the new tier would issue a ticket with no seat there and
+  // leave the old tier's seat taken.
+  const levelById = new Map(classRows.map((c) => [c.id, c.level]));
+  const tierProblems: string[] = [];
+  for (const r of rows) {
+    const order = existing.get(complimentaryKey(intake.id, r.email));
+    if (!order?.missingLine) continue;
+    const reserved = order.reservedClassId;
+    if (!reserved || !levelById.has(reserved)) {
+      tierProblems.push(`Line ${r.line}: ${order.enrollment_ref} has no order line and no recorded tier; fix it by hand.`);
+    } else if (levelById.get(reserved) !== r.tierLevel) {
+      tierProblems.push(
+        `Line ${r.line}: ${order.enrollment_ref} took its seat on "${levelById.get(reserved)}", but the list now says "${r.tierLevel}".`,
+      );
+    }
+  }
+  if (tierProblems.length) {
+    console.error(`${tierProblems.length} unfinished order(s) do not match the list. Nothing was written.`);
+    for (const p of tierProblems) console.error(`  ${p}`);
+    process.exit(1);
+  }
 
   // Seats are checked for the whole list before the first write.
   const need = new Map<string, number>();
@@ -227,7 +267,7 @@ async function main() {
           student_name_en: columns.student_name_en ?? row.name,
           phone: columns.phone ?? row.phone,
           email: columns.email ?? row.email,
-          form_data: columns.form_data,
+          form_data: { ...columns.form_data, [RESERVED_TIER_KEY]: c.id },
           attendees: runnersFor(row, c.id),
         });
         existing.set(key, order);
@@ -244,7 +284,8 @@ async function main() {
       const order = existing.get(complimentaryKey(intake.id, row.email));
       if (!order) continue;
       if (order.missingLine) {
-        const result = await repairLine(order, classByLevel.get(row.tierLevel)!.id, tenant.id);
+        // The tier its seat came from, checked against the list above.
+        const result = await repairLine(order, order.reservedClassId!, tenant.id);
         order.missingLine = false;
         console.log(
           result === "added"
@@ -494,15 +535,25 @@ async function loadOrders(keys: string[]): Promise<Map<string, Order>> {
   for (let i = 0; i < keys.length; i += 100) {
     const { data, error } = (await supabase
       .from("enrollments")
-      .select("id, enrollment_ref, idempotency_key, status, status_notified_at, enrollment_items(id)")
+      .select("id, enrollment_ref, idempotency_key, status, status_notified_at, form_data, attendees, enrollment_items(id)")
       .in("idempotency_key", keys.slice(i, i + 100))) as {
-      data: (Order & { enrollment_items: { id: string }[] | null })[] | null;
+      data: (Order & {
+        enrollment_items: { id: string }[] | null;
+        form_data: Record<string, unknown> | null;
+        attendees: { class_id?: unknown }[] | null;
+      })[] | null;
       error: { message: string } | null;
     };
     if (error || !data) fail(`Order lookup failed: ${error?.message ?? "no data"}`);
-    for (const { enrollment_items, ...o } of data) {
+    for (const { enrollment_items, form_data, attendees, ...o } of data) {
       if (o.status !== "confirmed") fail(`${o.enrollment_ref} (${o.idempotency_key}) is ${o.status}, not confirmed. Check it by hand.`);
-      map.set(o.idempotency_key, { ...o, missingLine: !enrollment_items?.length });
+      // The recorded tier; an order made before it was recorded falls back to
+      // its runner's tier, which createOrder set from the same reserved class.
+      const recorded = form_data?.[RESERVED_TIER_KEY];
+      const runnerTier = Array.isArray(attendees) ? attendees[0]?.class_id : undefined;
+      const reservedClassId =
+        typeof recorded === "string" ? recorded : typeof runnerTier === "string" ? runnerTier : null;
+      map.set(o.idempotency_key, { ...o, missingLine: !enrollment_items?.length, reservedClassId });
     }
   }
   return map;
