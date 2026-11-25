@@ -179,4 +179,28 @@ describe("enrollmentApprovedEmail", () => {
       expect(enrollmentApprovedEmail({ ...base, runners: null }).html).toBe(before);
     });
   });
+
+  describe("complimentary", () => {
+    const base = {
+      studentName: "Runner",
+      enrollmentRef: "TBR-1125-ABCDEF",
+      classLevel: "Early Bird - 10KM",
+      statusUrl: "https://beatsrun.kuunyi.com/status?ref=TBR-1125-ABCDEF",
+      orgType: "event",
+    };
+
+    it("says the ticket is free instead of that a payment was verified", () => {
+      const { html } = enrollmentApprovedEmail({ ...base, complimentary: true });
+      expect(html).toContain("your free ticket for <strong>Early Bird - 10KM</strong> is confirmed.");
+      expect(html).toContain("သင့်အခမဲ့လက်မှတ် အတည်ပြုပြီးပါပြီ။");
+      expect(html).not.toContain("your payment has been verified");
+      expect(html).not.toContain("သင့်ငွေပေးချေမှု အတည်ပြုပြီးဖြစ်ပြီး");
+    });
+
+    it("leaves the paid email unchanged", () => {
+      const before = enrollmentApprovedEmail(base).html;
+      expect(enrollmentApprovedEmail({ ...base, complimentary: false }).html).toBe(before);
+      expect(before).toContain("your payment has been verified");
+    });
+  });
 });
