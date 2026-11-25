@@ -42,7 +42,8 @@ export function parseCsv(text: string): string[][] {
   let quoteLine = 0;
   for (let i = 0; i < src.length; i++) {
     const ch = src[i];
-    if (ch === "\n") line++;
+    // One line break is LF, CR or CRLF; count a CRLF once, at its CR.
+    if (ch === "\r" || (ch === "\n" && src[i - 1] !== "\r")) line++;
     if (quoted) {
       if (ch === '"' && src[i + 1] === '"') {
         field += '"';
