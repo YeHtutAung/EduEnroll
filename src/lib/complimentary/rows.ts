@@ -16,7 +16,7 @@ export interface ComplimentaryRow {
   distance: string;
   /** classes.level the ticket is issued on. */
   tierLevel: string;
-  /** One of the event's size choices, in its own spelling. */
+  /** One of the event's size choices, in its own spelling; "" when the event asks none. */
   size: string;
 }
 
@@ -77,24 +77,26 @@ export function normalisePhone(raw: string): string {
  * Checks every line and returns either all rows or every problem found.
  *
  * @param tiers distance (any case) → classes.level, from the --tier options
- * @param sizes the event's jersey size choices
+ * @param sizes the event's jersey size choices, or null when the event asks
+ *              no size per ticket: then the size column is optional and ignored
  */
 export function parseComplimentaryRows(
   records: string[][],
   tiers: Map<string, string>,
-  sizes: string[],
+  sizes: string[] | null,
 ): RowsResult {
   if (records.length === 0) return { ok: false, errors: ["The list is empty."] };
 
+  const required = sizes ? REQUIRED : REQUIRED.filter((c) => c !== "size");
   const header = records[0].map((h) => h.trim().toLowerCase());
-  const missing = REQUIRED.filter((c) => !header.includes(c));
+  const missing = required.filter((c) => !header.includes(c));
   if (missing.length) {
-    return { ok: false, errors: [`Missing column(s): ${missing.join(", ")}. Expected: ${REQUIRED.join(", ")}.`] };
+    return { ok: false, errors: [`Missing column(s): ${missing.join(", ")}. Expected: ${required.join(", ")}.`] };
   }
   const col = (r: string[], name: string) => (r[header.indexOf(name)] ?? "").trim();
 
   const tierByDistance = new Map(Array.from(tiers.entries()).map(([d, level]) => [d.trim().toLowerCase(), level]));
-  const sizeByLower = new Map(sizes.map((s) => [s.toLowerCase(), s]));
+  const sizeByLower = new Map((sizes ?? []).map((s) => [s.toLowerCase(), s]));
 
   const errors: string[] = [];
   const rows: ComplimentaryRow[] = [];
@@ -115,8 +117,8 @@ export function parseComplimentaryRows(
     if (!EMAIL_RE.test(email)) problems.push(`email "${col(r, "email")}" is not an email address`);
     const tierLevel = tierByDistance.get(distance.toLowerCase());
     if (!tierLevel) problems.push(`distance "${distance}" has no --tier mapping`);
-    const size = sizeByLower.get(sizeRaw.toLowerCase());
-    if (!size) problems.push(`size "${sizeRaw}" is not one of: ${sizes.join(", ")}`);
+    const size = sizes ? sizeByLower.get(sizeRaw.toLowerCase()) : "";
+    if (sizes && !size) problems.push(`size "${sizeRaw}" is not one of: ${sizes.join(", ")}`);
 
     const firstLine = seenEmail.get(email);
     if (email && firstLine !== undefined) problems.push(`email repeats line ${firstLine}`);
@@ -126,7 +128,7 @@ export function parseComplimentaryRows(
       errors.push(`Line ${line}: ${problems.join("; ")}`);
       return;
     }
-    rows.push({ line, name, phone, email, distance, tierLevel: tierLevel!, size: size! });
+    rows.push({ line, name, phone, email, distance, tierLevel: tierLevel!, size: size ?? "" });
   });
 
   if (errors.length) return { ok: false, errors };
