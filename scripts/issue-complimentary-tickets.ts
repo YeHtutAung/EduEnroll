@@ -45,7 +45,7 @@ import {
 } from "@/lib/complimentary/rows";
 
 type Field = AttendeeField & { per_attendee: boolean };
-type Klass = { id: string; level: string; seat_remaining: number; seat_total: number; status: string };
+type Klass = { id: string; level: string; seat_remaining: number; seat_total: number; status: string; pack_size: number | null };
 type Order = { id: string; enrollment_ref: string; idempotency_key: string; status: string; status_notified_at: string | null };
 
 const supabase = createAdminClient();
@@ -97,12 +97,18 @@ async function main() {
 
   const { data: classRows } = (await supabase
     .from("classes")
-    .select("id, level, seat_remaining, seat_total, status")
+    .select("id, level, seat_remaining, seat_total, status, pack_size")
     .eq("intake_id", intake.id)) as { data: Klass[] | null };
   const classByLevel = new Map((classRows ?? []).map((c) => [c.level, c]));
   for (const level of Array.from(new Set(tiers.values()))) {
-    if (!classByLevel.has(level)) {
+    const c = classByLevel.get(level);
+    if (!c) {
       fail(`Tier "${level}" is not in "${intakeSlug}". Tiers: ${(classRows ?? []).map((c) => `"${c.level}"`).join(", ")}`);
+    }
+    // A package tier issues pack_size tickets per unit (issueTicketsForEnrollment),
+    // so one free unit would hand one person several tickets.
+    if ((c.pack_size ?? 1) !== 1) {
+      fail(`Tier "${level}" is a ${c.pack_size}-ticket package. Map each distance to a single-ticket tier.`);
     }
   }
 
@@ -120,8 +126,12 @@ async function main() {
   if (unknown.length) {
     fail(`The form asks each ticket for ${unknown.map((f) => `"${f.field_label}"`).join(", ")}, which this list has no column for.`);
   }
-  const sizes = Array.isArray(runnerSize?.options) ? (runnerSize!.options as unknown[]).map(String) : [];
-  if (runnerSize && sizes.length === 0) fail(`"${runnerSize.field_label}" has no choices to check sizes against.`);
+  // null: the event does not ask each ticket for a size, so the list needs none.
+  let sizes: string[] | null = null;
+  if (runnerSize) {
+    sizes = Array.isArray(runnerSize.options) ? (runnerSize.options as unknown[]).map(String) : [];
+    if (sizes.length === 0) fail(`"${runnerSize.field_label}" has no choices to check sizes against.`);
+  }
 
   // ── List ───────────────────────────────────────────────────────────────────
   const parsed = parseComplimentaryRows(parseCsv(readFileSync(csvPath, "utf8")), tiers, sizes);
@@ -172,7 +182,7 @@ async function main() {
     const order = existing.get(complimentaryKey(intake.id, r.email));
     const state = order ? `exists ${order.enrollment_ref}${order.status_notified_at ? ", emailed" : ""}` : "new";
     const note = paid.has(r.email) ? "  (also has a paid order)" : "";
-    console.log(`  line ${String(r.line).padStart(3)}  ${r.tierLevel.padEnd(20)} ${r.size.padEnd(7)} ${mask(r.email).padEnd(24)} ${state}${note}`);
+    console.log(`  line ${String(r.line).padStart(3)}  ${r.tierLevel.padEnd(20)} ${(r.size || "-").padEnd(7)} ${mask(r.email).padEnd(24)} ${state}${note}`);
   }
 
   if (!apply && !send) {
@@ -228,6 +238,7 @@ async function main() {
   if (send) {
     const origin = tenantLinkOrigin(tenant.subdomain);
     const failed: number[] = [];
+    const unmarked: string[] = [];
     let sent = 0;
     const queue = rows.flatMap((row) => {
       const order = existing.get(complimentaryKey(intake.id, row.email));
@@ -258,12 +269,19 @@ async function main() {
         });
         const ok = await sendEmail({ to: row.email, subject: content.subject, html: content.html, attachments: [attachment] });
         if (!ok) throw new Error("email provider rejected the send");
-        await supabase
+        sent++;
+        // The marker is what stops a later --send emailing this person again, so
+        // a failure to save it is reported, never counted as a clean send.
+        const { error: markError } = await supabase
           .from("enrollments")
           .update({ status_notified_at: new Date().toISOString() } as never)
           .eq("id", order.id);
-        sent++;
-        console.log(`  sent    ${order.enrollment_ref}  ${mask(row.email)}`);
+        if (markError) {
+          unmarked.push(order.enrollment_ref);
+          console.error(`  SENT, NOT RECORDED  ${order.enrollment_ref}: ${markError.message}`);
+        } else {
+          console.log(`  sent    ${order.enrollment_ref}  ${mask(row.email)}`);
+        }
       } catch (err) {
         failed.push(row.line);
         console.error(`  FAILED  ${order.enrollment_ref} (line ${row.line}): ${(err as Error).message}`);
@@ -271,10 +289,16 @@ async function main() {
       if (index < queue.length - 1) await new Promise((r) => setTimeout(r, delayMs));
     }
     console.log(`\nSent ${sent} of ${queue.length}.`);
+    if (unmarked.length) {
+      console.log(
+        `Emailed but NOT recorded: ${unmarked.join(", ")}. A re-run with --send would email these again. ` +
+          "Set status_notified_at on these orders by hand before re-running.",
+      );
+    }
     if (failed.length) {
       console.log(`Failed lines: ${failed.join(", ")}. Re-run with --send to retry only those.`);
-      process.exit(1);
     }
+    if (failed.length || unmarked.length) process.exit(1);
   }
 }
 

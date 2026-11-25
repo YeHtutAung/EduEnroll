@@ -94,6 +94,19 @@ describe("parseComplimentaryRows", () => {
     if (!result.ok) expect(result.errors).toEqual(["Line 3: email repeats line 2"]);
   });
 
+  it("needs no size when the event asks none per ticket", () => {
+    const noColumn = parseComplimentaryRows(
+      parseCsv("name,phone,email,distance\nA,09123456789,a@b.co,5KM"),
+      TIERS,
+      null,
+    );
+    expect(noColumn.ok && noColumn.rows[0]).toMatchObject({ name: "A", size: "" });
+
+    // A size column is ignored rather than checked against nothing.
+    const withColumn = parseComplimentaryRows(parseCsv(`${HEADER}\nA,09123456789,a@b.co,5KM,whatever`), TIERS, null);
+    expect(withColumn.ok && withColumn.rows[0].size).toBe("");
+  });
+
   it("reports missing columns and empty lists", () => {
     const noSize = parse("name,phone,email,distance\nA,09123456789,a@b.co,5KM");
     expect(noSize.ok || noSize.errors[0]).toContain("Missing column(s): size");
