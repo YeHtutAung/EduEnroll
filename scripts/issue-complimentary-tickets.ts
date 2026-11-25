@@ -46,7 +46,15 @@ import {
 
 type Field = AttendeeField & { per_attendee: boolean };
 type Klass = { id: string; level: string; seat_remaining: number; seat_total: number; status: string; pack_size: number | null };
-type Order = { id: string; enrollment_ref: string; idempotency_key: string; status: string; status_notified_at: string | null };
+type Order = {
+  id: string;
+  enrollment_ref: string;
+  idempotency_key: string;
+  status: string;
+  status_notified_at: string | null;
+  /** A run stopped between inserting the order and its line (see repairLine). */
+  missingLine?: boolean;
+};
 
 const supabase = createAdminClient();
 
@@ -96,11 +104,12 @@ async function main() {
   // makes guest orders, so it stops rather than create tickets nobody can open.
   if (intake.ticket_protection) fail(`"${intakeSlug}" has account-bound tickets; this script cannot issue them.`);
 
-  const { data: classRows } = (await supabase
+  const { data: classRows, error: classesError } = (await supabase
     .from("classes")
     .select("id, level, seat_remaining, seat_total, status, pack_size")
-    .eq("intake_id", intake.id)) as { data: Klass[] | null };
-  const classByLevel = new Map((classRows ?? []).map((c) => [c.level, c]));
+    .eq("intake_id", intake.id)) as { data: Klass[] | null; error: { message: string } | null };
+  if (classesError || !classRows) fail(`Could not load the event's ticket types: ${classesError?.message ?? "no data"}`);
+  const classByLevel = new Map(classRows.map((c) => [c.level, c]));
   for (const level of Array.from(new Set(tiers.values()))) {
     const c = classByLevel.get(level);
     if (!c) {
@@ -113,12 +122,15 @@ async function main() {
     }
   }
 
-  const { data: fieldRows } = (await supabase
+  const { data: fieldRows, error: fieldsError } = (await supabase
     .from("intake_form_fields")
     .select("field_key, field_label, field_type, is_required, options, per_attendee")
     .eq("intake_id", intake.id)
-    .order("sort_order")) as { data: Field[] | null };
-  const fields = fieldRows ?? [];
+    .order("sort_order")) as { data: Field[] | null; error: { message: string } | null };
+  // A failed lookup is not "no questions": treating it so would issue tickets
+  // without the runner's name and size, and a re-run would not add them.
+  if (fieldsError || !fieldRows) fail(`Could not load the event's form questions: ${fieldsError?.message ?? "no data"}`);
+  const fields = fieldRows;
   const buyer = buyerFieldKeys(fields);
   const runnerFields = fields.filter((f) => f.per_attendee);
   const runnerName = runnerFields.find((f) => f.field_type === "text");
@@ -181,7 +193,11 @@ async function main() {
   }
   for (const r of rows) {
     const order = existing.get(complimentaryKey(intake.id, r.email));
-    const state = order ? `exists ${order.enrollment_ref}${order.status_notified_at ? ", emailed" : ""}` : "new";
+    const state = !order
+      ? "new"
+      : order.missingLine
+        ? `exists ${order.enrollment_ref}, MISSING ITS ORDER LINE (--apply repairs it)`
+        : `exists ${order.enrollment_ref}${order.status_notified_at ? ", emailed" : ""}`;
     const note = paid.has(r.email) ? "  (also has a paid order)" : "";
     console.log(`  line ${String(r.line).padStart(3)}  ${r.tierLevel.padEnd(20)} ${(r.size || "-").padEnd(7)} ${mask(r.email).padEnd(24)} ${state}${note}`);
   }
@@ -228,6 +244,11 @@ async function main() {
     for (const row of rows) {
       const order = existing.get(complimentaryKey(intake.id, row.email));
       if (!order) continue;
+      if (order.missingLine) {
+        await repairLine(order, classByLevel.get(row.tierLevel)!.id, tenant.id);
+        order.missingLine = false;
+        console.log(`  repaired ${order.enrollment_ref}  line ${row.line} (added its missing order line)`);
+      }
       await issueTicketsForEnrollment(order.id);
     }
     const ticketless = await ordersWithoutTickets(Array.from(existing.values()).map((o) => o.id));
@@ -348,6 +369,28 @@ async function createOrder(c: Klass, insert: Record<string, unknown>): Promise<O
 }
 
 /**
+ * Adds the 0-priced line to an order a run left without one (it stopped after
+ * inserting the order). No seat is taken: createOrder takes the seat BEFORE it
+ * inserts the order, so an order that exists already holds its seat.
+ *
+ * Not covered: a run that stops after taking the seat but before inserting the
+ * order leaves one seat taken and no order, which nothing records. The tier
+ * then shows one seat fewer than expected; add it back by hand. A database
+ * transaction would close this, but needs a new function (a migration), which
+ * this script deliberately does without.
+ */
+async function repairLine(order: Order, classId: string, tenantId: string): Promise<void> {
+  const { error } = await supabase.from("enrollment_items").insert({
+    enrollment_id: order.id,
+    class_id: classId,
+    tenant_id: tenantId,
+    quantity: 1,
+    fee_amount: 0,
+  } as never);
+  if (error) fail(`Could not repair ${order.enrollment_ref}: ${error.message}`);
+}
+
+/**
  * Takes one seat without overwriting a sale made at the same moment: the write
  * only lands if seat_remaining is still what was read. Marks the tier full at
  * 0, as checkout does.
@@ -397,12 +440,15 @@ async function loadOrders(keys: string[]): Promise<Map<string, Order>> {
   for (let i = 0; i < keys.length; i += 100) {
     const { data, error } = (await supabase
       .from("enrollments")
-      .select("id, enrollment_ref, idempotency_key, status, status_notified_at")
-      .in("idempotency_key", keys.slice(i, i + 100))) as { data: Order[] | null; error: { message: string } | null };
+      .select("id, enrollment_ref, idempotency_key, status, status_notified_at, enrollment_items(id)")
+      .in("idempotency_key", keys.slice(i, i + 100))) as {
+      data: (Order & { enrollment_items: { id: string }[] | null })[] | null;
+      error: { message: string } | null;
+    };
     if (error || !data) fail(`Order lookup failed: ${error?.message ?? "no data"}`);
-    for (const o of data) {
+    for (const { enrollment_items, ...o } of data) {
       if (o.status !== "confirmed") fail(`${o.enrollment_ref} (${o.idempotency_key}) is ${o.status}, not confirmed. Check it by hand.`);
-      map.set(o.idempotency_key, o);
+      map.set(o.idempotency_key, { ...o, missingLine: !enrollment_items?.length });
     }
   }
   return map;
